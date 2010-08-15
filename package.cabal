@@ -1,0 +1,18 @@
+Name:           GHCJS
+Version:        0.1.0
+Description:    Javascript backend for GHC
+License:        BSD3 
+License-file:   LICENSE
+Author:         Pedro Martins and Victor Nazarov
+Maintainer:     Pedro Martins <pedromartins.pt@gmail.com>
+Stability:      Experimental
+Build-Type:     Simple
+Cabal-Version:  >= 1.6
+
+Executable ghcjs
+    Main-Is:        Main.hs
+    Hs-Source-Dirs: src
+    Other-Modules:  Javascript.Language
+                    Generator.TopLevel
+    Build-Depends:  base >=3 && <5, ghc, ghc-paths
+    GHC-Options:    -Wall -fno-warn-name-shadowing
