@@ -1,6 +1,7 @@
 module Generator.Core (declarations, definitions, withBindings) where
 
 import Data.List (find)
+import Data.Monoid (mconcat)
 
 import Panic (panic)
 
@@ -9,41 +10,41 @@ import Id as Stg (Id)
 import CoreSyn as Stg (AltCon (DataAlt, LitAlt, DEFAULT))
 import StgSyn as Stg
 
-import qualified Javascript.Language as Js
+import Javascript.Language as Js
 
 import Generator.Helpers
 import Generator.PrimOp (primitiveOperation)
 import Generator.FFI (foreignFunctionCall, primitiveCall)
 
-binding :: StgBinding -> Js.Program
+binding :: Javascript js => StgBinding -> js
 binding = bindings . stgBindingToList
 
-bindings :: [(Id, StgRhs)] -> Js.Program
-bindings binds = Js.sequence [declarations binds, definitions binds]
+bindings :: Javascript js => [(Stg.Id, StgRhs)] -> js
+bindings binds = mconcat [declarations binds, definitions binds]
 
-withBindings :: (Id -> StgRhs -> Js.Program) -> [(Id, StgRhs)] -> Js.Program
-withBindings f = Js.sequence . map (uncurry f)
+withBindings :: Javascript js => (Stg.Id -> StgRhs -> js) -> [(Stg.Id, StgRhs)] -> js
+withBindings f = mconcat . map (uncurry f)
 
-declarations :: [(Id, StgRhs)] -> Js.Program
+declarations :: Javascript js => [(Stg.Id, StgRhs)] -> js
 declarations = withBindings declaration
 
-definitions :: [(Id, StgRhs)] -> Js.Program
+definitions :: Javascript js => [(Stg.Id, StgRhs)] -> js
 definitions = withBindings definition
 
-declaration :: Id -> StgRhs -> Js.Program
+declaration :: Javascript js => Stg.Id -> StgRhs -> js
 declaration id rhs = stgIdToJsDecl id (creation rhs)
 
-creation :: StgRhs -> Js.Expression
+creation :: Javascript js => StgRhs -> Expression js
 creation (StgRhsCon _cc con _args) = dataCreation con
 creation rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt _args _body)
   | isUpdatable upd_flag = Js.new (Js.property haskellRoot "Thunk") []
   | otherwise = Js.new (Js.property haskellRoot "Func") [Js.int (stgRhsArity rhs)]
 
-definition :: Stg.Id -> StgRhs -> Js.Program
+definition :: Javascript js => Stg.Id -> StgRhs -> js
 definition id (StgRhsCon _cc _con args) = dataEvaluation (stgIdToJs id) (map stgArgToJs args)
 definition id (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
-  Js.sequence
-    [ Js.assignProperty object "evaluated" (Js.bool $ isUpdatable upd_flag)
+  mconcat
+    [ Js.assignProperty object "evaluated" (Js.bool . Prelude.not $ isUpdatable upd_flag)
     , Js.assignProperty object evalFunctionName $
         Js.function (map stgIdToJsId args) (expression body)
     ]
@@ -52,27 +53,27 @@ definition id (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
           | isUpdatable upd_flag = "evaluateOnce"
           | otherwise = "evaluate"
 
-dataCreation :: DataCon -> Js.Expression
+dataCreation :: Javascript js => DataCon -> Expression js
 dataCreation con = Js.new (Js.property haskellRoot "Data") [Js.int (dataConTag con)]
 
-dataEvaluation :: Js.Expression -> [Js.Expression] -> Js.Program
+dataEvaluation :: Javascript js => Expression js -> [Expression js] -> js
 dataEvaluation object args =
-  Js.sequence
+  mconcat
     [ Js.assignProperty object "evaluated" Js.true
     , Js.assignProperty object "data" (Js.list args)
     ]
 
-expression :: StgExpr -> Js.Program
+expression :: Javascript js => StgExpr -> js
 expression (StgCase expr _liveVars _liveRhsVars bndr _srt alttype alts) =
   caseExpression expr bndr alttype alts
-expression (StgLet bndn body) = Js.sequence [binding bndn, expression body]
-expression (StgLetNoEscape _ _ bndn body) = Js.sequence [binding bndn, expression body]
+expression (StgLet bndn body) = mconcat [binding bndn, expression body]
+expression (StgLetNoEscape _ _ bndn body) = mconcat [binding bndn, expression body]
 expression (StgSCC _ expr) = expression expr
 expression (StgTick _ _ expr) = expression expr
 expression (StgApp f args) = Js.jumpToMethod (stgIdToJs f) "hscall" (map stgArgToJs args)
 expression (StgLit lit) = Js.return . stgLiteralToJs $ lit
 expression (StgConApp con args) =
-  Js.sequence
+  mconcat
     [ Js.declare "$res" (dataCreation con)
     , dataEvaluation (Js.var "$res") (map stgArgToJs args)
     , Js.return . Js.var $ "$res"
@@ -82,24 +83,24 @@ expression (StgOpApp (StgPrimOp op) args _ty) = Js.return $ primitiveOperation o
 expression (StgOpApp (StgPrimCallOp call) args _ty) = Js.return $ primitiveCall call args
 expression (StgLam{}) = panic "unexpected StgLam" -- StgLam is used *only* during CoreToStg's work (StgSyn.lhs:196)
 
-caseExpression :: StgExpr -> Stg.Id -> Stg.AltType -> [StgAlt] -> Js.Program
+caseExpression :: Javascript js => StgExpr -> Stg.Id -> Stg.AltType -> [StgAlt] -> js
 caseExpression expr bndr alttype alts =
-  Js.sequence
+  mconcat
     [ caseExpressionScrut bndr expr
     , caseExpressionAlternatives bndr alttype alts
     ]
 
-caseExpressionScrut :: Stg.Id -> StgExpr -> Js.Program
+caseExpressionScrut :: Javascript js => Stg.Id -> StgExpr -> js
 caseExpressionScrut binder expr = go expr
   where go (StgConApp con args) =
-          Js.sequence
+          mconcat
             [ stgIdToJsDecl binder (dataCreation con)
             , dataEvaluation (stgIdToJs binder) (map stgArgToJs args)
             ]
         go (StgApp f args) =
           case args
           of [] ->
-               Js.sequence
+               mconcat
                  [ stgIdToJsDecl binder name
                  , Js.if_ (Js.not $ Js.property name "evaluated") $
                      Js.assignMethodCallResult (stgIdToJs binder) name "hscall" []
@@ -113,14 +114,14 @@ caseExpressionScrut binder expr = go expr
         go e = stgIdToJsDeclareFunctionCallResult binder f []
           where f = Js.function [] (expression e)
 
-caseExpressionAlternatives :: Stg.Id -> Stg.AltType -> [(Stg.AltCon, [Stg.Id], [Bool], StgExpr)] -> Js.Program
+caseExpressionAlternatives :: Javascript js => Stg.Id -> Stg.AltType -> [(Stg.AltCon, [Stg.Id], [Bool], StgExpr)] -> js
 caseExpressionAlternatives bndr altType [(_altCon, args, useMask, expr)] =
   case altType
   of PolyAlt {} -> jsexpr
      PrimAlt {} -> jsexpr
      UbxTupAlt {} -> argsAndExpr
      AlgAlt {} -> argsAndExpr
-  where argsAndExpr = Js.sequence [unpackData (stgIdToJs bndr) useMask args, jsexpr]
+  where argsAndExpr = mconcat [unpackData (stgIdToJs bndr) useMask args, jsexpr]
         jsexpr = expression expr
 caseExpressionAlternatives bndr altType alts =
   case altType
@@ -132,14 +133,14 @@ caseExpressionAlternatives bndr altType alts =
     name = stgIdToJs bndr
     defaultCase =
       do (_, _, _, expr) <- find isDefault alts
-         return $ expression expr
+         Prelude.return $ expression expr
     isDefault (DEFAULT, _, _, _) = True
     isDefault _ = False
-    cases = map alternative . filter (not . isDefault) $ alts
+    cases = map alternative . filter (Prelude.not . isDefault) $ alts
     alternative alt = (alternativeConst alt, alternativeBody alt)
     alternativeBody (alt, args, useMask, expr) =
       case alt
-      of DataAlt _ -> Js.sequence [unpackData name useMask args, expression expr]
+      of DataAlt _ -> mconcat [unpackData name useMask args, expression expr]
          LitAlt _ -> expression expr
          DEFAULT  -> panic "Default alternative!"
     alternativeConst (alt, _args, _useMask, _expr) =
@@ -148,7 +149,7 @@ caseExpressionAlternatives bndr altType alts =
          LitAlt lit -> stgLiteralToJs lit
          DEFAULT  -> panic "Default alternative!"
 
-unpackData :: Js.Expression -> [Bool] -> [Stg.Id] -> Js.Program
-unpackData name mask args = Js.sequence [f n arg | (n, True, arg) <- zip3 [(0::Int)..] mask args]
+unpackData :: Javascript js => Expression js -> [Bool] -> [Stg.Id] -> js
+unpackData name mask args = mconcat [f n arg | (n, True, arg) <- zip3 [(0::Int)..] mask args]
   where f n arg = stgIdToJsDecl arg (Js.subscript (Js.property name "data") (Js.int n))
 

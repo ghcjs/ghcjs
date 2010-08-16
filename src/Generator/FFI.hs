@@ -2,11 +2,11 @@ module Generator.FFI where
 
 import StgSyn as Stg
 import PrimOp
-import qualified Javascript.Language as Js
+import Javascript.Language as Js
 
-foreignFunctionCall :: a -> b -> c -> Js.Expression
+foreignFunctionCall :: Javascript js => a -> b -> c -> Expression js
 foreignFunctionCall _ _ _ = Js.unsafeStringToExpression "$hs.alert ('Unsupported: foreign function call')"
 
-primitiveCall :: PrimCall -> [StgArg] -> Js.Expression
+primitiveCall :: Javascript js => PrimCall -> [StgArg] -> Expression js
 primitiveCall _ _ = Js.unsafeStringToExpression "$hs.alert ('Unsupported: primitive call')"
 

@@ -13,12 +13,13 @@ import Control.Monad
 import Data.Maybe
 import Data.List
 
-import qualified Generator.TopLevel as JsGen (generate)
+import qualified Generator.TopLevel as Js (generate)
+import qualified Javascript.Formatted as Js
 
 main :: IO ()
 main = do 
     args <- getArgs
-    when (elem "--help" args) $ ghcError (ProgramError usage)
+    when (null args || elem "--help" args) $ ghcError (ProgramError usage)
     cfs <- defaultErrorHandler defaultDynFlags $ do
         runGhc (Just libdir) $ do
             sdflags <- getSessionDynFlags
@@ -43,7 +44,7 @@ compileCore c fp = do
     let cmod = cm_module c
     core' <- corePrepPgm defaultDynFlags (cm_binds c) [] 
     stg <- coreToStg (modulePackageId cmod) core'
-    prog <- JsGen.generate cmod (cm_imports c) stg 
+    prog <- Js.generate cmod (cm_imports c) stg :: IO Js.Formatted
     -- Custom output paths are ignored
     let program = show prog
     putStrLn $ "Writing " ++ fp
@@ -51,7 +52,7 @@ compileCore c fp = do
 
 usage :: [Char]
 usage = "Haskell to Javascript compiler (via GHC)\n\n\
-        \\tUsage: ghcjs [command-line-options-and-input-files]\n"
+        \\tUsage: ghcjs (Simple|Formatted) [command-line-options-and-input-files]\n"
 
 stripFileExt :: String -> String 
 stripFileExt fn = let safeLast x = if (null x) then Nothing else Just (last x)

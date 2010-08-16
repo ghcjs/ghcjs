@@ -1,50 +1,53 @@
 module Generator.TopLevel (generate) where
 
+import Data.Monoid (mconcat)
+
 import Module (Module)
-import Id as Stg (Id, isExportedId)
+import Id as Stg (Id)
+import Name (isExternalName, NamedThing (getName))
 
 import StgSyn
-import qualified Javascript.Language as Js
+import Javascript.Language as Js
 
-import Generator.Helpers (stgIdToJs, stgIdToJsId, stgModuleToJs, modulePath, stgBindingToList, haskellRoot)
+import Generator.Helpers (stgIdToJs, stgIdToJsId, stgModuleToJs, moduleName, stgBindingToList, haskellRoot)
 import Generator.Core (declarations, withBindings, definitions)
 
-generate :: Module -> [Module] -> [StgBinding] -> IO Js.Program
+generate :: Javascript js => Module -> [Module] -> [StgBinding] -> IO js
 generate thisMod importedMods binds =
-  return $ Js.sequence
+  Prelude.return $ mconcat
     [ Js.assign modRef $ Js.new (Js.property haskellRoot "Module") []
     , Js.assign (Js.property modRef "dependencies") $
-        Js.list . map (Js.string . modulePath) $ importedMods
-    , Js.assign (Js.property modRef "initBeforeDependecies") $
+        Js.list . map (Js.string . moduleName) $ importedMods
+    , Js.assign (Js.property modRef "initBeforeDependencies") $
         Js.function [] $
-          Js.sequence
+          mconcat
             [ declarations exportedBindings
             , withBindings (stubDefinition modRef) exportedBindings
             ]
-    , Js.assign (Js.property modRef "initAfterDependecies") $
+    , Js.assign (Js.property modRef "initAfterDependencies") $
         Js.function [] $
-          Js.sequence
+          mconcat
             [ declarations allBindings
             , definitions allBindings
             ]
     ]
   where modRef = stgModuleToJs thisMod
         allBindings = joinBindings binds
-        exportedBindings = filter (isExportedId . fst) allBindings
+        exportedBindings = filter (isExternalName . getName . fst) allBindings
 
-joinBindings :: [StgBinding] -> [(Id, StgRhs)]
+joinBindings :: [StgBinding] -> [(Stg.Id, StgRhs)]
 joinBindings = concat . map stgBindingToList
 
-stubDefinition :: Js.Expression -> Stg.Id -> StgRhs -> Js.Program
+stubDefinition :: Javascript js => Expression js -> Stg.Id -> StgRhs -> js
 stubDefinition mod id (StgRhsCon _cc _con _stgargs) =
-  Js.sequence
+  mconcat
     [ Js.assignProperty object "evaluated" Js.false
     , Js.assignProperty object "evaluate" $
         Js.function [] (dataStubExpression mod object)
     ]
   where object = stgIdToJs id
 stubDefinition mod id (StgRhsClosure _cc _bi _fvs upd_flag _srt stgargs _body) =
-  Js.sequence
+  mconcat
     [ Js.assignProperty object "evaluated" Js.false
     , Js.assignProperty object method $
          Js.function argNames (stubExpression mod object method args)
@@ -56,20 +59,20 @@ stubDefinition mod id (StgRhsClosure _cc _bi _fvs upd_flag _srt stgargs _body) =
         args = map stgIdToJs stgargs
         argNames = map stgIdToJsId stgargs
 
-stubExpression :: Js.Expression -> Js.Expression -> String -> [Js.Expression] -> Js.Program
+stubExpression :: Javascript js => Expression js -> Expression js -> String -> [Expression js] -> js
 stubExpression mod object method args =
-  Js.sequence
-    [ Js.declareMethodCallResult "$res" mod "loadDependencies" []
+  mconcat
+    [ Js.callMethod mod "loadDependencies" []
     , Js.jumpToMethod object method args
     ]
 
-dataStubExpression :: Js.Expression -> Js.Expression -> Js.Program
+dataStubExpression :: Javascript js => Expression js -> Expression js -> js
 dataStubExpression mod object =
-  Js.sequence
+  mconcat
     [ Js.if_ (Js.not $ Js.property object "evaluated") $
-        Js.sequence
-          [ Js.declareMethodCallResult "$res" mod "loadDependencies" []
-          , Js.jumpToMethod object "evaluate" []
+        mconcat
+          [ Js.callMethod mod "loadDependencies" []
+          , Js.return $ object
           ]
     , Js.return $ object
     ]

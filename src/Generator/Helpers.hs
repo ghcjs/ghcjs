@@ -1,67 +1,69 @@
+{-# LANGUAGE TypeFamilies #-}
 module Generator.Helpers where
 
-import Id as Stg (Id, isExportedId)
-import Name (NamedThing (getName, getOccName), nameModule)
+import Id as Stg (Id)
+import Name (NamedThing (getName, getOccName), nameModule, isExternalName)
 import OccName (occNameString)
 import Unique (Uniquable (getUnique), getKey)
 import FastString (unpackFS)
 import Panic (panic)
 import Encoding (zEncodeString)
 
-import Module (Module, moduleName, moduleNameString, moduleNameSlashes)
+import Module as Stg (Module, moduleName, moduleNameString)
 import StgSyn as Stg
 import qualified Literal as Stg
-import qualified Javascript.Language as Js
+import Javascript.Language as Js
 
-haskellRoot :: Js.Expression
+haskellRoot :: Javascript js => Expression js
 haskellRoot = Js.var "$hs"
 
-modulePath :: Module -> String
-modulePath = moduleNameSlashes . moduleName
+moduleName :: Module -> String
+moduleName = moduleNameString . Stg.moduleName
 
-stgModuleToJs :: Module -> Js.Expression
-stgModuleToJs mod = haskellRoot $. "modules" $. (zEncodeString . moduleNameString . moduleName $ mod)
+stgModuleToJs :: Javascript js => Module -> Expression js
+stgModuleToJs mod = haskellRoot $. "modules" $. (zEncodeString . moduleNameString . Stg.moduleName $ mod)
   where ($.) = Js.property
 
-stgIdToJs :: Stg.Id -> Js.Expression
+stgIdToJs :: Javascript js => Stg.Id -> Expression js
 stgIdToJs id
-  | isExportedId id = Js.property (stgModuleToJs . nameModule . getName $ id) name
+  | isExternalName name = Js.property (stgModuleToJs . nameModule $ name) nameStr
   | otherwise = Js.var . stgIdToJsId $ id
-  where name = zEncodeString . occNameString . getOccName $ id
+  where name = getName id
+        nameStr = zEncodeString . occNameString . getOccName $ id
 
 stgIdToJsId :: Stg.Id -> Js.Id
 stgIdToJsId id = name ++ key
   where name = zEncodeString . occNameString . getOccName $ id
         key = intToBase62 . getKey . getUnique $ id
 
-stgIdToJsDecl :: Stg.Id -> Js.Expression -> Js.Program
+stgIdToJsDecl :: Javascript js => Stg.Id -> Expression js -> js
 stgIdToJsDecl id expr
-  | isExportedId id = Js.assign (stgIdToJs id) expr
+  | isExternalName . getName $ id = Js.assign (stgIdToJs id) expr
   | otherwise = Js.declare (stgIdToJsId id) expr
 
-stgIdToJsDeclareMethodCallResult :: Stg.Id -> Js.Expression -> Js.Id -> [Js.Expression] -> Js.Program
+stgIdToJsDeclareMethodCallResult :: Javascript js => Stg.Id -> Expression js -> Js.Id -> [Expression js] -> js
 stgIdToJsDeclareMethodCallResult id
-  | isExportedId id = Js.assignMethodCallResult (stgIdToJs id)
+  | isExternalName . getName $ id = Js.assignMethodCallResult (stgIdToJs id)
   | otherwise = Js.declareMethodCallResult (stgIdToJsId id)
 
-stgIdToJsDeclareFunctionCallResult :: Stg.Id -> Js.Expression -> [Js.Expression] -> Js.Program
+stgIdToJsDeclareFunctionCallResult :: Javascript js => Stg.Id -> Expression js -> [Expression js] -> js
 stgIdToJsDeclareFunctionCallResult id
-  | isExportedId id = Js.assignFunctionCallResult (stgIdToJs id)
+  | isExternalName . getName $ id = Js.assignFunctionCallResult (stgIdToJs id)
   | otherwise = Js.declareFunctionCallResult (stgIdToJsId id)
 
-stgBindingToList :: StgBinding -> [(Id, StgRhs)]
+stgBindingToList :: StgBinding -> [(Stg.Id, StgRhs)]
 stgBindingToList (StgNonRec id rhs) = [(id, rhs)]
 stgBindingToList (StgRec bs) = bs
 
-stgArgsToJs :: [Stg.StgArg] -> Js.Expression
+stgArgsToJs :: Javascript js => [Stg.StgArg] -> Expression js
 stgArgsToJs = Js.list . map stgArgToJs
 
-stgArgToJs :: Stg.StgArg -> Js.Expression
+stgArgToJs :: Javascript js => Stg.StgArg -> Expression js
 stgArgToJs (Stg.StgVarArg id) = stgIdToJs id
 stgArgToJs (Stg.StgLitArg l) = stgLiteralToJs l
 stgArgToJs (Stg.StgTypeArg _) = panic "Compiler bug: StgTypeArg in expression"
 
-stgLiteralToJs :: Stg.Literal -> Js.Expression
+stgLiteralToJs :: Javascript js => Stg.Literal -> Expression js
 stgLiteralToJs (Stg.MachChar c) = Js.string [c]
 stgLiteralToJs (Stg.MachStr s) = Js.string (unpackFS s ++ "\0")
 stgLiteralToJs (Stg.MachInt i) = Js.int i

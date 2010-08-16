@@ -1,0 +1,6 @@
+/base-*
+/dist
+/examples/*.hi
+/examples/*.o
+/examples/Test.js
+
