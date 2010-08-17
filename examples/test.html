@@ -3,9 +3,11 @@
     <title>ghcjs-test</title>
     <script type="text/javascript" src="rts.js"></script>
     <script type="text/javascript">
-      $hs.loadModule("Test");
-      var res = $hs.modules.Test.test.hscall();
-      alert(res.data[0]);
+      window.onload = function() {
+        $hs.loadModule("Test");
+        var res = $hs.modules.Test.test.hscall();
+        alert(res.data[0]);
+      }
     </script>
   </head>
   <body>

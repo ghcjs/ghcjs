@@ -44,8 +44,9 @@ instance Javascript Formatted
 	bool True = true
 	bool False = false
 	not e = E $ 
-          do tell "!"
+          do tell "!("
              unE e
+             tell ")"
 	if_ test block = P $
 	    do newLine
                tell "if ("

@@ -20,16 +20,18 @@ haskellRoot = Js.var "$hs"
 moduleName :: Module -> String
 moduleName = moduleNameString . Stg.moduleName
 
+isExternalId :: Stg.Id -> Bool
+isExternalId = isExternalName . getName
+
 stgModuleToJs :: Javascript js => Module -> Expression js
 stgModuleToJs mod = haskellRoot $. "modules" $. (zEncodeString . moduleNameString . Stg.moduleName $ mod)
   where ($.) = Js.property
 
 stgIdToJs :: Javascript js => Stg.Id -> Expression js
 stgIdToJs id
-  | isExternalName name = Js.property (stgModuleToJs . nameModule $ name) nameStr
+  | isExternalId id = Js.property (stgModuleToJs . nameModule . getName $ id) nameStr
   | otherwise = Js.var . stgIdToJsId $ id
-  where name = getName id
-        nameStr = zEncodeString . occNameString . getOccName $ id
+  where nameStr = zEncodeString . occNameString . getOccName $ id
 
 stgIdToJsId :: Stg.Id -> Js.Id
 stgIdToJsId id = name ++ key
@@ -38,17 +40,17 @@ stgIdToJsId id = name ++ key
 
 stgIdToJsDecl :: Javascript js => Stg.Id -> Expression js -> js
 stgIdToJsDecl id expr
-  | isExternalName . getName $ id = Js.assign (stgIdToJs id) expr
+  | isExternalId id = Js.assign (stgIdToJs id) expr
   | otherwise = Js.declare (stgIdToJsId id) expr
 
 stgIdToJsDeclareMethodCallResult :: Javascript js => Stg.Id -> Expression js -> Js.Id -> [Expression js] -> js
 stgIdToJsDeclareMethodCallResult id
-  | isExternalName . getName $ id = Js.assignMethodCallResult (stgIdToJs id)
+  | isExternalId id = Js.assignMethodCallResult (stgIdToJs id)
   | otherwise = Js.declareMethodCallResult (stgIdToJsId id)
 
 stgIdToJsDeclareFunctionCallResult :: Javascript js => Stg.Id -> Expression js -> [Expression js] -> js
 stgIdToJsDeclareFunctionCallResult id
-  | isExternalName . getName $ id = Js.assignFunctionCallResult (stgIdToJs id)
+  | isExternalId id = Js.assignFunctionCallResult (stgIdToJs id)
   | otherwise = Js.declareFunctionCallResult (stgIdToJsId id)
 
 stgBindingToList :: StgBinding -> [(Stg.Id, StgRhs)]

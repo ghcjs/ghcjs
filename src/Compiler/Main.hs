@@ -44,7 +44,7 @@ compileCore c fp = do
     let cmod = cm_module c
     core' <- corePrepPgm defaultDynFlags (cm_binds c) [] 
     stg <- coreToStg (modulePackageId cmod) core'
-    prog <- Js.generate cmod (cm_imports c) stg :: IO Js.Formatted
+    prog <- Js.generate cmod stg :: IO Js.Formatted
     -- Custom output paths are ignored
     let program = show prog
     putStrLn $ "Writing " ++ fp
@@ -52,7 +52,7 @@ compileCore c fp = do
 
 usage :: [Char]
 usage = "Haskell to Javascript compiler (via GHC)\n\n\
-        \\tUsage: ghcjs (Simple|Formatted) [command-line-options-and-input-files]\n"
+        \\tUsage: ghcjs [command-line-options-and-input-files]\n"
 
 stripFileExt :: String -> String 
 stripFileExt fn = let safeLast x = if (null x) then Nothing else Just (last x)

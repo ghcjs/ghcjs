@@ -18,6 +18,6 @@ Executable ghcjs
                     Generator.TopLevel
                     Generator.Helpers
                     Generator.Core
-    Build-Depends:  base >=3 && <5, ghc, ghc-paths, monads-tf
+    Build-Depends:  base >=3 && <5, ghc, ghc-paths, monads-tf, containers
     GHC-Options:    -Wall -fno-warn-name-shadowing
 

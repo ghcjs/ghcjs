@@ -4,20 +4,20 @@ import Data.Monoid (mconcat)
 
 import Module (Module)
 import Id as Stg (Id)
-import Name (isExternalName, NamedThing (getName))
 
 import StgSyn
 import Javascript.Language as Js
 
-import Generator.Helpers (stgIdToJs, stgIdToJsId, stgModuleToJs, moduleName, stgBindingToList, haskellRoot)
+import Generator.Helpers
+import Generator.Dependencies (dependencies)
 import Generator.Core (declarations, withBindings, definitions)
 
-generate :: Javascript js => Module -> [Module] -> [StgBinding] -> IO js
-generate thisMod importedMods binds =
+generate :: Javascript js => Module -> [StgBinding] -> IO js
+generate thisMod binds =
   Prelude.return $ mconcat
     [ Js.assign modRef $ Js.new (Js.property haskellRoot "Module") []
     , Js.assign (Js.property modRef "dependencies") $
-        Js.list . map (Js.string . moduleName) $ importedMods
+        Js.list . map (Js.string . moduleName) $ dependencies thisMod allBindings
     , Js.assign (Js.property modRef "initBeforeDependencies") $
         Js.function [] $
           mconcat
@@ -33,7 +33,7 @@ generate thisMod importedMods binds =
     ]
   where modRef = stgModuleToJs thisMod
         allBindings = joinBindings binds
-        exportedBindings = filter (isExternalName . getName . fst) allBindings
+        exportedBindings = filter (isExternalId . fst) allBindings
 
 joinBindings :: [StgBinding] -> [(Stg.Id, StgRhs)]
 joinBindings = concat . map stgBindingToList

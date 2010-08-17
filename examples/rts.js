@@ -1,17 +1,20 @@
-
 var $hs = {
     modules: {},
     alert: function (str) {
         window.alert(str);
     },
+    logAny: function (c, str) {
+        var el = document.getElementById('log');
+        el.innerHTML = el.innerHTML + c + ": " + str + '<br/>\n';
+    },
     logInfo: function (str) {
-        $hs.alert(str);
+        $hs.logAny("INFO", str);
     },
     logError: function (str) {
-        $hs.alert(str);
+        $hs.logAny("ERROR", str);
     },
     logDebug: function (str) {
-        $hs.alert(str);
+        $hs.logAny("DEBUG", str);
     },
     loadPaths: ["./"],
     loadModule: function (moduleName) {
@@ -25,7 +28,6 @@ var $hs = {
 	    var code;
 	    for (var i = 0; i < $hs.loadPaths.length; i++) {
 		var path = $hs.loadPaths[i] + modulePath;
-		alert(path);
 		try {
 		    var transport = new XMLHttpRequest();
 		    transport.open("GET", path, false);
@@ -37,26 +39,12 @@ var $hs = {
 	    try {
 		eval(code);
 		$hs.modules[variableName].init();
-		$hs.modules[variableName].loadDependencies();
 	    } catch (e) {
 		$hs.logError("Error evaluating module: " + moduleName + ":\n" + e);
 		return false;
 	    }
 	    
 	    return true;
-    },
-    module: {
-        init: function () {
-            alert(this);
-            this.initBeforeDependencies();
-        },
-        loadDependencies: function () {
-            for (var i = 0; i < this.dependencies.length; i++)
-                $hs.loadModule(this.dependencies[i]);
-            this.initAfterDependencies();
-        }
-    },
-    Module : function () {
     },
     hscall : function () {
 	if (this.arity == arguments.length) { // EXACT and THUNK rules
@@ -75,60 +63,69 @@ var $hs = {
 		return new $hs.Pap (this, arguments);
         }
     },
-    pap: {
-        evaluated: true,
-        evaluate: function () {
-		var k = arguments.length;
-		var n = this.savedArguments.length;
-		var newArguments = new Array (k + n);
-		for (var i = 0; i < n; i++)
-			newArguments[i] = savedArguments[i];
-		for (var i = 0; i < k; i++)
-			newArguments[n + i] = arguments[i];
-                return this.object.hscall.apply(this.object, newArguments);
-        }
-    },
-    Pap: function(obj, args) {
-        this.arity = obj.arity - args.length;
-        this.object = obj;
-        this.savedArguments = args;
-    },
-    func: {
-        evaluated: true,
-    },
-    Func: function(a) {
-        this.arity = a;
-    },
-    thunk: {
-        arity: 0,
-        evaluated: false,
-        evaluate: function() {
-            var res = this.evaluateOnce();
-            this.evaluate = function () { return res; };
-            return res;
-        }
-    },
-    Thunk: function() {
-    },
-    data: {
-        arity: 0,
-        evaluated: true,
-        evaluate: function() {
-            return this;
-        }
-    },
-    Data: function (t) {
-        this.tag = t;
-    }
 }
 
-$hs.Module.prototype = $hs.module;
-$hs.Pap.prototype = $hs.pap;
-$hs.Func.prototype = $hs.func;
-$hs.Thunk.prototype = $hs.thunk;
-$hs.Data.prototype = $hs.data;
-$hs.Pap.prototype.hscall = $hs.hscall;
-$hs.Func.prototype.hscall = $hs.hscall;
-$hs.Thunk.prototype.hscall = $hs.hscall;
-$hs.Data.prototype.hscall = $hs.hscall;
+$hs.Module = function () {};
+$hs.Module.prototype = {
+    init: function () {
+        this.initBeforeDependencies();
+    },
+    loadDependencies: function () {
+        for (var i = 0; i < this.dependencies.length; i++)
+	    $hs.loadModule(this.dependencies[i]);
+        this.initAfterDependencies();
+    }
+};
+
+$hs.Pap = function(obj, args) {
+    this.arity = obj.arity - args.length;
+    this.object = obj;
+    this.savedArguments = args;
+};
+$hs.Pap.prototype = {
+    hscall: $hs.hscall,
+    evaluated: true,
+    evaluate: function () {
+            var k = arguments.length;
+            var n = this.savedArguments.length;
+            var newArguments = new Array (k + n);
+            for (var i = 0; i < n; i++)
+                newArguments[i] = savedArguments[i];
+            for (var i = 0; i < k; i++)
+                newArguments[n + i] = arguments[i];
+            return this.object.hscall.apply(this.object, newArguments);
+    }
+};
+
+$hs.Func = function(a) {
+    this.arity = a;
+};
+$hs.Func.prototype = {
+    hscall: $hs.hscall,
+    evaluated: true,
+};
+
+$hs.Thunk = function() {};
+$hs.Thunk.prototype = {
+    hscall: $hs.hscall,
+    arity: 0,
+    evaluated: false,
+    evaluate: function() {
+        var res = this.evaluateOnce();
+        this.evaluate = function () { return res; };
+        return res;
+    }
+};
+
+$hs.Data = function (t) {
+    this.tag = t;
+};
+$hs.Data.prototype = {
+    hscall: $hs.hscall,
+    arity: 0,
+    evaluated: true,
+    evaluate: function() {
+        return this;
+    }
+};
 
