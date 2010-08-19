@@ -1,10 +1,10 @@
 Name:           ghcjs
 Version:        0.1.0
-Description:    Javascript backend for GHC
+Description:    Haskell to Javascript translator
 License:        BSD3 
 License-file:   LICENSE
-Author:         Pedro Martins and Victor Nazarov
-Maintainer:     Pedro Martins <pedromartins.pt@gmail.com>
+Author:         Victor Nazarov, Maxim Taldykin and Pedro Martins
+Maintainer:     Victor Nazarov <asviraspossible@gmail.com>
 Stability:      Experimental
 Build-Type:     Simple
 Cabal-Version:  >= 1.6
