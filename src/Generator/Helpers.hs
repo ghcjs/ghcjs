@@ -31,11 +31,11 @@ stgIdToJs :: Javascript js => Stg.Id -> Expression js
 stgIdToJs id
   | isExternalId id = Js.property (stgModuleToJs . nameModule . getName $ id) nameStr
   | otherwise = Js.var . stgIdToJsId $ id
-  where nameStr = zEncodeString . occNameString . getOccName $ id
+  where nameStr = ("hs_"++) . zEncodeString . occNameString . getOccName $ id
 
 stgIdToJsId :: Stg.Id -> Js.Id
 stgIdToJsId id = name ++ key
-  where name = zEncodeString . occNameString . getOccName $ id
+  where name = ("hs_"++) . zEncodeString . occNameString . getOccName $ id
         key = intToBase62 . getKey . getUnique $ id
 
 stgIdToJsDecl :: Javascript js => Stg.Id -> Expression js -> js
