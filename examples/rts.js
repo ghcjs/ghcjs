@@ -50,13 +50,14 @@ var $hs = {
 	if (this.arity == arguments.length) { // EXACT and THUNK rules
 		return this.evaluate.apply(this, arguments);
 	} else if (this.arity < arguments.length) { // CALLK and TCALL rules
-		var remainingArguments = arguments.slice (this.arity, arguments.length)
-		arguments.length = n;
+		var realArgs = Array.prototype.slice.call(arguments);
+		var remainingArguments = realArgs.slice(this.arity, arguments.length)
+		arguments.length = this.arity;
 		var result = this.evaluate.apply(this, arguments);
 		return result.hscall.apply(result, remainingArguments);
-	} else if (arguments.length == 0) // RETFUN
+	} else if (arguments.length == 0) { // RETFUN
 		return this;
-	else if (this instanceof $hs.Pap) { // PCALL rule, we can bypass this rule by building PAPs of PAPs
+    } else if (this instanceof $hs.Pap) { // PCALL rule, we can bypass this rule by building PAPs of PAPs
 		return this.evaluate.apply(this, arguments);
 	} else {
 		// PAP2 rule and then RETFUN (jump to continuation)
@@ -90,7 +91,7 @@ $hs.Pap.prototype = {
             var n = this.savedArguments.length;
             var newArguments = new Array (k + n);
             for (var i = 0; i < n; i++)
-                newArguments[i] = savedArguments[i];
+                newArguments[i] = this.savedArguments[i];
             for (var i = 0; i < k; i++)
                 newArguments[n + i] = arguments[i];
             return this.object.hscall.apply(this.object, newArguments);
