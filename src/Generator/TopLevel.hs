@@ -12,7 +12,9 @@ import Generator.Helpers
 import Generator.Dependencies (dependencies)
 import Generator.Core (declarations, withBindings, definitions)
 
-generate :: Javascript js => Module -> [StgBinding] -> IO js
+type BindDependInfo = [(Stg.Id, [Stg.Id])]
+
+generate :: Javascript js => Module -> [(StgBinding, BindDependInfo)] -> IO js
 generate thisMod binds =
   Prelude.return $ mconcat
     [ Js.assign modRef $ Js.new (Js.property haskellRoot "Module") []
@@ -35,8 +37,8 @@ generate thisMod binds =
         allBindings = joinBindings binds
         exportedBindings = filter (isExternalId . fst) allBindings
 
-joinBindings :: [StgBinding] -> [(Stg.Id, StgRhs)]
-joinBindings = concat . map stgBindingToList
+joinBindings :: [(StgBinding, BindDependInfo)] -> [(Stg.Id, StgRhs)]
+joinBindings = concat . map (stgBindingToList . fst)
 
 stubDefinition :: Javascript js => Expression js -> Stg.Id -> StgRhs -> js
 stubDefinition mod id (StgRhsCon _cc _con _stgargs) =
