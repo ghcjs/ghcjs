@@ -1,6 +1,7 @@
 module Generator.TopLevel (generate) where
 
 import Data.Monoid (mconcat)
+import Data.List (partition)
 
 import Module (Module)
 import Id as Stg (Id)
@@ -29,13 +30,13 @@ generate thisMod binds =
     , Js.assign (Js.property modRef "initAfterDependencies") $
         Js.function [] $
           mconcat
-            [ declarations allBindings
+            [ declarations notExportedBindings
             , definitions allBindings
             ]
     ]
   where modRef = stgModuleToJs thisMod
         allBindings = joinBindings binds
-        exportedBindings = filter (isExternalId . fst) allBindings
+        (exportedBindings, notExportedBindings) = partition (isExternalId . fst) allBindings
 
 joinBindings :: [(StgBinding, BindDependInfo)] -> [(Stg.Id, StgRhs)]
 joinBindings = concat . map (stgBindingToList . fst)
