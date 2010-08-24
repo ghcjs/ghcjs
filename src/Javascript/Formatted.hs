@@ -30,6 +30,7 @@ instance Monoid Formatted
 
 instance Javascript Formatted
   where data Expression Formatted = E { unE :: ReaderT Identation (Writer String) () }
+        -- expressions:
         var v = E $ tell v
 	int i = E $ tell (show i)
 	float f = E $ tell (show f)
@@ -41,43 +42,29 @@ instance Javascript Formatted
 	null = E $ tell "null"
 	true = E $ tell "true"
 	false = E $ tell "false"
-	bool True = true
-	bool False = false
 	not e = E $ 
           do tell "!("
              unE e
              tell ")"
-	if_ test block = P $
-	    do newLine
-               tell "if ("
-               unE test
-               tell ") {"
-	       indent $ unP block
-               newLine
-	       tell "}"
-	assignMethodCallResult var obj method args = assign var $ callMethodPrimitive obj method args
-	declareMethodCallResult var obj method args = declare var $ callMethodPrimitive obj method args
-	callMethod obj method args = P $
-          do newLine
-             unE $ callMethodPrimitive obj method args
-             tell ";"
-	assignFunctionCallResult var func args = assign var $ callFunctionPrimitive func args
-	declareFunctionCallResult var func args = declare var $ callFunctionPrimitive func args
-	callFunction func args = P $
-          do newLine
-             unE $ callFunctionPrimitive func args
-             tell ";"
-	jumpToMethod obj method args = Javascript.Language.return $ callMethodPrimitive obj method args
-	return res = P $
-          do newLine
-             tell "return "
-             unE res
-             tell ";"
-	function args body = E $
-          do tell $ concat ["function (", intercalate ", " args, ") {"]
-             indent $ unP body
-             newLine
-             tell "}"
+	property obj id = E $
+          do unE obj
+             tell "."
+             tell id
+	new conctructor args = E $
+          do tell "new "
+             unE conctructor
+             tell "("
+             sequence_ . intersperse (tell ", ") . map unE $ args
+             tell ")"
+	subscript a i = E $
+          do unE a
+             tell "["
+             unE i
+             tell "]"
+
+        unsafeStringToExpression = E . tell
+
+        -- statements:
 	assign lval val = P $
           do newLine
              unE lval
@@ -89,16 +76,14 @@ instance Javascript Formatted
              tell $ concat ["var ", id, " = "]
              unE expr
              tell ";"
-	property obj id = E $
-          do unE obj
-             tell "."
-             tell id
-	new conctructor args = E $
-          do tell "new "
-             unE conctructor
-             tell "("
-             sequence_ . intersperse (tell ", ") . map unE $ args
-             tell ")"
+	if_ test block = P $
+	    do newLine
+               tell "if ("
+               unE test
+               tell ") {"
+	       indent $ unP block
+               newLine
+	       tell "}"
 	switch scrut def cases = P $
           do newLine
              tell "switch ("
@@ -124,12 +109,38 @@ instance Javascript Formatted
                      expr
                      tell ":"
                      indent prog
-	subscript a i = E $
-          do unE a
-             tell "["
-             unE i
-             tell "]"
-        unsafeStringToExpression = E . tell
+
+        -- calling:
+	assignMethodCallResult var obj method args = assign var $ callMethodPrimitive obj method args
+	declareMethodCallResult var obj method args = declare var $ callMethodPrimitive obj method args
+	callMethod obj method args = P $
+          do newLine
+             unE $ callMethodPrimitive obj method args
+             tell ";"
+	assignFunctionCallResult var func args = assign var $ callFunctionPrimitive func args
+	declareFunctionCallResult var func args = declare var $ callFunctionPrimitive func args
+	callFunction func args = P $
+          do newLine
+             unE $ callFunctionPrimitive func args
+             tell ";"
+
+        -- jumping:
+	jumpToMethod obj method args = Javascript.Language.return $ callMethodPrimitive obj method args
+	jumpToFunction func args = Javascript.Language.return $ callFunctionPrimitive func args
+
+        -- returning result:
+	return res = P $
+          do newLine
+             tell "return "
+             unE res
+             tell ";"
+
+        -- declaring callabale object
+	function args body = E $
+          do tell $ concat ["function (", intercalate ", " args, ") {"]
+             indent $ unP body
+             newLine
+             tell "}"
 
 callMethodPrimitive :: Expression Formatted -> Id -> [Expression Formatted] -> Expression Formatted
 callMethodPrimitive obj method args = E $
