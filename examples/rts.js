@@ -50,8 +50,7 @@ var $hs = {
 	if (this.arity == arguments.length) { // EXACT and THUNK rules
 		return this.evaluate.apply(this, arguments);
 	} else if (this.arity < arguments.length) { // CALLK and TCALL rules
-		var realArgs = Array.prototype.slice.call(arguments);
-		var remainingArguments = realArgs.slice(this.arity, arguments.length)
+		var remainingArguments = Array.prototype.slice.call(arguments, this.arity, arguments.length);
 		arguments.length = this.arity;
 		var result = this.evaluate.apply(this, arguments);
 		return result.hscall.apply(result, remainingArguments);
