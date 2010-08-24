@@ -72,11 +72,7 @@ stubExpression mod object method args =
 dataStubExpression :: Javascript js => Expression js -> Expression js -> js
 dataStubExpression mod object =
   mconcat
-    [ Js.if_ (Js.not $ Js.property object "evaluated") $
-        mconcat
-          [ Js.callMethod mod "loadDependencies" []
-          , Js.return $ object
-          ]
-    , Js.return $ object
+    [ Js.callMethod mod "loadDependencies" []
+    , Js.return (Js.var "this")
     ]
 

@@ -60,6 +60,9 @@ dataEvaluation :: Javascript js => Expression js -> [Expression js] -> js
 dataEvaluation object args =
   mconcat
     [ Js.assignProperty object "evaluated" Js.true
+    , Js.assignProperty object "evaluate" $
+        Js.function [] $
+          Js.return (Js.var "this")
     , Js.assignProperty object "data" (Js.list args)
     ]
 
