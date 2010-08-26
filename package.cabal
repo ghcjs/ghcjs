@@ -13,11 +13,11 @@ Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Hs-Source-Dirs: src
     Other-Modules:  Javascript.Language
-                    Javascript.Simple
                     Javascript.Formatted
+                    Javascript.Trampoline
                     Generator.TopLevel
                     Generator.Helpers
                     Generator.Core
-    Build-Depends:  base >=3 && <5, ghc, ghc-paths, monads-tf, containers
+    Build-Depends:  base >=3 && <5, ghc, ghc-paths, monads-tf, containers, filepath
     GHC-Options:    -Wall -fno-warn-name-shadowing
 

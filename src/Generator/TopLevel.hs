@@ -1,3 +1,4 @@
+{-# LANGUAGE Rank2Types #-}
 module Generator.TopLevel (generate) where
 
 import Data.Monoid (mconcat)
@@ -15,9 +16,9 @@ import Generator.Core (declarations, withBindings, definitions)
 
 type BindDependInfo = [(Stg.Id, [Stg.Id])]
 
-generate :: Javascript js => Module -> [(StgBinding, BindDependInfo)] -> IO js
+generate :: Module -> [(StgBinding, BindDependInfo)] -> (forall js. Javascript js => js)
 generate thisMod binds =
-  Prelude.return $ mconcat
+  mconcat
     [ Js.assign modRef $ Js.new (Js.property haskellRoot "Module") []
     , Js.assign (Js.property modRef "dependencies") $
         Js.list . map (Js.string . moduleName) $ dependencies thisMod allBindings
@@ -46,7 +47,7 @@ stubDefinition mod id (StgRhsCon _cc _con _stgargs) =
   mconcat
     [ Js.assignProperty object "evaluated" Js.false
     , Js.assignProperty object "evaluate" $
-        Js.function [] (dataStubExpression mod object)
+        Js.function [] (dataStubExpression mod)
     ]
   where object = stgIdToJs id
 stubDefinition mod id (StgRhsClosure _cc _bi _fvs upd_flag _srt stgargs _body) =
@@ -69,8 +70,8 @@ stubExpression mod object method args =
     , Js.jumpToMethod object method args
     ]
 
-dataStubExpression :: Javascript js => Expression js -> Expression js -> js
-dataStubExpression mod object =
+dataStubExpression :: Javascript js => Expression js -> js
+dataStubExpression mod =
   mconcat
     [ Js.callMethod mod "loadDependencies" []
     , Js.return (Js.var "this")
