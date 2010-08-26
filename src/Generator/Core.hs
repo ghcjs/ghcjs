@@ -41,13 +41,10 @@ creation rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt _args _body)
   | otherwise = Js.new (Js.property haskellRoot "Func") [Js.int (stgRhsArity rhs)]
 
 definition :: Javascript js => Stg.Id -> StgRhs -> js
-definition id (StgRhsCon _cc _con args) = dataEvaluation (stgIdToJs id) (map stgArgToJs args)
+definition id (StgRhsCon _cc _con args) = dataDefinition (stgIdToJs id) (map stgArgToJs args)
 definition id (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
-  mconcat
-    [ Js.assignProperty object "evaluated" (Js.bool . Prelude.not $ isUpdatable upd_flag)
-    , Js.assignProperty object evalFunctionName $
-        Js.function (map stgIdToJsId args) (expression body)
-    ]
+  Js.assignProperty object evalFunctionName $
+    Js.function (map stgIdToJsId args) (expression body)
   where object = (stgIdToJs id)
         evalFunctionName
           | isUpdatable upd_flag = "evaluateOnce"
@@ -56,15 +53,8 @@ definition id (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
 dataCreation :: Javascript js => DataCon -> Expression js
 dataCreation con = Js.new (Js.property haskellRoot "Data") [Js.int (dataConTag con)]
 
-dataEvaluation :: Javascript js => Expression js -> [Expression js] -> js
-dataEvaluation object args =
-  mconcat
-    [ Js.assignProperty object "evaluated" Js.true
-    , Js.assignProperty object "evaluate" $
-        Js.function [] $
-          Js.return (Js.var "this")
-    , Js.assignProperty object "data" (Js.list args)
-    ]
+dataDefinition :: Javascript js => Expression js -> [Expression js] -> js
+dataDefinition object args = Js.assignProperty object "data" (Js.list args)
 
 expression :: Javascript js => StgExpr -> js
 expression (StgCase expr _liveVars _liveRhsVars bndr _srt alttype alts) =
@@ -78,7 +68,7 @@ expression (StgLit lit) = Js.return . stgLiteralToJs $ lit
 expression (StgConApp con args) =
   mconcat
     [ Js.declare "$res" (dataCreation con)
-    , dataEvaluation (Js.var "$res") (map stgArgToJs args)
+    , dataDefinition (Js.var "$res") (map stgArgToJs args)
     , Js.return . Js.var $ "$res"
     ]
 expression (StgOpApp (StgFCallOp f g) args _ty) = Js.return $ foreignFunctionCall f g args
@@ -98,7 +88,7 @@ caseExpressionScrut binder expr = go expr
   where go (StgConApp con args) =
           mconcat
             [ stgIdToJsDecl binder (dataCreation con)
-            , dataEvaluation (stgIdToJs binder) (map stgArgToJs args)
+            , dataDefinition (stgIdToJs binder) (map stgArgToJs args)
             ]
         go (StgApp f args) =
           case args

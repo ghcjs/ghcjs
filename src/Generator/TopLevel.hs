@@ -1,7 +1,7 @@
 {-# LANGUAGE Rank2Types #-}
 module Generator.TopLevel (generate) where
 
-import Data.Monoid (mconcat)
+import Data.Monoid (mconcat, mempty)
 import Data.List (partition)
 
 import Module (Module)
@@ -31,7 +31,8 @@ generate thisMod binds =
     , Js.assign (Js.property modRef "initAfterDependencies") $
         Js.function [] $
           mconcat
-            [ declarations notExportedBindings
+            [ withBindings stubDefinitionFix exportedBindings
+            , declarations notExportedBindings
             , definitions allBindings
             ]
     ]
@@ -43,37 +44,46 @@ joinBindings :: [(StgBinding, BindDependInfo)] -> [(Stg.Id, StgRhs)]
 joinBindings = concat . map (stgBindingToList . fst)
 
 stubDefinition :: Javascript js => Expression js -> Stg.Id -> StgRhs -> js
-stubDefinition mod id (StgRhsCon _cc _con _stgargs) =
-  mconcat
-    [ Js.assignProperty object "evaluated" Js.false
-    , Js.assignProperty object "evaluate" $
-        Js.function [] (dataStubExpression mod)
-    ]
-  where object = stgIdToJs id
-stubDefinition mod id (StgRhsClosure _cc _bi _fvs upd_flag _srt stgargs _body) =
-  mconcat
-    [ Js.assignProperty object "evaluated" Js.false
-    , Js.assignProperty object method $
-         Js.function argNames (stubExpression mod object method args)
-    ]
-  where object = stgIdToJs id
-        method
-          | isUpdatable upd_flag = "evaluateOnce"
-          | otherwise = "evaluate"
-        args = map stgIdToJs stgargs
-        argNames = map stgIdToJsId stgargs
+stubDefinition mod id = def (stgIdToJs id)
+  where def object (StgRhsCon _cc _con _stgargs) =
+          mconcat
+            [ Js.assignProperty object "evaluated" Js.false
+            , Js.assignProperty object "evaluate" $
+                Js.function [] $
+                  mconcat
+                    [ Js.callMethod mod "loadDependencies" []
+                    , Js.return (Js.var "this")
+                    ]
+            ]
+        def object (StgRhsClosure _cc _bi _fvs upd_flag _srt stgargs _body) =
+          mconcat
+            [ changeEvaluated
+            , Js.assignProperty object method $
+                Js.function argNames $
+                  mconcat
+                    [ Js.callMethod mod "loadDependencies" []
+                    , Js.jumpToMethod object method args
+                    ]
+            ]
+          where method
+                  | isUpd = "evaluateOnce"
+                  | otherwise = "evaluate"
+                changeEvaluated
+                  | isUpd = mempty
+                  | otherwise = Js.assignProperty object "evaluated" Js.false
+                isUpd = isUpdatable upd_flag
+                args = map stgIdToJs stgargs
+                argNames = map stgIdToJsId stgargs
 
-stubExpression :: Javascript js => Expression js -> Expression js -> String -> [Expression js] -> js
-stubExpression mod object method args =
-  mconcat
-    [ Js.callMethod mod "loadDependencies" []
-    , Js.jumpToMethod object method args
-    ]
-
-dataStubExpression :: Javascript js => Expression js -> js
-dataStubExpression mod =
-  mconcat
-    [ Js.callMethod mod "loadDependencies" []
-    , Js.return (Js.var "this")
-    ]
+stubDefinitionFix :: Javascript js => Stg.Id -> StgRhs -> js
+stubDefinitionFix id = def (stgIdToJs id)
+  where def object (StgRhsCon _cc _con _stgargs) =
+          mconcat
+            [ Js.assignProperty object "evaluated" Js.true
+            , Js.assignProperty object "evaluate" $
+                Js.function [] (Js.return (Js.var "this"))
+            ]
+        def object (StgRhsClosure _cc _bi _fvs upd_flag _srt _stgargs _body)
+              | isUpdatable upd_flag = mempty
+              | otherwise = Js.assignProperty object "evaluated" Js.true
 
