@@ -60,7 +60,7 @@ main =
                     let program =
                           case callingConvention
                           of Plain -> show (prog :: Js.Formatted)
-                             Trampoline -> show (prog :: Js.TailCall Js.Formatted)
+                             Trampoline -> show (prog :: Js.Trampoline Js.Formatted)
                         fp = replaceExtension file ".js"
                     putStrLn $ "Writing " ++ fp
                     writeFile fp program 

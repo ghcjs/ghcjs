@@ -28,10 +28,11 @@ instance Monoid Formatted
         mappend (P a) (P b) = P (a >> b)
         mconcat = P . sequence_ . map unP
 
-instance Javascript Formatted
+instance JavascriptBase Formatted
   where data Expression Formatted = E { unE :: ReaderT Identation (Writer String) () }
-        -- expressions:
-        var v = E $ tell v
+
+instance JavascriptExpression Formatted
+  where var v = E $ tell v
 	int i = E $ tell (show i)
 	float f = E $ tell (show f)
 	string s = E $ tell (show s)
@@ -64,8 +65,8 @@ instance Javascript Formatted
 
         unsafeStringToExpression = E . tell
 
-        -- statements:
-	assign lval val = P $
+instance JavascriptStatement Formatted
+  where assign lval val = P $
           do newLine
              unE lval
              tell " = "
@@ -110,8 +111,8 @@ instance Javascript Formatted
                      tell ":"
                      indent prog
 
-        -- calling:
-	assignMethodCallResult var obj method args = assign var $ callMethodPrimitive obj method args
+instance JavascriptCall Formatted
+  where assignMethodCallResult var obj method args = assign var $ callMethodPrimitive obj method args
 	declareMethodCallResult var obj method args = declare var $ callMethodPrimitive obj method args
 	callMethod obj method args = P $
           do newLine
@@ -124,23 +125,25 @@ instance Javascript Formatted
              unE $ callFunctionPrimitive func args
              tell ";"
 
-        -- jumping:
-	jumpToMethod obj method args = Javascript.Language.return $ callMethodPrimitive obj method args
+instance JavascriptJump Formatted
+  where jumpToMethod obj method args = Javascript.Language.return $ callMethodPrimitive obj method args
 	jumpToFunction func args = Javascript.Language.return $ callFunctionPrimitive func args
 
-        -- returning result:
-	return res = P $
+instance JavascriptReturnResult Formatted
+  where return res = P $
           do newLine
              tell "return "
              unE res
              tell ";"
 
-        -- declaring callabale object
-	function args body = E $
+instance JavascriptCallable Formatted
+  where function args body = E $
           do tell $ concat ["function (", intercalate ", " args, ") {"]
              indent $ unP body
              newLine
              tell "}"
+
+instance Javascript Formatted
 
 callMethodPrimitive :: Expression Formatted -> Id -> [Expression Formatted] -> Expression Formatted
 callMethodPrimitive obj method args = E $
