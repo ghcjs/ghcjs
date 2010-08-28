@@ -7,6 +7,7 @@ import Data.Monoid
 newtype Trampoline js = TC js
   deriving ( Monoid
            , JavascriptCallable
+           , JavascriptNativeCall
            , JavascriptExpression
            , JavascriptStatement
            , Javascript

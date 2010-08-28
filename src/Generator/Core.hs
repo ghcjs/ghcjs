@@ -10,11 +10,12 @@ import Id as Stg (Id)
 import CoreSyn as Stg (AltCon (DataAlt, LitAlt, DEFAULT))
 import StgSyn as Stg
 
-import Javascript.Language as Js
+import qualified Javascript.Language as Js
+import Javascript.Language (Javascript, Expression)
 
 import Generator.Helpers
-import Generator.PrimOp (primitiveOperation)
-import Generator.FFI (foreignFunctionCall, primitiveCall)
+import Generator.PrimOp
+import Generator.FFI
 
 binding :: Javascript js => StgBinding -> js
 binding = bindings . stgBindingToList
@@ -71,9 +72,9 @@ expression (StgConApp con args) =
     , dataDefinition (Js.var "$res") (map stgArgToJs args)
     , Js.return . Js.var $ "$res"
     ]
-expression (StgOpApp (StgFCallOp f g) args _ty) = Js.return $ foreignFunctionCall f g args
-expression (StgOpApp (StgPrimOp op) args _ty) = Js.return $ primitiveOperation op args
-expression (StgOpApp (StgPrimCallOp call) args _ty) = Js.return $ primitiveCall call args
+expression (StgOpApp (StgFCallOp f g) args _ty) = returnForeignFunctionCallResult f g args
+expression (StgOpApp (StgPrimOp op) args _ty) = returnPrimitiveOperationResult op args
+expression (StgOpApp (StgPrimCallOp call) args _ty) = returnPrimitiveCallResult call args
 expression (StgLam{}) = panic "unexpected StgLam" -- StgLam is used *only* during CoreToStg's work (StgSyn.lhs:196)
 
 caseExpression :: Javascript js => StgExpr -> Stg.Id -> Stg.AltType -> [StgAlt] -> js
@@ -101,9 +102,9 @@ caseExpressionScrut binder expr = go expr
              _ -> stgIdToJsDeclareMethodCallResult binder name "hscall" (map stgArgToJs args)
           where name = stgIdToJs f
         go (StgLit lit) = stgIdToJsDecl binder $ stgLiteralToJs $ lit
-        go (StgOpApp (StgFCallOp f g) args _ty) = stgIdToJsDecl binder $ foreignFunctionCall f g args
-        go (StgOpApp (StgPrimOp op) args _ty) = stgIdToJsDecl binder $ primitiveOperation op args
-        go (StgOpApp (StgPrimCallOp call) args _ty) = stgIdToJsDecl binder $ primitiveCall call args
+        go (StgOpApp (StgFCallOp f g) args _ty) = bindForeignFunctionCallResult binder f g args
+        go (StgOpApp (StgPrimOp op) args _ty) = bindPrimitiveOperationResult binder op args
+        go (StgOpApp (StgPrimCallOp call) args _ty) = bindPrimitiveCallResult binder call args
         go e = stgIdToJsDeclareFunctionCallResult binder f []
           where f = Js.function [] (expression e)
 

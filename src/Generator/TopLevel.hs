@@ -52,7 +52,7 @@ stubDefinition mod id = def (stgIdToJs id)
                 Js.function [] $
                   mconcat
                     [ Js.callMethod mod "loadDependencies" []
-                    , Js.return (Js.var "this")
+                    , Js.return Js.this
                     ]
             ]
         def object (StgRhsClosure _cc _bi _fvs upd_flag _srt stgargs _body) =
@@ -81,7 +81,7 @@ stubDefinitionFix id = def (stgIdToJs id)
           mconcat
             [ Js.assignProperty object "evaluated" Js.true
             , Js.assignProperty object "evaluate" $
-                Js.function [] (Js.return (Js.var "this"))
+                Js.function [] (Js.return Js.this)
             ]
         def object (StgRhsClosure _cc _bi _fvs upd_flag _srt _stgargs _body)
               | isUpdatable upd_flag = mempty

@@ -17,6 +17,14 @@ import Javascript.Language as Js
 haskellRoot :: Javascript js => Expression js
 haskellRoot = Js.var "$hs"
 
+haskellTrue :: Javascript js => Expression js
+haskellTrue = haskellRoot # "modules" # "GHCziBase" # "hs_True"
+  where (#) = Js.property
+
+haskellFalse :: Javascript js => Expression js
+haskellFalse = haskellRoot # "modules" # "GHCziBase" # "hs_False"
+  where (#) = Js.property
+
 moduleName :: Module -> String
 moduleName = moduleNameString . Stg.moduleName
 
@@ -24,8 +32,8 @@ isExternalId :: Stg.Id -> Bool
 isExternalId = isExternalName . getName
 
 stgModuleToJs :: Javascript js => Module -> Expression js
-stgModuleToJs mod = haskellRoot $. "modules" $. (zEncodeString . moduleNameString . Stg.moduleName $ mod)
-  where ($.) = Js.property
+stgModuleToJs mod = haskellRoot # "modules" # (zEncodeString . moduleNameString . Stg.moduleName $ mod)
+  where (#) = Js.property
 
 stgIdToJs :: Javascript js => Stg.Id -> Expression js
 stgIdToJs id
@@ -75,7 +83,7 @@ stgLiteralToJs (Stg.MachWord64 i) = Js.int i
 stgLiteralToJs (Stg.MachFloat i) = Js.float i
 stgLiteralToJs (Stg.MachDouble i) = Js.float i
 stgLiteralToJs (Stg.MachNullAddr) = Js.null
-stgLiteralToJs (Stg.MachLabel {}) = Js.unsafeStringToExpression "$hs.alert ('Unsupported literal: MachLabel')"
+stgLiteralToJs (Stg.MachLabel {}) = Js.nativeMethodCall haskellRoot "alert" [Js.string "Unsupported literal: MachLabel"]
 
 intToBase62 :: Int -> String
 intToBase62 n = go n ""
