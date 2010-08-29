@@ -44,8 +44,8 @@ main =
           targets <- mapM (\x -> guessTarget x Nothing) fileargs
           setTargets targets
           mgraph <- depanal [] False
-          let files = filter (not . isSuffixOf "boot") 
-                            . map (extractPath . ms_location) $ mgraph
+          let files = filter (not . isSuffixOf "boot")
+                      . map (extractPath . ms_location) $ mgraph
               extractPath l = fromMaybe (ml_hi_file l) (ml_hs_file l)
           setTargets []
           flip mapM_ files $ \file ->

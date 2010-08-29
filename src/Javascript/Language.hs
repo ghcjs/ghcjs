@@ -5,7 +5,7 @@ import Data.Monoid
 
 type Id = String
 
-class Monoid js => JavascriptBase js
+class JavascriptBase js
   where data Expression js
 
 class JavascriptBase js => JavascriptExpression js
@@ -18,10 +18,20 @@ class JavascriptBase js => JavascriptExpression js
         subscript :: Expression js -> Expression js -> Expression js
         property :: Expression js -> Id -> Expression js
         new :: Expression js -> [Expression js] -> Expression js
-        binOp :: String -> Expression js -> Expression js -> Expression js
-        leftUnaryOp :: String -> Expression js -> Expression js
-        rightUnaryOp :: String -> Expression js -> Expression js
         ternary :: Expression js -> Expression js -> Expression js -> Expression js
+        assignment :: Expression js -> Expression js -> Expression js
+        not :: Expression js -> Expression js
+        plus :: Expression js -> Expression js -> Expression js
+        minus :: Expression js -> Expression js -> Expression js
+        divide :: Expression js -> Expression js -> Expression js
+        multiply :: Expression js -> Expression js -> Expression js
+        unaryMinus :: Expression js -> Expression js
+        equal :: Expression js -> Expression js -> Expression js
+        notEqual :: Expression js -> Expression js -> Expression js
+        less :: Expression js -> Expression js -> Expression js
+        lessOrEqual :: Expression js -> Expression js -> Expression js
+        greater :: Expression js -> Expression js -> Expression js
+        greaterOrEqual :: Expression js -> Expression js -> Expression js
 
 class JavascriptBase js => JavascriptStatement js
   where declare :: Id -> Expression js -> js
@@ -52,7 +62,8 @@ class JavascriptBase js => JavascriptJump js
 class JavascriptBase js => JavascriptReturnResult js
   where return :: Expression js -> js
 
-class ( JavascriptExpression js
+class ( Monoid js
+      , JavascriptExpression js
       , JavascriptStatement js
       , JavascriptCallable js
       , JavascriptCall js
@@ -69,10 +80,7 @@ bool True = true
 bool False = false
 
 assign :: Javascript js => Expression js -> Expression js -> js
-assign a b = expression (binOp "=" a b)
-
-not :: Javascript js => Expression js -> Expression js
-not = leftUnaryOp "!"
+assign a b = expression (assignment a b)
 
 null :: Javascript js => Expression js
 null = var "null"

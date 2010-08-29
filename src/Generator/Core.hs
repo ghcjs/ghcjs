@@ -113,9 +113,10 @@ caseExpressionAlternatives bndr altType [(_altCon, args, useMask, expr)] =
   case altType
   of PolyAlt {} -> jsexpr
      PrimAlt {} -> jsexpr
-     UbxTupAlt {} -> argsAndExpr
-     AlgAlt {} -> argsAndExpr
-  where argsAndExpr = mconcat [unpackData (stgIdToJs bndr) useMask args, jsexpr]
+     UbxTupAlt {} -> process object
+     AlgAlt {} -> process (Js.property object "data")
+  where object = stgIdToJs bndr
+        process obj = mconcat [unpackData obj useMask args, jsexpr]
         jsexpr = expression expr
 caseExpressionAlternatives bndr altType alts =
   case altType
@@ -134,7 +135,7 @@ caseExpressionAlternatives bndr altType alts =
     alternative alt = (alternativeConst alt, alternativeBody alt)
     alternativeBody (alt, args, useMask, expr) =
       case alt
-      of DataAlt _ -> mconcat [unpackData name useMask args, expression expr]
+      of DataAlt _ -> mconcat [unpackData (Js.property name "data") useMask args, expression expr]
          LitAlt _ -> expression expr
          DEFAULT  -> panic "Default alternative!"
     alternativeConst (alt, _args, _useMask, _expr) =
@@ -144,6 +145,6 @@ caseExpressionAlternatives bndr altType alts =
          DEFAULT  -> panic "Default alternative!"
 
 unpackData :: Javascript js => Expression js -> [Bool] -> [Stg.Id] -> js
-unpackData name mask args = mconcat [f n arg | (n, True, arg) <- zip3 [(0::Int)..] mask args]
-  where f n arg = stgIdToJsDecl arg (Js.subscript (Js.property name "data") (Js.int n))
+unpackData object mask args = mconcat [f n arg | (n, True, arg) <- zip3 [(0::Int)..] mask args]
+  where f n arg = stgIdToJsDecl arg (Js.subscript object (Js.int n))
 

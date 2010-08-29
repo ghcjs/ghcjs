@@ -13,5 +13,5 @@ Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Hs-Source-Dirs: src
     Build-Depends:  base >=3 && <5, ghc, ghc-paths, monads-tf, containers, filepath
-    GHC-Options:    -Wall -fno-warn-name-shadowing
+    GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans
 
