@@ -1,7 +1,8 @@
 {-# LANGUAGE TypeFamilies, FlexibleContexts #-}
 module Javascript.Formatted (Formatted) where
 
-import Javascript.Language
+import Javascript.Language as Js hiding (not, null, return)
+import qualified Javascript.Language as Js (return)
 import Data.Monoid
 import Data.List
 
@@ -40,6 +41,20 @@ instance JavascriptExpression Formatted
           do tell "["
              sequence_ . intersperse (tell ", ") . map unE $ xs
              tell "]"
+        object xs = E $
+          do tell "{"
+             when (not . null $ xs) $
+               indent $
+                 do flip mapM_ (init xs) $ \i ->
+                      do uncurry prop i
+                         tell ","
+                    uncurry prop (last xs)
+             tell "}"
+          where prop p v =
+                  do newLine
+                     tell p
+                     tell ": "
+                     unE v
 	property obj id = E $
           do tell "("
              unE obj
@@ -164,8 +179,8 @@ instance JavascriptCall Formatted
              tell ";"
 
 instance JavascriptJump Formatted
-  where jumpToMethod obj method args = Javascript.Language.return $ nativeMethodCall obj method args
-	jumpToFunction func args = Javascript.Language.return $ nativeFunctionCall func args
+  where jumpToMethod obj method args = Js.return $ nativeMethodCall obj method args
+	jumpToFunction func args = Js.return $ nativeFunctionCall func args
 
 instance JavascriptReturnResult Formatted
   where return res = P $

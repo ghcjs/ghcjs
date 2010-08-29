@@ -14,6 +14,7 @@ class JavascriptBase js => JavascriptExpression js
         float :: (Fractional a) => a -> Expression js
         string :: String -> Expression js
         list :: [Expression js] -> Expression js
+        object :: [(Id, Expression js)] -> Expression js
         subscript :: Expression js -> Expression js -> Expression js
         property :: Expression js -> Id -> Expression js
         new :: Expression js -> [Expression js] -> Expression js
