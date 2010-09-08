@@ -14,9 +14,9 @@ Building
 
 Code builds as standard haskell package
 
-    $ cabal Setup configure
-    $ cabal Setup build
-    $ cabal Setup install
+    $ runghc Setup configure
+    $ runghc Setup build
+    $ runghc Setup install
 
 Usage
 -----
@@ -31,6 +31,9 @@ This command is merely equivalent to the following
 
 but it compiles to Javascript instead of native code.
 
+See examples folder for an example of loading and running haskell code
+from browser.
+
 Status
 ------
 
@@ -41,6 +44,23 @@ Implementation
 
 Compiler is implemented as [GHC](http://www.haskell.org/ghc/) backend
 using GHC API. And been tested with GHC 6.12.1.
+
+Building Prelude
+----------------
+
+To play with any Haskell code you'll need Haskell standard library.
+GHC implements standard library as a "base" package.
+You'll need to compile modules from base package.
+
+  1. Download ghc source distribution for the same version of ghc that you
+     use to build ghcjs.
+
+  2. Build ghc
+
+         ./configure
+         make
+
+  3.
 
 Differences from old version
 ----------------------------
@@ -62,21 +82,16 @@ previous version. The differences are the following.
 
    Modules are loaded (using XMLHttpRequest) on demand when they are needed.
 
-### Removed features
+Features
+--------
 
- * Primitive operations and foreign function interface is not
-   supported.
+ * Foreign function interface is not supported.
+   Only minimum of primitive operations is supported.
 
-   Alerts are generated. I want to concentrate on loading and
-   modules support at first
+ * Tail recursion optimization is off by default.
 
- * Tail recursion optimization is gone.
+   Use
 
-   Every call is native Javascript call without any magic.
-   It is MUCH easier to debug this code. Tail call support can be
-   easilly added as new Javascript class instance:
-   
-       data TailCalledJavascript js = TC js
-       instance Javascript js => Javascript (TailCalledJavascript js) where
-           callFunction func args = TC (... callFunction ...)
+       $ ghcjs --calling-convention=trampoline
 
+   To optimize tail recursion in resulting code.

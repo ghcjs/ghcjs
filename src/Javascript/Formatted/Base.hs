@@ -6,7 +6,7 @@ module Javascript.Formatted.Base
   , indent
   , newLine
   , Precedence
-  , mkExpression
+  , mkOperation
   , tellWithPrecedenceConstraint
   , tellUnconstraint
   ) where
@@ -42,20 +42,21 @@ instance Monoid Formatted
 
 type Precedence = Int
 instance JavascriptBase Formatted
-  where -- | Expression is a function from priority of the enclosing context to actual code writer
-        --   we will try to use precedence table from
-        --   http://www.codehouse.com/javascript/precedence/
-        newtype Expression Formatted = E (Precedence -> ReaderT Identation (Writer String) ())
+  where -- | Expression is a function from precedence of the enclosing context
+        -- to actual code writer.
+        newtype Expression Formatted = E (Precedence -> FormattedWriter ())
 
 tellWithPrecedenceConstraint :: Expression Formatted -> Precedence -> FormattedWriter ()
 tellWithPrecedenceConstraint (E e) = e
 
-mkExpression :: Precedence -> ReaderT Identation (Writer String) () -> Expression Formatted
-mkExpression ep b = E $ \p ->
+-- | Helper function to define operation with given precedence
+-- operations in expression are to be executed in order of precedence
+mkOperation :: Precedence -> FormattedWriter () -> Expression Formatted
+mkOperation ep b = E $ \p ->
   do when (p < ep) $ tell "("
      b
      when (p < ep) $ tell ")"
 
-tellUnconstraint :: Expression Formatted -> ReaderT Identation (Writer String) ()
+tellUnconstraint :: Expression Formatted -> FormattedWriter ()
 tellUnconstraint e = tellWithPrecedenceConstraint e 20
 

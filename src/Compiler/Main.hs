@@ -1,21 +1,19 @@
 {-# LANGUAGE TypeFamilies #-}
 module Main where
 
+import qualified GHC.Paths
 import GHC
-import CoreToStg
-import SimplStg
-import GHC.Paths ( libdir )
+import HscMain (hscSimplify)
+import TidyPgm (tidyProgram)
+import CoreToStg (coreToStg)
+import SimplStg (stg2stg)
 import DynFlags ( defaultDynFlags )
-import HscTypes
-import Panic
-import CorePrep
+import HscTypes (liftIO, ModGuts, CgGuts (..))
+import CorePrep (corePrepPgm)
+import DriverPhases (HscSource (HsBootFile))
 
-import Control.Monad
-import Data.Maybe
-import Data.List
-import System.Environment
-
-import System.FilePath
+import System.Environment (getArgs)
+import System.FilePath (replaceExtension)
 
 import qualified Generator.TopLevel as Js (generate)
 import Javascript.Language (Javascript)
@@ -35,33 +33,61 @@ main =
              of ("--calling-convention=plain":args) -> (Plain, args)
                 ("--calling-convention=trampoline":args) -> (Trampoline, args)
                 _ -> (Plain, args)
-     defaultErrorHandler defaultDynFlags $ runGhc (Just libdir) $
+     defaultErrorHandler defaultDynFlags $ runGhc (Just GHC.Paths.libdir) $
        do sdflags <- getSessionDynFlags
           (dflags, fileargs', _) <- parseDynamicFlags sdflags (map noLoc args') 
-          when (null fileargs') $ ghcError (UsageError "No input files.")
           _ <- setSessionDynFlags dflags
           let fileargs = map unLoc fileargs'
-          targets <- mapM (\x -> guessTarget x Nothing) fileargs
+          targets <- mapM (flip guessTarget Nothing) fileargs
           setTargets targets
+          _ <- load LoadAllTargets
           mgraph <- depanal [] False
-          let files = filter (not . isSuffixOf "boot")
-                      . map (extractPath . ms_location) $ mgraph
-              extractPath l = fromMaybe (ml_hi_file l) (ml_hs_file l)
-          setTargets []
-          flip mapM_ files $ \file ->
-            do core <- compileToCoreSimplified file
-               HscTypes.liftIO $
-                 do core_binds <- corePrepPgm dflags (cm_binds core) (typeEnvTyCons . cm_types $ core)
-                    stg <- coreToStg (modulePackageId . cm_module $ core) core_binds
-                    (stg', _ccs) <- stg2stg dflags (cm_module core) stg
-                    let prog :: Javascript js => js
-                        prog = Js.generate (cm_module core) stg'
-                    -- Custom output paths are ignored
-                    let program =
-                          case callingConvention
-                          of Plain -> show (prog :: Js.Formatted)
-                             Trampoline -> show (prog :: Js.Trampoline Js.Formatted)
-                        fp = replaceExtension file ".js"
-                    putStrLn $ "Writing " ++ fp
-                    writeFile fp program 
+          mapM_ (compile callingConvention) mgraph
+
+compile :: GhcMonad m => CallingConvention -> ModSummary -> m ()
+compile callingConvention mod =
+  case ms_hsc_src mod
+  of HsBootFile -> liftIO $ putStrLn $ concat ["Skipping boot ", name]
+     _ ->
+       do liftIO $ putStrLn $ concat ["Compiling ", name]
+          preparedMod <- prepareModule mod
+          processModule callingConvention preparedMod
+  where name = moduleNameString . moduleName . ms_mod $ mod
+
+prepareModule :: GhcMonad m => ModSummary -> m DesugaredModule
+prepareModule mod =
+  do parsedMod <- parseModule mod
+     typedCheckMod <- typecheckModule parsedMod
+     desugarModule typedCheckMod
+
+processModule :: GhcMonad m => CallingConvention -> DesugaredModule -> m ()
+processModule callingConvention mod =
+  do tidyCore <- simplifyModule (coreModule mod)
+     program <- liftIO $ compileModule dflags callingConvention tidyCore
+     liftIO $
+       do putStrLn $ concat ["Writing module ", name, " (to ", outputFile, ")"]
+          writeFile outputFile program
+  where summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
+        outputFile = replaceExtension (ml_hi_file . ms_location $ summary) ".js"
+        name = moduleNameString . moduleName . ms_mod $ summary
+        dflags = ms_hspp_opts $ summary
+
+simplifyModule :: GhcMonad m => ModGuts -> m CgGuts
+simplifyModule guts =
+  do hscEnv <- getSession
+     simplGuts <- hscSimplify guts
+     (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
+     return cgGuts
+
+compileModule :: DynFlags -> CallingConvention -> CgGuts -> IO String
+compileModule dflags callingConvention core =
+  do core_binds <- corePrepPgm dflags (cg_binds core) (cg_tycons $ core)
+     stg <- coreToStg (modulePackageId . cg_module $ core) core_binds
+     (stg', _ccs) <- stg2stg dflags (cg_module core) stg
+     let abstractProgram :: Javascript js => js
+         abstractProgram = Js.generate (cg_module core) stg'
+     return $
+       case callingConvention
+       of Plain -> show (abstractProgram :: Js.Formatted)
+          Trampoline -> show (abstractProgram :: Js.Trampoline Js.Formatted)
 
