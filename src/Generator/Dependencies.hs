@@ -19,7 +19,7 @@ ids = unions . map (uncurry go)
 
 idsOfRhs :: StgRhs -> Set Id
 idsOfRhs (StgRhsClosure _ _ _ _ _ args body) = fromList args `union` idsOfExpr body
-idsOfRhs _ = empty
+idsOfRhs (StgRhsCon _ _ args) = idsOfArgs args
 
 idsOfExpr :: StgExpr -> Set Id
 idsOfExpr (StgApp f args) = insert f $ idsOfArgs args

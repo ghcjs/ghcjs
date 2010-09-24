@@ -52,7 +52,7 @@ stubDefinition mod id = def (stgIdToJs id)
                 Js.function [] $
                   mconcat
                     [ Js.callMethod mod "loadDependencies" []
-                    , Js.return Js.this
+                    , Js.return object
                     ]
             ]
         def object (StgRhsClosure _cc _bi _fvs upd_flag _srt stgargs _body) =

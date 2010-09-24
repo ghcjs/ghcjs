@@ -18,11 +18,11 @@ haskellRoot :: Javascript js => Expression js
 haskellRoot = Js.var "$hs"
 
 haskellTrue :: Javascript js => Expression js
-haskellTrue = haskellRoot # "modules" # "GHCziBase" # "hs_True"
+haskellTrue = haskellRoot # "modules" # "GHCziBool" # "hs_True"
   where (#) = Js.property
 
 haskellFalse :: Javascript js => Expression js
-haskellFalse = haskellRoot # "modules" # "GHCziBase" # "hs_False"
+haskellFalse = haskellRoot # "modules" # "GHCziBool" # "hs_False"
   where (#) = Js.property
 
 moduleName :: Module -> String
