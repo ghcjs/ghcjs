@@ -55,12 +55,53 @@ You'll need to compile modules from base package.
   1. Download ghc source distribution for the same version of ghc that you
      use to build ghcjs.
 
-  2. Build ghc
+  2. Customize build
 
-         ./configure
-         make
+         $ cd ghc-x.xx.x
+         $ cd mk
+         $ cp build.mk.sample build.mk
 
-  3.
+     Edit mk/build.mk
+
+     Add the following line to the top:
+
+         INTEGER_LIBRARY = integer-simple
+
+     Set build flower to the quikest: uncomment the line:
+
+         BuildFlavour = quickest
+
+  3. Build ghc
+
+         $ ./configure
+         $ make
+
+=== Building ghc-prim
+
+    $ cd ghc-x.xx.x
+    $ cd libraries/ghc-prim
+    $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/Types.hs 
+    $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/*
+
+=== Building integer-simple
+
+    $ cd ghc-x.xx.x
+    $ cd libraries/integer-simple
+    $ ghcjs -odir <javascript files folder>/integer-simple -hidir <javascript files folder>/integer-simple -cpp -fglasgow-exts -package-name integer-simple GHC/Integer.hs 
+
+=== Building base
+
+    $ cd ghc-x.xx.x
+    $ cd libraries/base
+    $ cabal configure
+    $ cabal build
+    $ ghcjs -odir <javascript files folder>/base -hidir <javascript files folder>/base -cpp -package-name base -hide-package base -i -idist/build -i. -idist/build/autogen -Idist/build/autogen -Idist/build -Iinclude -XMagicHash -XExistentialQuantification -XRank2Types -XScopedTypeVariables -XUnboxedTuples -XForeignFunctionInterface -XUnliftedFFITypes -XDeriveDataTypeable -XGeneralizedNewtypeDeriving -XFlexibleInstances -XStandaloneDeriving -XPatternGuards -XEmptyDataDecls -XNoImplicitPrelude -XCPP Prelude
+
+This last magic command line was guessed using
+
+    cabal build -v
+
+to see what options are passed to GHC.
 
 Differences from old version
 ----------------------------
