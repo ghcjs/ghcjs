@@ -17,6 +17,7 @@ var $hs = {
         $hs.logAny("DEBUG", str);
     },
     loadPaths: ["./"],
+    packages: [".", "ghc-prim", "integer-simple", "base"],
     loadModule: function (moduleName) {
 	    variableName = moduleName.replace (/\./g, "zi"); // Z-encoding string
 	    modulePath = moduleName.replace (/\./g, "/") + ".js";
@@ -25,17 +26,18 @@ var $hs = {
 		return;
 	    }
 
-	    var code;
-	    for (var i = 0; i < $hs.loadPaths.length; i++) {
-		var path = $hs.loadPaths[i] + modulePath;
-		try {
-		    var transport = new XMLHttpRequest();
-		    transport.open("GET", path, false);
-		    transport.send(null);
-		    code = transport.responseText;
-		    break;
-		} catch (e) { }
-	    }
+	    var code = null;
+	    for (var i = 0; i < $hs.loadPaths.length && code == null; i++) {
+	        for (var j = 0; j < $hs.packages.length && code == null; j++) {
+		    var path = $hs.loadPaths[i] + $hs.packages[j] + "/" + modulePath;
+		    try {
+		        var transport = new XMLHttpRequest();
+		        transport.open("GET", path, false);
+		        transport.send(null);
+		        code = transport.responseText;
+		    } catch (e) { }
+	        }
+            }
 	    try {
 		eval(code);
 		$hs.modules[variableName].init();

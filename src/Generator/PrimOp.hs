@@ -42,26 +42,23 @@ primOp IntEqOp  [a, b] = Just $ boolOp Js.equal a b
 primOp IntNeOp  [a, b] = Just $ boolOp Js.notEqual a b
 primOp IntLtOp  [a, b] = Just $ boolOp Js.less  a b
 primOp IntLeOp  [a, b] = Just $ boolOp Js.lessOrEqual a b
-primOp IntAddOp [a, b] = Just $ Js.plus (stgArgToJs a) (stgArgToJs b)
-primOp IntSubOp [a, b] = Just $ Js.minus (stgArgToJs a) (stgArgToJs b)
-primOp IntMulOp [a, b] = Just $ Js.multiply (stgArgToJs a) (stgArgToJs b)
+primOp IntAddOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "add" [stgArgToJs a, stgArgToJs b]
+primOp IntSubOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "sub" [stgArgToJs a, stgArgToJs b]
+primOp IntMulOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "mul" [stgArgToJs a, stgArgToJs b]
 primOp IntNegOp [a]    = Just $ Js.unaryMinus (stgArgToJs a)
 
 -- overflow sensitive operations:
-primOp IntMulMayOfloOp [_, _] = Just $ Js.int (0 :: Int) -- State that no overflows are possible what so ever
-primOp IntAddCOp       [a, b] = Just $ Js.list [Js.plus (stgArgToJs a) (stgArgToJs b), Js.int (0 :: Int)] -- Second member is alway zero, meaning that there are no overflows
-primOp IntSubCOp       [a, b] = Just $ Js.list [Js.minus (stgArgToJs a) (stgArgToJs b), Js.int (0 :: Int)] -- Second member is alway zero, meaning that there are no overflows
+primOp IntMulMayOfloOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "mulIntMayOflo" [stgArgToJs a, stgArgToJs b]
+primOp IntAddCOp       [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "addC" [stgArgToJs a, stgArgToJs b]
+primOp IntSubCOp       [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "subC" [stgArgToJs a, stgArgToJs b]
 
 -- FIXME: is there native Javascript mechanism for this?
-primOp IntQuotOp [a, b] = Just $ Generator.PrimOp.floor a b
-primOp IntRemOp  [a, b] = Just $ Js.minus (stgArgToJs a) (Js.multiply (Generator.PrimOp.floor a b) (stgArgToJs b))
+primOp IntQuotOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "quot" [stgArgToJs a, stgArgToJs b]
+primOp IntRemOp  [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "rem" [stgArgToJs a, stgArgToJs b]
 
 primOp IndexOffAddrOp_Char [a, b] = Just $ Js.subscript (stgArgToJs a) (stgArgToJs b)
 primOp DataToTagOp [a] = Just $ Js.property (stgArgToJs a) "tag"
 primOp _ _ = Nothing
-
-floor :: Javascript js => StgArg -> StgArg -> Expression js
-floor a b = Js.nativeMethodCall (Js.var "Math") "floor" [Js.divide (stgArgToJs a) (stgArgToJs b)]
 
 boolOp :: Javascript js => (Expression js -> Expression js -> Expression js) -> StgArg -> StgArg -> Expression js
 boolOp op a b = Js.ternary (op (stgArgToJs a) (stgArgToJs b)) haskellTrue haskellFalse
