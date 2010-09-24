@@ -42,28 +42,28 @@ main =
           setTargets targets
           _ <- load LoadAllTargets
           mgraph <- depanal [] False
-          mapM_ (compile callingConvention) mgraph
+          mapM_ (compileModSummary callingConvention) mgraph
 
-compile :: GhcMonad m => CallingConvention -> ModSummary -> m ()
-compile callingConvention mod =
+compileModSummary :: GhcMonad m => CallingConvention -> ModSummary -> m ()
+compileModSummary callingConvention mod =
   case ms_hsc_src mod
   of HsBootFile -> liftIO $ putStrLn $ concat ["Skipping boot ", name]
      _ ->
        do liftIO $ putStrLn $ concat ["Compiling ", name]
-          preparedMod <- prepareModule mod
-          processModule callingConvention preparedMod
+          desugaredMod <- desugaredModuleFromModSummary mod
+          writeDesugaredModule callingConvention desugaredMod
   where name = moduleNameString . moduleName . ms_mod $ mod
 
-prepareModule :: GhcMonad m => ModSummary -> m DesugaredModule
-prepareModule mod =
+desugaredModuleFromModSummary :: GhcMonad m => ModSummary -> m DesugaredModule
+desugaredModuleFromModSummary mod =
   do parsedMod <- parseModule mod
      typedCheckMod <- typecheckModule parsedMod
      desugarModule typedCheckMod
 
-processModule :: GhcMonad m => CallingConvention -> DesugaredModule -> m ()
-processModule callingConvention mod =
-  do tidyCore <- simplifyModule (coreModule mod)
-     program <- liftIO $ compileModule dflags callingConvention tidyCore
+writeDesugaredModule :: GhcMonad m => CallingConvention -> DesugaredModule -> m ()
+writeDesugaredModule callingConvention mod =
+  do tidyCore <- cgGutsFromModGuts (coreModule mod)
+     program <- liftIO $ concreteJavascriptFromCgGuts dflags callingConvention tidyCore
      liftIO $
        do putStrLn $ concat ["Writing module ", name, " (to ", outputFile, ")"]
           writeFile outputFile program
@@ -72,22 +72,22 @@ processModule callingConvention mod =
         name = moduleNameString . moduleName . ms_mod $ summary
         dflags = ms_hspp_opts $ summary
 
-simplifyModule :: GhcMonad m => ModGuts -> m CgGuts
-simplifyModule guts =
+cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
+cgGutsFromModGuts guts =
   do hscEnv <- getSession
      simplGuts <- hscSimplify guts
      (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
      return cgGuts
 
-compileModule :: DynFlags -> CallingConvention -> CgGuts -> IO String
-compileModule dflags callingConvention core =
+concreteJavascriptFromCgGuts :: DynFlags -> CallingConvention -> CgGuts -> IO String
+concreteJavascriptFromCgGuts dflags callingConvention core =
   do core_binds <- corePrepPgm dflags (cg_binds core) (cg_tycons $ core)
      stg <- coreToStg (modulePackageId . cg_module $ core) core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-     let abstractProgram :: Javascript js => js
-         abstractProgram = Js.generate (cg_module core) stg'
+     let abstract :: Javascript js => js
+         abstract = Js.generate (cg_module core) stg'
      return $
        case callingConvention
-       of Plain -> show (abstractProgram :: Js.Formatted)
-          Trampoline -> show (abstractProgram :: Js.Trampoline Js.Formatted)
+       of Plain -> show (abstract :: Js.Formatted)
+          Trampoline -> show (abstract :: Js.Trampoline Js.Formatted)
 
