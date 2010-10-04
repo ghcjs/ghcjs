@@ -5,10 +5,28 @@
     <script type="text/javascript" src="rts.js"></script>
     <script type="text/javascript">
       window.onload = function() {
-        $hs.Int = Int64; // Set up system default int width
+        // Set up system default int width
+        // Int64 doesn't work on
+        // Firefox 3.6.10 Mozilla/5.0 (X11; U; Linux x86_64; ru; rv:1.9.2.10)
+        //     Gecko/20100915 Ubuntu/10.04 (lucid) Firefox/3.6.10
+        // :(
+        $hs.Int = Int32;
+
+        $hs.loadModule("GHC.Bool"); // Is required for primitive operations
         $hs.loadModule("Test");
-        var res = $hs.modules.Test.hs_test.hscall();
-        alert(res.data[0]);
+
+        // Int operations works:
+        var res = $hs.fromHaskellInt($hs.modules.Test.hs_test1);
+        alert(res);
+
+        // Integer operations works, when integers are small:
+        var res = $hs.fromHaskellInt($hs.modules.Test.hs_test2);
+        alert(res);
+
+        // causes "too much recursion" error.
+        // we need to test it with trampoline.
+        var res = $hs.fromHaskellString($hs.modules.Test.hs_test3);
+        alert(res);
       }
     </script>
   </head>

@@ -32,6 +32,12 @@ class JavascriptBase js => JavascriptExpression js
         lessOrEqual :: Expression js -> Expression js -> Expression js
         greater :: Expression js -> Expression js -> Expression js
         greaterOrEqual :: Expression js -> Expression js -> Expression js
+        shiftLL :: Expression js -> Expression js -> Expression js
+        shiftRL :: Expression js -> Expression js -> Expression js
+        shiftRA :: Expression js -> Expression js -> Expression js
+        bitAnd :: Expression js -> Expression js -> Expression js
+        bitXOr :: Expression js -> Expression js -> Expression js
+        bitOr :: Expression js -> Expression js -> Expression js
 
 class JavascriptBase js => JavascriptStatement js
   where declare :: Id -> Expression js -> js

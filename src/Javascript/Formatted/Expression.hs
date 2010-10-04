@@ -1,6 +1,6 @@
 -- | Define operations to build javascript expressions
 --   use precedence table from
---   http://www.codehouse.com/javascript/precedence/
+--   https://developer.mozilla.org/en/JavaScript/Reference/Operators/Operator_Precedence
 module Javascript.Formatted.Expression where
 
 import Data.List (intersperse, intercalate)
@@ -75,19 +75,25 @@ instance JavascriptExpression Formatted
              tellWithPrecedenceConstraint t 15
              tell " : "
              tellWithPrecedenceConstraint f 15
-        assignment a b =     rightBinOp  "=" 16 a b
-        equal a b =          leftBinOp   "==" 9 a b
-        notEqual a b =       leftBinOp   "!=" 9 a b
-        less a b =           leftBinOp   "<"  8 a b
-        lessOrEqual a b =    leftBinOp   "<=" 8 a b
-        greater a b =        leftBinOp   ">"  8 a b
-        greaterOrEqual a b = leftBinOp   ">=" 8 a b
-        plus a b =           leftBinOp   "+"  6 a b
-        minus a b =          leftBinOp   "-"  6 a b
-        multiply a b =       leftBinOp   "*"  5 a b
-        divide a b =         leftBinOp   "/"  5 a b
-        not =                leftUnaryOp "!"  4
-        unaryMinus a =       leftUnaryOp "-"  4 a
+        assignment a b =     rightBinOp  "="  16 a b
+        bitOr a b =          leftBinOp   "|"  12 a b
+        bitXOr a b =         leftBinOp   "^"  11 a b
+        bitAnd a b =         leftBinOp   "&"  10 a b
+        equal a b =          leftBinOp   "=="  9 a b
+        notEqual a b =       leftBinOp   "!="  9 a b
+        less a b =           leftBinOp   "<"   8 a b
+        lessOrEqual a b =    leftBinOp   "<="  8 a b
+        greater a b =        leftBinOp   ">"   8 a b
+        greaterOrEqual a b = leftBinOp   ">="  8 a b
+        shiftLL a b =        leftBinOp   "<<"  7 a b
+        shiftRL a b =        leftBinOp   ">>"  7 a b
+        shiftRA a b =        leftBinOp   ">>>" 7 a b
+        plus a b =           leftBinOp   "+"   6 a b
+        minus a b =          leftBinOp   "-"   6 a b
+        multiply a b =       leftBinOp   "*"   5 a b
+        divide a b =         leftBinOp   "/"   5 a b
+        not =                leftUnaryOp "!"   4
+        unaryMinus a =       leftUnaryOp "-"   4 a
 
 instance JavascriptNativeCall Formatted
   where nativeFunctionCall func args = mkOperation 2 $

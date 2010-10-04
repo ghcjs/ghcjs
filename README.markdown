@@ -76,6 +76,16 @@ You'll need to compile modules from base package.
          $ ./configure
          $ make
 
+  4. You should try to use buildpackages.sh script. buildpackages.sh
+     basicly do nothing, just print out command to build packages.
+     You can build ghc-prim, integer-simple and base packages in
+     examples directory with the following command
+
+         $ cd examples
+         $ ./buildpackages.sh <path-to-ghc-directory> | sh
+
+     You can build packages manually using instructions below.
+
 === Building ghc-prim
 
     $ cd ghc-x.xx.x
@@ -93,15 +103,21 @@ You'll need to compile modules from base package.
 
     $ cd ghc-x.xx.x
     $ cd libraries/base
-    $ cabal configure
-    $ cabal build
-    $ ghcjs -odir <javascript files folder>/base -hidir <javascript files folder>/base -cpp -package-name base -hide-package base -i -idist/build -i. -idist/build/autogen -Idist/build/autogen -Idist/build -Iinclude -XMagicHash -XExistentialQuantification -XRank2Types -XScopedTypeVariables -XUnboxedTuples -XForeignFunctionInterface -XUnliftedFFITypes -XDeriveDataTypeable -XGeneralizedNewtypeDeriving -XFlexibleInstances -XStandaloneDeriving -XPatternGuards -XEmptyDataDecls -XNoImplicitPrelude -XCPP Prelude
+    $ ghcjs -odir <javascript files folder>/base -hidir <javascript files folder>/base -hide-package base -package-name base -I./include -i./dist-install/build -XMagicHash -XExistentialQuantification -XRank2Types -XScopedTypeVariables -XUnboxedTuples -XForeignFunctionInterface -XUnliftedFFITypes -XDeriveDataTypeable -XGeneralizedNewtypeDeriving -XFlexibleInstances -XStandaloneDeriving -XPatternGuards -XEmptyDataDecls -XNoImplicitPrelude -XCPP Prelude.hs
 
 This last magic command line was guessed using
 
     cabal build -v
 
 to see what options are passed to GHC.
+
+We should really use
+
+    -odir /tmp
+
+option to get read of useless object files, but it seems to be a bug in ghc
+that cause GHC to rely on odir to be the same as hidir wich is mostly the
+case in "normal" GHC usage.
 
 Differences from old version
 ----------------------------

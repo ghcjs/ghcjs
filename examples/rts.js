@@ -1,4 +1,30 @@
 var $hs = {
+    Word : {
+      gt : function(a, b) {
+        if ((a < 0 || b < 0) && (a >= 0 || b >= 0)) // Different signs
+          return a > b ? $hs.modules.GHCziBool.hs_False : $hs.modules.GHCziBool.hs_True;
+        else
+          return a > b ? $hs.modules.GHCziBool.hs_True : $hs.modules.GHCziBool.hs_False;
+      },
+      ge : function(a, b) {
+        if ((a < 0 || b < 0) && (a >= 0 || b >= 0)) // Different signs
+          return a >= b ? $hs.modules.GHCziBool.hs_False : $hs.modules.GHCziBool.hs_True;
+        else
+          return a >= b ? $hs.modules.GHCziBool.hs_True : $hs.modules.GHCziBool.hs_False;
+      },
+      lt : function(a, b) {
+        if ((a < 0 || b < 0) && (a >= 0 || b >= 0)) // Different signs
+          return a < b ? $hs.modules.GHCziBool.hs_False : $hs.modules.GHCziBool.hs_True;
+        else
+          return a < b ? $hs.modules.GHCziBool.hs_True : $hs.modules.GHCziBool.hs_False;
+      },
+      le : function(a, b) {
+        if ((a < 0 || b < 0) && (a >= 0 || b >= 0)) // Different signs
+          return a <= b ? $hs.modules.GHCziBool.hs_False : $hs.modules.GHCziBool.hs_True;
+        else
+          return a <= b ? $hs.modules.GHCziBool.hs_True : $hs.modules.GHCziBool.hs_False;
+      },
+    },
     modules: {},
     alert: function (str) {
         window.alert(str);
@@ -130,4 +156,29 @@ $hs.Data.prototype = {
         return this;
     }
 };
+
+$hs.modules.GHCziPrim = new $hs.Module();
+$hs.modules.GHCziPrim.dependencies = [];
+$hs.modules.GHCziPrim.initBeforeDependencies = function () {};
+$hs.modules.GHCziPrim.hs_realWorldzh = new $hs.Data(1);
+
+$hs.fromHaskellString = function(sthunk) {
+          var res = "";
+          for (;;) {
+            var s = sthunk.hscall();
+            switch (s.tag) {
+              case 1: // nil
+                return res;
+              case 2: // cons
+                var chthunk = s.data[0];
+                var sthunk = s.data[1];
+                var ch = chthunk.hscall();
+                res = res + ch.data[0];
+            }
+          }
+        };
+$hs.fromHaskellInt = function(ithunk) {
+          var i = ithunk.hscall();
+          return i.data[0];
+        };
 
