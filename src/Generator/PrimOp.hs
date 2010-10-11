@@ -36,7 +36,7 @@ primOp OrdOp    [a]    = Just $ Js.nativeMethodCall (stgArgToJs a) "charCodeAt" 
 primOp ChrOp    [a]    = Just $ Js.nativeMethodCall (Js.var "String") "fromCharCode" [stgArgToJs a]
 
 -- int:
-primOp IntGtOp  [a, b] = Just $ boolOp Js.greater  a b
+primOp IntGtOp  [a, b] = Just $ boolOp Js.greater a b
 primOp IntGeOp  [a, b] = Just $ boolOp Js.greaterOrEqual a b
 primOp IntEqOp  [a, b] = Just $ boolOp Js.equal a b
 primOp IntNeOp  [a, b] = Just $ boolOp Js.notEqual a b
@@ -61,12 +61,12 @@ primOp Int2WordOp  [a] = Just $ stgArgToJs a
 
 -- word:
 -- imlement word as a bit reinterpretation of int
-primOp WordGtOp  [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Word") "gt" [stgArgToJs a, stgArgToJs b]
-primOp WordGeOp  [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Word") "ge" [stgArgToJs a, stgArgToJs b]
+primOp WordGtOp  [a, b] = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property haskellRoot "Word") "gt" [stgArgToJs a, stgArgToJs b]
+primOp WordGeOp  [a, b] = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property haskellRoot "Word") "ge" [stgArgToJs a, stgArgToJs b]
 primOp WordEqOp  [a, b] = Just $ boolOp Js.equal a b
 primOp WordNeOp  [a, b] = Just $ boolOp Js.notEqual a b
-primOp WordLtOp  [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Word") "lt" [stgArgToJs a, stgArgToJs b]
-primOp WordLeOp  [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Word") "le" [stgArgToJs a, stgArgToJs b]
+primOp WordLtOp  [a, b] = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property haskellRoot "Word") "lt" [stgArgToJs a, stgArgToJs b]
+primOp WordLeOp  [a, b] = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property haskellRoot "Word") "le" [stgArgToJs a, stgArgToJs b]
 primOp WordAddOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "add" [stgArgToJs a, stgArgToJs b]
 primOp WordSubOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "sub" [stgArgToJs a, stgArgToJs b]
 primOp WordMulOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "mul" [stgArgToJs a, stgArgToJs b]
@@ -76,7 +76,7 @@ primOp SrlOp     [a, b] = Just $ Js.shiftRL (stgArgToJs a) (stgArgToJs b)
 primOp AndOp     [a, b] = Just $ Js.bitAnd (stgArgToJs a) (stgArgToJs b)
 primOp OrOp      [a, b] = Just $ Js.bitOr (stgArgToJs a) (stgArgToJs b)
 primOp XorOp     [a, b] = Just $ Js.bitXOr (stgArgToJs a) (stgArgToJs b)
-primOp NotOp     [a] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "bitNot" [stgArgToJs a]
+primOp NotOp     [a] = Just $ Js.bitNot (stgArgToJs a)
 primOp Word2IntOp[a] = Just $ stgArgToJs a
 
 primOp IndexOffAddrOp_Char [a, b] = Just $ Js.subscript (stgArgToJs a) (stgArgToJs b)
@@ -84,5 +84,5 @@ primOp DataToTagOp [a] = Just $ Js.property (stgArgToJs a) "tag"
 primOp _ _ = Nothing
 
 boolOp :: Javascript js => (Expression js -> Expression js -> Expression js) -> StgArg -> StgArg -> Expression js
-boolOp op a b = Js.ternary (op (stgArgToJs a) (stgArgToJs b)) haskellTrue haskellFalse
+boolOp op a b = jsBoolToHs $ op (stgArgToJs a) (stgArgToJs b)
 

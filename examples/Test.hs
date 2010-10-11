@@ -2,17 +2,24 @@ module Test where
 
 import Data.List
 
-mymap f [] = []
-mymap f (x:xs) = f x : mymap f xs
-
-test :: Integer
-test = sum [1,2,3,4,5]
-
 test1 :: Int
-test1 = sum [1,2,3,4,5]
+test1 = sum [1..5]
 
 test2 :: Int
-test2 = fromInteger test
+test2 = product [1..5]
 
-test3 :: String
-test3 = show $ (product [1..3] :: Integer)
+test3 :: Int
+test3 = product [2..10]
+
+test4 :: String
+test4 = show test3
+
+test5 :: String
+test5 = "Hello World"
+
+test6 :: String
+test6 = show (sum [1..5] :: Integer)
+
+test7 :: String
+test7 = show (product [1..5] :: Integer)
+

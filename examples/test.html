@@ -1,31 +1,50 @@
 <html>
   <head>
     <title>ghcjs-test</title>
-    <script type="text/javascript" src="int.js"></script>
-    <script type="text/javascript" src="rts.js"></script>
+    <script type="text/javascript" src="rts-common.js"></script>
+    <script type="text/javascript" src="rts-plain.js"></script>
     <script type="text/javascript">
       window.onload = function() {
-        // Set up system default int width
-        // Int64 doesn't work on
-        // Firefox 3.6.10 Mozilla/5.0 (X11; U; Linux x86_64; ru; rv:1.9.2.10)
-        //     Gecko/20100915 Ubuntu/10.04 (lucid) Firefox/3.6.10
-        // :(
-        $hs.Int = Int32;
+         // URLs to load modules from in order of precedence
+        $hs.loadPaths = ["http://localhost/ghcjs"];
 
-        $hs.loadModule("GHC.Bool"); // Is required for primitive operations
+        // Used packages
+        $hs.packages = ["", "/ghc-prim", "/integer-simple", "/base"];
+
+        // Must be called first
+        $hs.init();
+
         $hs.loadModule("Test");
 
-        // Int operations works:
         var res = $hs.fromHaskellInt($hs.modules.Test.hs_test1);
         alert(res);
 
-        // Integer operations works, when integers are small:
         var res = $hs.fromHaskellInt($hs.modules.Test.hs_test2);
         alert(res);
 
-        // causes "too much recursion" error.
-        // we need to test it with trampoline.
-        var res = $hs.fromHaskellString($hs.modules.Test.hs_test3);
+        var res = $hs.fromHaskellInt($hs.modules.Test.hs_test3);
+        alert(res);
+
+        var res = $hs.fromHaskellString($hs.modules.Test.hs_test4);
+        alert(res);
+
+        var res = $hs.fromHaskellString($hs.modules.Test.hs_test5);
+        alert(res);
+
+        // I wasn't able to make Integer type work.
+        //
+        // "simple-integer" package provides Integer implementation
+        // wich differs signigicantly depending on platform bit-width.
+        // I have 64-bit machine, but I can only emulate
+        // 32-bit ints in javascript. I think it may work with
+        // "simple-integer" built on 32bit machine.
+        // But I have no one for now...
+        //
+        // OR we may emulate 64bit ints with pair of javascript-numbers
+        var res = $hs.fromHaskellString($hs.modules.Test.hs_test6);
+        alert(res);
+
+        var res = $hs.fromHaskellString($hs.modules.Test.hs_test7);
         alert(res);
       }
     </script>

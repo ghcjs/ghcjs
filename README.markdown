@@ -76,13 +76,12 @@ You'll need to compile modules from base package.
          $ ./configure
          $ make
 
-  4. You should try to use buildpackages.sh script. buildpackages.sh
-     basicly do nothing, just print out command to build packages.
-     You can build ghc-prim, integer-simple and base packages in
+  4. You should try to use BuildPackages.hs script. You can build ghc-prim,
+     integer-simple and base packages in
      examples directory with the following command
 
          $ cd examples
-         $ ./buildpackages.sh <path-to-ghc-directory> | sh
+         $ ./BuildPackages.hs <path-to-ghc-directory>
 
      You can build packages manually using instructions below.
 

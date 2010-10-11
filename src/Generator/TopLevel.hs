@@ -51,7 +51,7 @@ stubDefinition mod id = def (stgIdToJs id)
             , Js.assignProperty object "evaluate" $
                 Js.function [] $
                   mconcat
-                    [ Js.callMethod mod "loadDependencies" []
+                    [ Js.expression $ Js.nativeMethodCall mod "loadDependencies" []
                     , Js.return object
                     ]
             ]
@@ -61,7 +61,7 @@ stubDefinition mod id = def (stgIdToJs id)
             , Js.assignProperty object method $
                 Js.function argNames $
                   mconcat
-                    [ Js.callMethod mod "loadDependencies" []
+                    [ Js.expression $ Js.nativeMethodCall mod "loadDependencies" []
                     , Js.jumpToMethod object method args
                     ]
             ]

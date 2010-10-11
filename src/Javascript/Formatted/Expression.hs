@@ -3,6 +3,7 @@
 --   https://developer.mozilla.org/en/JavaScript/Reference/Operators/Operator_Precedence
 module Javascript.Formatted.Expression where
 
+import Data.Char (ord)
 import Data.List (intersperse, intercalate)
 import Control.Monad (when)
 import Control.Monad.Writer (tell)
@@ -35,7 +36,7 @@ instance JavascriptExpression Formatted
   where var = mkOperation 0 . tell
 	int = mkOperation 0 . tell . show
 	float = mkOperation 0 . tell . show
-	string = mkOperation 0 . tell . show
+	string = mkOperation 0 . tell . showJsString
 	list xs = mkOperation 0 $
           do tell "["
              sequence_ . intersperse (tell ", ") . map tellUnconstraint $ xs
@@ -93,7 +94,8 @@ instance JavascriptExpression Formatted
         multiply a b =       leftBinOp   "*"   5 a b
         divide a b =         leftBinOp   "/"   5 a b
         not =                leftUnaryOp "!"   4
-        unaryMinus a =       leftUnaryOp "-"   4 a
+        bitNot =             leftUnaryOp "~"   4
+        unaryMinus =         leftUnaryOp "-"   4
 
 instance JavascriptNativeCall Formatted
   where nativeFunctionCall func args = mkOperation 2 $
@@ -115,4 +117,23 @@ instance JavascriptCallable Formatted
              indent $ unP body
              newLine
              tell "}"
+
+showJsString :: String -> String
+showJsString xs = concat ["\"", concat . map lit $ xs, "\""]
+  where lit '"'  = "\\\""
+        lit '\\' = "\\\\"
+        lit '\b' = "\\b"
+        lit '\f' = "\\f"
+        lit '\n' = "\\n"
+        lit '\r' = "\\r"
+        lit '\t' = "\\t"
+        lit '\v' = "\\v"
+        lit c
+          | ' ' <= c && c < '\x7F' = [c]
+          | c <= '\xFF'            = "\\x" ++ hex 2 (ord c)
+          | c <= '\xFFFF'          = "\\u" ++ hex 4 (ord c)
+          | otherwise              = "\\uffff" -- Javascript supports only UTF-16 characters
+          where hex n = reverse . take n . map ((d!!).snd) . iterate (f . fst) . f
+                d = ['0'..'9'] ++ ['a'..'f']
+                f = flip divMod 16
 

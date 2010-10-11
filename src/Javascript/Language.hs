@@ -38,6 +38,7 @@ class JavascriptBase js => JavascriptExpression js
         bitAnd :: Expression js -> Expression js -> Expression js
         bitXOr :: Expression js -> Expression js -> Expression js
         bitOr :: Expression js -> Expression js -> Expression js
+        bitNot :: Expression js -> Expression js
 
 class JavascriptBase js => JavascriptStatement js
   where declare :: Id -> Expression js -> js

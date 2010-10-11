@@ -25,6 +25,9 @@ haskellFalse :: Javascript js => Expression js
 haskellFalse = haskellRoot # "modules" # "GHCziBool" # "hs_False"
   where (#) = Js.property
 
+jsBoolToHs :: Javascript js => Expression js -> Expression js
+jsBoolToHs ex = Js.ternary ex haskellTrue haskellFalse
+
 moduleName :: Module -> String
 moduleName = moduleNameString . Stg.moduleName
 
@@ -42,7 +45,14 @@ stgIdToJs id
   where nameStr = ("hs_"++) . zEncodeString . occNameString . getOccName $ id
 
 stgIdToJsId :: Stg.Id -> Js.Id
-stgIdToJsId id = name ++ key
+stgIdToJsId id
+  | isExternalId id =
+    concat
+      [ moduleNameString . Stg.moduleName . nameModule . getName $ id
+      , "."
+      , occNameString . getOccName $ id
+      ]
+  | otherwise = name ++ key
   where name = ("hs_"++) . zEncodeString . occNameString . getOccName $ id
         key = intToBase62 . getKey . getUnique $ id
 

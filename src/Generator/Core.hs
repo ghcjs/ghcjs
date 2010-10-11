@@ -1,7 +1,7 @@
 module Generator.Core (declarations, definitions, withBindings) where
 
 import Data.List (find)
-import Data.Monoid (mconcat)
+import Data.Monoid (mconcat, mempty)
 
 import Panic (panic)
 
@@ -9,6 +9,7 @@ import DataCon as Stg (DataCon, dataConTag)
 import Id as Stg (Id)
 import CoreSyn as Stg (AltCon (DataAlt, LitAlt, DEFAULT))
 import StgSyn as Stg
+import DataCon (isUnboxedTupleCon)
 
 import qualified Javascript.Language as Js
 import Javascript.Language (Javascript, Expression)
@@ -42,7 +43,7 @@ creation rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt _args _body)
   | otherwise = Js.new (Js.property haskellRoot "Func") [Js.int (stgRhsArity rhs)]
 
 definition :: Javascript js => Stg.Id -> StgRhs -> js
-definition id (StgRhsCon _cc _con args) = dataDefinition (stgIdToJs id) (map stgArgToJs args)
+definition id (StgRhsCon _cc con args) = dataDefinition con (stgIdToJs id) (map stgArgToJs args)
 definition id (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
   Js.assignProperty object evalFunctionName $
     Js.function (map stgIdToJsId args) (expression body)
@@ -52,10 +53,14 @@ definition id (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
           | otherwise = "evaluate"
 
 dataCreation :: Javascript js => DataCon -> Expression js
-dataCreation con = Js.new (Js.property haskellRoot "Data") [Js.int (dataConTag con)]
+dataCreation con
+  | isUnboxedTupleCon con = Js.null
+  | otherwise = Js.new (Js.property haskellRoot "Data") [Js.int (dataConTag con)]
 
-dataDefinition :: Javascript js => Expression js -> [Expression js] -> js
-dataDefinition object args = Js.assignProperty object "data" (Js.list args)
+dataDefinition :: Javascript js => DataCon -> Expression js -> [Expression js] -> js
+dataDefinition con object args
+  | isUnboxedTupleCon con = Js.assign object (Js.list args)
+  | otherwise = Js.assignProperty object "data" (Js.list args)
 
 expression :: Javascript js => StgExpr -> js
 expression (StgCase expr _liveVars _liveRhsVars bndr _srt alttype alts) =
@@ -69,7 +74,7 @@ expression (StgLit lit) = Js.return . stgLiteralToJs $ lit
 expression (StgConApp con args) =
   mconcat
     [ Js.declare "$res" (dataCreation con)
-    , dataDefinition (Js.var "$res") (map stgArgToJs args)
+    , dataDefinition con (Js.var "$res") (map stgArgToJs args)
     , Js.return . Js.var $ "$res"
     ]
 expression (StgOpApp (StgFCallOp f g) args _ty) = returnForeignFunctionCallResult f g args
@@ -80,24 +85,28 @@ expression (StgLam{}) = panic "unexpected StgLam" -- StgLam is used *only* durin
 caseExpression :: Javascript js => StgExpr -> Stg.Id -> Stg.AltType -> [StgAlt] -> js
 caseExpression expr bndr alttype alts =
   mconcat
-    [ caseExpressionScrut bndr expr
+    [ caseExpressionScrut bndr alttype expr
     , caseExpressionAlternatives bndr alttype alts
     ]
 
-caseExpressionScrut :: Javascript js => Stg.Id -> StgExpr -> js
-caseExpressionScrut binder expr = go expr
+caseExpressionScrut :: Javascript js => Stg.Id -> Stg.AltType -> StgExpr -> js
+caseExpressionScrut binder altType expr = go expr
   where go (StgConApp con args) =
           mconcat
             [ stgIdToJsDecl binder (dataCreation con)
-            , dataDefinition (stgIdToJs binder) (map stgArgToJs args)
+            , dataDefinition con (stgIdToJs binder) (map stgArgToJs args)
             ]
         go (StgApp f args) =
           case args
           of [] ->
                mconcat
                  [ stgIdToJsDecl binder name
-                 , Js.if_ (Js.not $ Js.property name "evaluated") $
-                     Js.assignMethodCallResult (stgIdToJs binder) name "hscall" []
+                 , case altType
+                   of PrimAlt {} -> mempty
+                      UbxTupAlt {} -> mempty
+                      _ ->
+                        Js.if_ (Js.not $ Js.property name "evaluated") $
+                          Js.assignMethodCallResult (stgIdToJs binder) name "hscall" []
                  ]
              _ -> stgIdToJsDeclareMethodCallResult binder name "hscall" (map stgArgToJs args)
           where name = stgIdToJs f
