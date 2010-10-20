@@ -9,6 +9,7 @@ import PrimOp
 import Javascript.Language as Js
 
 import Generator.Helpers
+import RTS.Objects
 
 returnPrimitiveOperationResult :: Javascript js => PrimOp -> [StgArg] -> js
 returnPrimitiveOperationResult op args =

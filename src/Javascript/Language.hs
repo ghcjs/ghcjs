@@ -42,7 +42,7 @@ class JavascriptBase js => JavascriptExpression js
 
 class JavascriptBase js => JavascriptStatement js
   where declare :: Id -> Expression js -> js
-        if_ :: Expression js -> js -> js
+        ifthenelse :: Expression js -> js -> Maybe js-> js
         switch :: Expression js -> Maybe js -> [(Expression js, js)] -> js
         throw :: Expression js -> js
         expression :: Expression js -> js
@@ -100,4 +100,10 @@ false = var "false"
 
 this :: Javascript js => Expression js
 this = var "this"
+
+if_ :: Javascript js => Expression js -> js -> js
+if_ cond action = ifthenelse cond action Nothing
+
+ifelse :: Javascript js => Expression js -> js -> js -> js
+ifelse cond action alterAction = ifthenelse cond action (Just alterAction)
 

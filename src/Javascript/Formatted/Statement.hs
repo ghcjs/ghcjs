@@ -15,14 +15,21 @@ instance JavascriptStatement Formatted
              tell $ concat ["var ", id, " = "]
              tellUnconstraint expr
              tell ";"
-	if_ test block = P $
+	ifthenelse test block1 maybeBlock2 = P $
 	    do newLine
                tell "if ("
                tellUnconstraint test
                tell ") {"
-	       indent $ unP block
+	       indent $ unP block1
                newLine
 	       tell "}"
+               case maybeBlock2
+                 of Nothing -> Prelude.return ()
+                    Just block2 ->
+                      do tell " else {"
+                         indent $ unP block2
+                         newLine
+	                 tell "}"
 	switch scrut def cases = P $
           do newLine
              tell "switch ("

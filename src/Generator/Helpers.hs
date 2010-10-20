@@ -13,17 +13,7 @@ import Module as Stg (Module, moduleName, moduleNameString)
 import StgSyn as Stg
 import qualified Literal as Stg
 import Javascript.Language as Js
-
-haskellRoot :: Javascript js => Expression js
-haskellRoot = Js.var "$hs"
-
-haskellTrue :: Javascript js => Expression js
-haskellTrue = haskellRoot # "modules" # "GHCziBool" # "hs_True"
-  where (#) = Js.property
-
-haskellFalse :: Javascript js => Expression js
-haskellFalse = haskellRoot # "modules" # "GHCziBool" # "hs_False"
-  where (#) = Js.property
+import RTS.Objects
 
 jsBoolToHs :: Javascript js => Expression js -> Expression js
 jsBoolToHs ex = Js.ternary ex haskellTrue haskellFalse
@@ -35,7 +25,7 @@ isExternalId :: Stg.Id -> Bool
 isExternalId = isExternalName . getName
 
 stgModuleToJs :: Javascript js => Module -> Expression js
-stgModuleToJs mod = haskellRoot # "modules" # (zEncodeString . moduleNameString . Stg.moduleName $ mod)
+stgModuleToJs mod = haskellModules # (zEncodeString . moduleNameString . Stg.moduleName $ mod)
   where (#) = Js.property
 
 stgIdToJs :: Javascript js => Stg.Id -> Expression js

@@ -13,6 +13,7 @@ import Javascript.Language as Js
 import Generator.Helpers
 import Generator.Dependencies (dependencies)
 import Generator.Core (declarations, withBindings, definitions)
+import RTS.Objects
 
 type BindDependInfo = [(Stg.Id, [Stg.Id])]
 
@@ -47,8 +48,8 @@ stubDefinition :: Javascript js => Expression js -> Stg.Id -> StgRhs -> js
 stubDefinition mod id = def (stgIdToJs id)
   where def object (StgRhsCon _cc _con _stgargs) =
           mconcat
-            [ Js.assignProperty object "evaluated" Js.false
-            , Js.assignProperty object "evaluate" $
+            [ haskellMarkAsNotEvaluated object
+            , Js.assignProperty object haskellEvalFunctionName $
                 Js.function [] $
                   mconcat
                     [ Js.expression $ Js.nativeMethodCall mod "loadDependencies" []
@@ -66,11 +67,11 @@ stubDefinition mod id = def (stgIdToJs id)
                     ]
             ]
           where method
-                  | isUpd = "evaluateOnce"
-                  | otherwise = "evaluate"
+                  | isUpd = haskellThunkEvalOnceFunctionName
+                  | otherwise = haskellEvalFunctionName
                 changeEvaluated
                   | isUpd = mempty
-                  | otherwise = Js.assignProperty object "evaluated" Js.false
+                  | otherwise = haskellMarkAsNotEvaluated object
                 isUpd = isUpdatable upd_flag
                 args = map stgIdToJs stgargs
                 argNames = map stgIdToJsId stgargs
@@ -79,11 +80,11 @@ stubDefinitionFix :: Javascript js => Stg.Id -> StgRhs -> js
 stubDefinitionFix id = def (stgIdToJs id)
   where def object (StgRhsCon _cc _con _stgargs) =
           mconcat
-            [ Js.assignProperty object "evaluated" Js.true
-            , Js.assignProperty object "evaluate" $
+            [ haskellMarkAsEvaluated object
+            , Js.assignProperty object haskellEvalFunctionName $
                 Js.function [] (Js.return Js.this)
             ]
         def object (StgRhsClosure _cc _bi _fvs upd_flag _srt _stgargs _body)
               | isUpdatable upd_flag = mempty
-              | otherwise = Js.assignProperty object "evaluated" Js.true
+              | otherwise = haskellMarkAsEvaluated object
 

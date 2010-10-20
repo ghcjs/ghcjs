@@ -23,7 +23,7 @@ $hs.Pap = function(obj, args) {
 };
 $hs.Pap.prototype = {
     hscall: $hs.hscall,
-    evaluated: true,
+    notEvaluated: false,
     evaluate: function () {
             var k = arguments.length;
             var n = this.savedArguments.length;
@@ -41,14 +41,14 @@ $hs.Func = function(a) {
 };
 $hs.Func.prototype = {
     hscall: $hs.hscall,
-    evaluated: true,
+    notEvaluated: false,
 };
 
 $hs.Thunk = function() {};
 $hs.Thunk.prototype = {
     hscall: $hs.hscall,
     arity: 0,
-    evaluated: false,
+    notEvaluated: true,
     evaluate: function() {
         var res = this.evaluateOnce();
         this.evaluate = function () { return res; };
@@ -62,7 +62,7 @@ $hs.Data = function (t) {
 $hs.Data.prototype = {
     hscall: $hs.hscall,
     arity: 0,
-    evaluated: true,
+    notEvaluated: false,
     evaluate: function() {
         return this;
     }
