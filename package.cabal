@@ -3,7 +3,8 @@ Version:        0.1.0
 Description:    Haskell to Javascript translator
 License:        BSD3 
 License-file:   LICENSE
-Author:         Victor Nazarov, Maxim Taldykin and Pedro Martins
+Author:         Victor Nazarov
+Copyright:      Victor Nazarov
 Maintainer:     Victor Nazarov <asviraspossible@gmail.com>
 Stability:      Experimental
 Build-Type:     Simple
