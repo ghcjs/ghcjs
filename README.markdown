@@ -52,6 +52,11 @@ To play with any Haskell code you'll need Haskell standard library.
 GHC implements standard library as a "base" package.
 You'll need to compile modules from base package.
 
+For now we only support 32-bit GHC for building base libraries.
+We emulate 32-bit integers in Javascript and we need base libraries
+to be build in 32-bit environment. You can build libraries on 32-bit system
+and use compiled Javascript on 64-bit system.
+
   1. Download ghc source distribution for the same version of ghc that you
      use to build ghcjs.
 
