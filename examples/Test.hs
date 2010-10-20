@@ -21,5 +21,12 @@ test6 :: String
 test6 = show (sum [1..5] :: Integer)
 
 test7 :: String
-test7 = show (product [1..5] :: Integer)
+test7 = show $ take 7 primes
+
+primes :: [Int]
+primes = sieve [2..]
+  where sieve (x:xs) = x : sieve [y | y <- xs, y `mod` x /= 0]
+
+test8 :: String
+test8 = show (product [1..5] :: Integer)
 
