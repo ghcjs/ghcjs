@@ -21,9 +21,12 @@ class JavascriptBase js => JavascriptExpression js
         ternary :: Expression js -> Expression js -> Expression js -> Expression js
         assignment :: Expression js -> Expression js -> Expression js
         not :: Expression js -> Expression js
+        and :: Expression js -> Expression js -> Expression js
+        or :: Expression js -> Expression js -> Expression js
         plus :: Expression js -> Expression js -> Expression js
         minus :: Expression js -> Expression js -> Expression js
         divide :: Expression js -> Expression js -> Expression js
+        mod :: Expression js -> Expression js -> Expression js
         multiply :: Expression js -> Expression js -> Expression js
         unaryMinus :: Expression js -> Expression js
         equal :: Expression js -> Expression js -> Expression js

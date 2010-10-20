@@ -43,18 +43,28 @@ primOp IntEqOp  [a, b] = Just $ boolOp Js.equal a b
 primOp IntNeOp  [a, b] = Just $ boolOp Js.notEqual a b
 primOp IntLtOp  [a, b] = Just $ boolOp Js.less  a b
 primOp IntLeOp  [a, b] = Just $ boolOp Js.lessOrEqual a b
-primOp IntAddOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "add" [stgArgToJs a, stgArgToJs b]
-primOp IntSubOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "sub" [stgArgToJs a, stgArgToJs b]
+
+-- $hs.Int.addCarry(a, b, 0)[0]
+primOp IntAddOp [a, b] = Just $ flip Js.subscript (Js.int (0 :: Int)) $ Js.nativeMethodCall (Js.property haskellRoot "Int") "addCarry" [stgArgToJs a, stgArgToJs b, Js.int (0 :: Int)]
+
+-- $hs.Int.addCarry(a, ~b, 1)[0]
+primOp IntSubOp [a, b] = Just $ flip Js.subscript (Js.int (0 :: Int)) $ Js.nativeMethodCall (Js.property haskellRoot "Int") "addCarry" [stgArgToJs a, Js.bitNot (stgArgToJs b), Js.int (1 :: Int)]
 primOp IntMulOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "mul" [stgArgToJs a, stgArgToJs b]
 primOp IntNegOp [a]    = Just $ Js.unaryMinus (stgArgToJs a)
 
 -- overflow sensitive operations:
-primOp IntMulMayOfloOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "mulIntMayOflo" [stgArgToJs a, stgArgToJs b]
-primOp IntAddCOp       [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "addC" [stgArgToJs a, stgArgToJs b]
-primOp IntSubCOp       [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "subC" [stgArgToJs a, stgArgToJs b]
+-- (a >>> 16) == 0 && (b >>> 16) == 0
+primOp IntMulMayOfloOp [a, b] = Just $ Js.and (Js.equal (Js.shiftRA (stgArgToJs a) (Js.int (16 :: Int))) (Js.int (0 :: Int))) (Js.equal (Js.shiftRA (stgArgToJs b) (Js.int (16 :: Int))) (Js.int (0 :: Int)))
 
-primOp IntQuotOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "quot" [stgArgToJs a, stgArgToJs b]
-primOp IntRemOp  [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "rem" [stgArgToJs a, stgArgToJs b]
+-- $hs.Int.addCarry(a, b, 0)
+primOp IntAddCOp       [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "addCarry" [stgArgToJs a, stgArgToJs b, Js.int (0 :: Int)]
+
+-- $hs.Int.addCarry(a, ~b, 1)
+primOp IntSubCOp       [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "addCarry" [stgArgToJs a, Js.bitNot (stgArgToJs b), Js.int (1 :: Int)]
+
+-- (a / b) & ~0
+primOp IntQuotOp [a, b] = Just $ Js.bitAnd (Js.divide (stgArgToJs a) (stgArgToJs b)) (Js.bitNot $ Js.int (0 :: Int))
+primOp IntRemOp  [a, b] = Just $ Js.mod (stgArgToJs a) (stgArgToJs b)
 primOp ISllOp     [a, b] = Just $ Js.shiftLL (stgArgToJs a) (stgArgToJs b)
 primOp ISrlOp     [a, b] = Just $ Js.shiftRL (stgArgToJs a) (stgArgToJs b)
 primOp ISraOp     [a, b] = Just $ Js.shiftRA (stgArgToJs a) (stgArgToJs b)
@@ -68,10 +78,13 @@ primOp WordEqOp  [a, b] = Just $ boolOp Js.equal a b
 primOp WordNeOp  [a, b] = Just $ boolOp Js.notEqual a b
 primOp WordLtOp  [a, b] = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property haskellRoot "Word") "lt" [stgArgToJs a, stgArgToJs b]
 primOp WordLeOp  [a, b] = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property haskellRoot "Word") "le" [stgArgToJs a, stgArgToJs b]
-primOp WordAddOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "add" [stgArgToJs a, stgArgToJs b]
-primOp WordSubOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "sub" [stgArgToJs a, stgArgToJs b]
+
+-- $hs.Int.addCarry(a, b, 0)[0]
+primOp WordAddOp [a, b] = Just $ flip Js.subscript (Js.int (0 :: Int)) $ Js.nativeMethodCall (Js.property haskellRoot "Int") "addCarry" [stgArgToJs a, stgArgToJs b, Js.int (0 :: Int)]
+
+-- $hs.Int.addCarry(a, ~b, 1)[0]
+primOp WordSubOp [a, b] = Just $ flip Js.subscript (Js.int (0 :: Int)) $ Js.nativeMethodCall (Js.property haskellRoot "Int") "addCarry" [stgArgToJs a, Js.bitNot (stgArgToJs b), Js.int (1 :: Int)]
 primOp WordMulOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "mul" [stgArgToJs a, stgArgToJs b]
-primOp WordRemOp [a, b] = Just $ Js.nativeMethodCall (Js.property haskellRoot "Int") "rem" [stgArgToJs a, stgArgToJs b]
 primOp SllOp     [a, b] = Just $ Js.shiftLL (stgArgToJs a) (stgArgToJs b)
 primOp SrlOp     [a, b] = Just $ Js.shiftRL (stgArgToJs a) (stgArgToJs b)
 primOp AndOp     [a, b] = Just $ Js.bitAnd (stgArgToJs a) (stgArgToJs b)
@@ -81,7 +94,7 @@ primOp NotOp     [a] = Just $ Js.bitNot (stgArgToJs a)
 primOp Word2IntOp[a] = Just $ stgArgToJs a
 
 primOp IndexOffAddrOp_Char [a, b] = Just $ Js.subscript (stgArgToJs a) (stgArgToJs b)
-primOp DataToTagOp [a] = Just $ Js.property (stgArgToJs a) "tag"
+primOp DataToTagOp [a] = Just $ haskellConAppTag (stgArgToJs a)
 primOp _ _ = Nothing
 
 boolOp :: Javascript js => (Expression js -> Expression js -> Expression js) -> StgArg -> StgArg -> Expression js

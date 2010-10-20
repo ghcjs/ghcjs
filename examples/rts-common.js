@@ -38,35 +38,17 @@ var $hs = {
          var resh = word16addCarry(a >>> 16, b >>> 16, resl[1]);
          return [(resh[0] << 16) | resl[0], resh[1]];
       },
-      addC : function(a, b) {
-        return $hs.Int.addCarry(a, b, 0);
-      },
-      subC : function(a, b) {
-         return $hs.Int.addCarry(a, ~b, 1);
-      },
-      add : function(a, b) {
-         return $hs.Int.addC(a, b)[0];
-      },
-      sub : function(a, b) {
-         return $hs.Int.subC(a, b)[0];
-      },
       mul : function(a, b) {
          var al = a & 0xFFFF;
          var ah = a >>> 16;
          var bl = b & 0xFFFF;
          var bh = b >>> 16;
-         var r = $hs.Int.add(al * bh, bl * ah)
-         return $hs.Int.add(al * bl, (r & 0xFFFF) << 16);
+         var r = $hs.Int.addCarry(al * bh, bl * ah, 0)[0]
+         return $hs.Int.addCarry(al * bl, (r & 0xFFFF) << 16, 0)[0];
       },
       mulIntMayOflo : function(a, b) {
         return a >>> 16 == 0 && b >>> 16 == 0;
       },
-      quot : function(a, b) {
-        return ((a - a % b) / b) & ~0 ;
-      },
-      rem : function(a, b) {
-        return a % b;
-      }
     },
     modules: {},
     alert: function (str) {

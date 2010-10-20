@@ -77,6 +77,8 @@ instance JavascriptExpression Formatted
              tell " : "
              tellWithPrecedenceConstraint f 15
         assignment a b =     rightBinOp  "="  16 a b
+        or a b =             leftBinOp   "||" 14 a b
+        and a b =            leftBinOp   "&&" 13 a b
         bitOr a b =          leftBinOp   "|"  12 a b
         bitXOr a b =         leftBinOp   "^"  11 a b
         bitAnd a b =         leftBinOp   "&"  10 a b
@@ -93,6 +95,7 @@ instance JavascriptExpression Formatted
         minus a b =          leftBinOp   "-"   6 a b
         multiply a b =       leftBinOp   "*"   5 a b
         divide a b =         leftBinOp   "/"   5 a b
+        mod a b =            leftBinOp   "%"   5 a b
         not =                leftUnaryOp "!"   4
         bitNot =             leftUnaryOp "~"   4
         unaryMinus =         leftUnaryOp "-"   4
