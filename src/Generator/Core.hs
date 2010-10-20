@@ -1,4 +1,4 @@
-module Generator.Core (declarations, definitions, withBindings) where
+module Generator.Core (withBindings, creation, definition) where
 
 import Data.List (find)
 import Data.Monoid (mconcat)
@@ -23,19 +23,14 @@ binding :: Javascript js => StgBinding -> js
 binding = bindings . stgBindingToList
 
 bindings :: Javascript js => [(Stg.Id, StgRhs)] -> js
-bindings binds = mconcat [declarations binds, definitions binds]
+bindings binds = mconcat [withBindings localDecl binds, withBindings localDef binds]
+  where localDecl id rhs
+          | isExternalId id = Js.assign (stgIdToJs id) (creation rhs)
+          | otherwise = Js.declare (stgIdToJsId id) (creation rhs)
+        localDef = definition . stgIdToJs
 
 withBindings :: Javascript js => (Stg.Id -> StgRhs -> js) -> [(Stg.Id, StgRhs)] -> js
 withBindings f = mconcat . map (uncurry f)
-
-declarations :: Javascript js => [(Stg.Id, StgRhs)] -> js
-declarations = withBindings declaration
-
-definitions :: Javascript js => [(Stg.Id, StgRhs)] -> js
-definitions = withBindings definition
-
-declaration :: Javascript js => Stg.Id -> StgRhs -> js
-declaration id rhs = stgIdToJsDecl id (creation rhs)
 
 creation :: Javascript js => StgRhs -> Expression js
 creation (StgRhsCon _cc con _args) = dataCreation con
@@ -43,13 +38,12 @@ creation rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt _args _body)
   | isUpdatable upd_flag = Js.new haskellThunk []
   | otherwise = Js.new haskellFunc [Js.int (stgRhsArity rhs)]
 
-definition :: Javascript js => Stg.Id -> StgRhs -> js
-definition id (StgRhsCon _cc con args) = dataDefinition con (stgIdToJs id) (map stgArgToJs args)
-definition id (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
+definition :: Javascript js => Expression js -> StgRhs -> js
+definition object (StgRhsCon _cc con args) = dataDefinition con object (map stgArgToJs args)
+definition object (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
   Js.assignProperty object method $
     Js.function (map stgIdToJsId args) (expression body)
-  where object = (stgIdToJs id)
-        method
+  where method
           | isUpdatable upd_flag = haskellThunkEvalOnceFunctionName
           | otherwise = haskellEvalFunctionName
 
@@ -104,28 +98,28 @@ caseExpression expr bndr alttype alts =
 caseExpressionScrut :: Javascript js => Stg.Id -> StgExpr -> js
 caseExpressionScrut binder expr = go expr
   where go (StgConApp con args)
-          | isUnboxedTupleCon con = stgIdToJsDecl binder (Js.list jsargs)
+          | isUnboxedTupleCon con = Js.declare (stgIdToJsId binder) (Js.list jsargs)
           | otherwise =
               mconcat
-                [ stgIdToJsDecl binder (dataCreation con)
+                [ Js.declare (stgIdToJsId binder) (dataCreation con)
                 , dataDefinition con (stgIdToJs binder) jsargs
                 ]
           where jsargs = map stgArgToJs args
         go (StgApp f []) =
           mconcat
-            [ stgIdToJsDecl binder object
+            [ Js.declare (stgIdToJsId binder) object
             , Js.if_ (haskellIsNotEvaluatedAndNotPrimitive object) $
                 Js.assignMethodCallResult (stgIdToJs binder) object haskellApplyMethodName []
             ]
           where object = stgIdToJs f
         go (StgApp f args) =
-            stgIdToJsDeclareMethodCallResult binder object haskellApplyMethodName (map stgArgToJs args)
+            Js.declareMethodCallResult (stgIdToJsId binder) object haskellApplyMethodName (map stgArgToJs args)
           where object = stgIdToJs f
-        go (StgLit lit) = stgIdToJsDecl binder $ stgLiteralToJs $ lit
+        go (StgLit lit) = Js.declare (stgIdToJsId binder) $ stgLiteralToJs $ lit
         go (StgOpApp (StgFCallOp f g) args _ty) = bindForeignFunctionCallResult binder f g args
         go (StgOpApp (StgPrimOp op) args _ty) = bindPrimitiveOperationResult binder op args
         go (StgOpApp (StgPrimCallOp call) args _ty) = bindPrimitiveCallResult binder call args
-        go e = stgIdToJsDeclareFunctionCallResult binder f []
+        go e = Js.declareFunctionCallResult (stgIdToJsId binder) f []
           where f = Js.function [] (expression e)
 
 caseExpressionAlternatives :: Javascript js => Stg.Id -> Stg.AltType -> [(Stg.AltCon, [Stg.Id], [Bool], StgExpr)] -> js
@@ -166,5 +160,5 @@ caseExpressionAlternatives bndr altType alts =
 
 unpackData :: Javascript js => Expression js -> [Bool] -> [Stg.Id] -> js
 unpackData object mask args = mconcat [f n arg | (n, True, arg) <- zip3 [(0::Int)..] mask args]
-  where f n arg = stgIdToJsDecl arg (Js.subscript object (Js.int n))
+  where f n arg = Js.declare (stgIdToJsId arg) (Js.subscript object (Js.int n))
 

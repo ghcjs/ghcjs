@@ -12,7 +12,7 @@ import Javascript.Language as Js
 
 import Generator.Helpers
 import Generator.Dependencies (dependencies)
-import Generator.Core (declarations, withBindings, definitions)
+import Generator.Core (withBindings, definition, creation)
 import RTS.Objects
 
 type BindDependInfo = [(Stg.Id, [Stg.Id])]
@@ -26,15 +26,15 @@ generate thisMod binds =
     , Js.assign (Js.property modRef "initBeforeDependencies") $
         Js.function [] $
           mconcat
-            [ declarations exportedBindings
+            [ withBindings topDeclaration exportedBindings
             , withBindings (stubDefinition modRef) exportedBindings
             ]
     , Js.assign (Js.property modRef "initAfterDependencies") $
         Js.function [] $
           mconcat
             [ withBindings stubDefinitionFix exportedBindings
-            , declarations notExportedBindings
-            , definitions allBindings
+            , withBindings topDeclaration notExportedBindings
+            , withBindings topDefinition allBindings
             ]
     ]
   where modRef = stgModuleToJs thisMod
@@ -44,8 +44,18 @@ generate thisMod binds =
 joinBindings :: [(StgBinding, BindDependInfo)] -> [(Stg.Id, StgRhs)]
 joinBindings = concat . map (stgBindingToList . fst)
 
+topDeclaration :: Javascript js => Stg.Id -> StgRhs -> js
+topDeclaration id
+  | isExternalId id = Js.assignProperty Js.this (stgIdToJsProperyName id) . creation
+  | otherwise = Js.declare (stgIdToJsId id) . creation
+
+topDefinition :: Javascript js => Stg.Id -> StgRhs -> js
+topDefinition id
+  | isExternalId id = definition $ Js.property Js.this (stgIdToJsProperyName id)
+  | otherwise = definition $ Js.var . stgIdToJsId $ id
+
 stubDefinition :: Javascript js => Expression js -> Stg.Id -> StgRhs -> js
-stubDefinition mod id = def (stgIdToJs id)
+stubDefinition mod = def . Js.property Js.this . stgIdToJsProperyName
   where def object (StgRhsCon _cc _con _stgargs) =
           mconcat
             [ haskellMarkAsNotEvaluated object
@@ -53,7 +63,7 @@ stubDefinition mod id = def (stgIdToJs id)
                 Js.function [] $
                   mconcat
                     [ Js.expression $ Js.nativeMethodCall mod "loadDependencies" []
-                    , Js.return object
+                    , Js.return Js.this
                     ]
             ]
         def object (StgRhsClosure _cc _bi _fvs upd_flag _srt stgargs _body) =
@@ -63,7 +73,7 @@ stubDefinition mod id = def (stgIdToJs id)
                 Js.function argNames $
                   mconcat
                     [ Js.expression $ Js.nativeMethodCall mod "loadDependencies" []
-                    , Js.jumpToMethod object method args
+                    , Js.jumpToMethod Js.this method args
                     ]
             ]
           where method
@@ -77,7 +87,7 @@ stubDefinition mod id = def (stgIdToJs id)
                 argNames = map stgIdToJsId stgargs
 
 stubDefinitionFix :: Javascript js => Stg.Id -> StgRhs -> js
-stubDefinitionFix id = def (stgIdToJs id)
+stubDefinitionFix = def . Js.property Js.this . stgIdToJsProperyName
   where def object (StgRhsCon _cc _con _stgargs) =
           mconcat
             [ haskellMarkAsEvaluated object

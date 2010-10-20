@@ -20,7 +20,7 @@ returnPrimitiveOperationResult op args =
 bindPrimitiveOperationResult :: Javascript js => Stg.Id -> PrimOp -> [StgArg] -> js
 bindPrimitiveOperationResult id op args =
   case primOp op args
-  of Just e -> stgIdToJsDecl id e
+  of Just e -> Js.declare (stgIdToJsId id) e
      Nothing -> Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
 
 -- | primOp tries to implement GHC primitive operations as described at

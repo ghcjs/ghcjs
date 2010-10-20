@@ -37,31 +37,9 @@ stgIdToJs id
   | otherwise = Js.var . stgIdToJsId $ id
 
 stgIdToJsId :: Stg.Id -> Js.Id
-stgIdToJsId id
-  | isExternalId id =
-    concat
-      [ moduleNameString . Stg.moduleName . nameModule . getName $ id
-      , "."
-      , occNameString . getOccName $ id
-      ]
-  | otherwise = name ++ key
+stgIdToJsId id = name ++ key
   where name = ("hs_"++) . zEncodeString . occNameString . getOccName $ id
         key = intToBase62 . getKey . getUnique $ id
-
-stgIdToJsDecl :: Javascript js => Stg.Id -> Expression js -> js
-stgIdToJsDecl id expr
-  | isExternalId id = Js.assign (stgIdToJs id) expr
-  | otherwise = Js.declare (stgIdToJsId id) expr
-
-stgIdToJsDeclareMethodCallResult :: Javascript js => Stg.Id -> Expression js -> Js.Id -> [Expression js] -> js
-stgIdToJsDeclareMethodCallResult id
-  | isExternalId id = Js.assignMethodCallResult (stgIdToJs id)
-  | otherwise = Js.declareMethodCallResult (stgIdToJsId id)
-
-stgIdToJsDeclareFunctionCallResult :: Javascript js => Stg.Id -> Expression js -> [Expression js] -> js
-stgIdToJsDeclareFunctionCallResult id
-  | isExternalId id = Js.assignFunctionCallResult (stgIdToJs id)
-  | otherwise = Js.declareFunctionCallResult (stgIdToJsId id)
 
 stgBindingToList :: StgBinding -> [(Stg.Id, StgRhs)]
 stgBindingToList (StgNonRec id rhs) = [(id, rhs)]
