@@ -1,7 +1,7 @@
 module Generator.Core (declarations, definitions, withBindings) where
 
 import Data.List (find)
-import Data.Monoid (mconcat, mempty)
+import Data.Monoid (mconcat)
 
 import Panic (panic)
 
@@ -38,7 +38,7 @@ declaration :: Javascript js => Stg.Id -> StgRhs -> js
 declaration id rhs = stgIdToJsDecl id (creation rhs)
 
 creation :: Javascript js => StgRhs -> Expression js
-creation (StgRhsCon _cc con args) = dataCreation con (map stgArgToJs args)
+creation (StgRhsCon _cc con _args) = dataCreation con
 creation rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt _args _body)
   | isUpdatable upd_flag = Js.new haskellThunk []
   | otherwise = Js.new haskellFunc [Js.int (stgRhsArity rhs)]
@@ -53,14 +53,14 @@ definition id (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
           | isUpdatable upd_flag = haskellThunkEvalOnceFunctionName
           | otherwise = haskellEvalFunctionName
 
-dataCreation :: Javascript js => DataCon -> [Expression js] -> Expression js
-dataCreation con args
-  | isUnboxedTupleCon con = Js.list args
+dataCreation :: Javascript js => DataCon -> Expression js
+dataCreation con
+  | isUnboxedTupleCon con = Js.null
   | otherwise = Js.new haskellConApp [Js.int (dataConTag con)]
 
 dataDefinition :: Javascript js => DataCon -> Expression js -> [Expression js] -> js
 dataDefinition con object args
-  | isUnboxedTupleCon con = mempty
+  | isUnboxedTupleCon con = Js.assign object (Js.list args)
   | otherwise = Js.assign (haskellConAppArgVector object) (Js.list args)
 
 expression :: Javascript js => StgExpr -> js
@@ -77,12 +77,14 @@ expression (StgApp f []) =
   where object = stgIdToJs f
 expression (StgApp f args) = Js.jumpToMethod (stgIdToJs f) haskellApplyMethodName (map stgArgToJs args)
 expression (StgLit lit) = Js.return . stgLiteralToJs $ lit
-expression (StgConApp con args) =
-  mconcat
-    [ Js.declare "$res" (dataCreation con jsargs)
-    , dataDefinition con (Js.var "$res") jsargs
-    , Js.return . Js.var $ "$res"
-    ]
+expression (StgConApp con args)
+  | isUnboxedTupleCon con = Js.return (Js.list jsargs)
+  | otherwise =
+      mconcat
+        [ Js.declare "$res" (dataCreation con)
+        , dataDefinition con (Js.var "$res") jsargs
+        , Js.return . Js.var $ "$res"
+        ]
   where jsargs = map stgArgToJs args
 expression (StgOpApp (StgFCallOp f g) args _ty) = returnForeignFunctionCallResult f g args
 expression (StgOpApp (StgPrimOp op) args _ty) = returnPrimitiveOperationResult op args
@@ -96,24 +98,29 @@ caseExpression expr bndr alttype alts =
     , caseExpressionAlternatives bndr alttype alts
     ]
 
+-- | 'caseExpressionScrut' is absolutely the same as expression
+-- the difference is that 'expression' "returns" result
+-- but 'caseExpressionScrut' "binds" result
 caseExpressionScrut :: Javascript js => Stg.Id -> StgExpr -> js
 caseExpressionScrut binder expr = go expr
-  where go (StgConApp con args) =
-          mconcat
-            [ stgIdToJsDecl binder (dataCreation con jsargs)
-            , dataDefinition con (stgIdToJs binder) jsargs
-            ]
+  where go (StgConApp con args)
+          | isUnboxedTupleCon con = stgIdToJsDecl binder (Js.list jsargs)
+          | otherwise =
+              mconcat
+                [ stgIdToJsDecl binder (dataCreation con)
+                , dataDefinition con (stgIdToJs binder) jsargs
+                ]
           where jsargs = map stgArgToJs args
+        go (StgApp f []) =
+          mconcat
+            [ stgIdToJsDecl binder object
+            , Js.if_ (haskellIsNotEvaluatedAndNotPrimitive object) $
+                Js.assignMethodCallResult (stgIdToJs binder) object haskellApplyMethodName []
+            ]
+          where object = stgIdToJs f
         go (StgApp f args) =
-          case args
-          of [] ->
-               mconcat
-                 [ stgIdToJsDecl binder name
-                 , Js.if_ (haskellIsNotEvaluatedAndNotPrimitive name) $
-                     Js.assignMethodCallResult (stgIdToJs binder) name haskellApplyMethodName []
-                 ]
-             _ -> stgIdToJsDeclareMethodCallResult binder name haskellApplyMethodName (map stgArgToJs args)
-          where name = stgIdToJs f
+            stgIdToJsDeclareMethodCallResult binder object haskellApplyMethodName (map stgArgToJs args)
+          where object = stgIdToJs f
         go (StgLit lit) = stgIdToJsDecl binder $ stgLiteralToJs $ lit
         go (StgOpApp (StgFCallOp f g) args _ty) = bindForeignFunctionCallResult binder f g args
         go (StgOpApp (StgPrimOp op) args _ty) = bindPrimitiveOperationResult binder op args
