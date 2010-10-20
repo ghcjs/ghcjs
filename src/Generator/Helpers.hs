@@ -28,11 +28,13 @@ stgModuleToJs :: Javascript js => Module -> Expression js
 stgModuleToJs mod = haskellModules # (zEncodeString . moduleNameString . Stg.moduleName $ mod)
   where (#) = Js.property
 
+stgIdToJsProperyName :: Stg.Id -> String
+stgIdToJsProperyName = ("hs_"++) . zEncodeString . occNameString . getOccName
+
 stgIdToJs :: Javascript js => Stg.Id -> Expression js
 stgIdToJs id
-  | isExternalId id = Js.property (stgModuleToJs . nameModule . getName $ id) nameStr
+  | isExternalId id = Js.property (stgModuleToJs . nameModule . getName $ id) (stgIdToJsProperyName id)
   | otherwise = Js.var . stgIdToJsId $ id
-  where nameStr = ("hs_"++) . zEncodeString . occNameString . getOccName $ id
 
 stgIdToJsId :: Stg.Id -> Js.Id
 stgIdToJsId id
@@ -77,9 +79,11 @@ stgLiteralToJs :: Javascript js => Stg.Literal -> Expression js
 stgLiteralToJs (Stg.MachChar c) = Js.string [c]
 stgLiteralToJs (Stg.MachStr s) = Js.string (unpackFS s ++ "\0")
 stgLiteralToJs (Stg.MachInt i) = Js.int i
-stgLiteralToJs (Stg.MachInt64 i) = Js.int i
-stgLiteralToJs (Stg.MachWord i) = Js.int i
-stgLiteralToJs (Stg.MachWord64 i) = Js.int i
+stgLiteralToJs (Stg.MachInt64 _) = Js.nativeMethodCall haskellRoot "alert" [Js.string "Unsupported literal: Int64"]
+stgLiteralToJs (Stg.MachWord i)
+  | i > 2^(31 :: Int) - 1 = Js.int (i - 2^(32 :: Int) + 1)
+  | otherwise = Js.int i
+stgLiteralToJs (Stg.MachWord64 _) = Js.nativeMethodCall haskellRoot "alert" [Js.string "Unsupported literal: Int64"]
 stgLiteralToJs (Stg.MachFloat i) = Js.float i
 stgLiteralToJs (Stg.MachDouble i) = Js.float i
 stgLiteralToJs (Stg.MachNullAddr) = Js.null
