@@ -88,8 +88,8 @@ var $hs = {
     loadPaths: ["./"],
     packages: [".", "ghc-prim", "integer-simple", "base"],
     loadModule: function (moduleName) {
-	    variableName = moduleName.replace (/\./g, "zi"); // Z-encoding string
-	    modulePath = moduleName.replace (/\./g, "/") + ".js";
+	    variableName = moduleName.replace(/z/g, "zz").replace(/\./g, "zi"); // Z-encoding string
+	    modulePath = moduleName.replace(/\./g, "/") + ".js";
 	    if ($hs.modules[variableName] != undefined) {
 		return;
 	    }
