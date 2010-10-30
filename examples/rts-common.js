@@ -28,7 +28,7 @@ var $hs = {
     },
     Int : { // binary operations supposed to work with 32bit words
       addCarry : function(a, b, c) {
-         var word16addCarry = function function(a, b, c) {
+         var word16addCarry = function(a, b, c) {
             var sum = a + b + c;
             var res = sum & 0xFFFF;
             var carry = sum >>> 16;
@@ -67,9 +67,22 @@ var $hs = {
     logDebug: function (str) {
         $hs.logAny("DEBUG", str);
     },
-    loadPaths: ["./"],
-    packages: [".", "ghc-prim", "integer-simple", "base"],
-    loadModule: function (moduleName) {
+}
+
+$hs.Module = function () {};
+$hs.Module.prototype = {
+    init: function () {
+        this.initBeforeDependencies();
+    },
+    loadDependencies: function () {
+        for (var i = 0; i < this.dependencies.length; i++)
+	    $hs.loadModule(this.dependencies[i]);
+        this.initAfterDependencies();
+    }
+};
+$hs.loadPaths = ["./"];
+$hs.packages = [".", "ghc-prim", "integer-simple", "base"];
+$hs.loadModule = function (moduleName) {
 	    variableName = moduleName.replace(/z/g, "zz").replace(/\./g, "zi"); // Z-encoding string
 	    modulePath = moduleName.replace(/\./g, "/") + ".js";
 	    if ($hs.modules[variableName] != undefined) {
@@ -84,7 +97,7 @@ var $hs = {
 		        var transport = new XMLHttpRequest();
 		        transport.open("GET", path, false);
 		        transport.send(null);
-		        if (transport.status == 200)
+		        if (transport.status == 200 || transport.status == 0)
                             code = transport.responseText;
 		    } catch (e) { }
 	        }
@@ -98,19 +111,6 @@ var $hs = {
 	    }
 	    
 	    return true;
-    },
-}
-
-$hs.Module = function () {};
-$hs.Module.prototype = {
-    init: function () {
-        this.initBeforeDependencies();
-    },
-    loadDependencies: function () {
-        for (var i = 0; i < this.dependencies.length; i++)
-	    $hs.loadModule(this.dependencies[i]);
-        this.initAfterDependencies();
-    }
 };
 
 $hs.fromHaskellString = function() {
