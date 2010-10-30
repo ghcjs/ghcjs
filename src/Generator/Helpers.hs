@@ -13,10 +13,10 @@ import Module as Stg (Module, moduleName, moduleNameString)
 import StgSyn as Stg
 import qualified Literal as Stg
 import Javascript.Language as Js
-import RTS.Objects
+import qualified RTS.Objects as RTS
 
 jsBoolToHs :: Javascript js => Expression js -> Expression js
-jsBoolToHs ex = Js.ternary ex haskellTrue haskellFalse
+jsBoolToHs ex = Js.ternary ex RTS.true RTS.false
 
 moduleName :: Module -> String
 moduleName = moduleNameString . Stg.moduleName
@@ -25,7 +25,7 @@ isExternalId :: Stg.Id -> Bool
 isExternalId = isExternalName . getName
 
 stgModuleToJs :: Javascript js => Module -> Expression js
-stgModuleToJs mod = haskellModules # (zEncodeString . moduleNameString . Stg.moduleName $ mod)
+stgModuleToJs mod = RTS.modules # (zEncodeString . moduleNameString . Stg.moduleName $ mod)
   where (#) = Js.property
 
 stgIdToJsProperyName :: Stg.Id -> String
@@ -57,15 +57,15 @@ stgLiteralToJs :: Javascript js => Stg.Literal -> Expression js
 stgLiteralToJs (Stg.MachChar c) = Js.string [c]
 stgLiteralToJs (Stg.MachStr s) = Js.string (unpackFS s ++ "\0")
 stgLiteralToJs (Stg.MachInt i) = Js.int i
-stgLiteralToJs (Stg.MachInt64 _) = Js.nativeMethodCall haskellRoot "alert" [Js.string "Unsupported literal: Int64"]
+stgLiteralToJs (Stg.MachInt64 _) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: Int64"]
 stgLiteralToJs (Stg.MachWord i)
   | i > 2^(31 :: Int) - 1 = Js.int (i - 2^(32 :: Int) + 1)
   | otherwise = Js.int i
-stgLiteralToJs (Stg.MachWord64 _) = Js.nativeMethodCall haskellRoot "alert" [Js.string "Unsupported literal: Int64"]
+stgLiteralToJs (Stg.MachWord64 _) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: Int64"]
 stgLiteralToJs (Stg.MachFloat i) = Js.float i
 stgLiteralToJs (Stg.MachDouble i) = Js.float i
 stgLiteralToJs (Stg.MachNullAddr) = Js.null
-stgLiteralToJs (Stg.MachLabel {}) = Js.nativeMethodCall haskellRoot "alert" [Js.string "Unsupported literal: MachLabel"]
+stgLiteralToJs (Stg.MachLabel {}) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: MachLabel"]
 
 intToBase62 :: Int -> String
 intToBase62 n = go n ""

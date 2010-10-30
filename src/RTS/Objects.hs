@@ -3,55 +3,55 @@ module RTS.Objects where
 import qualified Javascript.Language as Js
 import Javascript.Language (Javascript, Expression)
 
-haskellRoot :: Javascript js => Expression js
-haskellRoot = Js.var "$hs"
+root :: Javascript js => Expression js
+root = Js.var "$hs"
 
-haskellModules :: Javascript js => Expression js
-haskellModules = Js.property haskellRoot "modules"
+modules :: Javascript js => Expression js
+modules = Js.property root "modules"
 
-haskellModuleDependencies :: Javascript js => Expression js -> Expression js
-haskellModuleDependencies mod = Js.property mod "dependencies"
+moduleDependencies :: Javascript js => Expression js -> Expression js
+moduleDependencies mod = Js.property mod "dependencies"
 
-haskellTrue :: Javascript js => Expression js
-haskellTrue = haskellModules # "GHCziBool" # "hs_True"
+true :: Javascript js => Expression js
+true = modules # "GHCziBool" # "hs_True"
   where (#) = Js.property
 
-haskellFalse :: Javascript js => Expression js
-haskellFalse = haskellModules # "GHCziBool" # "hs_False"
+false :: Javascript js => Expression js
+false = modules # "GHCziBool" # "hs_False"
   where (#) = Js.property
 
-haskellThunk :: Javascript js => Expression js
-haskellThunk = Js.property haskellRoot "Thunk"
+thunk :: Javascript js => Expression js
+thunk = Js.property root "Thunk"
 
-haskellFunc :: Javascript js => Expression js
-haskellFunc = Js.property haskellRoot "Func"
+func :: Javascript js => Expression js
+func = Js.property root "Func"
 
-haskellConApp :: Javascript js => Expression js
-haskellConApp = Js.property haskellRoot "Data"
+conApp :: Javascript js => Expression js
+conApp = Js.property root "Data"
 
-haskellThunkEvalOnceFunctionName :: Js.Id
-haskellThunkEvalOnceFunctionName = "evaluateOnce"
+thunkEvalOnceFunctionName :: Js.Id
+thunkEvalOnceFunctionName = "evaluateOnce"
 
-haskellEvalFunctionName :: Js.Id
-haskellEvalFunctionName = "evaluate"
+evalFunctionName :: Js.Id
+evalFunctionName = "evaluate"
 
-haskellConAppArgVector :: Javascript js => Expression js -> Expression js
-haskellConAppArgVector object = Js.property object "data"
+conAppArgVector :: Javascript js => Expression js -> Expression js
+conAppArgVector object = Js.property object "data"
 
-haskellConAppTag :: Javascript js => Expression js -> Expression js
-haskellConAppTag object = Js.property object "tag"
+conAppTag :: Javascript js => Expression js -> Expression js
+conAppTag object = Js.property object "tag"
 
-haskellApplyMethodName :: Js.Id
-haskellApplyMethodName = "hscall"
+applyMethodName :: Js.Id
+applyMethodName = "hscall"
 
 -- notEvaluated propery is undefined for primitive types
 -- and undefined is treated as false in Javascript
-haskellIsNotEvaluatedAndNotPrimitive :: Javascript js => Expression js -> Expression js
-haskellIsNotEvaluatedAndNotPrimitive object = Js.property object "notEvaluated"
+isNotEvaluatedAndNotPrimitive :: Javascript js => Expression js -> Expression js
+isNotEvaluatedAndNotPrimitive object = Js.property object "notEvaluated"
 
-haskellMarkAsNotEvaluated :: Javascript js => Expression js -> js
-haskellMarkAsNotEvaluated object = Js.assignProperty object "notEvaluated" Js.true
+markAsNotEvaluated :: Javascript js => Expression js -> js
+markAsNotEvaluated object = Js.assignProperty object "notEvaluated" Js.true
 
-haskellMarkAsEvaluated :: Javascript js => Expression js -> js
-haskellMarkAsEvaluated object = Js.assignProperty object "notEvaluated" Js.false
+markAsEvaluated :: Javascript js => Expression js -> js
+markAsEvaluated object = Js.assignProperty object "notEvaluated" Js.false
 

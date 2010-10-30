@@ -13,14 +13,14 @@ import Javascript.Language as Js
 import Generator.Helpers
 import Generator.Dependencies (dependencies)
 import Generator.Core (withBindings, definition, creation)
-import RTS.Objects
+import qualified RTS.Objects as RTS
 
 type BindDependInfo = [(Stg.Id, [Stg.Id])]
 
 generate :: Module -> [(StgBinding, BindDependInfo)] -> (forall js. Javascript js => js)
 generate thisMod binds =
   mconcat
-    [ Js.assign modRef $ Js.new (Js.property haskellRoot "Module") []
+    [ Js.assign modRef $ Js.new (Js.property RTS.root "Module") []
     , Js.assign (Js.property modRef "dependencies") $
         Js.list . map (Js.string . moduleName) $ dependencies thisMod allBindings
     , Js.assign (Js.property modRef "initBeforeDependencies") $
@@ -58,8 +58,8 @@ stubDefinition :: Javascript js => Expression js -> Stg.Id -> StgRhs -> js
 stubDefinition mod = def . Js.property Js.this . stgIdToJsProperyName
   where def object (StgRhsCon _cc _con _stgargs) =
           mconcat
-            [ haskellMarkAsNotEvaluated object
-            , Js.assignProperty object haskellEvalFunctionName $
+            [ RTS.markAsNotEvaluated object
+            , Js.assignProperty object RTS.evalFunctionName $
                 Js.function [] $
                   mconcat
                     [ Js.expression $ Js.nativeMethodCall mod "loadDependencies" []
@@ -77,11 +77,11 @@ stubDefinition mod = def . Js.property Js.this . stgIdToJsProperyName
                     ]
             ]
           where method
-                  | isUpd = haskellThunkEvalOnceFunctionName
-                  | otherwise = haskellEvalFunctionName
+                  | isUpd = RTS.thunkEvalOnceFunctionName
+                  | otherwise = RTS.evalFunctionName
                 changeEvaluated
                   | isUpd = mempty
-                  | otherwise = haskellMarkAsNotEvaluated object
+                  | otherwise = RTS.markAsNotEvaluated object
                 isUpd = isUpdatable upd_flag
                 args = map stgIdToJs stgargs
                 argNames = map stgIdToJsId stgargs
@@ -90,11 +90,11 @@ stubDefinitionFix :: Javascript js => Stg.Id -> StgRhs -> js
 stubDefinitionFix = def . Js.property Js.this . stgIdToJsProperyName
   where def object (StgRhsCon _cc _con _stgargs) =
           mconcat
-            [ haskellMarkAsEvaluated object
-            , Js.assignProperty object haskellEvalFunctionName $
+            [ RTS.markAsEvaluated object
+            , Js.assignProperty object RTS.evalFunctionName $
                 Js.function [] (Js.return Js.this)
             ]
         def object (StgRhsClosure _cc _bi _fvs upd_flag _srt _stgargs _body)
               | isUpdatable upd_flag = mempty
-              | otherwise = haskellMarkAsEvaluated object
+              | otherwise = RTS.markAsEvaluated object
 

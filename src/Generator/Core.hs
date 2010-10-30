@@ -17,7 +17,7 @@ import Javascript.Language (Javascript, Expression)
 import Generator.Helpers
 import Generator.PrimOp
 import Generator.FFI
-import RTS.Objects
+import qualified RTS.Objects as RTS
 
 binding :: Javascript js => StgBinding -> js
 binding = bindings . stgBindingToList
@@ -35,8 +35,8 @@ withBindings f = mconcat . map (uncurry f)
 creation :: Javascript js => StgRhs -> Expression js
 creation (StgRhsCon _cc con _args) = dataCreation con
 creation rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt _args _body)
-  | isUpdatable upd_flag = Js.new haskellThunk []
-  | otherwise = Js.new haskellFunc [Js.int (stgRhsArity rhs)]
+  | isUpdatable upd_flag = Js.new RTS.thunk []
+  | otherwise = Js.new RTS.func [Js.int (stgRhsArity rhs)]
 
 definition :: Javascript js => Expression js -> StgRhs -> js
 definition object (StgRhsCon _cc con args) = dataDefinition con object (map stgArgToJs args)
@@ -44,18 +44,18 @@ definition object (StgRhsClosure _cc _bi _fvs upd_flag _srt args body) =
   Js.assignProperty object method $
     Js.function (map stgIdToJsId args) (expression body)
   where method
-          | isUpdatable upd_flag = haskellThunkEvalOnceFunctionName
-          | otherwise = haskellEvalFunctionName
+          | isUpdatable upd_flag = RTS.thunkEvalOnceFunctionName
+          | otherwise = RTS.evalFunctionName
 
 dataCreation :: Javascript js => DataCon -> Expression js
 dataCreation con
   | isUnboxedTupleCon con = Js.null
-  | otherwise = Js.new haskellConApp [Js.int (dataConTag con)]
+  | otherwise = Js.new RTS.conApp [Js.int (dataConTag con)]
 
 dataDefinition :: Javascript js => DataCon -> Expression js -> [Expression js] -> js
 dataDefinition con object args
   | isUnboxedTupleCon con = Js.assign object (Js.list args)
-  | otherwise = Js.assign (haskellConAppArgVector object) (Js.list args)
+  | otherwise = Js.assign (RTS.conAppArgVector object) (Js.list args)
 
 expression :: Javascript js => StgExpr -> js
 expression (StgCase expr _liveVars _liveRhsVars bndr _srt alttype alts) =
@@ -65,11 +65,11 @@ expression (StgLetNoEscape _ _ bndn body) = mconcat [binding bndn, expression bo
 expression (StgSCC _ expr) = expression expr
 expression (StgTick _ _ expr) = expression expr
 expression (StgApp f []) =
-  Js.ifelse (haskellIsNotEvaluatedAndNotPrimitive object)
-    (Js.jumpToMethod object haskellApplyMethodName [])
+  Js.ifelse (RTS.isNotEvaluatedAndNotPrimitive object)
+    (Js.jumpToMethod object RTS.applyMethodName [])
     (Js.return object)
   where object = stgIdToJs f
-expression (StgApp f args) = Js.jumpToMethod (stgIdToJs f) haskellApplyMethodName (map stgArgToJs args)
+expression (StgApp f args) = Js.jumpToMethod (stgIdToJs f) RTS.applyMethodName (map stgArgToJs args)
 expression (StgLit lit) = Js.return . stgLiteralToJs $ lit
 expression (StgConApp con args)
   | isUnboxedTupleCon con = Js.return (Js.list jsargs)
@@ -108,12 +108,12 @@ caseExpressionScrut binder expr = go expr
         go (StgApp f []) =
           mconcat
             [ Js.declare (stgIdToJsId binder) object
-            , Js.if_ (haskellIsNotEvaluatedAndNotPrimitive object) $
-                Js.assignMethodCallResult (stgIdToJs binder) object haskellApplyMethodName []
+            , Js.if_ (RTS.isNotEvaluatedAndNotPrimitive object) $
+                Js.assignMethodCallResult (stgIdToJs binder) object RTS.applyMethodName []
             ]
           where object = stgIdToJs f
         go (StgApp f args) =
-            Js.declareMethodCallResult (stgIdToJsId binder) object haskellApplyMethodName (map stgArgToJs args)
+            Js.declareMethodCallResult (stgIdToJsId binder) object RTS.applyMethodName (map stgArgToJs args)
           where object = stgIdToJs f
         go (StgLit lit) = Js.declare (stgIdToJsId binder) $ stgLiteralToJs $ lit
         go (StgOpApp (StgFCallOp f g) args _ty) = bindForeignFunctionCallResult binder f g args
@@ -128,7 +128,7 @@ caseExpressionAlternatives bndr altType [(_altCon, args, useMask, expr)] =
   of PolyAlt {} -> jsexpr
      PrimAlt {} -> jsexpr
      UbxTupAlt {} -> process object
-     AlgAlt {} -> process (haskellConAppArgVector object)
+     AlgAlt {} -> process (RTS.conAppArgVector object)
   where object = stgIdToJs bndr
         process obj = mconcat [unpackData obj useMask args, jsexpr]
         jsexpr = expression expr
@@ -137,7 +137,7 @@ caseExpressionAlternatives bndr altType alts =
     of PolyAlt   {} -> panic "multiple case alternatives for PolyAlt"
        UbxTupAlt {} -> panic "multiple case alternatives for UbxTupAlt"
        PrimAlt   {} -> Js.switch name defaultCase cases
-       AlgAlt    {} -> Js.switch (haskellConAppTag name) defaultCase cases
+       AlgAlt    {} -> Js.switch (RTS.conAppTag name) defaultCase cases
   where
     name = stgIdToJs bndr
     defaultCase =
@@ -149,7 +149,7 @@ caseExpressionAlternatives bndr altType alts =
     alternative alt = (alternativeConst alt, alternativeBody alt)
     alternativeBody (alt, args, useMask, expr) =
       case alt
-      of DataAlt _ -> mconcat [unpackData (haskellConAppArgVector name) useMask args, expression expr]
+      of DataAlt _ -> mconcat [unpackData (RTS.conAppArgVector name) useMask args, expression expr]
          LitAlt _ -> expression expr
          DEFAULT  -> panic "Default alternative!"
     alternativeConst (alt, _args, _useMask, _expr) =
