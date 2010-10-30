@@ -20,6 +20,7 @@ main =
              , dstPath = "."
              }
      mapM_ (system . uncurry (buildCommand env)) packages
+     system . intercalate " " $ [ ghcJs env, "Test.hs" ]
 
 packages =
   [ ( "ghc-prim"
