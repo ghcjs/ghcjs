@@ -1,7 +1,9 @@
 /base-*
 /ghc-*
 /dist
-/examples/*.hi
-/examples/*.o
-/examples/Test*.js
+/examples/main/*.hi
+/examples/main/*.o
+/examples/main/*.c
+/examples/main/*.h
+/examples/main/*.js
 

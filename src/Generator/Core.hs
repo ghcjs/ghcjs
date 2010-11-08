@@ -116,9 +116,9 @@ caseExpressionScrut binder expr = go expr
             Js.declareMethodCallResult (stgIdToJsId binder) object RTS.applyMethodName (map stgArgToJs args)
           where object = stgIdToJs f
         go (StgLit lit) = Js.declare (stgIdToJsId binder) $ stgLiteralToJs $ lit
-        go (StgOpApp (StgFCallOp f g) args _ty) = bindForeignFunctionCallResult binder f g args
-        go (StgOpApp (StgPrimOp op) args _ty) = bindPrimitiveOperationResult binder op args
-        go (StgOpApp (StgPrimCallOp call) args _ty) = bindPrimitiveCallResult binder call args
+        go (StgOpApp (StgFCallOp f g) args _ty) = declareForeignFunctionCallResult binder f g args
+        go (StgOpApp (StgPrimOp op) args _ty) = declarePrimitiveOperationResult binder op args
+        go (StgOpApp (StgPrimCallOp call) args _ty) = declarePrimitiveCallResult binder call args
         go e = Js.declareFunctionCallResult (stgIdToJsId binder) f []
           where f = Js.function [] (expression e)
 

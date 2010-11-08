@@ -1,6 +1,16 @@
+-- | Tries to implement GHC primitive operations as described at
+--   http://www.haskell.org/ghc/docs/6.12.2/html/libraries/ghc-prim-0.2.0.0/GHC-Prim.html
+-- Char# is Javascript string
+-- Int# is Javascript number
+-- Word# is Javascript number
+-- Float# is Javascript number
+-- Doable# is Javascript number
+-- Addr# is Javascript string
+-- MutableByteArray# s is Javascript string
+-- ByteArray# s is Javascript string
 module Generator.PrimOp
   ( returnPrimitiveOperationResult
-  , bindPrimitiveOperationResult
+  , declarePrimitiveOperationResult
   ) where
 
 import Id as Stg
@@ -8,8 +18,8 @@ import StgSyn as Stg
 import PrimOp
 import Javascript.Language as Js
 
-import Generator.Helpers
 import qualified RTS.Objects as RTS
+import Generator.Helpers
 
 returnPrimitiveOperationResult :: Javascript js => PrimOp -> [StgArg] -> js
 returnPrimitiveOperationResult op args =
@@ -17,14 +27,12 @@ returnPrimitiveOperationResult op args =
   of Just e -> Js.return e
      Nothing -> Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
 
-bindPrimitiveOperationResult :: Javascript js => Stg.Id -> PrimOp -> [StgArg] -> js
-bindPrimitiveOperationResult id op args =
+declarePrimitiveOperationResult :: Javascript js => Stg.Id -> PrimOp -> [StgArg] -> js
+declarePrimitiveOperationResult id op args =
   case primOp op args
   of Just e -> Js.declare (stgIdToJsId id) e
      Nothing -> Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
 
--- | primOp tries to implement GHC primitive operations as described at
---   http://www.haskell.org/ghc/docs/6.12.2/html/libraries/ghc-prim-0.2.0.0/GHC-Prim.html
 primOp :: Javascript js => PrimOp -> [StgArg] -> Maybe (Expression js)
 -- char:
 primOp CharGtOp [a, b] = Just $ boolOp Js.greater a b
@@ -54,7 +62,10 @@ primOp IntNegOp [a]    = Just $ Js.unaryMinus (stgArgToJs a)
 
 -- overflow sensitive operations:
 -- (a >>> 16) == 0 && (b >>> 16) == 0
-primOp IntMulMayOfloOp [a, b] = Just $ Js.and (Js.equal (Js.shiftRA (stgArgToJs a) (Js.int (16 :: Int))) (Js.int (0 :: Int))) (Js.equal (Js.shiftRA (stgArgToJs b) (Js.int (16 :: Int))) (Js.int (0 :: Int)))
+primOp IntMulMayOfloOp [a, b] = Just $ Js.and (test a) (test b)
+  where zero = Js.int (0 :: Int)
+        sixteen = Js.int (16 :: Int)
+        test x = Js.equal (Js.shiftRA (stgArgToJs x) sixteen) zero
 
 -- $hs.Int.addCarry(a, b, 0)
 primOp IntAddCOp       [a, b] = Just $ Js.nativeMethodCall (Js.property RTS.root "Int") "addCarry" [stgArgToJs a, stgArgToJs b, Js.int (0 :: Int)]
@@ -93,8 +104,30 @@ primOp XorOp     [a, b] = Just $ Js.bitXOr (stgArgToJs a) (stgArgToJs b)
 primOp NotOp     [a] = Just $ Js.bitNot (stgArgToJs a)
 primOp Word2IntOp[a] = Just $ stgArgToJs a
 
-primOp IndexOffAddrOp_Char [a, b] = Just $ Js.subscript (stgArgToJs a) (stgArgToJs b)
+primOp Narrow8IntOp [a] = Just $
+  Js.ternary (Js.greaterOrEqual arg zero)
+    (Js.bitAnd arg bitMask7)
+    (inv (inv arg `Js.bitAnd` bitMask7))
+  where arg = stgArgToJs a
+        inv f = Js.bitXOr f (Js.bitNot zero)
+        bitMask7 = Js.int (127 :: Int)
+        zero = Js.int (0 :: Int)
+primOp Narrow16IntOp [a] = Just $
+  Js.ternary (Js.greaterOrEqual arg zero)
+    (Js.bitAnd arg bitMask15)
+    (inv (inv arg `Js.bitAnd` bitMask15))
+  where arg = stgArgToJs a
+        inv f = Js.bitXOr f (Js.bitNot zero)
+        bitMask15 = Js.int (32767 :: Int)
+        zero = Js.int (0 :: Int)
+primOp Narrow32IntOp [a] = Just $ stgArgToJs a
+primOp Narrow8WordOp [a] = Just $ Js.bitAnd (stgArgToJs a) (Js.int (0xFF :: Int))
+primOp Narrow16WordOp [a] = Just $ Js.bitAnd (stgArgToJs a) (Js.int (0xFFFF :: Int))
+primOp Narrow32WordOp [a] = Just $ stgArgToJs a
+
 primOp DataToTagOp [a] = Just $ RTS.conAppTag (stgArgToJs a)
+
+primOp IndexOffAddrOp_Char [a, b] = Just $ Js.nativeMethodCall (stgArgToJs a) "charAt" [stgArgToJs b]
 primOp _ _ = Nothing
 
 boolOp :: Javascript js => (Expression js -> Expression js -> Expression js) -> StgArg -> StgArg -> Expression js

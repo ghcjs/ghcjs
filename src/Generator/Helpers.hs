@@ -15,6 +15,27 @@ import qualified Literal as Stg
 import Javascript.Language as Js
 import qualified RTS.Objects as RTS
 
+-- | Convert Haskell literal to Javascript object
+-- this function should really go into PrimOp module...
+stgLiteralToJs :: Javascript js => Stg.Literal -> Expression js
+stgLiteralToJs (Stg.MachChar c) = Js.string [c] -- Char#
+stgLiteralToJs (Stg.MachStr s) = Js.string (unpackFS s ++ "\0") -- Addr#
+stgLiteralToJs (Stg.MachInt i) = Js.int i -- Int#
+stgLiteralToJs (Stg.MachInt64 _) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: Int64"]
+stgLiteralToJs (Stg.MachWord i) -- Word#
+  | i > 2^(31 :: Int) - 1 = Js.int (i - 2^(32 :: Int) + 1)
+  | otherwise = Js.int i
+stgLiteralToJs (Stg.MachWord64 _) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: Int64"]
+stgLiteralToJs (Stg.MachFloat i) = Js.float i -- Float#
+stgLiteralToJs (Stg.MachDouble i) = Js.float i -- Doable#
+stgLiteralToJs (Stg.MachNullAddr) = Js.null -- Addr#
+stgLiteralToJs (Stg.MachLabel {}) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: MachLabel"]
+
+stgArgToJs :: Javascript js => Stg.StgArg -> Expression js
+stgArgToJs (Stg.StgVarArg id) = stgIdToJs id
+stgArgToJs (Stg.StgLitArg l) = stgLiteralToJs l
+stgArgToJs (Stg.StgTypeArg _) = panic "Compiler bug: StgTypeArg in expression"
+
 jsBoolToHs :: Javascript js => Expression js -> Expression js
 jsBoolToHs ex = Js.ternary ex RTS.true RTS.false
 
@@ -47,25 +68,6 @@ stgBindingToList (StgRec bs) = bs
 
 stgArgsToJs :: Javascript js => [Stg.StgArg] -> Expression js
 stgArgsToJs = Js.list . map stgArgToJs
-
-stgArgToJs :: Javascript js => Stg.StgArg -> Expression js
-stgArgToJs (Stg.StgVarArg id) = stgIdToJs id
-stgArgToJs (Stg.StgLitArg l) = stgLiteralToJs l
-stgArgToJs (Stg.StgTypeArg _) = panic "Compiler bug: StgTypeArg in expression"
-
-stgLiteralToJs :: Javascript js => Stg.Literal -> Expression js
-stgLiteralToJs (Stg.MachChar c) = Js.string [c]
-stgLiteralToJs (Stg.MachStr s) = Js.string (unpackFS s ++ "\0")
-stgLiteralToJs (Stg.MachInt i) = Js.int i
-stgLiteralToJs (Stg.MachInt64 _) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: Int64"]
-stgLiteralToJs (Stg.MachWord i)
-  | i > 2^(31 :: Int) - 1 = Js.int (i - 2^(32 :: Int) + 1)
-  | otherwise = Js.int i
-stgLiteralToJs (Stg.MachWord64 _) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: Int64"]
-stgLiteralToJs (Stg.MachFloat i) = Js.float i
-stgLiteralToJs (Stg.MachDouble i) = Js.float i
-stgLiteralToJs (Stg.MachNullAddr) = Js.null
-stgLiteralToJs (Stg.MachLabel {}) = Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: MachLabel"]
 
 intToBase62 :: Int -> String
 intToBase62 n = go n ""

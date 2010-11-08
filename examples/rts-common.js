@@ -133,6 +133,25 @@ $hs.fromHaskellInt = function() {
           var i = $hs.force.apply($hs, arguments);
           return i.data[0];
         };
+$hs.fromHaskellIO = function() {
+          var newArguments = [];
+          for (var i = 0; i < arguments.length; i++)
+            newArguments[i] = arguments[i];
+          newArguments[arguments.length] = $hs.modules.GHCziPrim.hs_realWorldzh;
+          var i = $hs.force.apply($hs, newArguments);
+          return i[1];
+        };
+$hs.toHaskellInt = function(i) {
+    var hsi = new $hs.Data(1);
+    hsi.data = [(0 + i) & ~0];
+    return hsi;
+};
+$hs.nil = function() {
+    return "";
+};
+$hs.cons = function(x, xs) {
+    return String.fromCharCode(x) + xs;
+};
 
 $hs.init = function() {
     $hs.modules.GHCziPrim = new $hs.Module();

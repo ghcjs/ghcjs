@@ -6,46 +6,46 @@
     <script type="text/javascript">
       window.onload = function() {
          // URLs to load modules from in order of precedence
+
         $hs.loadPaths = ["."];
 
         // Used packages
-        $hs.packages = ["", "/ghc-prim", "/integer-simple", "/base"];
+        $hs.packages = ["/main", "/ghc-prim", "/integer-simple", "/base"];
 
         // Must be called first
         $hs.init();
 
         $hs.loadModule("Test");
 
-        var res = $hs.fromHaskellInt($hs.modules.Test.hs_test1);
-        alert(res);
+        try {
 
-        var res = $hs.fromHaskellInt($hs.modules.Test.hs_test2);
-        alert(res);
+          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test1);
+          alert(res);
 
-        var res = $hs.fromHaskellInt($hs.modules.Test.hs_test3);
-        alert(res);
+          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test2);
+          alert(res);
 
-        var res = $hs.fromHaskellString($hs.modules.Test.hs_test4);
-        alert(res);
+          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test3);
+          alert(res);
 
-        var res = $hs.fromHaskellString($hs.modules.Test.hs_test5);
-        alert(res);
+          var res = $hs.fromHaskellString($hs.modules.Test.hs_test4);
+          alert(res);
 
-        // I wasn't able to make Integer type work.
-        //
-        // "simple-integer" package provides Integer implementation
-        // wich differs signigicantly depending on platform bit-width.
-        // I have 64-bit machine, but I can only emulate
-        // 32-bit ints in javascript. I think it may work with
-        // "simple-integer" built on 32bit machine.
-        // But I have no one for now...
-        //
-        // OR we may emulate 64bit ints with pair of javascript-numbers
-        var res = $hs.fromHaskellString($hs.modules.Test.hs_test6);
-        alert(res);
+          var res = $hs.fromHaskellString($hs.modules.Test.hs_test5);
+          alert(res);
 
-        var res = $hs.fromHaskellString($hs.modules.Test.hs_test7);
-        alert(res);
+          var res = $hs.fromHaskellString($hs.modules.Test.hs_test6);
+          alert(res);
+
+          var res = $hs.fromHaskellString($hs.modules.Test.hs_test7);
+          alert(res);
+
+          var res = $hs.fromHaskellInt($hs.fromHaskellIO($hs.modules.Test.hs_test9));
+          alert(res);
+
+        } catch (e) {
+          alert(e);
+        }
       }
     </script>
   </head>
