@@ -24,7 +24,7 @@ var $hs = {
           return a >= b;
         else
           return a <= b;
-      },
+      }
     },
     Int : { // binary operations supposed to work with 32bit words
       addCarry : function(a, b, c) {
@@ -48,7 +48,7 @@ var $hs = {
       },
       mulIntMayOflo : function(a, b) {
         return a >>> 16 == 0 && b >>> 16 == 0;
-      },
+      }
     },
     modules: {},
     alert: function (str) {
@@ -66,7 +66,7 @@ var $hs = {
     },
     logDebug: function (str) {
         $hs.logAny("DEBUG", str);
-    },
+    }
 }
 
 $hs.Module = function () {};

@@ -62,7 +62,7 @@ $hs.Func = function(a) {
 };
 $hs.Func.prototype = {
     hscall: $hs.hscall,
-    notEvaluated: false,
+    notEvaluated: false
 };
 
 $hs.Thunk = function() {};
