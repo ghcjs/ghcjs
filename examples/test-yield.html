@@ -1,0 +1,61 @@
+<html>
+  <head>
+    <title>ghcjs-test</title>
+    <script type="application/javascript;version=1.7" src="rts-thread.js"></script>
+    <script type="application/javascript;version=1.7" src="rts-common.js"></script>
+    <script type="application/javascript;version=1.7" src="rts-yieldtrampoline.js"></script>
+    <script type="application/javascript;version=1.7">
+      window.onload = function() {
+         // URLs to load modules from in order of precedence
+
+        $hs.loadPaths = ["."];
+
+        // Used packages
+        $hs.packages = ["/main", "/ghc-prim", "/integer-simple", "/base"];
+
+        // Must be called first
+        $hs.init();
+
+        $hs.loadModule("Test");
+
+        try {
+
+          var res = $hs.fromHaskellInt($hs.fromHaskellIO($hs.modules.Test.hs_test10));
+          alert(res);
+
+          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test1);
+          alert(res);
+
+          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test2);
+          alert(res);
+
+          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test3);
+          alert(res);
+
+          var res = $hs.fromHaskellString($hs.modules.Test.hs_test4);
+          alert(res);
+
+          var res = $hs.fromHaskellString($hs.modules.Test.hs_test5);
+          alert(res);
+
+          var res = $hs.fromHaskellString($hs.modules.Test.hs_test6);
+          alert(res);
+
+          var res = $hs.fromHaskellString($hs.modules.Test.hs_test7);
+          alert(res);
+
+          var res = $hs.fromHaskellInt($hs.fromHaskellIO($hs.modules.Test.hs_test9));
+          alert(res);
+
+        } catch (e) {
+          alert(e);
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="log">
+    </div>
+  </body>
+</html>
+

@@ -19,8 +19,9 @@ import qualified Generator.TopLevel as Js (generate)
 import Javascript.Language (Javascript)
 import qualified Javascript.Formatted as Js
 import qualified Javascript.Trampoline as Js
+import qualified Javascript.YieldTrampoline as Js
 
-data CallingConvention = Plain | Trampoline
+data CallingConvention = Plain | Trampoline | YieldTrampoline
 
 main :: IO ()
 main =
@@ -32,6 +33,7 @@ main =
            case args
              of ("--calling-convention=plain":args) -> (Plain, args)
                 ("--calling-convention=trampoline":args) -> (Trampoline, args)
+                ("--calling-convention=yield":args) -> (YieldTrampoline, args)
                 _ -> (Plain, args)
      defaultErrorHandler defaultDynFlags $ runGhc (Just GHC.Paths.libdir) $
        do sdflags <- getSessionDynFlags
@@ -90,4 +92,5 @@ concreteJavascriptFromCgGuts dflags callingConvention core =
        case callingConvention
        of Plain -> show (abstract :: Js.Formatted)
           Trampoline -> show (abstract :: Js.Trampoline Js.Formatted)
+          YieldTrampoline -> show (abstract :: Js.YieldTrampoline Js.Formatted)
 
