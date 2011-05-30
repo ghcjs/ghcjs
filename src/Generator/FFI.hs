@@ -19,14 +19,14 @@ returnForeignFunctionCallResult :: Javascript js => ForeignCall -> Stg.Unique ->
 returnForeignFunctionCallResult (CCall (CCallSpec target _ccallConv _safety)) _ args =
   case target
   of DynamicTarget -> Js.throw . Js.string $ "Unsupported: foreign function call"
-     (StaticTarget clabelString) ->
+     (StaticTarget clabelString _) ->
        Js.return $ foreignCall clabelString args
 
 declareForeignFunctionCallResult :: Javascript js => Stg.Id -> ForeignCall -> Stg.Unique -> [StgArg] -> js
 declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _safety)) _ args =
   case target
   of DynamicTarget -> Js.throw . Js.string $ "Unsupported: foreign function call"
-     (StaticTarget clabelString) ->
+     (StaticTarget clabelString _) ->
        Js.declare (stgIdToJsId binder) $ foreignCall clabelString args
 
 foreignCall :: Javascript js => FastString -> [StgArg] -> Expression js

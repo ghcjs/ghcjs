@@ -4,6 +4,7 @@ module Test where
 import Data.List
 import Foreign.C.Types
 import Foreign.Ptr
+import Control.Concurrent
 
 data JSObject
 
@@ -53,4 +54,13 @@ test9 =
   do s <- string2JSString "Haskell says hello"
      jsalert s
      return 9
+
+test10 :: IO Int
+test10 =
+  do 
+     x <- newEmptyMVar
+     forkIO $ do
+         putMVar x 5
+     y <- takeMVar x
+     return y
 

@@ -1,7 +1,7 @@
 Name:           ghcjs
 Version:        0.1.0
 Description:    Haskell to Javascript translator
-License:        BSD3 
+License:        BSD3
 License-file:   LICENSE
 Author:         Victor Nazarov
 Copyright:      Victor Nazarov
@@ -15,4 +15,7 @@ Executable ghcjs
     Hs-Source-Dirs: src
     Build-Depends:  base >=3 && <5, ghc, ghc-paths, monads-tf, containers, filepath
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans
-
+    Other-Modules:  Javascript.Language, Javascript.Trampoline, Javascript.Formatted.Base,
+                    Javascript.Formatted.Expression, Javascript.Formatted.Statement,
+                    Javascript.Formatted, RTS.Objects, Generator.Helpers, Generator.Dependencies,
+                    Generator.PrimOp, Generator.FFI, Generator.Core, Generator.TopLevel

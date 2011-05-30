@@ -128,8 +128,36 @@ primOp Narrow32WordOp [a] = Just $ stgArgToJs a
 primOp DataToTagOp [a] = Just $ RTS.conAppTag (stgArgToJs a)
 
 primOp IndexOffAddrOp_Char [a, b] = Just $ Js.nativeMethodCall (stgArgToJs a) "charAt" [stgArgToJs b]
+
+primOp NewMutVarOp   [a, s]    = Just $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "newMutVar" [stgArgToJs a, stgArgToJs s]
+primOp ReadMutVarOp  [a, s]    = Just $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "read" [stgArgToJs a, stgArgToJs s]
+primOp WriteMutVarOp [a, b, s] = Just $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "write" [stgArgToJs a, stgArgToJs b, stgArgToJs s]
+primOp SameMutVarOp  [a, b, s] = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "same" [stgArgToJs a, stgArgToJs b, stgArgToJs s]
+primOp AtomicModifyMutVarOp  [a, b, s] = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "atomicModify" [stgArgToJs a, stgArgToJs b, stgArgToJs s]
+-- primOp CasMutVarOp   [a, b, c, s] = Just $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "cas" [stgArgToJs a, stgArgToJs b, stgArgToJs c, stgArgToJs s]
+
+primOp ForkOp [a, s]      = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "Thread") "fork" [stgArgToJs a, stgArgToJs s]
+primOp ForkOnOp [a, b, s] = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "Thread") "forkOn" [stgArgToJs a, stgArgToJs b, stgArgToJs s]
+primOp YieldOp [s]        = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "Thread") "yieldThread" [stgArgToJs s]
+primOp MyThreadIdOp [s]   = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "Thread") "myThreadId" [stgArgToJs s]
+primOp NoDuplicateOp [s]  = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "Thread") "noDuplicate" [stgArgToJs s]
+
+primOp CatchOp [a, b, s] = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "Exception") "tryCatch" [stgArgToJs a, stgArgToJs b, stgArgToJs s]
+primOp RaiseOp [a] = Just $ Js.nativeMethodCall (Js.property RTS.root "Exception") "raise" [stgArgToJs a]
+primOp RaiseIOOp [a, s] = Just $ Js.nativeMethodCall (Js.property RTS.root "Exception") "raiseIO" [stgArgToJs a, stgArgToJs s]
+-- primOp MaskAsyncExceptionsOp [a] = Just $ Js.nativeMethodCall (Js.property RTS.root "Exception") "maskAsyncExceptions" [stgArgToJs a]
+-- primOp MaskUninterruptibleOp [a] = Just $ Js.nativeMethodCall (Js.property RTS.root "Exception") "maskUninterruptible" [stgArgToJs a]
+-- primOp UnmaskAsyncExceptionsOp [a] = Just $ Js.nativeMethodCall (Js.property RTS.root "Exception") "unmaskAsyncExceptions" [stgArgToJs a]
+-- primOp MaskStatus [s] = Just $ Js.nativeMethodCall (Js.property RTS.root "Exception") "getMaskingState" [stgArgToJs s]
+
+primOp NewMVarOp     [s]       = Just $ Js.nativeMethodCall (Js.property RTS.root "MVar") "newMVar" [stgArgToJs s]
+primOp TakeMVarOp    [a, s]    = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "MVar") "take" [stgArgToJs a, stgArgToJs s]
+primOp TryTakeMVarOp [a, s]    = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "MVar") "tryTake" [stgArgToJs a, stgArgToJs s]
+primOp PutMVarOp     [a, b, s] = Just $ yield $ Js.nativeMethodCall (Js.property RTS.root "MVar") "put" [stgArgToJs a, stgArgToJs b, stgArgToJs s]
+primOp SameMVarOp    [a, b, s] = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "MVar") "same" [stgArgToJs a, stgArgToJs b, stgArgToJs s]
+primOp IsEmptyMVarOp [a, s]    = Just $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "MVar") "isEmpty" [stgArgToJs a, stgArgToJs s]
+
 primOp _ _ = Nothing
 
 boolOp :: Javascript js => (Expression js -> Expression js -> Expression js) -> StgArg -> StgArg -> Expression js
 boolOp op a b = jsBoolToHs $ op (stgArgToJs a) (stgArgToJs b)
-
