@@ -33,22 +33,40 @@ instance Javascript js => JavascriptJump (YieldTrampoline js)
           YTC $ expression $ yield $ new (property trampoline "Jump") [func, Js.null, runYTCE . list $ args]
 
 instance Javascript js => JavascriptCall (YieldTrampoline js)
-  where assignMethodCallResult (YTCE var) (YTCE obj) method args =
-          YTC $ assign var $ yield $ nativeMethodCall obj method (map runYTCE args)
+  where assignMethodCallResult v (YTCE obj) method args rest = mconcat
+          [ YTC $ assign (Js.var v) $ yield $ nativeMethodCall obj method (map runYTCE args)
+          , rest
+          ]
 
-        declareMethodCallResult var (YTCE obj) method args =
-          YTC $ declare var $ yield $ nativeMethodCall obj method (map runYTCE args)
+        declareMethodCallResult var (YTCE obj) method args rest = mconcat
+          [ YTC $ declare var $ yield $ nativeMethodCall obj method (map runYTCE args)
+          , rest
+          ]
 
-        callMethod (YTCE obj) method args =
-          YTC $ expression $ yield $ nativeMethodCall obj method (map runYTCE args)
+        callMethod (YTCE obj) method args rest = mconcat
+          [ YTC $ expression $ yield $ nativeMethodCall obj method (map runYTCE args)
+          , rest
+          ]
 
-        assignFunctionCallResult (YTCE var) (YTCE func) args =
-          YTC $ assign var $ yield $ nativeFunctionCall func (map runYTCE args)
+        assignFunctionCallResult v (YTCE func) args rest = mconcat
+          [ YTC $ assign (Js.var v) $ yield $ nativeFunctionCall func (map runYTCE args)
+          , rest
+          ]
 
-        declareFunctionCallResult var (YTCE func) args =
-          YTC $ declare var $ yield $ nativeFunctionCall func (map runYTCE args)
+        declareFunctionCallResult var (YTCE func) args rest = mconcat
+          [ YTC $ declare var $ yield $ nativeFunctionCall func (map runYTCE args)
+          , rest
+          ]
 
-        callFunction (YTCE func) args =
-          YTC $ expression $ yield $ nativeFunctionCall func (map runYTCE args)
+        callFunction (YTCE func) args rest = mconcat
+          [ YTC $ expression $ yield $ nativeFunctionCall func (map runYTCE args)
+          , rest
+          ]
 
+        maybeAssignMethodCallResult (YTCE pred) v (YTCE obj) method args (YTC rest) = YTC $ mconcat
+          [ Js.declare v obj
+          , Js.if_ (pred) $
+              assign (Js.var v) $ yield $ nativeMethodCall obj method (map runYTCE args)
+          , rest
+          ]
 

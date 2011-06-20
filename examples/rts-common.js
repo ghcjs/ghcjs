@@ -66,6 +66,54 @@ var $hs = {
     },
     logDebug: function (str) {
         $hs.logAny("DEBUG", str);
+    },
+    MutVar : {
+        newMutVar : function(a, s) {
+            return [s, {value : a}];
+        },
+        read : function (a, s) {
+            return [s, a.value];
+        },
+        write : function (a, b, s) {
+            a.value = b;
+            return [s];
+        },
+        same : function (a, b, s) {
+            return [s, a === b];
+        }
+    },
+    _Array : {
+        newArray : function(n, a, s) {
+            var result = [];
+            for (x = 0; x != n; x++)
+              result[x] = a;
+            return [s, result];
+        },
+        same : function (a, b, s) {
+            return [s, a === b];
+        },
+        read : function (a, n, s) {
+            return [s, a[n]];
+        },
+        write : function (a, n, b, s) {
+            a[n] = b;
+            return [s];
+        },
+        sizeof : function (a, s) {
+            return [s, a.length];
+        },
+        sizeofMut : function (a, s) {
+            return [s, a.length];
+        },
+        index : function (a, n) {
+            return a[n];
+        },
+        unsafeFreeze : function (a, s) {
+            return [s, a];
+        },
+        unsafeThaw : function (a, s) {
+            return [s, a];
+        }
     }
 }
 

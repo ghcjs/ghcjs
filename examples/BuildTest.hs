@@ -12,15 +12,15 @@ data BuildEnv =
     }
 
 main =
-  do (ghcp:_) <- getArgs
+  do (conv:ghcp:_) <- getArgs
      let env =
            BuildEnv
              { ghcPath = ghcp
              , ghcJs = "../dist/build/ghcjs/ghcjs"
              , dstPath = "."
              }
-     mapM_ (system . uncurry (buildCommand env)) packages
-     system . intercalate " " $ [ ghcJs env, concat ["-i", dstPath env, "/main"], "Test" ]
+     mapM_ (system . uncurry (buildCommand conv env)) packages
+     system . intercalate " " $ [ ghcJs env, "--calling-convention="++conv, concat ["-i", dstPath env, "/main"], "Test" ]
 
 packages =
   [ ( "ghc-prim"
@@ -39,9 +39,10 @@ packages =
   , ("base", ["Prelude"])
   ]
 
-buildCommand env package modules =
+buildCommand conv env package modules =
   intercalate " " $
     [ ghcJs env
+    , "--calling-convention="++conv
     , "-odir", concat [dstPath env, "/", package]
     , "-hidir", concat [dstPath env, "/", package]
     , "-package-name", package

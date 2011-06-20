@@ -87,39 +87,47 @@ expression (StgLam{}) = panic "unexpected StgLam" -- StgLam is used *only* durin
 
 caseExpression :: Javascript js => StgExpr -> Stg.Id -> Stg.AltType -> [StgAlt] -> js
 caseExpression expr bndr alttype alts =
-  mconcat
-    [ caseExpressionScrut bndr expr
-    , caseExpressionAlternatives bndr alttype alts
-    ]
+  caseExpressionScrut bndr expr (caseExpressionAlternatives bndr alttype alts)
 
 -- | 'caseExpressionScrut' is absolutely the same as expression
 -- the difference is that 'expression' "returns" result
 -- but 'caseExpressionScrut' "binds" result
-caseExpressionScrut :: Javascript js => Stg.Id -> StgExpr -> js
-caseExpressionScrut binder expr = go expr
+caseExpressionScrut :: Javascript js => Stg.Id -> StgExpr -> js -> js
+caseExpressionScrut binder expr altsJs = go expr
   where go (StgConApp con args)
-          | isUnboxedTupleCon con = Js.declare (stgIdToJsId binder) (Js.list jsargs)
+          | isUnboxedTupleCon con =
+              mconcat
+                [ Js.declare (stgIdToJsId binder) (Js.list jsargs)
+                , altsJs ]
           | otherwise =
               mconcat
                 [ Js.declare (stgIdToJsId binder) (dataCreation con)
                 , dataDefinition con (stgIdToJs binder) jsargs
+                , altsJs
                 ]
           where jsargs = map stgArgToJs args
         go (StgApp f []) =
           mconcat
             [ Js.declare (stgIdToJsId binder) object
-            , Js.if_ (RTS.isNotEvaluatedAndNotPrimitive object) $
-                Js.assignMethodCallResult (stgIdToJs binder) object RTS.applyMethodName []
+            , Js.maybeAssignMethodCallResult (RTS.isNotEvaluatedAndNotPrimitive object)
+                    (stgIdToJsId binder) object RTS.applyMethodName [] altsJs
             ]
           where object = stgIdToJs f
         go (StgApp f args) =
-            Js.declareMethodCallResult (stgIdToJsId binder) object RTS.applyMethodName (map stgArgToJs args)
+            Js.declareMethodCallResult (stgIdToJsId binder) object RTS.applyMethodName (map stgArgToJs args) altsJs
           where object = stgIdToJs f
-        go (StgLit lit) = Js.declare (stgIdToJsId binder) $ stgLiteralToJs $ lit
-        go (StgOpApp (StgFCallOp f g) args _ty) = declareForeignFunctionCallResult binder f g args
-        go (StgOpApp (StgPrimOp op) args _ty) = declarePrimitiveOperationResult binder op args
-        go (StgOpApp (StgPrimCallOp call) args _ty) = declarePrimitiveCallResult binder call args
-        go e = Js.declareFunctionCallResult (stgIdToJsId binder) f []
+        go (StgLit lit) = mconcat
+            [ Js.declare (stgIdToJsId binder) $ stgLiteralToJs $ lit
+            , altsJs ]
+        go (StgOpApp (StgFCallOp f g) args _ty) = mconcat
+            [ declareForeignFunctionCallResult binder f g args
+            , altsJs ]
+        go (StgOpApp (StgPrimOp op) args _ty) =
+            declarePrimitiveOperationResult binder op args altsJs
+        go (StgOpApp (StgPrimCallOp call) args _ty) = mconcat
+            [ declarePrimitiveCallResult binder call args
+            , altsJs ]
+        go e = Js.declareFunctionCallResult (stgIdToJsId binder) f [] altsJs
           where f = Js.function [] (expression e)
 
 caseExpressionAlternatives :: Javascript js => Stg.Id -> Stg.AltType -> [(Stg.AltCon, [Stg.Id], [Bool], StgExpr)] -> js

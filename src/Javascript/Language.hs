@@ -59,12 +59,13 @@ class JavascriptBase js => JavascriptNativeCall js
         nativeMethodCall :: Expression js -> Id -> [Expression js] -> Expression js
 
 class JavascriptBase js => JavascriptCall js
-  where callMethod :: Expression js -> Id -> [Expression js] -> js
-        assignMethodCallResult :: Expression js -> Expression js -> Id -> [Expression js] -> js
-        declareMethodCallResult :: Id -> Expression js -> Id -> [Expression js] -> js
-        callFunction :: Expression js -> [Expression js] -> js
-        assignFunctionCallResult :: Expression js -> Expression js -> [Expression js] -> js
-        declareFunctionCallResult :: Id -> Expression js -> [Expression js] -> js
+  where callMethod :: Expression js -> Id -> [Expression js] -> js -> js
+        assignMethodCallResult :: Id -> Expression js -> Id -> [Expression js] -> js -> js
+        declareMethodCallResult :: Id -> Expression js -> Id -> [Expression js] -> js -> js
+        callFunction :: Expression js -> [Expression js] -> js -> js
+        assignFunctionCallResult :: Id -> Expression js -> [Expression js] -> js -> js
+        declareFunctionCallResult :: Id -> Expression js -> [Expression js] -> js -> js
+        maybeAssignMethodCallResult :: Expression js -> Id -> Expression js -> Id -> [Expression js] -> js -> js
         
 class JavascriptBase js => JavascriptJump js
   where jumpToMethod :: Expression js -> Id -> [Expression js] -> js

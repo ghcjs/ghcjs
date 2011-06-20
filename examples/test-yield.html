@@ -20,8 +20,10 @@
 
         try {
 
-          var res = $hs.fromHaskellInt($hs.fromHaskellIO($hs.modules.Test.hs_test10));
-          alert(res);
+          if ($hs.Thread && $hs.MVar) {
+            res = $hs.fromHaskellInt($hs.fromHaskellIO($hs.modules.Test.hs_test10));
+            alert("Thread test returned " + res);
+          }
 
           var res = $hs.fromHaskellInt($hs.modules.Test.hs_test1);
           alert(res);

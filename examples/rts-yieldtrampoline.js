@@ -140,25 +140,10 @@ $hs.Thread = {
     noDuplicate : function (s) { return s; }
 };
 
-$hs.MutVar = {
-    newMutVar : function(a, s) {
-        return [s, {value : a}];
-    },
-    read : function (a, s) {
-        return [s, a.value];
-    },
-    write : function (a, b, s) {
-        a.value = b;
-        return [s];
-    },
-    same : function (a, b, s) {
-        return [s, a === b];
-    },
-    atomicModify : function (a, b, s) {
-        var res = yield b.hscall(a.value);
-        a.value = res.data[0];
-        yield [s, res.data[1]];
-    }
+$hs.MutVar.atomicModify = function (a, b, s) {
+    var res = yield b.hscall(a.value);
+    a.value = res.data[0];
+    yield [s, res.data[1]];
 };
 
 $hs.MVar = {

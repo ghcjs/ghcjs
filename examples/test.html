@@ -2,7 +2,7 @@
   <head>
     <title>ghcjs-test</title>
     <script type="text/javascript" src="rts-common.js"></script>
-    <script type="text/javascript" src="rts-plain.js"></script>
+    <script type="text/javascript" src="rts-trampoline.js"></script>
     <script type="text/javascript">
       window.onload = function() {
          // URLs to load modules from in order of precedence
@@ -18,6 +18,11 @@
         $hs.loadModule("Test");
 
         try {
+
+          if ($hs.Thread && $hs.MVar) {
+            res = $hs.fromHaskellInt($hs.fromHaskellIO($hs.modules.Test.hs_test10));
+            alert("Thread test returned " + res);
+          }
 
           var res = $hs.fromHaskellInt($hs.modules.Test.hs_test1);
           alert(res);
