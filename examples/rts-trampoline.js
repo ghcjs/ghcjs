@@ -382,7 +382,7 @@ $hs.MVar = {
                 a.waiting = Array.prototype.slice.call(a.waiting, 1, a.waiting.length)
                 $tr.Scheduler.schedule(w, null);
             }
-            return $tr.Result(s);
+            return new $tr.Result(s);
         }
         if (a.value !== null) {
             $tr.traceMVar("put waiting");
@@ -409,11 +409,11 @@ $hs.Exception = {
     },
     raise : function(a) {
         $tr.traceException("raise");
-        throw a
+        throw a;
     },
     raiseIO : function(a, s) {
         $tr.traceException("raiseIO");
-        throw a
+        throw a;
     }
 };
 
