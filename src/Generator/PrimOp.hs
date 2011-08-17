@@ -104,30 +104,38 @@ primOp XorOp     [a, b] = Just $ Js.bitXOr (stgArgToJs a) (stgArgToJs b)
 primOp NotOp     [a] = Just $ Js.bitNot (stgArgToJs a)
 primOp Word2IntOp[a] = Just $ stgArgToJs a
 
+
 primOp Narrow8IntOp [a] = Just $
-  Js.ternary (Js.greaterOrEqual arg zero)
-    (Js.bitAnd arg bitMask7)
-    (inv (inv arg `Js.bitAnd` bitMask7))
-  where arg = stgArgToJs a
-        inv f = Js.bitXOr f (Js.bitNot zero)
-        bitMask7 = Js.int (127 :: Int)
-        zero = Js.int (0 :: Int)
+  Js.minus bits signBit
+  where bits = Js.bitAnd arg (Js.int (0x7F :: Int))
+        signBit = Js.bitAnd arg (Js.int (0x80 :: Int))
+        arg = stgArgToJs a
 primOp Narrow16IntOp [a] = Just $
-  Js.ternary (Js.greaterOrEqual arg zero)
-    (Js.bitAnd arg bitMask15)
-    (inv (inv arg `Js.bitAnd` bitMask15))
-  where arg = stgArgToJs a
-        inv f = Js.bitXOr f (Js.bitNot zero)
-        bitMask15 = Js.int (32767 :: Int)
-        zero = Js.int (0 :: Int)
+  Js.minus bits signBit
+  where bits = Js.bitAnd arg (Js.int (0x7FFF :: Int))
+        signBit = Js.bitAnd arg (Js.int (0x8000 :: Int))
+        arg = stgArgToJs a
 primOp Narrow32IntOp [a] = Just $ stgArgToJs a
-primOp Narrow8WordOp [a] = Just $ Js.bitAnd (stgArgToJs a) (Js.int (0xFF :: Int))
-primOp Narrow16WordOp [a] = Just $ Js.bitAnd (stgArgToJs a) (Js.int (0xFFFF :: Int))
+primOp Narrow8WordOp [a] = Just $
+  Js.minus bits signBit
+  where bits = Js.bitAnd arg (Js.int (0x7F :: Int))
+        signBit = Js.bitAnd arg (Js.int (0x80 :: Int))
+        arg = stgArgToJs a
+primOp Narrow16WordOp [a] = Just $
+  Js.minus bits signBit
+  where bits = Js.bitAnd arg (Js.int (0x7FFF :: Int))
+        signBit = Js.bitAnd arg (Js.int (0x8000 :: Int))
+        arg = stgArgToJs a
 primOp Narrow32WordOp [a] = Just $ stgArgToJs a
 
 primOp DataToTagOp [a] = Just $ RTS.conAppTag (stgArgToJs a)
 
 primOp IndexOffAddrOp_Char [a, b] = Just $ Js.nativeMethodCall (stgArgToJs a) "charAt" [stgArgToJs b]
+
+-- StablePtr:
+primOp MakeStablePtrOp [a, b] = Just $ Js.list [stgArgToJs b, stgArgToJs a]
+primOp DeRefStablePtrOp [a, b] = Just $ Js.list [stgArgToJs b, stgArgToJs a]
+
 primOp _ _ = Nothing
 
 boolOp :: Javascript js => (Expression js -> Expression js -> Expression js) -> StgArg -> StgArg -> Expression js
