@@ -13,6 +13,6 @@ Cabal-Version:  >= 1.6
 Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Hs-Source-Dirs: src
-    Build-Depends:  base >=3 && <5, ghc, ghc-paths, monads-tf, containers, filepath
+    Build-Depends:  base >=3 && <5, ghc >= 7.0 && < 7.3, ghc-paths, monads-tf, containers, filepath
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans
 
