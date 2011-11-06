@@ -57,7 +57,7 @@ test9 =
 
 test10 :: IO Int
 test10 =
-  do 
+  do
      x <- newEmptyMVar
      forkIO $ do
          putMVar x 5

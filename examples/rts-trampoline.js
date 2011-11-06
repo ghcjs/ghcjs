@@ -1,58 +1,128 @@
-$tr = {
+var $tr = {
+/**
+ * @constructor
+ */
     Jump : function(method, object, args) {
+//        if (typeof method != 'function')
+//            throw "Not a function!";
         this.method = method;
         this.object = object;
         this.args = args;
     },
 
+/**
+ * @constructor
+ */
     Call : function(method, object, args, rest) {
+//        if (typeof method != 'function')
+//            throw "Not a function!";
         this.method = method;
         this.object = object;
         this.args = args;
         this.rest = rest;
     },
 
+/**
+ * @constructor
+ */
     Catch : function(next, catcher) {
         this.next = next;
         this.catcher = catcher;
     },
 
-    WithThread : function(withThread) {
-        this.withThread = withThread;
+    ctch : function(next, catcher) {
+        $tr.currentResult = new $tr.Catch(next, catcher);
     },
 
+/**
+ * @constructor
+ */
+    WithThread : function(withThreadFunc) {
+        this.withThread = withThreadFunc;
+    },
+
+    withThread : function(withThreadFunc) {
+        $tr.currentResult = new $tr.WithThread(withThreadFunc);
+    },
+
+/**
+ * @constructor
+ */
     Suspend : function(resume) {
         this.resume = resume;
     },
 
+    suspend : function(resume) {
+        $tr.currentResult = new $tr.Suspend(resume);
+    },
+
+/**
+ * @constructor
+ */
     Yield : function(next) {
         this.next = next;
     },
 
+    yield : function(next) {
+        $tr.currentResult = new $tr.Yield(next);
+    },
+
+/**
+ * @constructor
+ */
     Result : function(result) {
         this.value = result;
     }
+};
+
+function $j(method, object, args) {
+    $tr.currentResult = new $tr.Jump(method, object, args);
+}
+
+function $c(method, object, args, rest) {
+    $tr.currentResult = new $tr.Call(method, object, args, rest);
+}
+
+function $M(object, rest) {
+    if(object.notEvaluated)
+        $tr.currentResult = new $tr.Call(object.hscall, object, [], rest);
+    else
+        rest(object);
+}
+
+function $A(object) {
+    if(object.notEvaluated)
+        $tr.currentResult = new $tr.Jump(object.hscall, object, []);
+    else
+        $tr.currentResult = new $tr.Result(object);
+}
+
+function $r(result) {
+    $tr.currentResult = new $tr.Result(result);
 }
 
 $tr.Scheduler = {
     waiting : [],
     maxID   : 0,
     runWaiting : function() {
-        while (this.waiting.length != 0) {
-            var t = this.waiting[0];
-            this.activeThread = t[0];
-            this.waiting = Array.prototype.slice.call(this.waiting, 1, this.waiting.length);
+        var s = $tr.Scheduler;
+        while (s.waiting.length != 0) {
+            var t = s.waiting[0];
+            s.activeThread = t[0];
+            s.waiting = Array.prototype.slice.call(s.waiting, 1, s.waiting.length);
             t[0]._run(t[1], t[2]);
         }
     },
     schedule : function(thread, retval, isException) {
-        this.waiting.push([thread, retval, isException]);
+        var s = $tr.Scheduler;
+        s.waiting.push([thread, retval, isException]);
     },
     start : function(r) {
+        var s = $tr.Scheduler;
         var thread = new $tr.Thread();
-        this.schedule(thread, r, false);
-        this.maxID++;
-        thread.threadID = this.maxID;
+        s.schedule(thread, r, false);
+        s.maxID++;
+        thread.threadID = s.maxID;
         return thread;
     }
 };
@@ -73,6 +143,9 @@ $tr.traceException = function(msg) {
     $tr.trace(msg);
 };
 
+/**
+ * @constructor
+ */
 $tr.Thread = function () {
   this._stack = [];
   this._stackMax = 10000;
@@ -86,7 +159,7 @@ $tr.Thread.prototype = {
   finished: function() {
     return this._state != "run";
   },
-  
+
   /* Returns the final return value of the Thread.
    * If the Thread ended with an exception, throws the exception that
    * ended the Thread.
@@ -101,12 +174,12 @@ $tr.Thread.prototype = {
       throw "Thread is not complete";
     }
   },
-  
+
   /* Suspends a running Thread until this Thread is complete. */
   join: function() {
     if (this._state == "run") {
       var _this = this;
-      return new $tr.WithThread(function(currentThread) { 
+      return new $tr.WithThread(function(currentThread) {
           _this.waitingThreads.push(currentThread);
           return new $tr.Suspend(null);
         });
@@ -114,7 +187,7 @@ $tr.Thread.prototype = {
       return new $tr.Result(this.value());
     }
   },
-  
+
   popReturnHandler : function () {
     var handler = null;
     while(this._stack.length != 0 && handler == null) {
@@ -130,10 +203,12 @@ $tr.Thread.prototype = {
     }
     return catcher;
   },
-  
+
   _run : function(r, isException) {
     var traceLog = [];
     while (true) {
+      $tr.currentResult = null;
+
       // Handy for debug
       traceLog.push(r);
       if (traceLog.length > 100)
@@ -147,6 +222,8 @@ $tr.Thread.prototype = {
           var catcher = this.popCatcher();
           if (catcher != null) {
             r = catcher(r);
+            if ($tr.currentResult != null)
+              r = $tr.currentResult;
           }
           else {
             this._state = "throw";
@@ -157,15 +234,21 @@ $tr.Thread.prototype = {
         }
         if (r instanceof $tr.Jump) {
           r = r.method.apply(r.object, r.args);
+          if ($tr.currentResult != null)
+            r = $tr.currentResult;
         }
         else if(r instanceof $tr.Call) {
           this._stack.push([r.rest, null]);
           r = r.method.apply(r.object, r.args);
+          if ($tr.currentResult != null)
+            r = $tr.currentResult;
         }
         else if(r instanceof $tr.Result) {
           var handler = this.popReturnHandler();
           if (handler != null) {
             r = handler(r.value);
+            if ($tr.currentResult != null)
+              r = $tr.currentResult;
           }
           else {
             this._state = "return";
@@ -180,6 +263,8 @@ $tr.Thread.prototype = {
         }
         else if(r instanceof $tr.WithThread) {
           r = r.withThread(this);
+          if ($tr.currentResult != null)
+            r = $tr.currentResult;
         }
         else if(r instanceof $tr.Suspend) {
           if(r.resume != null)
@@ -195,6 +280,8 @@ $tr.Thread.prototype = {
           var handler = this.popReturnHandler();
           if (handler != null) {
             r = handler(r);
+            if ($tr.currentResult != null)
+              r = $tr.currentResult;
           }
           else {
             this._state = "return";
@@ -208,7 +295,7 @@ $tr.Thread.prototype = {
       catch(e) {
         isException = true;
         r = e;
-      }     
+      }
     }
   },
 
@@ -224,6 +311,7 @@ $tr.Thread.prototype = {
 }
 
 $hs.hscall = function () {
+    console.log(this.arity + " " + arguments);
     if (this.arity == arguments.length) { // EXACT and THUNK rules
         return new $tr.Jump(this.evaluate, this, arguments);
     } else if (this.arity < arguments.length) { // CALLK and TCALL rules
@@ -241,6 +329,9 @@ $hs.hscall = function () {
     }
 };
 
+/**
+ * @constructor
+ */
 $hs.Pap = function(obj, args) {
     this.arity = obj.arity - args.length;
     this.object = obj;
@@ -258,19 +349,48 @@ $hs.Pap.prototype = {
             for (var i = 0; i < k; i++)
                 newArguments[n + i] = arguments[i];
             return new $tr.Jump(this.object.hscall, this.object, newArguments);
+    },
+    J : function() {
+        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+    },
+    C : function(args, rest) {
+        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
     }
 };
 
-$hs.Func = function(a) {
+/**
+ * @constructor
+ */
+function $Func(a, f, info) {
     this.arity = a;
+    this.evaluate = f;
+    this.info = info;
 };
-$hs.Func.prototype = {
+$Func.prototype = {
     hscall: $hs.hscall,
-    notEvaluated: false
+    notEvaluated: false,
+    J : function() {
+        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+    },
+    C : function(args, rest) {
+        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
+    }
+};
+function $F(a, f, info) {
+    return new $Func(a, f, info);
+};
+function $f(a, f, info) {
+    return new $Func(a, f, info);
 };
 
-$hs.Thunk = function() {};
-$hs.Thunk.prototype = {
+/**
+ * @constructor
+ */
+function $Thunk(f, info) {
+    this.evaluateOnce = f;
+    this.info = info;
+};
+$Thunk.prototype = {
     hscall: $hs.hscall,
     arity: 0,
     notEvaluated: true,
@@ -280,19 +400,86 @@ $hs.Thunk.prototype = {
             _this.evaluate = function () { return new $tr.Result(res); };
             return new $tr.Result(res);
         });
+    },
+    J : function() {
+        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+    },
+    C : function(args, rest) {
+        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
     }
 };
-
-$hs.Data = function (t) {
-    this.tag = t;
+function $T(f, info) {
+    return new $Thunk(f, info);
 };
-$hs.Data.prototype = {
+function $t(f, info) {
+    return new $Thunk(f, info);
+};
+
+/**
+ * @constructor
+ */
+function $Data(t, f, info) {
+    this.g = t;
+    this.evaluateOnce = f;
+    this.info = info;
+};
+$Data.prototype = {
+    hscall: $hs.hscall,
+    arity: 0,
+    notEvaluated: true,
+    evaluate: function() {
+        var _this = this;
+        return new $tr.Call(_this.evaluateOnce, _this, [], function (res) {
+            _this.v = res;
+            _this.notEvaluated = false;
+            _this.evaluate = function () { return new $tr.Result(_this); };
+            return new $tr.Result(_this);
+        });
+    },
+    J : function() {
+        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+    },
+    C : function(args, rest) {
+        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
+    }
+};
+function $D(tag, f, info) {
+//    if (typeof f != 'function')
+//        throw "Not a function!";
+    return new $Data(tag, f, info);
+};
+
+/**
+ * @constructor
+ */
+function $DataValue(t, v, info) {
+    this.g = t;
+    this.v = v;
+    this.info = info;
+};
+$DataValue.prototype = {
     hscall: $hs.hscall,
     arity: 0,
     notEvaluated: false,
     evaluate: function() {
         return new $tr.Result(this);
+    },
+    J : function() {
+        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+    },
+    C : function(args, rest) {
+        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
     }
+};
+function $R(tag, v, info) {
+//    if (typeof f == 'function')
+//        throw "A function!";
+    $tr.currentResult = new $DataValue(tag, v, info);
+};
+function $d(tag, v, info) {
+//    if (typeof f == 'function')
+//        throw "A function!";
+    return new $DataValue(tag, v, info);
 };
 
 $hs.force = function () {
@@ -308,11 +495,11 @@ $hs.Thread = {
         var t = $tr.Scheduler.start(a.hscall(s));
         $tr.traceThread("fork thread " + t.threadID);
         return new $tr.Result([s, t]);
-    },    
+    },
     forkOn : function (n, a, s) {return fork(a,s);},
     yieldThread : function (s) {
         $tr.traceThread("yield thread");
-        return new $tr.Yield(new $Result(s));
+        return new $tr.Yield(new $tr.Result(s));
     },
     myThreadId : function (s) {
         return new $tr.WithThread(function (t) {
@@ -324,8 +511,8 @@ $hs.Thread = {
 
 $hs.MutVar.atomicModify = function (a, b, s) {
     return new $tr.Call(b.hscall, b, [a.value], function (res) {
-        a.value = res.data[0];
-        return new $tr.Result([s, res.data[1]]);
+        a.value = res.v[0];
+        return new $tr.Result([s, res.v[1]]);
       });
 };
 
@@ -335,7 +522,7 @@ $hs.MVar = {
         return [s, {value : null, waiting : []}];
     },
     take : function (a, s) {
-        var takeWhenNotEmpty = function (_x) {
+        var takeWhenNotEmpty = function (_) {
             $tr.traceMVar("take taking");
             var result = a.value;
             a.value = null;
@@ -373,7 +560,7 @@ $hs.MVar = {
         return new $tr.Result([s, 1, result]);
     },
     put : function (a, b, s) {
-        var putWhenEmpty = function (_x) {
+        var putWhenEmpty = function (_) {
             $tr.traceMVar("put putting");
             a.value = b;
             if (a.waiting.length != 0) {
@@ -384,7 +571,7 @@ $hs.MVar = {
             }
             return new $tr.Result(s);
         }
-        if (a.value !== null) {
+        if (a.value != null) {
             $tr.traceMVar("put waiting");
             return new $tr.WithThread(function (t) {
                 a.waiting.push(t);

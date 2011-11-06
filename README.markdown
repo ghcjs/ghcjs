@@ -94,14 +94,14 @@ and use compiled Javascript on 64-bit system.
 
     $ cd ghc-x.xx.x
     $ cd libraries/ghc-prim
-    $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/Types.hs 
+    $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/Types.hs
     $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/*
 
 === Building integer-simple
 
     $ cd ghc-x.xx.x
     $ cd libraries/integer-simple
-    $ ghcjs -odir <javascript files folder>/integer-simple -hidir <javascript files folder>/integer-simple -cpp -fglasgow-exts -package-name integer-simple GHC/Integer.hs 
+    $ ghcjs -odir <javascript files folder>/integer-simple -hidir <javascript files folder>/integer-simple -cpp -fglasgow-exts -package-name integer-simple GHC/Integer.hs
 
 === Building base
 
@@ -156,3 +156,43 @@ Features
        $ ghcjs --calling-convention=trampoline
 
    To optimize tail recursion in resulting code.
+
+Reading The Code
+----------------
+
+It would be nice to use a source map to avoid reading the generated javascript
+at all.  But until that is done here are some use things to know.
+
+Many of the names used have been shortened to a single character to reduce the
+size of the java script.  Here is a key so you can work out what they do.
+
+<table>
+    <tr>
+        <th>Name</th>
+        <th>Description</th>
+    </tr>
+    <tr>
+        <td>G</td>
+        <td><td/>
+    </tr>
+    <tr>
+        <td></td>
+        <td><td/>
+    </tr>
+    <tr>
+        <td></td>
+        <td><td/>
+    </tr>
+    <tr>
+        <td></td>
+        <td><td/>
+    </tr>
+    <tr>
+        <td></td>
+        <td><td/>
+    </tr>
+    <tr>
+        <td></td>
+        <td><td/>
+    </tr>
+</table>

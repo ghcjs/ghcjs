@@ -14,17 +14,13 @@ import Javascript.Formatted.Base
 leftBinOp :: String -> Precedence -> Expression Formatted -> Expression Formatted -> Expression Formatted
 leftBinOp op p a b = mkOperation p $
   do tellWithPrecedenceConstraint a p
-     tell " "
      tell op
-     tell " "
      tellWithPrecedenceConstraint b (p - 1)
 
 rightBinOp :: String -> Precedence -> Expression Formatted -> Expression Formatted -> Expression Formatted
 rightBinOp op p a b = mkOperation p $
   do tellWithPrecedenceConstraint a (p - 1)
-     tell " "
      tell op
-     tell " "
      tellWithPrecedenceConstraint b p
 
 leftUnaryOp :: String -> Precedence -> Expression Formatted -> Expression Formatted
@@ -39,7 +35,7 @@ instance JavascriptExpression Formatted
 	string = mkOperation 0 . tell . showJsString
 	list xs = mkOperation 0 $
           do tell "["
-             sequence_ . intersperse (tell ", ") . map tellUnconstraint $ xs
+             sequence_ . intersperse (tell ",") . map tellUnconstraint $ xs
              tell "]"
         object xs = mkOperation 0 $
           do tell "{"
@@ -63,18 +59,18 @@ instance JavascriptExpression Formatted
           do tell "new "
              tellWithPrecedenceConstraint conctructor 1
              tell "("
-             sequence_ . intersperse (tell ", ") . map tellUnconstraint $ args
+             sequence_ . intersperse (tell ",") . map tellUnconstraint $ args
              tell ")"
 	subscript a i = mkOperation 1 $
           do tellWithPrecedenceConstraint a 1
              tell "["
-             tellUnconstraint i 
+             tellUnconstraint i
              tell "]"
         ternary test t f = mkOperation 15 $
           do tellWithPrecedenceConstraint test 15
-             tell " ? "
+             tell "?"
              tellWithPrecedenceConstraint t 15
-             tell " : "
+             tell ":"
              tellWithPrecedenceConstraint f 15
         assignment a b =     rightBinOp  "="  16 a b
         or a b =             leftBinOp   "||" 14 a b
@@ -107,19 +103,19 @@ instance JavascriptNativeCall Formatted
   where nativeFunctionCall func args = mkOperation 2 $
           do tellWithPrecedenceConstraint func 2
              tell "("
-             sequence_ . intersperse (tell ", ") . map tellUnconstraint $ args
+             sequence_ . intersperse (tell ",") . map tellUnconstraint $ args
              tell ")"
         nativeMethodCall obj method args = mkOperation 2 $
           do tellWithPrecedenceConstraint obj 2
              tell "."
              tell method
              tell "("
-             sequence_ . intersperse (tell ", ") . map tellUnconstraint $ args
+             sequence_ . intersperse (tell ",") . map tellUnconstraint $ args
              tell ")"
 
 instance JavascriptCallable Formatted
   where function args body = mkOperation 0 $
-          do tell $ concat ["function (", intercalate ", " args, ") {"]
+          do tell $ concat ["function(", intercalate "," args, "){"]
              indent $ unP body
              newLine
              tell "}"

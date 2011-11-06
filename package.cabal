@@ -8,10 +8,11 @@ Copyright:      Victor Nazarov
 Maintainer:     Victor Nazarov <asviraspossible@gmail.com>
 Stability:      Experimental
 Build-Type:     Simple
-Cabal-Version:  >= 1.6
+Cabal-Version:  >= 1.10
 
 Executable ghcjs
     Main-Is:        Compiler/Main.hs
+    Default-Language: Haskell2010
     Hs-Source-Dirs: src
     Build-Depends:  base >=3 && <5, ghc, ghc-paths, monads-tf, containers, filepath
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans
@@ -19,3 +20,10 @@ Executable ghcjs
                     Javascript.Formatted.Expression, Javascript.Formatted.Statement,
                     Javascript.Formatted, RTS.Objects, Generator.Helpers, Generator.Dependencies,
                     Generator.PrimOp, Generator.FFI, Generator.Core, Generator.TopLevel
+
+test-suite test
+    type:       exitcode-stdio-1.0
+    Default-Language: Haskell2010
+    hs-source-dirs: examples
+    main-is:    BuildTest.hs
+    build-depends: base >=3 && <5, process

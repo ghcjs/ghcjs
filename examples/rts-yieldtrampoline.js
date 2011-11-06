@@ -97,7 +97,7 @@ $hs.Thunk.prototype = {
 };
 
 $hs.Data = function (t) {
-    this.tag = t;
+    this.g = t;
 };
 
 $hs.Data.prototype = {
@@ -124,7 +124,7 @@ $hs.Thread = {
         $yt.Scheduler.start(t);
         $yt.traceThread("fork thread " + t.threadID);
         yield [s, t];
-    },    
+    },
     forkOn : function (n, a, s) {yield fork(a,s);},
     yieldThread : function (s) {
         $yt.traceThread("yield thread");

@@ -6,40 +6,47 @@ import Javascript.Language (Javascript, Expression)
 root :: Javascript js => Expression js
 root = Js.var "$hs"
 
-modules :: Javascript js => Expression js
-modules = Js.property root "modules"
-
-moduleDependencies :: Javascript js => Expression js -> Expression js
-moduleDependencies mod = Js.property mod "dependencies"
-
 true :: Javascript js => Expression js
-true = modules # "GHCziBool" # "hs_True"
-  where (#) = Js.property
+true = Js.var "$$GHCziTypes_True"
 
 false :: Javascript js => Expression js
-false = modules # "GHCziBool" # "hs_False"
-  where (#) = Js.property
+false = Js.var "$$GHCziTypes_False"
 
-thunk :: Javascript js => Expression js
-thunk = Js.property root "Thunk"
+makeThunkStub :: Javascript js => Expression js
+makeThunkStub = Js.var "$Thunk" -- Js.property (Js.var "m") "T"
 
-func :: Javascript js => Expression js
-func = Js.property root "Func"
+makeFuncStub :: Javascript js => Expression js
+makeFuncStub = Js.var "$Func" -- Js.property (Js.var "m") "F"
 
-conApp :: Javascript js => Expression js
-conApp = Js.property root "Data"
+makeDataStub :: Javascript js => Expression js
+makeDataStub = Js.var "$Data" -- Js.property (Js.var "m") "D"
 
-thunkEvalOnceFunctionName :: Js.Id
-thunkEvalOnceFunctionName = "evaluateOnce"
+makeThunkLocalStub :: Javascript js => Expression js
+makeThunkLocalStub = Js.var "$Thunk"
 
-evalFunctionName :: Js.Id
-evalFunctionName = "evaluate"
+makeFuncLocalStub :: Javascript js => Expression js
+makeFuncLocalStub = Js.var "$Func"
+
+makeDataLocalStub :: Javascript js => Expression js
+makeDataLocalStub = Js.var "$Data"
+
+makeThunk :: Javascript js => Expression js
+makeThunk = Js.var "$t"
+
+makeFunc :: Javascript js => Expression js
+makeFunc = Js.var "$f"
+
+makeData :: Javascript js => Expression js
+makeData = Js.var "$d"
+
+returnData :: Javascript js => Expression js
+returnData = Js.var "$R"
 
 conAppArgVector :: Javascript js => Expression js -> Expression js
-conAppArgVector object = Js.property object "data"
+conAppArgVector object = Js.property object "v"
 
 conAppTag :: Javascript js => Expression js -> Expression js
-conAppTag object = Js.property object "tag"
+conAppTag object = Js.property object "g"
 
 applyMethodName :: Js.Id
 applyMethodName = "hscall"

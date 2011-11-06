@@ -5,13 +5,17 @@ import Javascript.Formatted.Base (Formatted)
 import Javascript.Formatted.Expression ()
 import Javascript.Formatted.Statement ()
 import Data.Monoid (Monoid(..))
+import qualified RTS.Objects as RTS
 
 instance JavascriptCall Formatted
   where assignMethodCallResult v obj method args rest = mconcat
             [ assign (var v) $ nativeMethodCall obj method args
             , rest ]
+        declareApplyMethodCallResult var obj args rest = mconcat
+            [ declare [(var, nativeMethodCall obj RTS.applyMethodName args)]
+            , rest ]
         declareMethodCallResult var obj method args rest = mconcat
-            [ declare var $ nativeMethodCall obj method args
+            [ declare [(var, nativeMethodCall obj method args)]
             , rest ]
         callMethod obj method args rest = mconcat
             [ expression $ nativeMethodCall obj method args
@@ -20,21 +24,27 @@ instance JavascriptCall Formatted
             [ assign (var v) $ nativeFunctionCall func args
             , rest ]
         declareFunctionCallResult var func args rest = mconcat
-            [ declare var $ nativeFunctionCall func args
+            [ declare [(var, nativeFunctionCall func args)]
             , rest ]
         callFunction func args rest = mconcat
             [ expression $ nativeFunctionCall func args
             , rest ]
-        maybeAssignMethodCallResult pred v obj method args rest = mconcat
-            [ Js.declare v obj
-            , Js.if_ (pred) $
-                assign (Js.var v) $ nativeMethodCall obj method args
+        maybeAssignApplyMethodCallResult v obj rest = mconcat
+            [ Js.declare [(v, obj)]
+            , Js.if_ (RTS.isNotEvaluatedAndNotPrimitive obj) $
+                assign (Js.var v) $ nativeMethodCall obj RTS.applyMethodName []
             , rest
             ]
 
 instance JavascriptJump Formatted
-  where jumpToMethod obj method args = Js.return $ nativeMethodCall obj method args
+  where jumpToApplyMethod obj args = Js.return $ nativeMethodCall obj RTS.applyMethodName args
+	jumpToMethod obj method args = Js.return $ nativeMethodCall obj method args
 	jumpToFunction func args = Js.return $ nativeFunctionCall func args
+        maybeJumpToApplyMethod obj =
+            Js.ifelse (RTS.isNotEvaluatedAndNotPrimitive obj)
+                (Js.jumpToApplyMethod obj [])
+                (Js.return obj)
+        returnValue v = Js.return $ Js.nativeFunctionCall (RTS.returnData) v
 
 instance Javascript Formatted
 

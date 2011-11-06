@@ -24,13 +24,15 @@ type FormattedWriter = ReaderT Identation (Writer String)
 newtype Formatted = P { unP :: FormattedWriter () }
 
 indent :: FormattedWriter a -> FormattedWriter a
-indent = local (+4)
+indent = local (+1)
 
 newLine :: FormattedWriter ()
 newLine =
   do tell "\n"
      n <- ask
-     tell $ replicate n ' '
+     let (t, s) = quotRem n 8
+     tell $ replicate t '\t'
+     tell $ replicate s ' '
 
 instance Show Formatted
   where show = execWriter . flip runReaderT 0 . unP

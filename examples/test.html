@@ -1,59 +1,8 @@
 <html>
   <head>
     <title>ghcjs-test</title>
-    <script type="text/javascript" src="rts-common.js"></script>
-    <script type="text/javascript" src="rts-trampoline.js"></script>
-    <script type="text/javascript">
-      window.onload = function() {
-         // URLs to load modules from in order of precedence
-
-        $hs.loadPaths = ["."];
-
-        // Used packages
-        $hs.packages = ["/main", "/ghc-prim", "/integer-simple", "/base"];
-
-        // Must be called first
-        $hs.init();
-
-        $hs.loadModule("Test");
-
-        try {
-
-          if ($hs.Thread && $hs.MVar) {
-            res = $hs.fromHaskellInt($hs.fromHaskellIO($hs.modules.Test.hs_test10));
-            alert("Thread test returned " + res);
-          }
-
-          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test1);
-          alert(res);
-
-          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test2);
-          alert(res);
-
-          var res = $hs.fromHaskellInt($hs.modules.Test.hs_test3);
-          alert(res);
-
-          var res = $hs.fromHaskellString($hs.modules.Test.hs_test4);
-          alert(res);
-
-          var res = $hs.fromHaskellString($hs.modules.Test.hs_test5);
-          alert(res);
-
-          var res = $hs.fromHaskellString($hs.modules.Test.hs_test6);
-          alert(res);
-
-          var res = $hs.fromHaskellString($hs.modules.Test.hs_test7);
-          alert(res);
-
-          var res = $hs.fromHaskellInt($hs.fromHaskellIO($hs.modules.Test.hs_test9));
-          alert(res);
-
-        } catch (e) {
-          alert(e);
-        }
-      }
-    </script>
-  </head>
+    <script type="text/javascript" src="all.js"></script>
+ </head>
   <body>
     <div id="log">
     </div>

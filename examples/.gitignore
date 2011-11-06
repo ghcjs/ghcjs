@@ -1,3 +1,7 @@
 /base/
 /ghc-prim/
 /integer-simple/
+/base.js
+/ghc-prim.js
+/integer-simple.js
+/main.js

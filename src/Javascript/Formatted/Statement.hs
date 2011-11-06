@@ -4,37 +4,44 @@ import Control.Monad.Writer (tell)
 
 import Javascript.Language
 import Javascript.Formatted.Base
+import Control.Monad (unless)
 
 instance JavascriptStatement Formatted
   where expression expr = P $
           do newLine
              tellUnconstraint expr
              tell ";"
-        declare id expr = P $
+        declare decls = P $ unless (Prelude.null decls) $
           do newLine
-             tell $ concat ["var ", id, " = "]
-             tellUnconstraint expr
+             tell "var "
+             flip mapM_ (init decls) $ \d -> do
+                decl d
+                tell ","
+             decl (last decls)
              tell ";"
+          where decl (id, expr) = do
+                    tell $ concat [id, "="]
+                    tellUnconstraint expr
 	ifthenelse test block1 maybeBlock2 = P $
 	    do newLine
-               tell "if ("
+               tell "if("
                tellUnconstraint test
-               tell ") {"
+               tell "){"
 	       indent $ unP block1
                newLine
 	       tell "}"
                case maybeBlock2
                  of Nothing -> Prelude.return ()
                     Just block2 ->
-                      do tell " else {"
+                      do tell "else{"
                          indent $ unP block2
                          newLine
 	                 tell "}"
 	switch scrut def cases = P $
           do newLine
-             tell "switch ("
+             tell "switch("
              tellUnconstraint scrut
-             tell ") {"
+             tell "){"
              unP casesP
              defP
              newLine
@@ -55,6 +62,7 @@ instance JavascriptStatement Formatted
                      tellUnconstraint expr
                      tell ":"
                      indent prog
+                     tell "break;"
         throw e = P $
           do newLine
              tell "throw "

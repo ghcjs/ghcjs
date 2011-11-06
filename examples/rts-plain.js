@@ -36,16 +36,33 @@ $hs.Pap.prototype = {
     }
 };
 
-$hs.Func = function(a) {
+/**
+ * @constructor
+ */
+function $Func(a, f, info) {
     this.arity = a;
+    this.evaluate = f;
+    this.n = info;
 };
-$hs.Func.prototype = {
+$Func.prototype = {
     hscall: $hs.hscall,
     notEvaluated: false
 };
+function $F(a, f, info) {
+    return new $Func(a, f, info);
+};
+function $f(a, f, info) {
+    return new $Func(a, f, info);
+};
 
-$hs.Thunk = function() {};
-$hs.Thunk.prototype = {
+/**
+ * @constructor
+ */
+function $Thunk(f, info) {
+    this.evaluateOnce=f;
+    this.info=info;
+};
+$Thunk.prototype = {
     hscall: $hs.hscall,
     arity: 0,
     notEvaluated: true,
@@ -55,17 +72,64 @@ $hs.Thunk.prototype = {
         return res;
     }
 };
-
-$hs.Data = function (t) {
-    this.tag = t;
+function $T(f, info) {
+    return new $Thunk(f, info);
 };
-$hs.Data.prototype = {
+function $t(f, info) {
+    return new $Thunk(f, info);
+};
+
+/**
+ * @constructor
+ */
+function $Data(t, f, info) {
+    this.g = t;
+    this.evaluateOnce = f;
+    this.info = info;
+};
+$Data.prototype = {
+    hscall: $hs.hscall,
+    arity: 0,
+    notEvaluated: true,
+    evaluate: function() {
+        this.v = this.evaluateOnce();
+        this.notEvaluated = false;
+        var _this = this;
+        this.evaluate = function () { return _this; }
+        return this;
+    }
+};
+function $D(tag, f, info) {
+//    if (typeof f != 'function')
+//        throw "Not a function!";
+    return new $Data(tag, f, info);
+};
+
+/**
+ * @constructor
+ */
+function $DataValue(t, v, info) {
+    this.g = t;
+    this.v = v;
+    this.info = info;
+};
+$DataValue.prototype = {
     hscall: $hs.hscall,
     arity: 0,
     notEvaluated: false,
     evaluate: function() {
         return this;
     }
+};
+function $R(tag, v, info) {
+//    if (typeof f == 'function')
+//        throw "A function!";
+    return new $DataValue(tag, v, info);
+};
+function $d(tag, v, info) {
+//    if (typeof f == 'function')
+//        throw "A function!";
+    return new $DataValue(tag, v, info);
 };
 
 $hs.force = function () {

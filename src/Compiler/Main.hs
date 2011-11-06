@@ -7,21 +7,23 @@ import HscMain (hscSimplify)
 import TidyPgm (tidyProgram)
 import CoreToStg (coreToStg)
 import SimplStg (stg2stg)
-import DynFlags ( defaultDynFlags )
-import HscTypes (liftIO, ModGuts, CgGuts (..))
+import DynFlags (defaultLogAction)
+import HscTypes (ModGuts, CgGuts (..))
 import CorePrep (corePrepPgm)
 import DriverPhases (HscSource (HsBootFile))
 
 import System.Environment (getArgs)
-import System.FilePath (replaceExtension)
 
 import qualified Generator.TopLevel as Js (generate)
 import Javascript.Language (Javascript)
 import qualified Javascript.Formatted as Js
 import qualified Javascript.Trampoline as Js
-import qualified Javascript.YieldTrampoline as Js
+import MonadUtils (MonadIO(..))
+import Generator.Helpers (newGenState)
+import Control.Monad.State.Lazy (runState)
+import System.IO (hFlush, openFile, hPutStrLn, Handle, IOMode(..))
 
-data CallingConvention = Plain | Trampoline | YieldTrampoline
+data CallingConvention = Plain | Trampoline
 
 main :: IO ()
 main =
@@ -33,27 +35,28 @@ main =
            case args
              of ("--calling-convention=plain":args) -> (Plain, args)
                 ("--calling-convention=trampoline":args) -> (Trampoline, args)
-                ("--calling-convention=yield":args) -> (YieldTrampoline, args)
                 _ -> (Plain, args)
-     defaultErrorHandler defaultDynFlags $ runGhc (Just GHC.Paths.libdir) $
+     defaultErrorHandler defaultLogAction $ runGhc (Just GHC.Paths.libdir) $
        do sdflags <- getSessionDynFlags
-          (dflags, fileargs', _) <- parseDynamicFlags sdflags (map noLoc args') 
+          (dflags, fileargs', _) <- parseDynamicFlags sdflags (map noLoc args') -- ("-DWORD_SIZE_IN_BITS=32":args'))
           _ <- setSessionDynFlags dflags
           let fileargs = map unLoc fileargs'
           targets <- mapM (flip guessTarget Nothing) fileargs
           setTargets targets
           _ <- load LoadAllTargets
           mgraph <- depanal [] False
-          mapM_ (compileModSummary callingConvention) mgraph
+          let outputFileName = maybe "a.js" id (outputFile dflags)
+          output <- liftIO $ openFile outputFileName WriteMode
+          mapM_ (compileModSummary output callingConvention) mgraph
 
-compileModSummary :: GhcMonad m => CallingConvention -> ModSummary -> m ()
-compileModSummary callingConvention mod =
+compileModSummary :: GhcMonad m => Handle -> CallingConvention -> ModSummary -> m ()
+compileModSummary output callingConvention mod =
   case ms_hsc_src mod
   of HsBootFile -> liftIO $ putStrLn $ concat ["Skipping boot ", name]
      _ ->
        do liftIO $ putStrLn $ concat ["Compiling ", name]
           desugaredMod <- desugaredModuleFromModSummary mod
-          writeDesugaredModule callingConvention desugaredMod
+          writeDesugaredModule output callingConvention desugaredMod
   where name = moduleNameString . moduleName . ms_mod $ mod
 
 desugaredModuleFromModSummary :: GhcMonad m => ModSummary -> m DesugaredModule
@@ -62,22 +65,24 @@ desugaredModuleFromModSummary mod =
      typedCheckMod <- typecheckModule parsedMod
      desugarModule typedCheckMod
 
-writeDesugaredModule :: GhcMonad m => CallingConvention -> DesugaredModule -> m ()
-writeDesugaredModule callingConvention mod =
+writeDesugaredModule :: GhcMonad m => Handle -> CallingConvention -> DesugaredModule -> m ()
+writeDesugaredModule output callingConvention mod =
   do tidyCore <- cgGutsFromModGuts (coreModule mod)
      program <- liftIO $ concreteJavascriptFromCgGuts dflags callingConvention tidyCore
      liftIO $
-       do putStrLn $ concat ["Writing module ", name, " (to ", outputFile, ")"]
-          writeFile outputFile program
+       do putStrLn $ concat ["Writing module ", name]
+          hPutStrLn output $ "// Module " ++ name
+          hPutStrLn output program
+          hFlush output
+          return ()
   where summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
-        outputFile = replaceExtension (ml_hi_file . ms_location $ summary) ".js"
         name = moduleNameString . moduleName . ms_mod $ summary
         dflags = ms_hspp_opts $ summary
 
 cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
 cgGutsFromModGuts guts =
   do hscEnv <- getSession
-     simplGuts <- hscSimplify guts
+     simplGuts <- liftIO $ hscSimplify hscEnv guts
      (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
      return cgGuts
 
@@ -87,10 +92,9 @@ concreteJavascriptFromCgGuts dflags callingConvention core =
      stg <- coreToStg (modulePackageId . cg_module $ core) core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
      let abstract :: Javascript js => js
-         abstract = Js.generate (cg_module core) stg'
+         abstract = fst $ runState (Js.generate (cg_module core) stg') newGenState
      return $
        case callingConvention
        of Plain -> show (abstract :: Js.Formatted)
           Trampoline -> show (abstract :: Js.Trampoline Js.Formatted)
-          YieldTrampoline -> show (abstract :: Js.YieldTrampoline Js.Formatted)
 
