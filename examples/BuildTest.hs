@@ -30,15 +30,20 @@ main = do
         "-o", concat [dstPath env, "/main.js"],
         concat ["-i", dstPath env, "/main"], "Test" ]
     checkExit . system . intercalate " " $ [
-        "java", "-Xmx1G", "-jar", "~/closure-compiler/compiler.jar",
-        "--js", "examples/rts-common.js",
-        "--js", concat ["examples/rts-", conv, ".js"],
-        "--js", concat [dstPath env, "/ghc-prim.js"],
-        "--js", concat [dstPath env, "/integer-simple.js"],
-        "--js", concat [dstPath env, "/base.js"],
-        "--js", concat [dstPath env, "/main.js"],
+        "dist/build/ghcjs-link/ghcjs-link",
+        "-Xmx1G", "-jar", "~/closure-compiler/compiler.jar",
+        "--pages_module", "Test",
+        "--js", "~/closure-library/closure/goog/base.js",
+        "--js", "../ghcjs-rts/rts-common.js",
+        "--define='HS_DEBUG=false'",
+        "--js", concat ["../ghcjs-rts/rts-", conv, ".js"],
+        "--module", "rts:3:",
+        "--hjs", concat [dstPath env, "/ghc-prim"],
+        "--hjs", concat [dstPath env, "/integer-simple"],
+        "--hjs", concat [dstPath env, "/base"],
+        "--hjs", concat [dstPath env, "/main"],
         "--js", "examples/TestJS.js",
-        "--module", "all:7:",
+        "--module", "test:2:rts",
         "--module_output_path_prefix", concat [dstPath env, "/"],
         "--compilation_level", "ADVANCED_OPTIMIZATIONS",
         "--manage_closure_dependencies"]
@@ -55,13 +60,12 @@ packages =
     , [ "GHC.Debug"
       , "GHC.Generics"
       , "GHC.IntWord64"
-      , "GHC.Ordering"
       , "GHC.Tuple"
       , "GHC.Types"
-      , "GHC.Unit"
+      , "GHC.Classes"
       ]
     )
-  , ("integer-simple", ["GHC.Integer"])
+  , ("integer-simple", ["GHC.Integer","GHC.Integer.Logarithms","GHC.Integer.Logarithms.Internals"])
   , ("base", ["Prelude"])
   ]
 

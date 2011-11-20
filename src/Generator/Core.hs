@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE CPP, ScopedTypeVariables #-}
 module Generator.Core (withBindings, notExportedDecl, creation, definition) where
 
 import Data.List (partition, find)
@@ -6,7 +6,7 @@ import Data.Monoid (Monoid(..), mconcat)
 
 import Panic (panic)
 
-import DataCon as Stg (DataCon, dataConTag)
+import DataCon as Stg (DataCon, dataConTag, dataConName)
 import Id as Stg (Id)
 import CoreSyn as Stg (AltCon (DataAlt, LitAlt, DEFAULT))
 import StgSyn as Stg
@@ -20,6 +20,9 @@ import Generator.PrimOp
 import Generator.FFI
 import qualified RTS.Objects as RTS
 import Control.Applicative ((<$>))
+import Name (getOccName, getName, pprNameDefnLoc)
+import OccName (occNameString)
+import Outputable (showSDoc)
 
 binding :: Javascript js => StgBinding -> Gen js
 binding (StgNonRec id rhs) = nonRecDeclAndDef id rhs
@@ -34,7 +37,7 @@ bindings binds = do
         exportedDecl id rhs = do
             i <- stgIdToJs id
             r <- creation id rhs
-            return $ Js.assign i r
+            return $ Js.assign (Js.var i) r
 
 notExportedDecl :: Javascript js => (Stg.Id, StgRhs) -> Gen (Js.Id, Expression js)
 notExportedDecl (id, rhs) = do
@@ -45,8 +48,11 @@ notExportedDecl (id, rhs) = do
 withBindings :: Javascript js => (Stg.Id -> StgRhs -> Gen js) -> [(Stg.Id, StgRhs)] -> Gen js
 withBindings f b = mconcat <$> mapM (uncurry f) b
 
-debugInfo :: Js.Javascript js => Stg.Id -> [Expression js]
-debugInfo _id = [] -- [Js.string . occNameString $ getOccName id]
+debugInfo :: Js.Javascript js => Stg.Id -> Gen [Expression js]
+debugInfo x = do
+    case showSDoc . pprNameDefnLoc $ getName x of
+        "at <no location info>" -> return []
+        s                       -> return [Js.string s]
 
 creation :: Javascript js => Stg.Id -> StgRhs -> Gen (Expression js)
 creation id (StgRhsCon _cc con args) = do
@@ -56,43 +62,47 @@ creation id rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt args body)
   | isUpdatable upd_flag = do
         a <- mapM stgIdToJsId args
         b <- expression body
-        return $ Js.new RTS.makeThunkLocalStub $ [Js.function a b] ++ debugInfo id
+        info <- debugInfo id
+        return $ Js.new RTS.makeThunkLocalStub $ [Js.function a b] ++ info
   | otherwise = do
         a <- mapM stgIdToJsId args
         b <- expression body
-        return $ Js.new RTS.makeFuncLocalStub $ [Js.int (stgRhsArity rhs), Js.function a b] ++ debugInfo id
+        info <- debugInfo id
+        return $ Js.new RTS.makeFuncLocalStub $ [Js.int (stgRhsArity rhs), Js.function a b] ++ info
 
 dataCreation :: Javascript js => Stg.Id -> DataCon -> [Expression js] -> Gen (Expression js)
 dataCreation id con args
   | isUnboxedTupleCon con = return $ Js.list args
-  | otherwise = return $ Js.new RTS.makeDataLocalStub $ [Js.int (dataConTag con), Js.function [] (Js.return $ Js.list args)] ++ debugInfo id
+  | otherwise = do
+    info <- debugInfo id
+    return $ Js.new RTS.makeDataLocalStub $ [Js.int (dataConTag con), Js.function [] (Js.return $ Js.list args)] ++ info
 
 definition :: Javascript js => Stg.Id -> StgRhs -> Gen js
 definition id (StgRhsCon _cc con args)
   | not (isUnboxedTupleCon con) = do
-            en <- stgIdToJsExternalName id
             a <- mapM stgArgToJs args
-            return $ Js.declare [(en,
-                Js.new RTS.makeDataStub $ [Js.int (dataConTag con), Js.function [] (Js.return $ Js.list a)] ++ debugInfo id)]
+            info <- debugInfo id
+            return $ Js.declare [(stgIdToJsExternalName id,
+                Js.new RTS.makeDataStub $ [Js.int (dataConTag con), Js.function [] (Js.return $ Js.list a)] ++ info)]
   | otherwise = do
-            en <- stgIdToJsExternalName id
-            return $ Js.declare [(en, Js.null)]
+            return $ Js.declare [(stgIdToJsExternalName id, Js.null)]
 definition id rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt args body) = do
-            en <- stgIdToJsExternalName id
             a <- mapM stgIdToJsId args
             b <- expression body
-            return $ Js.declare [(en,
+            info <- debugInfo id
+            return $ Js.declare [(stgIdToJsExternalName id,
                 if isUpdatable upd_flag
-                    then Js.new (RTS.makeThunkStub) $ [Js.function a b] ++ debugInfo id
-                    else Js.new (RTS.makeFuncStub) $ [Js.int (stgRhsArity rhs), Js.function a b] ++ debugInfo id)]
+                    then Js.new (RTS.makeThunkStub) $ [Js.function a b] ++ info
+                    else Js.new (RTS.makeFuncStub) $ [Js.int (stgRhsArity rhs), Js.function a b] ++ info)]
 
 nonRecDeclAndDef :: Javascript js => Stg.Id -> StgRhs -> Gen js
 nonRecDeclAndDef id (StgRhsCon _cc con args)
   | not (isUnboxedTupleCon con) = do
             i <- stgIdToJsId id
             a <- mapM stgArgToJs args
+            info <- debugInfo id
             return $ Js.declare [(i,
-                Js.nativeFunctionCall (RTS.makeData) $ [Js.int (dataConTag con), Js.list a] ++ debugInfo id)]
+                Js.nativeFunctionCall (RTS.makeData) $ [Js.int (dataConTag con), Js.list a] ++ info)]
   | otherwise = do
             i <- stgIdToJsId id
             a <- mapM stgArgToJs args
@@ -101,28 +111,33 @@ nonRecDeclAndDef id rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt args body) = d
             i <- stgIdToJsId id
             a <- mapM stgIdToJsId args
             e <- expression body
+            info <- debugInfo id
             return $ Js.declare [(i, if isUpdatable upd_flag
-                then Js.nativeFunctionCall (RTS.makeThunk) $ [Js.function a e] ++ debugInfo id
-                else Js.nativeFunctionCall (RTS.makeFunc) $ [Js.int (stgRhsArity rhs), Js.function a e] ++ debugInfo id)]
+                then Js.nativeFunctionCall (RTS.makeThunk) $ [Js.function a e] ++ info
+                else Js.nativeFunctionCall (RTS.makeFunc) $ [Js.int (stgRhsArity rhs), Js.function a e] ++ info)]
 
 expression :: Javascript js => StgExpr -> Gen js
 expression (StgCase expr _liveVars _liveRhsVars bndr _srt alttype alts) =
   caseExpression expr bndr alttype alts
 expression (StgLet bndn body) = mconcat <$> sequence [binding bndn, expression body]
 expression (StgLetNoEscape _ _ bndn body) = mconcat <$> sequence [binding bndn, expression body]
+#if __GLASGOW_HASKELL__ >= 702
+expression (StgSCC _ _ _ expr) = expression expr
+#else
 expression (StgSCC _ expr) = expression expr
+#endif
 expression (StgTick _ _ expr) = expression expr
-expression (StgApp f []) = Js.maybeJumpToApplyMethod <$> stgIdToJs f
+expression (StgApp f []) = Js.maybeJumpToApplyMethod . Js.var <$> stgIdToJs f
 expression (StgApp f args) = do
     v <- stgIdToJs f
     jsargs <- mapM stgArgToJs args
-    return $ Js.jumpToApplyMethod v jsargs
+    return $ Js.jumpToApplyMethod (Js.var v) jsargs
 expression (StgLit lit) = Js.return <$> stgLiteralToJs lit
 expression (StgConApp con args)
   | isUnboxedTupleCon con = Js.return . Js.list <$> mapM stgArgToJs args
   | otherwise = do
     jsargs <- mapM stgArgToJs args
-    return $ Js.returnValue [Js.int (dataConTag con), Js.list jsargs]
+    return $ Js.returnValue [Js.int (dataConTag con), Js.list jsargs, Js.string . occNameString . getOccName $ dataConName con]
 expression (StgOpApp (StgFCallOp f g) args _ty) = returnForeignFunctionCallResult f g args
 expression (StgOpApp (StgPrimOp op) args _ty) = returnPrimitiveOperationResult op args
 expression (StgOpApp (StgPrimCallOp call) args _ty) = returnPrimitiveCallResult call args
@@ -147,19 +162,19 @@ caseExpressionScrut binder expr altsJs = go expr
               v <- stgIdToJsId binder
               jsargs <- mapM stgArgToJs args
               return $ mconcat
-                [ Js.declare [(v, Js.nativeFunctionCall (RTS.makeData) [Js.int (dataConTag con), Js.list jsargs])]
+                [ Js.declare [(v, Js.nativeFunctionCall (RTS.makeData) [Js.int (dataConTag con), Js.list jsargs, Js.string . occNameString . getOccName $ dataConName con])]
                 , altsJs
                 ]
         go (StgApp f []) = do
           v <- stgIdToJsId binder
           object <- stgIdToJs f
           return $ mconcat
-            [ Js.maybeAssignApplyMethodCallResult v object altsJs]
+            [ Js.maybeAssignApplyMethodCallResult v (Js.var object) altsJs]
         go (StgApp f args) = do
           v <- stgIdToJsId binder
           object <- stgIdToJs f
           jsargs <- mapM stgArgToJs args
-          return $ Js.declareApplyMethodCallResult v object jsargs altsJs
+          return $ Js.declareApplyMethodCallResult v (Js.var object) jsargs altsJs
         go (StgLit lit) = do
           v <- stgIdToJsId binder
           l <- stgLiteralToJs lit
@@ -182,7 +197,7 @@ caseExpressionAlternatives bndr altType [(_altCon, args, useMask, expr)] =
      PrimAlt {} -> jsexpr
      UbxTupAlt {} -> object >>= process
      AlgAlt {} -> object >>= (process . RTS.conAppArgVector)
-  where object = stgIdToJs bndr
+  where object = Js.var <$> stgIdToJs bndr
         process obj = mconcat <$> sequence [unpackData obj useMask args, jsexpr]
         jsexpr = expression expr
 caseExpressionAlternatives bndr altType alts =
@@ -201,7 +216,7 @@ caseExpressionAlternatives bndr altType alts =
             return $ Js.switch (RTS.conAppTag n) dc c
   where
     name :: Javascript js => Gen (Expression js)
-    name = stgIdToJs bndr
+    name = Js.var <$> stgIdToJs bndr
     defaultCase = do
         case find isDefault alts of
             Just (_, _, _, expr) -> Just <$> expression expr

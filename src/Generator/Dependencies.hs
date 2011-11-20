@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 module Generator.Dependencies where
 
 import Id as Stg (Id)
@@ -31,7 +32,11 @@ idsOfExpr (StgCase expr _ _ bndr _ _ alts) =
   insert bndr $ idsOfExpr expr `union` idsOfAlts alts
 idsOfExpr (StgLet bndn body) = idsOfBinding bndn `union` idsOfExpr body
 idsOfExpr (StgLetNoEscape _ _ bndn body) = idsOfBinding bndn `union` idsOfExpr body
+#if __GLASGOW_HASKELL__ >= 702
+idsOfExpr (StgSCC _ _ _ expr) = idsOfExpr expr
+#else
 idsOfExpr (StgSCC _ expr) = idsOfExpr expr
+#endif
 idsOfExpr (StgTick _ _ expr) = idsOfExpr expr
 
 idsOfArgs :: [StgArg] -> Set Id

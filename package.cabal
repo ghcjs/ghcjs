@@ -21,6 +21,13 @@ Executable ghcjs
                     Javascript.Formatted, RTS.Objects, Generator.Helpers, Generator.Dependencies,
                     Generator.PrimOp, Generator.FFI, Generator.Core, Generator.TopLevel
 
+Executable ghcjs-link
+    Main-Is:        Linker/Main.hs
+    Default-Language: Haskell2010
+    Hs-Source-Dirs: src
+    Build-Depends:  base >=3 && <5, ghc, containers, filepath, directory, process
+    Other-Modules:  Generator.Link
+
 test-suite test
     type:       exitcode-stdio-1.0
     Default-Language: Haskell2010

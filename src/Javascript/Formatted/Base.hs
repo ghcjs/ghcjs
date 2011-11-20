@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP, TypeFamilies #-}
 module Javascript.Formatted.Base
   ( Identation
   , FormattedWriter
@@ -9,19 +9,30 @@ module Javascript.Formatted.Base
   , mkOperation
   , tellWithPrecedenceConstraint
   , tellUnconstraint
+  , tell
   ) where
 
 import Data.Monoid
 
 import Control.Monad (when)
+#ifdef MIN_VERSION_monads_tf
 import Control.Monad.Writer (Writer, tell, execWriter)
 import Control.Monad.Reader (ReaderT, ask, local, runReaderT)
+#else
+import Javascript.Formatted.Monads (Writer, execWriter)
+import qualified Javascript.Formatted.Monads as Monads
+import Javascript.Formatted.Monads (ReaderT, ask, local, runReaderT, liftReaderT)
+#endif
 
 import Javascript.Language
 
 type Identation = Int
 type FormattedWriter = ReaderT Identation (Writer String)
 newtype Formatted = P { unP :: FormattedWriter () }
+
+#ifndef MIN_VERSION_monads_tf
+tell = liftReaderT . Monads.tell
+#endif
 
 indent :: FormattedWriter a -> FormattedWriter a
 indent = local (+1)

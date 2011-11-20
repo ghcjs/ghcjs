@@ -1,3 +1,13 @@
+/**
+ * @define {boolean} HS_DEBUG is like goog.DEBUG, but for ghcjs internals
+ */
+var HS_DEBUG = true;
+
+/**
+ * @define {boolean} enable extra tracing
+ */
+var HS_TRACE = false;
+
 var $hs = {
     // treat signed integer as unsigned word, assuming complementary representation
     Word : {
@@ -78,8 +88,8 @@ var $hs = {
             a.value = b;
             return [s];
         },
-        same : function (a, b, s) {
-            return [s, a === b];
+        same : function (a, b) {
+            return a === b;
         }
     },
     _Array : {
@@ -89,8 +99,8 @@ var $hs = {
               result[x] = a;
             return [s, result];
         },
-        same : function (a, b, s) {
-            return [s, a === b];
+        same : function (a, b) {
+            return a === b;
         },
         read : function (a, n, s) {
             return [s, a[n]];
@@ -114,8 +124,266 @@ var $hs = {
         unsafeThaw : function (a, s) {
             return [s, a];
         }
+    },
+    newByteArrayzh : function (n, s) {
+        var result = new ArrayBuffer(n);
+        return [s, result];
+    },
+    newPinnedByteArrayzh : function (n, s) {
+        var result = new ArrayBuffer(n);
+        return [s, result];
+    },
+    newAllignedPinnedByteArrayzh : function (n, k, s) {
+        var result = new ArrayBuffer(n);
+        return [s, result];
+    },
+    byteArrayContentszh : function (a) {
+        return [a, 0];
+    },
+    sameMutableByteArrayzh : function (a, b) {
+        return a === b;
+    },
+    unsafeFreezeByteArrayzh : function (a, s) {
+        return [s, a];
+    },
+    sizeofByteArrayzh : function (a) {
+        return new Uint8Array(a).length;
+    },
+    sizeofMutableByteArrayzh : function (a) {
+        return new Uint8Array(a).length;
+    },
+    indexCharArrayzh : function (a, n) {
+        return String.fromCharCode(new Uint8Array(a)[n]);
+    },
+    indexWideCharArrayzh : function (a, n) {
+        return String.fromCharCode(new Uint32Array(a)[n]);
+    },
+    indexIntArrayzh : function (a, n) {
+        return new Int32Array(a)[n];
+    },
+    indexWordArrayzh : function (a, n) {
+        return new Uint32Array(a)[n];
+    },
+    indexAddrArrayzh : function (a, n) {
+        throw "Not sure how to store Addr in a ByteArray";
+    },
+    indexFloatArrayzh : function (a, n) {
+        return Float32Array(a)[n];
+    },
+    indexDoubleArrayzh : function (a, n) {
+        return Float64Array(a)[n];
+    },
+    indexAddrArrayzh : function (a, n) {
+        throw "Not sure how to store StablePtr in a ByteArray";
+    },
+    indexInt8Arrayzh : function (a, n) {
+        return new Int8Array(a)[n];
+    },
+    indexInt16Arrayzh : function (a, n) {
+        return new Int16Array(a)[n];
+    },
+    indexInt32Arrayzh : function (a, n) {
+        return new Int32Array(a)[n];
+    },
+    indexInt64Arrayzh : function (a, n) {
+        return new Int64Array(a)[n];
+    },
+    indexWord8Arrayzh : function (a, n) {
+        return new Uint8Array(a)[n];
+    },
+    indexWord16Arrayzh : function (a, n) {
+        return new Uint16Array(a)[n];
+    },
+    indexWord32Arrayzh : function (a, n) {
+        return new Uint32Array(a)[n];
+    },
+    indexWord64Arrayzh : function (a, n) {
+        return new Uint64Array(a)[n];
+    },
+    readCharArrayzh : function (a, n, s) {
+        return [s, String.fromCharCode(new Uint8Array(a)[n])];
+    },
+    readWideCharArrayzh : function (a, n, s) {
+        return [s, String.fromCharCode(new Uint32Array(a)[n])];
+    },
+    readIntArrayzh : function (a, n, s) {
+        return [s, new Int32Array(a)[n]];
+    },
+    readWordArrayzh : function (a, n, s) {
+        return [s, new Uint32Array(a)[n]];
+    },
+    readAddrArrayzh : function (a, n, s) {
+        throw "Not sure how to store Addr in a ByteArray";
+    },
+    readFloatArrayzh : function (a, n, s) {
+        return [s, Float32Array(a)[n]];
+    },
+    readDoubleArrayzh : function (a, n, s) {
+        return [s, Float64Array(a)[n]];
+    },
+    readAddrArrayzh : function (a, n, s) {
+        throw "Not sure how to store StablePtr in a ByteArray";
+    },
+    readInt8Arrayzh : function (a, n, s) {
+        return [s, new Int8Array(a)[n]];
+    },
+    readInt16Arrayzh : function (a, n, s) {
+        return [s, new Int16Array(a)[n]];
+    },
+    readInt32Arrayzh : function (a, n, s) {
+        return [s, new Int32Array(a)[n]];
+    },
+    readInt64Arrayzh : function (a, n, s) {
+        return [s, new Int64Array(a)[n]];
+    },
+    readWord8Arrayzh : function (a, n, s) {
+        return [s, new Uint8Array(a)[n]];
+    },
+    readWord16Arrayzh : function (a, n, s) {
+        return [s, new Uint16Array(a)[n]];
+    },
+    readWord32Arrayzh : function (a, n, s) {
+        return [s, new Uint32Array(a)[n]];
+    },
+    readWord64Arrayzh : function (a, n, s) {
+        return [s, new Uint64Array(a)[n]];
+    },
+    writeCharArrayzh : function (a, n, v, s) {
+        new Uint8Array(a)[n] = v.charCodeAt();
+        return s;
+    },
+    writeWideCharArrayzh : function (a, n, v, s) {
+        new Uint32Array(a)[n] = v.charCodeAt();
+        return s;
+    },
+    writeIntArrayzh : function (a, n, v, s) {
+        new Int32Array(a)[n] = v;
+        return s;
+    },
+    writeWordArrayzh : function (a, n, v, s) {
+        new Uint32Array(a)[n] = v;
+        return s;
+    },
+    writeAddrArrayzh : function (a, n, v, s) {
+        throw "Not sure how to store Addr in a ByteArray";
+    },
+    writeFloatArrayzh : function (a, n, v, s) {
+        Float32Array(a)[n] = v;
+        return s;
+    },
+    writeDoubleArrayzh : function (a, n, v, s) {
+        Float64Array(a)[n] = v;
+        return s;
+    },
+    writeAddrArrayzh : function (a, n, v, s) {
+        throw "Not sure how to store StablePtr in a ByteArray";
+    },
+    writeInt8Arrayzh : function (a, n, v, s) {
+        new Int8Array(a)[n] = v;
+        return s;
+    },
+    writeInt16Arrayzh : function (a, n, v, s) {
+        new Int16Array(a)[n] = v;
+        return s;
+    },
+    writeInt32Arrayzh : function (a, n, v, s) {
+        new Int32Array(a)[n] = v;
+        return s;
+    },
+    writeInt64Arrayzh : function (a, n, v, s) {
+        new Int64Array(a)[n] = v;
+        return s;
+    },
+    writeWord8Arrayzh : function (a, n, v, s) {
+        new Uint8Array(a)[n] = v;
+        return s;
+    },
+    writeWord16Arrayzh : function (a, n, v, s) {
+        new Uint16Array(a)[n] = v;
+        return s;
+    },
+    writeWord32Arrayzh : function (a, n, v, s) {
+        new Uint32Array(a)[n] = v;
+        return s;
+    },
+    writeWord64Arrayzh : function (a, n, v, s) {
+        new Uint64Array(a)[n] = v;
+        return s;
+    },
+    copyByteArrayzh : function (src, soff, dest, doff, count, s) {
+        srcarray = new Uint8Array(src);
+        destarray = new Uint8Array(dest);
+        while(count != 0) {
+            destarray[doff] = srcarray[soff];
+            soff++;
+            doff++;
+            count--;
+        }
+        return s;
+    },
+    copyMutableByteArrayzh : function (src, soff, dest, doff, count, s) {
+        srcarray = new Uint8Array(src);
+        destarray = new Uint8Array(dest);
+        while(count != 0) {
+            destarray[doff] = srcarray[soff];
+            soff++;
+            doff++;
+            count--;
+        }
+        return s;
     }
-}
+};
+
+var _hs_text_memcpy = function (dest, doff, src, soff, count) {
+    srcarray = new Uint16Array(src);
+    destarray = new Uint16Array(dest);
+    while(count != 0) {
+        destarray[doff] = srcarray[soff];
+        soff++;
+        doff++;
+        count--;
+    }
+};
+
+var _hs_text_memcmp = function(a, aoff, b, boff, count) {
+    aarray = new Uint16Array(a);
+    barray = new Uint16Array(b);
+    while(count != 0) {
+        if( aarray[aoff] < barray[boff] )
+            return -1;
+        if( aarray[aoff] > barray[boff] )
+            return 1;
+        soff++;
+        doff++;
+        count--;
+    }
+    return 0;
+};
+
+var u_iswspace = function(a) { return 0; };
+var u_iswalpha = function(a) { return 0; };
+
+$hs.loaded = [];
+$hs.loadPath = "./";
+$hs.load = function (modules) {
+    for (var i = 0; i < modules.length; i++) {
+        if($hs.loaded[modules[i]]===undefined) {
+            var path = $hs.loadPath + "hs" + modules[i] + (COMPILED ? "min.js" : ".js");
+            var transport = new XMLHttpRequest();
+            transport.open("GET", path, false);
+            transport.send(null);
+            if (transport.status == 200 || transport.status == 0) {
+                try {
+                    goog.globalEval(transport.responseText);
+                    $hs.loaded[modules[i]] = true;
+                } catch (e) {
+                    $hs.logError("Error evaluating module: " + path + ":\n" + e);
+                    return false;
+                }
+            }
+        }
+    }
+};
 
 $hs.fromHaskellString = function() {
   var res = "";
@@ -152,9 +420,7 @@ $hs.fromHaskellIO = function() {
 };
 $hs.toHaskellInt = function(i) {
     console.log("toHaskellInt");
-    var hsi = new $Data(1);
-    hsi.v = [(0 + i) & ~0];
-    return hsi;
+    return new $DataValue(1, [(0 + i) & ~0]);
 };
 $hs.nil = function() {
     return "";
@@ -162,8 +428,6 @@ $hs.nil = function() {
 $hs.cons = function(x, xs) {
     return String.fromCharCode(x) + xs;
 };
-
 $hs.init = function() {
     $$GHCziPrim_realWorldzh = $D(1, function(){return []}, "realWorld#");
 }
-

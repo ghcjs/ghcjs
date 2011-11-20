@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP, TypeFamilies #-}
 module Generator.Helpers where
 
 import Id as Stg (Id)
@@ -13,10 +13,12 @@ import StgSyn as Stg
 import qualified Literal as Stg
 import qualified Javascript.Language as Js
 import qualified RTS.Objects as RTS
-import Control.Monad.State (State)
+#ifdef MIN_VERSION_monads_tf
+import Control.Monad.State (State, runState)
+import Control.Monad.State.Class (MonadState(..))
+#endif
 import Control.Applicative ((<$>))
 import qualified Data.Map as M
-import Control.Monad.State.Class (MonadState(..))
 import qualified Data.Set as S (Set, member, fromList)
 import Javascript.Language (Javascript, Expression)
 
@@ -24,7 +26,31 @@ data GenState = GenState {
     idMap     :: M.Map Stg.Id Js.Id
   , unusedIds :: [Js.Id]
   }
+
+#ifdef MIN_VERSION_monads_tf
 type Gen = State GenState
+runGen :: Gen a -> GenState -> (a, GenState)
+runGen = runState
+#else
+newtype Gen a = Gen { runGen :: GenState -> (a, GenState) }
+
+instance Monad Gen where
+    return a = Gen $ \s -> (a, s)
+    m >>= k  = Gen $ \s ->
+        let ~(a, s') = runGen m s in
+        runGen (k a) s'
+    fail str = Gen $ \_ -> error str
+
+get :: Gen GenState
+get = Gen $ \s -> (s, s)
+
+put :: GenState -> Gen ()
+put s = Gen $ \_ -> ((), s)
+
+instance Functor Gen where
+    fmap f m = Gen $ \s ->
+        (\ ~(a, s') -> (f a, s')) $ runGen m s
+#endif
 
 newGenState :: GenState
 newGenState = GenState M.empty safeIds
@@ -44,9 +70,10 @@ stgLiteralToJs (Stg.MachFloat i) = return $ Js.float i -- Float#
 stgLiteralToJs (Stg.MachDouble i) = return $ Js.float i -- Doable#
 stgLiteralToJs (Stg.MachNullAddr) = return $ Js.null -- Addr#
 stgLiteralToJs (Stg.MachLabel {}) = return $ Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: MachLabel"]
+stgLiteralToJs _ = error "Unknown literal type"
 
 stgArgToJs :: Javascript js => Stg.StgArg -> Gen (Expression js)
-stgArgToJs (Stg.StgVarArg id) = stgIdToJs id
+stgArgToJs (Stg.StgVarArg id) = Js.var <$> stgIdToJs id
 stgArgToJs (Stg.StgLitArg l) = stgLiteralToJs l
 stgArgToJs (Stg.StgTypeArg _) = panic "Compiler bug: StgTypeArg in expression"
 
@@ -56,15 +83,14 @@ jsBoolToHs ex = Js.ternary ex RTS.true RTS.false
 isExternalId :: Stg.Id -> Bool
 isExternalId = isExternalName . getName
 
-stgIdToJsExternalName :: Stg.Id -> Gen String
-stgIdToJsExternalName id = return $
-    (("$$"++mod++"_")++) . zEncodeString . occNameString $ getOccName id
+stgIdToJsExternalName :: Stg.Id -> Js.Id
+stgIdToJsExternalName id = (("$$"++mod++"_")++) . zEncodeString . occNameString $ getOccName id
   where mod = zEncodeString . moduleNameString . moduleName . nameModule . getName $ id
 
-stgIdToJs :: Javascript js => Stg.Id -> Gen (Expression js)
+stgIdToJs :: Stg.Id -> Gen Js.Id
 stgIdToJs id
-  | isExternalId id = Js.var <$> stgIdToJsExternalName id
-  | otherwise = Js.var <$> stgIdToJsId id
+  | isExternalId id = return $ stgIdToJsExternalName id
+  | otherwise = stgIdToJsId id
 
 addTopLevelIds :: Module -> [Stg.Id] -> Gen ()
 addTopLevelIds mod ids = do
@@ -80,10 +106,10 @@ stgIdToJsId id = do
     state <- get
     let m = idMap state
     case (M.lookup id m, unusedIds state) of
-        (Just r, _)     -> return r -- $ (zEncodeString . moduleNameString $ genMod state) ++ r
+        (Just r, _)     -> return r
         (Nothing, x:xs) -> do
             put $ state {idMap = M.insert id x m, unusedIds=xs}
-            return x -- $ (zEncodeString . moduleNameString $ genMod state) ++ x
+            return x
         (Nothing, [])   -> error "Ran out of ids (should never happen)"
 
 stgBindingToList :: StgBinding -> [(Stg.Id, StgRhs)]

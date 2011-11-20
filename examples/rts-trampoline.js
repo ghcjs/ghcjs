@@ -1,105 +1,109 @@
-var $tr = {
-/**
- * @constructor
- */
-    Jump : function(method, object, args) {
-//        if (typeof method != 'function')
-//            throw "Not a function!";
-        this.method = method;
-        this.object = object;
-        this.args = args;
-    },
+var $tr = {}
 
 /**
  * @constructor
  */
-    Call : function(method, object, args, rest) {
-//        if (typeof method != 'function')
-//            throw "Not a function!";
-        this.method = method;
-        this.object = object;
-        this.args = args;
-        this.rest = rest;
-    },
-
-/**
- * @constructor
- */
-    Catch : function(next, catcher) {
-        this.next = next;
-        this.catcher = catcher;
-    },
-
-    ctch : function(next, catcher) {
-        $tr.currentResult = new $tr.Catch(next, catcher);
-    },
-
-/**
- * @constructor
- */
-    WithThread : function(withThreadFunc) {
-        this.withThread = withThreadFunc;
-    },
-
-    withThread : function(withThreadFunc) {
-        $tr.currentResult = new $tr.WithThread(withThreadFunc);
-    },
-
-/**
- * @constructor
- */
-    Suspend : function(resume) {
-        this.resume = resume;
-    },
-
-    suspend : function(resume) {
-        $tr.currentResult = new $tr.Suspend(resume);
-    },
-
-/**
- * @constructor
- */
-    Yield : function(next) {
-        this.next = next;
-    },
-
-    yield : function(next) {
-        $tr.currentResult = new $tr.Yield(next);
-    },
-
-/**
- * @constructor
- */
-    Result : function(result) {
-        this.value = result;
+$tr.Jump = function(method, object, args) {
+    if(HS_DEBUG) {
+        if (typeof method != 'function')
+            throw "Not a function!";
     }
+    this.method = method;
+    this.object = object;
+    this.args = args;
+};
+
+/**
+ * @constructor
+ */
+$tr.Call = function(method, object, args, rest) {
+    if(HS_DEBUG) {
+        if (typeof method != 'function')
+            throw "Not a function!";
+    }
+    this.method = method;
+    this.object = object;
+    this.args = args;
+    this.rest = rest;
+};
+
+/**
+ * @constructor
+ */
+$tr.Catch = function(next, catcher) {
+    this.next = next;
+    this.catcher = catcher;
+};
+
+$tr.ctch = function(next, catcher) {
+    $tr.currentResult = new $tr.Catch(next, catcher);
+};
+
+/**
+ * @constructor
+ */
+$tr.WithThread = function(withThreadFunc) {
+    this.withThread = withThreadFunc;
+};
+
+$tr.withThread = function(withThreadFunc) {
+    $tr.currentResult = new $tr.WithThread(withThreadFunc);
+};
+
+/**
+ * @constructor
+ */
+$tr.Suspend = function(resume) {
+    this.resume = resume;
+};
+
+$tr.suspend = function(resume) {
+    $tr.currentResult = new $tr.Suspend(resume);
+};
+
+/**
+ * @constructor
+ */
+$tr.Yield = function(next) {
+    this.next = next;
+};
+
+$tr.yield = function(next) {
+    $tr.currentResult = new $tr.Yield(next);
+};
+
+/**
+ * @constructor
+ */
+$tr.Result = function(result) {
+    this.value = result;
 };
 
 function $j(method, object, args) {
     $tr.currentResult = new $tr.Jump(method, object, args);
-}
+};
 
 function $c(method, object, args, rest) {
     $tr.currentResult = new $tr.Call(method, object, args, rest);
-}
+};
 
 function $M(object, rest) {
     if(object.notEvaluated)
         $tr.currentResult = new $tr.Call(object.hscall, object, [], rest);
     else
         rest(object);
-}
+};
 
 function $A(object) {
     if(object.notEvaluated)
         $tr.currentResult = new $tr.Jump(object.hscall, object, []);
     else
         $tr.currentResult = new $tr.Result(object);
-}
+};
 
 function $r(result) {
     $tr.currentResult = new $tr.Result(result);
-}
+};
 
 $tr.Scheduler = {
     waiting : [],
@@ -204,15 +208,21 @@ $tr.Thread.prototype = {
     return catcher;
   },
 
+  load : function(method) {
+    console.log(method);
+  },
+
   _run : function(r, isException) {
     var traceLog = [];
     while (true) {
       $tr.currentResult = null;
 
-      // Handy for debug
-      traceLog.push(r);
-      if (traceLog.length > 100)
-        traceLog = Array.prototype.slice.call(traceLog, 1, traceLog.length);
+      if(HS_TRACE) {
+          // Handy for debug
+          traceLog.push(r);
+          if (traceLog.length > 100)
+            traceLog = Array.prototype.slice.call(traceLog, 1, traceLog.length);
+      }
 
       try {
         if (this._stack.length > this._stackMax)
@@ -233,11 +243,13 @@ $tr.Thread.prototype = {
           }
         }
         if (r instanceof $tr.Jump) {
+          if (r.method === undefined) this.load(r.method);
           r = r.method.apply(r.object, r.args);
           if ($tr.currentResult != null)
             r = $tr.currentResult;
         }
         else if(r instanceof $tr.Call) {
+          if (r.method === undefined) this.load(r.method);
           this._stack.push([r.rest, null]);
           r = r.method.apply(r.object, r.args);
           if ($tr.currentResult != null)
@@ -310,16 +322,30 @@ $tr.Thread.prototype = {
   }
 }
 
+if(HS_TRACE) {
+    function logCall(obj, args) {
+        var msg = 'hscall ' + obj.toString();
+        for(var n = 0; n != args.length; n++) {
+            msg + ' (' + args[n].toString() + ')';
+        }
+        console.log(msg);
+    };
+}
+
+/**
+ * @constructor
+ */
 $hs.hscall = function () {
-    console.log(this.arity + " " + arguments);
-    if (this.arity == arguments.length) { // EXACT and THUNK rules
+    if(HS_TRACE) logCall(this, arguments);
+    var argc = arguments.length;
+    if (this.arity == argc) { // EXACT and THUNK rules
         return new $tr.Jump(this.evaluate, this, arguments);
-    } else if (this.arity < arguments.length) { // CALLK and TCALL rules
-        var remainingArguments = Array.prototype.slice.call(arguments, this.arity, arguments.length);
+    } else if (this.arity < argc) { // CALLK and TCALL rules
+        var remainingArguments = Array.prototype.slice.call(arguments, this.arity, argc);
         arguments.length = this.arity;
         return new $tr.Call(this.evaluate, this, arguments,
             function (result) {return new $tr.Jump(result.hscall, result, remainingArguments)});
-    } else if (arguments.length == 0) { // RETFUN
+    } else if (argc == 0) { // RETFUN
         return new $tr.Result(this);
     } else if (this instanceof $hs.Pap) { // PCALL rule, we can bypass this rule by building PAPs of PAPs
         return new $tr.Jump(this.evaluate, this, arguments);
@@ -341,14 +367,14 @@ $hs.Pap.prototype = {
     hscall: $hs.hscall,
     notEvaluated: false,
     evaluate: function () {
-            var k = arguments.length;
-            var n = this.savedArguments.length;
-            var newArguments = new Array (k + n);
-            for (var i = 0; i < n; i++)
-                newArguments[i] = this.savedArguments[i];
-            for (var i = 0; i < k; i++)
-                newArguments[n + i] = arguments[i];
-            return new $tr.Jump(this.object.hscall, this.object, newArguments);
+        var k = arguments.length;
+        var n = this.savedArguments.length;
+        var newArguments = new Array (k + n);
+        for (var i = 0; i < n; i++)
+            newArguments[i] = this.savedArguments[i];
+        for (var i = 0; i < k; i++)
+            newArguments[n + i] = arguments[i];
+        return new $tr.Jump(this.object.hscall, this.object, newArguments);
     },
     J : function() {
         $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
@@ -358,14 +384,37 @@ $hs.Pap.prototype = {
     }
 };
 
-/**
- * @constructor
- */
-function $Func(a, f, info) {
-    this.arity = a;
-    this.evaluate = f;
-    this.info = info;
-};
+if(HS_DEBUG) {
+    /**
+     * @constructor
+     */
+    function $Func(a, f, info) {
+        this.arity = a;
+        this.evaluate = f;
+        this.info = info;
+    };
+    function $F(a, f, info) {
+        return new $Func(a, f, info);
+    };
+    function $f(a, f, info) {
+        return new $Func(a, f, info);
+    };
+}
+else {
+    /**
+     * @constructor
+     */
+    function $Func(a, f) {
+        this.arity = a;
+        this.evaluate = f;
+    };
+    function $F(a, f) {
+        return new $Func(a, f);
+    };
+    function $f(a, f, info) {
+        return new $Func(a, f);
+    };
+}
 $Func.prototype = {
     hscall: $hs.hscall,
     notEvaluated: false,
@@ -376,20 +425,42 @@ $Func.prototype = {
         $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
     }
 };
-function $F(a, f, info) {
-    return new $Func(a, f, info);
-};
-function $f(a, f, info) {
-    return new $Func(a, f, info);
-};
+if(HS_DEBUG) {
+    $Func.prototype.toString = function () {
+        return this.info + ' arity=' + this.arity;
+    };
+}
 
-/**
- * @constructor
- */
-function $Thunk(f, info) {
-    this.evaluateOnce = f;
-    this.info = info;
-};
+if(HS_DEBUG) {
+    /**
+     * @constructor
+     */
+    function $Thunk(f, info) {
+        this.evaluateOnce = f;
+        this.info = info;
+    };
+    function $T(f, info) {
+        return new $Thunk(f, info);
+    };
+    function $t(f, info) {
+        return new $Thunk(f, info);
+    };
+}
+else {
+    /**
+     * @constructor
+     */
+    function $Thunk(f) {
+        this.evaluateOnce = f;
+    };
+    function $T(f, info) {
+        return new $Thunk(f, info);
+    };
+    function $t(f, info) {
+        return new $Thunk(f, info);
+    };
+}
+
 $Thunk.prototype = {
     hscall: $hs.hscall,
     arity: 0,
@@ -408,21 +479,39 @@ $Thunk.prototype = {
         $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
     }
 };
-function $T(f, info) {
-    return new $Thunk(f, info);
-};
-function $t(f, info) {
-    return new $Thunk(f, info);
-};
+if(HS_DEBUG) {
+    $Thunk.prototype.toString = function () {
+        return this.info;
+    };
+}
 
-/**
- * @constructor
- */
-function $Data(t, f, info) {
-    this.g = t;
-    this.evaluateOnce = f;
-    this.info = info;
-};
+if(HS_DEBUG) {
+    /**
+     * @constructor
+     */
+    function $Data(t, f, info) {
+        this.g = t;
+        this.evaluateOnce = f;
+        this.info = info;
+    };
+    function $D(tag, f, info) {
+        if (typeof f != 'function')
+            throw "Not a function!";
+        return new $Data(tag, f, info);
+    };
+}
+else {
+    /**
+     * @constructor
+     */
+    function $Data(t, f) {
+        this.g = t;
+        this.evaluateOnce = f;
+    };
+    function $D(tag, f) {
+        return new $Data(tag, f);
+    };
+}
 $Data.prototype = {
     hscall: $hs.hscall,
     arity: 0,
@@ -430,6 +519,11 @@ $Data.prototype = {
     evaluate: function() {
         var _this = this;
         return new $tr.Call(_this.evaluateOnce, _this, [], function (res) {
+            if (!(res instanceof Array))
+                throw "Not an array!";
+            for(var n = 0; n != res.length; n++)
+                if(res[n] === undefined)
+                    throw "Undefined"
             _this.v = res;
             _this.notEvaluated = false;
             _this.evaluate = function () { return new $tr.Result(_this); };
@@ -443,20 +537,65 @@ $Data.prototype = {
         $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
     }
 };
-function $D(tag, f, info) {
-//    if (typeof f != 'function')
-//        throw "Not a function!";
-    return new $Data(tag, f, info);
-};
+if(HS_DEBUG) {
+    $Data.prototype.toString = function () {
+        var msg = this.info;
+        if(!this.notEvaluated) {
+            for(var n = 0; n != this.v.length; n++) {
+                if(this.v[n] === undefined)
+                    msg = msg + "!!";
+                else
+                    msg = msg + " (" + this.v[n].toString() + ")";
+            }
+        }
+        else {
+          msg = msg + " ??";
+        }
+        return msg;
+    };
+}
 
-/**
- * @constructor
- */
-function $DataValue(t, v, info) {
-    this.g = t;
-    this.v = v;
-    this.info = info;
-};
+if(HS_DEBUG) {
+    /**
+     * @constructor
+     */
+    function $DataValue(t, v, info) {
+        this.g = t;
+        this.v = v;
+        this.info = info;
+    };
+    function $R(tag, v, info) {
+        if (!(v instanceof Array))
+            throw "Not an array!";
+        for(var n = 0; n != v.length; n++)
+            if(v[n] === undefined)
+                throw "Undefined"
+        $tr.currentResult = new $DataValue(tag, v, info);
+    };
+    function $d(tag, v, info) {
+        if (!(v instanceof Array))
+            throw "Not an array!";
+        for(var n = 0; n != v.length; n++)
+            if(v[n] === undefined)
+                throw "Undefined"
+        return new $DataValue(tag, v, info);
+    };
+}
+else {
+    /**
+     * @constructor
+     */
+    function $DataValue(t, v) {
+        this.g = t;
+        this.v = v;
+    };
+    function $R(tag, v) {
+        $tr.currentResult = new $DataValue(tag, v);
+    };
+    function $d(tag, v) {
+        return new $DataValue(tag, v);
+    };
+}
 $DataValue.prototype = {
     hscall: $hs.hscall,
     arity: 0,
@@ -471,16 +610,22 @@ $DataValue.prototype = {
         $tr.currentResult = new $tr.Call(this.hscall, this, args, rest);
     }
 };
-function $R(tag, v, info) {
-//    if (typeof f == 'function')
-//        throw "A function!";
-    $tr.currentResult = new $DataValue(tag, v, info);
-};
-function $d(tag, v, info) {
-//    if (typeof f == 'function')
-//        throw "A function!";
-    return new $DataValue(tag, v, info);
-};
+if(HS_DEBUG) {
+    $DataValue.prototype.toString = function () {
+        var msg = this.info;
+        if(!this.notEvaluated) {
+            for(var n = 0; n != this.v.length; n++) {
+                if(this.v[n] === undefined)
+                    msg = msg + "!!";
+                else if(this.v[n].toString === undefined)
+                    msg = msg + " (" + this.v[n] + ")";
+                else
+                    msg = msg + " (" + this.v[n].toString() + ")";
+            }
+        }
+        return msg;
+    };
+}
 
 $hs.force = function () {
     var f = arguments[0];

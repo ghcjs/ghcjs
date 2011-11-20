@@ -6,7 +6,6 @@ module Javascript.Formatted.Expression where
 import Data.Char (ord)
 import Data.List (intersperse, intercalate)
 import Control.Monad (when)
-import Control.Monad.Writer (tell)
 
 import Javascript.Language hiding (null)
 import Javascript.Formatted.Base

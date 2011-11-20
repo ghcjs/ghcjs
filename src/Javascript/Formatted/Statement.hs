@@ -1,7 +1,5 @@
 module Javascript.Formatted.Statement where
 
-import Control.Monad.Writer (tell)
-
 import Javascript.Language
 import Javascript.Formatted.Base
 import Control.Monad (unless)
@@ -68,6 +66,10 @@ instance JavascriptStatement Formatted
              tell "throw "
              tellUnconstraint e
              tell ";"
+        comment c = P $
+          do newLine
+             tell "//"
+             tell c
 
 instance JavascriptReturnResult Formatted
   where return res = P $
