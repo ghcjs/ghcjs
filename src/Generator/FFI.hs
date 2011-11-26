@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Generator.FFI
   ( returnForeignFunctionCallResult
   , declareForeignFunctionCallResult
@@ -20,18 +22,23 @@ returnForeignFunctionCallResult :: Javascript js => ForeignCall -> Stg.Unique ->
 returnForeignFunctionCallResult (CCall (CCallSpec target _ccallConv _safety)) _ args =
   case target
   of DynamicTarget -> return $ Js.throw . Js.string $ "Unsupported: foreign function call"
-     (StaticTarget clabelString _) -> do
-        a <- mapM stgArgToJs args
-        return $ Js.return $ foreignCall clabelString a
+#if GHC7
+     (StaticTarget clabelString _) ->
+#else
+     (StaticTarget clabelString) ->
+#endif
+       return $ Js.return $ foreignCall clabelString args
 
 declareForeignFunctionCallResult :: Javascript js => Stg.Id -> ForeignCall -> Stg.Unique -> [StgArg] -> Gen js
 declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _safety)) _ args =
   case target
   of DynamicTarget -> return $ Js.throw . Js.string $ "Unsupported: foreign function call"
-     (StaticTarget clabelString _) -> do
-        b <- stgIdToJsId binder
-        a <- mapM stgArgToJs args
-        return $ Js.declare [(b, foreignCall clabelString a)]
+#if GHC7
+     (StaticTarget clabelString _) ->
+#else
+     (StaticTarget clabelString) ->
+#endif
+       return $ Js.declare (stgIdToJsId binder) $ foreignCall clabelString args
 
 foreignCall :: Javascript js => FastString -> [Expression js] -> Expression js
 foreignCall clabelString args =
