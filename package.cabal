@@ -25,7 +25,7 @@ Executable ghcjs-link
     Main-Is:        Linker/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    Build-Depends:  base >=3 && <5, ghc, containers, filepath, directory, process
+    Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time
     Other-Modules:  Generator.Link
 
 test-suite test

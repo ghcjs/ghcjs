@@ -4,7 +4,7 @@ module Generator.TopLevel (generate) where
 import Data.Monoid (mconcat)
 import Data.List (partition)
 
-import Module as Stg (Module)
+import Module as Stg (Module, moduleName, moduleNameString)
 import Id as Stg (Id)
 
 import StgSyn
@@ -25,7 +25,9 @@ generate thisMod binds = do
   exports <- withBindings definition exportedBindings
   decls   <- map (\(i, r) -> Js.declare [(i, r)]) <$> mapM notExportedDecl notExportedBindings
   allDeps <- mapM deps allBindings
-  return $ mconcat $ allDeps ++ [exports] ++ decls
+  return . mconcat $
+    [Js.comment $ "GHCJS Haskell Module " ++ show (moduleNameString $ moduleName thisMod, modDeps)]
+    ++ allDeps ++ [exports] ++ decls
   where allBindings = joinBindings binds
         (exportedBindings, notExportedBindings) = partition (isExternalId . fst) allBindings
         deps :: Javascript js => (Stg.Id, StgRhs) -> Gen js
@@ -35,6 +37,7 @@ generate thisMod binds = do
             return . Js.comment $ show (thisId, filter isTopLevel depIds)
         isTopLevel ('$':'$':_) = True
         isTopLevel _ = False
+        modDeps = map (moduleNameString . moduleName) $ dependencies thisMod allBindings
 
 joinBindings :: [(StgBinding, BindDependInfo)] -> [(Stg.Id, StgRhs)]
 joinBindings = concat . map (stgBindingToList . fst)

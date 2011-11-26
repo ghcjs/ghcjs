@@ -10,13 +10,15 @@ import System.FilePath (replaceExtension)
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
 import DynFlags (DynFlags(..))
 import Module (PackageId)
-import System.FilePath (dropExtension, (</>), (<.>))
+import System.FilePath (dropExtension, replaceExtension, (</>), (<.>))
+import System.Directory (doesFileExist)
 import Packages (getPreloadPackagesAnd, PackageConfig, importDirs)
 import Data.List (nub)
 import Util (notNull)
 import ErrUtils (debugTraceMsg)
 import Outputable ((<+>), ptext, text)
 import FastString (sLit)
+import Data.Maybe (catMaybes)
 
 import qualified Generator.Helpers as Js (runGen, newGenState)
 import qualified Generator.TopLevel as Js (generate)
@@ -46,15 +48,22 @@ concreteJavascript callingConvention core (stg', _ccs) =
        of Plain -> show (abstract :: Js.Formatted)
           Trampoline -> show (abstract :: Js.Trampoline Js.Formatted)
 
-linkJavaScript :: DynFlags -> [PackageId] -> IO ()
-linkJavaScript dyflags dep_packages = do
+linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> IO ()
+linkJavaScript dyflags o_files dep_packages = do
     let jsexe = jsexeFileName dyflags
     importPaths <- getPackageImportPaths dyflags dep_packages
     debugTraceMsg dyflags 1 (ptext (sLit "Java Script Linking") <+> text jsexe
                              <+> text "...")
     createDirectoryIfMissingVerbose normal False jsexe
-    closureArgs <- Js.link (jsexe++"/") importPaths ["Main"] []
+    jsFiles <- mapM (mbFile . (flip replaceExtension ".js")) o_files
+    closureArgs <- Js.link (jsexe++"/") importPaths (catMaybes jsFiles) ["JS"] []
     writeFile (jsexe </> "closure.args") $ unwords closureArgs
+  where
+    mbFile f = do
+        exists <- doesFileExist f
+        if exists
+            then return $ Just f
+            else return Nothing
 
 -- | Find all the import paths in these and the preload packages
 getPackageImportPaths :: DynFlags -> [PackageId] -> IO [FilePath]

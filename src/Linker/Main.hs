@@ -13,6 +13,7 @@ import Generator.Link (link)
 -- As well as the normal closure-compiler options this function accepts
 --     --haskell_output_path_prefix (overrides --module_output_path_prefix for ghcjs-link output)
 --     --hjs Specifies directories to look in for ghcjs generated .js
+--     --hjs_file ghcjs generated .js file
 --     --pages_module Main
 --     --page_function Main.main
 -- A "page" is an function that we want to be able to load quickly on demand
@@ -23,18 +24,20 @@ main = do
     let out = head (getOpts "--haskell_output_path_prefix" args
                  ++ getOpts "--module_output_path_prefix" args ++ ["all"])
         dirs = getOpts "--hjs" args
+        files = getOpts "--hjs_file" args
         pageModules = getOpts "--pages_module" args
         pageFunctions = getOpts "--page_function" args
         isHaskellOpt "--hjs" = True
+        isHaskellOpt "--hjs_file" = True
         isHaskellOpt "--haskell_output_path_prefix" = True
         isHaskellOpt "--pages_module" = True
         isHaskellOpt "--page_function" = True
         isHaskellOpt _ = False
-        (initArgs', remainingArgs') = span (/= "--hjs") args
+        (initArgs', remainingArgs') = span (\a -> a /= "--hjs" && a /= "--hjs_file") args
         initArgs      = filterOut isHaskellOpt initArgs'
         remainingArgs = filterOut isHaskellOpt remainingArgs'
 
-    closureArgs <- link out dirs pageModules pageFunctions
+    closureArgs <- link out dirs files pageModules pageFunctions
     checkExit . system . intercalate " " $ ["java"] ++ initArgs ++ closureArgs ++ remainingArgs
   where
     checkExit f = do
