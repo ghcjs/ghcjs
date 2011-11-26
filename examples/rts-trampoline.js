@@ -108,14 +108,17 @@ function $r(result) {
 $tr.Scheduler = {
     waiting : [],
     maxID   : 0,
+    running : false,
     runWaiting : function() {
         var s = $tr.Scheduler;
+        s.running = true;
         while (s.waiting.length != 0) {
             var t = s.waiting[0];
             s.activeThread = t[0];
             s.waiting = Array.prototype.slice.call(s.waiting, 1, s.waiting.length);
             t[0]._run(t[1], t[2]);
         }
+        s.running = false
     },
     schedule : function(thread, retval, isException) {
         var s = $tr.Scheduler;
@@ -627,12 +630,31 @@ if(HS_DEBUG) {
     };
 }
 
+// Run haskell function and get the result
 $hs.force = function () {
+    if($tr.Scheduler.running)
+        throw "Haskell already running.  Consider using $hs.fork or $hs.schedule."
     var f = arguments[0];
     var args = Array.prototype.slice.call(arguments, 1, arguments.length);
     var t = $tr.Scheduler.start(f.hscall.apply(f, args));
     $tr.Scheduler.runWaiting();
     return t.value();
+};
+
+// Run haskell function
+$hs.fork = function () {
+    var f = arguments[0];
+    var args = Array.prototype.slice.call(arguments, 1, arguments.length);
+    var t = $tr.Scheduler.start(f.hscall.apply(f, args));
+    if(!$tr.Scheduler.running)
+        $tr.Scheduler.runWaiting();
+};
+
+// Schedule a haskell function to run the next time haskell runs
+$hs.schedule = function () {
+    var f = arguments[0];
+    var args = Array.prototype.slice.call(arguments, 1, arguments.length);
+    var t = $tr.Scheduler.start(f.hscall.apply(f, args));
 };
 
 $hs.Thread = {
