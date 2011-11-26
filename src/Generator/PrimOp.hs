@@ -125,27 +125,23 @@ primOp XorOp     [a, b] = PlainE $ Js.bitXOr a b
 primOp NotOp     [a] = PlainE $ Js.bitNot a
 primOp Word2IntOp[a] = PlainE $ a
 
-primOp Narrow8IntOp [a] = Just $
+primOp Narrow8IntOp [arg] = PlainE $
   Js.minus bits signBit
   where bits = Js.bitAnd arg (Js.int (0x7F :: Int))
         signBit = Js.bitAnd arg (Js.int (0x80 :: Int))
-        arg = stgArgToJs a
-primOp Narrow16IntOp [a] = Just $
+primOp Narrow16IntOp [arg] = PlainE $
   Js.minus bits signBit
   where bits = Js.bitAnd arg (Js.int (0x7FFF :: Int))
         signBit = Js.bitAnd arg (Js.int (0x8000 :: Int))
-        arg = stgArgToJs a
-primOp Narrow32IntOp [a] = Just $ stgArgToJs a
-primOp Narrow8WordOp [a] = Just $
+primOp Narrow32IntOp [a] = PlainE $ a
+primOp Narrow8WordOp [arg] = PlainE $
   Js.minus bits signBit
   where bits = Js.bitAnd arg (Js.int (0x7F :: Int))
         signBit = Js.bitAnd arg (Js.int (0x80 :: Int))
-        arg = stgArgToJs a
-primOp Narrow16WordOp [a] = Just $
+primOp Narrow16WordOp [arg] = PlainE $
   Js.minus bits signBit
   where bits = Js.bitAnd arg (Js.int (0x7FFF :: Int))
         signBit = Js.bitAnd arg (Js.int (0x8000 :: Int))
-        arg = stgArgToJs a
 primOp Narrow32WordOp [a] = PlainE $ a
 
 primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
@@ -153,8 +149,8 @@ primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
 primOp IndexOffAddrOp_Char [a, b] = PlainE $ Js.nativeMethodCall a "charAt" [b]
 
 -- StablePtr:
-primOp MakeStablePtrOp [a, b] = Just $ Js.list [stgArgToJs b, stgArgToJs a]
-primOp DeRefStablePtrOp [a, b] = Just $ Js.list [stgArgToJs b, stgArgToJs a]
+primOp MakeStablePtrOp [a, b] = PlainE $ Js.list [b, a]
+primOp DeRefStablePtrOp [a, b] = PlainE $ Js.list [b, a]
 
 primOp NewArrayOp    [n, a, s]    = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "newArray"    [n, a, s]
 primOp SameMutableArrayOp [a, b]  = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "same"        [a, b]

@@ -21,24 +21,27 @@ import Generator.Helpers
 returnForeignFunctionCallResult :: Javascript js => ForeignCall -> Stg.Unique -> [StgArg] -> Gen js
 returnForeignFunctionCallResult (CCall (CCallSpec target _ccallConv _safety)) _ args =
   case target
-  of DynamicTarget -> return $ Js.throw . Js.string $ "Unsupported: foreign function call"
+  of DynamicTarget -> return . Js.throw . Js.string $ "Unsupported: foreign function call"
 #if GHC7
-     (StaticTarget clabelString _) ->
+     (StaticTarget clabelString _) -> do
 #else
-     (StaticTarget clabelString) ->
+     (StaticTarget clabelString) -> do
 #endif
-       return $ Js.return $ foreignCall clabelString args
+           a <- mapM stgArgToJs args
+           return . Js.return $ foreignCall clabelString a
 
 declareForeignFunctionCallResult :: Javascript js => Stg.Id -> ForeignCall -> Stg.Unique -> [StgArg] -> Gen js
 declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _safety)) _ args =
   case target
-  of DynamicTarget -> return $ Js.throw . Js.string $ "Unsupported: foreign function call"
+  of DynamicTarget -> return . Js.throw . Js.string $ "Unsupported: foreign function call"
 #if GHC7
-     (StaticTarget clabelString _) ->
+     (StaticTarget clabelString _) -> do
 #else
-     (StaticTarget clabelString) ->
+     (StaticTarget clabelString) -> do
 #endif
-       return $ Js.declare (stgIdToJsId binder) $ foreignCall clabelString args
+            b <- stgIdToJsId binder
+            a <- mapM stgArgToJs args
+            return $ Js.declare [(b, foreignCall clabelString a)]
 
 foreignCall :: Javascript js => FastString -> [Expression js] -> Expression js
 foreignCall clabelString args =
