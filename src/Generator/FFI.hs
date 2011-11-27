@@ -22,7 +22,7 @@ returnForeignFunctionCallResult :: Javascript js => ForeignCall -> Stg.Unique ->
 returnForeignFunctionCallResult (CCall (CCallSpec target _ccallConv _safety)) _ args =
   case target
   of DynamicTarget -> return . Js.throw . Js.string $ "Unsupported: foreign function call"
-#if GHC7
+#if __GLASGOW_HASKELL__ >= 700
      (StaticTarget clabelString _) -> do
 #else
      (StaticTarget clabelString) -> do
@@ -34,7 +34,7 @@ declareForeignFunctionCallResult :: Javascript js => Stg.Id -> ForeignCall -> St
 declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _safety)) _ args =
   case target
   of DynamicTarget -> return . Js.throw . Js.string $ "Unsupported: foreign function call"
-#if GHC7
+#if __GLASGOW_HASKELL__ >= 700
      (StaticTarget clabelString _) -> do
 #else
      (StaticTarget clabelString) -> do
