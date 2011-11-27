@@ -94,9 +94,6 @@ instance JavascriptExpression Formatted
         not =                leftUnaryOp "!"   4
         bitNot =             leftUnaryOp "~"   4
         unaryMinus =         leftUnaryOp "-"   4
-        yield a = mkOperation 0 $
-          do tell "yield "
-             tellUnconstraint a
 
 instance JavascriptNativeCall Formatted
   where nativeFunctionCall func args = mkOperation 2 $
