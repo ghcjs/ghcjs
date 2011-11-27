@@ -34,9 +34,9 @@ main = do
         "-Xmx1G", "-jar", "~/closure-compiler/compiler.jar",
         "--pages_module", "Test",
         "--js", "~/closure-library/closure/goog/base.js",
-        "--js", "../ghcjs-rts/rts-common.js",
+        "--js", concat [dstPath env, "/rts-common.js"],
         "--define='HS_DEBUG=false'",
-        "--js", concat ["../ghcjs-rts/rts-", conv, ".js"],
+        "--js", concat [dstPath env, "/rts-", conv, ".js"],
         "--module", "rts:3:",
         "--hjs", concat [dstPath env, "/ghc-prim"],
         "--hjs", concat [dstPath env, "/integer-simple"],
@@ -45,8 +45,7 @@ main = do
         "--js", "examples/TestJS.js",
         "--module", "test:2:rts",
         "--module_output_path_prefix", concat [dstPath env, "/"],
-        "--compilation_level", "ADVANCED_OPTIMIZATIONS",
-        "--manage_closure_dependencies"]
+        "--compilation_level", "ADVANCED_OPTIMIZATIONS"]
     checkExit $ system "open examples/test.html"
   where
     checkExit f = do
