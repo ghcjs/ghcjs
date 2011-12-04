@@ -20,7 +20,11 @@ import Generator.PrimOp
 import Generator.FFI
 import qualified RTS.Objects as RTS
 import Control.Applicative ((<$>))
-import Name (getOccName, getName, pprNameDefnLoc)
+import Module (moduleNameString)
+import Name (getOccName, getName)
+#if __GLASGOW_HASKELL__ >= 703
+import Name (pprNameDefnLoc)
+#endif
 import OccName (occNameString)
 import Outputable (showSDoc)
 
@@ -50,9 +54,13 @@ withBindings f b = mconcat <$> mapM (uncurry f) b
 
 debugInfo :: Js.Javascript js => Stg.Id -> Gen [Expression js]
 debugInfo x = do
+#if __GLASGOW_HASKELL__ >= 703
     case showSDoc . pprNameDefnLoc $ getName x of
-        "at <no location info>" -> return []
+        "at <no location info>" -> return [Js.string . occNameString . getOccName $ x]
         s                       -> return [Js.string s]
+#else
+    return [Js.string . occNameString . getOccName $ x]
+#endif
 
 creation :: Javascript js => Stg.Id -> StgRhs -> Gen (Expression js)
 creation id (StgRhsCon _cc con args) = do
@@ -121,7 +129,7 @@ expression (StgCase expr _liveVars _liveRhsVars bndr _srt alttype alts) =
   caseExpression expr bndr alttype alts
 expression (StgLet bndn body) = mconcat <$> sequence [binding bndn, expression body]
 expression (StgLetNoEscape _ _ bndn body) = mconcat <$> sequence [binding bndn, expression body]
-#if __GLASGOW_HASKELL__ >= 702
+#if __GLASGOW_HASKELL__ >= 703
 expression (StgSCC _ _ _ expr) = expression expr
 #else
 expression (StgSCC _ expr) = expression expr

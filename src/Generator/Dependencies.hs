@@ -32,7 +32,7 @@ idsOfExpr (StgCase expr _ _ bndr _ _ alts) =
   insert bndr $ idsOfExpr expr `union` idsOfAlts alts
 idsOfExpr (StgLet bndn body) = idsOfBinding bndn `union` idsOfExpr body
 idsOfExpr (StgLetNoEscape _ _ bndn body) = idsOfBinding bndn `union` idsOfExpr body
-#if __GLASGOW_HASKELL__ >= 702
+#if __GLASGOW_HASKELL__ >= 703
 idsOfExpr (StgSCC _ _ _ expr) = idsOfExpr expr
 #else
 idsOfExpr (StgSCC _ expr) = idsOfExpr expr
