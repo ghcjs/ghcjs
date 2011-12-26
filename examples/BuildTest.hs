@@ -1,5 +1,4 @@
-#!/usr/bin/runghc
-
+{-# LANGUAGE CPP #-}
 import System.Environment (getArgs)
 import System.Process (system)
 import Data.List (intercalate)
@@ -12,12 +11,20 @@ data BuildEnv =
     , dstPath :: String
     }
 
+#if __GLASGOW_HASKELL__ == 700
+defaultGhcSource = "../ghc-7.0.4"
+#elif __GLASGOW_HASKELL__ == 702
+defaultGhcSource = "../ghc-7.2.2"
+#else
+defaultGhcSource = "../ghc"
+#endif
+
 main = do
     args <- getArgs
     putStrLn $ show args
     let (conv, ghcp) = case args of
             (conv:ghcp:_) -> (conv, ghcp)
-            []            -> ("trampoline", "../ghc")
+            []            -> ("trampoline",defaultGhcSource)
             _             -> error "Invalid arguments for BuildTest"
         env =
                BuildEnv
@@ -44,7 +51,7 @@ main = do
         "--hjs", concat [dstPath env, "/main"],
         "--js", "examples/TestJS.js",
         "--module", "test:2:rts",
-        "--module_output_path_prefix", concat [dstPath env, "/"],
+        "--module_output_path_prefix", concat [dstPath env, "/out/"],
         "--compilation_level", "ADVANCED_OPTIMIZATIONS"]
     checkExit $ system "open examples/test.html"
   where
@@ -61,10 +68,24 @@ packages =
       , "GHC.IntWord64"
       , "GHC.Tuple"
       , "GHC.Types"
+#if __GLASGOW_HASKELL__ >= 703
       , "GHC.Classes"
+#elif __GLASGOW_HASKELL__ >= 702
+      , "GHC.Ordering"
+      , "GHC.Unit"
+      , "GHC.IntWord32"
+#else
+      , "GHC.Bool"
+#endif
       ]
     )
-  , ("integer-simple", ["GHC.Integer","GHC.Integer.Logarithms","GHC.Integer.Logarithms.Internals"])
+  , ("integer-simple"
+    , [ "GHC.Integer"
+#if __GLASGOW_HASKELL__ >= 702
+      , "GHC.Integer.Logarithms"
+      , "GHC.Integer.Logarithms.Internals"
+#endif
+      ])
   , ("base", ["Prelude"])
   ]
 

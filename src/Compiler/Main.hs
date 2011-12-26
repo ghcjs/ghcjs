@@ -7,7 +7,11 @@ import HscMain (hscSimplify)
 import TidyPgm (tidyProgram)
 import CoreToStg (coreToStg)
 import SimplStg (stg2stg)
+#if __GLASGOW_HASKELL__ >= 702
 import DynFlags (defaultLogAction)
+#else
+import DynFlags (defaultDynFlags)
+#endif
 import HscTypes (ModGuts, CgGuts (..))
 import CorePrep (corePrepPgm)
 import DriverPhases (HscSource (HsBootFile))
@@ -35,7 +39,13 @@ main =
              of ("--calling-convention=plain":args) -> (Plain, args)
                 ("--calling-convention=trampoline":args) -> (Trampoline, args)
                 _ -> (Plain, args)
-     defaultErrorHandler defaultLogAction $ runGhc (Just GHC.Paths.libdir) $
+     defaultErrorHandler
+#if __GLASGOW_HASKELL__ >= 702
+        defaultLogAction
+#else
+        defaultDynFlags
+#endif
+        $ runGhc (Just GHC.Paths.libdir) $
        do sdflags <- getSessionDynFlags
           (dflags, fileargs', _) <- parseDynamicFlags sdflags (map noLoc args') -- ("-DWORD_SIZE_IN_BITS=32":args'))
           _ <- setSessionDynFlags dflags
@@ -77,14 +87,18 @@ writeDesugaredModule callingConvention mod =
 cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
 cgGutsFromModGuts guts =
   do hscEnv <- getSession
+#if __GLASGOW_HASKELL__ >= 702
      simplGuts <- liftIO $ hscSimplify hscEnv guts
+#else
+     simplGuts <- hscSimplify guts
+#endif
      (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
      return cgGuts
 
 concreteJavascriptFromCgGuts :: DynFlags -> CallingConvention -> CgGuts -> IO String
 concreteJavascriptFromCgGuts dflags callingConvention core =
   do core_binds <- corePrepPgm dflags (cg_binds core) (cg_tycons $ core)
-#if MIN_VERSION_ghc(7,3,0)
+#if __GLASGOW_HASKELL__ >= 703
      stg <- coreToStg dflags core_binds
 #else
      stg <- coreToStg (modulePackageId . cg_module $ core) core_binds

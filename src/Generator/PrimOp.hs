@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 -- | Tries to implement GHC primitive operations as described at
 --   http://www.haskell.org/ghc/docs/6.12.2/html/libraries/ghc-prim-0.2.0.0/GHC-Prim.html
 -- Char# is Javascript string
@@ -167,7 +168,9 @@ primOp ReadMutVarOp  [a, s]    = PlainE $ Js.nativeMethodCall (Js.property RTS.r
 primOp WriteMutVarOp [a, b, s] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "write" [a, b, s]
 primOp SameMutVarOp  [a, b]    = PlainE $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "same" [a, b]
 primOp AtomicModifyMutVarOp  [a, b, s] = TrampolineM (Js.property RTS.root "MutVar") "atomicModify" [a, b, s]
+#if __GLASGOW_HASKELL__ >= 702
 primOp CasMutVarOp   [a, b, c, s] = TrampolineM (Js.property RTS.root "MutVar") "cas" [a, b, c, s]
+#endif
 
 primOp ForkOp [a, s]      = TrampolineM (Js.property RTS.root "Thread") "fork" [a, s]
 primOp ForkOnOp [a, b, s] = TrampolineM (Js.property RTS.root "Thread") "forkOn" [a, b, s]

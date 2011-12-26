@@ -20,13 +20,12 @@ import Generator.PrimOp
 import Generator.FFI
 import qualified RTS.Objects as RTS
 import Control.Applicative ((<$>))
-import Module (moduleNameString)
-import Name (getOccName, getName)
+import Name (getOccName)
 #if __GLASGOW_HASKELL__ >= 703
-import Name (pprNameDefnLoc)
+import Name (pprNameDefnLoc, getName)
+import Outputable (showSDoc)
 #endif
 import OccName (occNameString)
-import Outputable (showSDoc)
 
 binding :: Javascript js => StgBinding -> Gen js
 binding (StgNonRec id rhs) = nonRecDeclAndDef id rhs
