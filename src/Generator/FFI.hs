@@ -12,7 +12,6 @@ import Unique as Stg
 import StgSyn as Stg
 import ForeignCall (ForeignCall (CCall), CCallSpec (CCallSpec), CCallTarget (DynamicTarget, StaticTarget))
 import FastString (FastString, unpackFS)
-import Encoding (zDecodeString)
 import PrimOp
 import Javascript.Language as Js hiding(return)
 import qualified Javascript.Language as Js (return)
@@ -45,11 +44,16 @@ declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _saf
 
 foreignCall :: Javascript js => FastString -> [Expression js] -> Expression js
 foreignCall clabelString args =
-  Js.list [last $ args, nativeFunctionCall (Js.var . zDecodeString . unpackFS $ clabelString) (init args)]
+  Js.list [last $ args, nativeFunctionCall (Js.var . unpackFS $ clabelString) (init args)]
 
 returnPrimitiveCallResult :: Javascript js => PrimCall -> [StgArg] -> Gen js
-returnPrimitiveCallResult _ _ = return $ Js.throw . Js.string $ "Unsupported: primitive call"
+returnPrimitiveCallResult (PrimCall clabelString _) args = do
+    a <- mapM stgArgToJs args
+    return . Js.return $ nativeFunctionCall (Js.var . unpackFS $ clabelString) a
 
 declarePrimitiveCallResult :: Javascript js => Stg.Id -> PrimCall -> [StgArg] -> Gen js
-declarePrimitiveCallResult _ _ _ = return $ Js.throw . Js.string $ "Unsupported: primitive call"
+declarePrimitiveCallResult binder (PrimCall clabelString _) args = do
+    b <- stgIdToJsId binder
+    a <- mapM stgArgToJs args
+    return $ Js.declare [(b, nativeFunctionCall (Js.var . unpackFS $ clabelString) a)]
 
