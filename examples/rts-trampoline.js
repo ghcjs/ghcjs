@@ -329,7 +329,7 @@ if(HS_TRACE) {
     function logCall(obj, args) {
         var msg = 'hscall ' + obj.toString();
         for(var n = 0; n != args.length; n++) {
-            msg + ' (' + args[n].toString() + ')';
+            msg = msg + ' (' + args[n].toString() + ')';
         }
         console.log(msg);
     };
