@@ -83,11 +83,10 @@ primOp IntMulOp [a, b] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "Int
 primOp IntNegOp [a]    = PlainE $ Js.unaryMinus a
 
 -- overflow sensitive operations:
--- (a >>> 16) == 0 && (b >>> 16) == 0
-primOp IntMulMayOfloOp [a, b] = PlainE $ Js.and (test a) (test b)
-  where zero = Js.int (0 :: Int)
-        sixteen = Js.int (16 :: Int)
-        test x = Js.equal (Js.shiftRA x sixteen) zero
+-- (a >>> 16) + (b >>> 16)
+primOp IntMulMayOfloOp [a, b] = PlainE $ Js.plus (test a) (test b)
+  where sixteen = Js.int (16 :: Int)
+        test x = Js.shiftRA x sixteen
 
 -- $hs.Int.addCarry(a, b, 0)
 primOp IntAddCOp [a, b] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "Int") "addCarry" [a, b, Js.int (0 :: Int)]
