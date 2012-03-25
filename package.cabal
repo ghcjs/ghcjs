@@ -7,7 +7,7 @@ Author:         Victor Nazarov
 Copyright:      Victor Nazarov
 Maintainer:     Victor Nazarov <asviraspossible@gmail.com>
 Stability:      Experimental
-Build-Type:     Simple
+Build-Type:     Custom
 Cabal-Version:  >= 1.10
 
 flag ghc7
@@ -16,8 +16,8 @@ Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    if flag(ghc7) 
-      Build-Depends:  base >=3 && <5, ghc >= 7.0 && < 7.4, ghc-paths, monads-tf, containers, filepath
+    if flag(ghc7)
+      Build-Depends:  base >=3 && <5, ghc >= 7.0 && < 7.5, ghc-paths, monads-tf, containers, filepath
       cpp-options:     -DGHC7
     else
       Build-Depends:  base >=3 && <5, ghc == 6.12.3, ghc-paths, monads-tf, containers, filepath
