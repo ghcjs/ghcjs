@@ -141,10 +141,10 @@ link out searchPath objFiles pageModules pageFunctions = do
 -- Only files with newer modification times are copied.
 --
 installJavaScriptFiles :: Verbosity -> FilePath -> FilePath -> IO ()
-installJavaScriptFiles vebosity srcDir destDir = do
-    info vebosity $ "Copying Java Script From" ++ srcDir
+installJavaScriptFiles verbosity srcDir destDir = do
+    info verbosity $ "Copying Java Script From" ++ srcDir
     srcFiles <- getDirectoryContentsRecursive srcDir >>= filterM modTimeDiffers
-    installOrdinaryFiles vebosity destDir [ (srcDir, f) | f <- srcFiles, takeExtension f == ".js" ]
+    installOrdinaryFiles verbosity destDir [ (srcDir, f) | f <- srcFiles, takeExtension f == ".js" ]
   where
     modTimeDiffers f = do
             srcTime  <- getModificationTime $ srcDir </> f
