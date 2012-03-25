@@ -21,6 +21,7 @@ import Control.Applicative ((<$>))
 import qualified Data.Map as M
 import qualified Data.Set as S (Set, member, fromList)
 import Javascript.Language (Javascript, Expression)
+import Data.Bits (Bits(..))
 
 data GenState = GenState {
     idMap     :: M.Map Stg.Id Js.Id
@@ -61,11 +62,22 @@ stgLiteralToJs :: Javascript js => Stg.Literal -> Gen (Expression js)
 stgLiteralToJs (Stg.MachChar c) = return $ Js.string [c] -- Char#
 stgLiteralToJs (Stg.MachStr s) = return $ Js.string (unpackFS s ++ "\0") -- Addr#
 stgLiteralToJs (Stg.MachInt i) = return $ Js.int i -- Int#
-stgLiteralToJs (Stg.MachInt64 _) = return $ Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: Int64"]
+stgLiteralToJs (Stg.MachInt64 i)
+    = return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
+        Js.int (i .&. 0xFFFFFFFF),
+        Js.int (i `shiftR` 32 .&. 0xFFFFFFFF)]
 stgLiteralToJs (Stg.MachWord i) -- Word#
-  | i > 2^(31 :: Int) - 1 = return $ Js.int (i - 2^(32 :: Int) + 1)
+  | i >= 2^(31 :: Int) = return $ Js.int (i - 2^(32 :: Int) + 1)
   | otherwise = return $ Js.int i
-stgLiteralToJs (Stg.MachWord64 _) = return $ Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: Int64"]
+stgLiteralToJs (Stg.MachWord64 i)
+  | i >= 2^(63 :: Int) = do
+    let c = i - 2^(64 :: Int) + 1
+    return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
+        Js.int (c .&. 0xFFFFFFFF),
+        Js.int (c `shiftR` 32 .&. 0xFFFFFFFF)]
+  | otherwise = return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
+        Js.int (i .&. 0xFFFFFFFF),
+        Js.int (i `shiftR` 32 .&. 0xFFFFFFFF)]
 stgLiteralToJs (Stg.MachFloat i) = return $ Js.float i -- Float#
 stgLiteralToJs (Stg.MachDouble i) = return $ Js.float i -- Doable#
 stgLiteralToJs (Stg.MachNullAddr) = return $ Js.null -- Addr#
