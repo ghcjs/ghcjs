@@ -116,7 +116,9 @@ link out searchPath objFiles pageModules pageFunctions = do
         combinedScripts = map snd $ combineSmall scriptsBySize
 
     closureMods <- forM (zip [1..] combinedScripts) $ \(n, (pageSet, script)) -> do
-        writeFile (out++"hs"++show n++".js") . unlines $ (pageSetComment $ S.toList pageSet) ++ script
+        writeFile (out++"hs"++show n++".js") . unlines $
+            (pageSetComment $ S.toList pageSet) ++ script ++
+            [("//@ sourceURL=hs"++show n++".js")]
         return (n, pageSet)
 
     let pageToCMod = M.fromListWith (++) $ concatMap (\(m, ps) -> map (\p -> (p, [m])) $ S.toList ps) closureMods
