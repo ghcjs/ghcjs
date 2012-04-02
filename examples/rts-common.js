@@ -4,9 +4,24 @@
 var HS_DEBUG = true;
 
 /**
- * @define {boolean} enable extra tracing
+ * @define {boolean} enable traceLog in the run loop
  */
-var HS_TRACE = false;
+var HS_TRACE = true;
+
+/**
+ * @define {boolean} enable tracing in hscall
+ */
+var HS_TRACE_CALLS = false;
+
+/**
+ * @define {boolean} enable include args in the hscall messages
+ */
+var HS_TRACE_ARGS = false;
+
+/**
+ * @define {boolean} enable tracing of RTS calls
+ */
+var HS_RTS_TRACE = true;
 
 var $hs = {
     // treat signed integer as unsigned word, assuming complementary representation
@@ -83,7 +98,7 @@ var $hs = {
         },
         write : function (a, b, s) {
             a.value = b;
-            return [s];
+            return s;
         },
         same : function (a, b) {
             return a === b;
@@ -104,7 +119,7 @@ var $hs = {
         },
         write : function (a, n, b, s) {
             a[n] = b;
-            return [s];
+            return s;
         },
         sizeof : function (a, s) {
             return [s, a.length];
@@ -362,23 +377,44 @@ var $hs = {
     remAddrzh : function (a, b) {
         return a[1]%b;
     },
+    mkBool : function(b) {
+        return b ? $$GHCziTypes_True:$$GHCziTypes_False;
+    },
     gtAddrzh : function (a, b) {
-        return a[2]>b[2] ? $$GHCziTypes_True:$$GHCziTypes_False;
+        return $hs.mkBool(
+             (a===null&&b===null)?false:
+            ((a===null&&b!==null)?false:
+            ((a!==null&&b===null)?true:(a[2]>b[2]))));
     },
     geAddrzh : function (a, b) {
-        return a[2]>=b[2] ? $$GHCziTypes_True:$$GHCziTypes_False;
+        return $hs.mkBool(
+             (a===null&&b===null)?true:
+            ((a===null&&b!==null)?false:
+            ((a!==null&&b===null)?true:(a[2]>=b[2]))));
     },
     eqAddrzh : function (a, b) {
-        return a[2]===b[2] ? $$GHCziTypes_True:$$GHCziTypes_False;
+        return $hs.mkBool(
+             (a===null&&b===null)?true:
+            ((a===null&&b!==null)?false:
+            ((a!==null&&b===null)?false:(a[2]===b[2]))));
     },
     neAddrzh : function (a, b) {
-        return a[2]!==b[2] ? $$GHCziTypes_True:$$GHCziTypes_False;
+        return $hs.mkBool(
+             (a===null&&b===null)?false:
+            ((a===null&&b!==null)?true:
+            ((a!==null&&b===null)?true:(a[2]!==b[2]))));
     },
     ltAddrzh : function (a, b) {
-        return a[2]<b[2] ? $$GHCziTypes_True:$$GHCziTypes_False;
+        return $hs.mkBool(
+             (a===null&&b===null)?false:
+            ((a===null&&b!==null)?true:
+            ((a!==null&&b===null)?false:(a[2]<b[2]))));
     },
     leAddrzh : function (a, b) {
-        return a[2]<=b[2] ? $$GHCziTypes_True:$$GHCziTypes_False;
+        return $hs.mkBool(
+             (a===null&&b===null)?true:
+            ((a===null&&b!==null)?true:
+            ((a!==null&&b===null)?false:(a[2]<=b[2]))));
     },
     indexCharOffAddrzh : function (a, n) {
         return String.fromCharCode(new Uint8Array(a[0],a[1]+n)[0]);
@@ -393,7 +429,7 @@ var $hs = {
         return new Uint32Array(a[0],a[1]+n*4)[0];
     },
     indexAddrOffAddrzh : function (a, n) {
-        var res = a.ptrs[a[1]+n*4];
+        var res = a[0].ptrs[a[1]+n*4];
         if(HS_DEBUG && res[2] !== new Uint32Array(a[0],a[1]+n*4)[0])
             throw "Array Pointer Error";
         return res;
@@ -405,7 +441,7 @@ var $hs = {
         return Float64Array(a[0],a[1]+n*8)[0];
     },
     indexStablePtrOffAddrzh : function (a, n) {
-        var res = a.ptrs[a[1]+n*4];
+        var res = a[0].ptrs[a[1]+n*4];
         if(HS_DEBUG && res[2] !== new Uint32Array(a[0],a[1]+n*4)[0])
             throw "Array Pointer Error";
         return res;
@@ -447,7 +483,7 @@ var $hs = {
         return [s, new Uint32Array(a[0],a[1]+n*4)[0]];
     },
     readAddrOffAddrzh : function (a, n, s) {
-        var res = a.ptrs[a[1]+n*4];
+        var res = a[0].ptrs[a[1]+n*4];
         if(HS_DEBUG && a[2] !== new Uint32Array(a[0],a[1]+n*4)[0])
             throw "Array Pointer Error";
         return [s, res];
@@ -459,7 +495,7 @@ var $hs = {
         return [s, Float64Array(a[0],a[1]+n*8)[0]];
     },
     readStablePtrOffAddrzh : function (a, n, s) {
-        var res = a.ptrs[a[1]+n*4];
+        var res = a[0].ptrs[a[1]+n*4];
         if(HS_DEBUG && a[2] !== new Uint32Array(a[0],a[1]+n*4)[0])
             throw "Array Pointer Error";
         return [s, res];
@@ -489,69 +525,69 @@ var $hs = {
         return [s, new Uint64Array(a[0],a[1]+n*8)[0]];
     },
     writeCharOffAddrzh : function (a, n, v, s) {
-        new Uint8Array(a[0],a[1]+n)[0] = v.charCodeAt();
+        (new Uint8Array(a[0],a[1]+n))[0] = v.charCodeAt();
         return s;
     },
     writeWideCharOffAddrzh : function (a, n, v, s) {
-        new Uint32Array(a[0],a[1]+n*4)[0] = v.charCodeAt();
+        (new Uint32Array(a[0],a[1]+n*4))[0] = v.charCodeAt();
         return s;
     },
     writeIntOffAddrzh : function (a, n, v, s) {
-        new Int32Array(a[0],a[1]+n*4)[0] = v;
+        (new Int32Array(a[0],a[1]+n*4))[0] = v;
         return s;
     },
     writeWordOffAddrzh : function (a, n, v, s) {
-        new Uint32Array(a[0],a[1]+n*4)[0] = v;
+        (new Uint32Array(a[0],a[1]+n*4))[0] = v;
         return s;
     },
     writeAddrOffAddrzh : function (a, n, v, s) {
-        a.ptrs[n] = v;
-        new Uint32Array(a[0],a[1]+n*4)[0] = a[2];
+        a[0].ptrs[n] = v;
+        (new Uint32Array(a[0],a[1]+n*4))[0] = a[2];
         return s;
     },
     writeFloatOffAddrzh : function (a, n, v, s) {
-        Float32Array(a[0],a[1]+n*4)[0] = v;
+        (new Float32Array(a[0],a[1]+n*4))[0] = v;
         return s;
     },
     writeDoubleOffAddrzh : function (a, n, v, s) {
-        Float64Array(a[0],a[1]+n*8)[0] = v;
+        (new Float64Array(a[0],a[1]+n*8))[0] = v;
         return s;
     },
     writeStablePtrOffAddrzh : function (a, n, v, s) {
-        a.ptrs[n] = v;
-        new Uint32Array(a[0],a[1]+n*4)[0] = a[2];
+        a[0].ptrs[n] = v;
+        (new Uint32Array(a[0],a[1]+n*4))[0] = a[2];
         return s;
     },
     writeInt8OffAddrzh : function (a, n, v, s) {
-        new Int8Array(a[0],a[1]+n)[0] = v;
+        (new Int8Array(a[0],a[1]+n))[0] = v;
         return s;
     },
     writeInt16OffAddrzh : function (a, n, v, s) {
-        new Int16Array(a[0],a[1]+n*2)[0] = v;
+        (new Int16Array(a[0],a[1]+n*2))[0] = v;
         return s;
     },
     writeInt32OffAddrzh : function (a, n, v, s) {
-        new Int32Array(a[0],a[1]+n*4)[0] = v;
+        (new Int32Array(a[0],a[1]+n*4))[0] = v;
         return s;
     },
     writeInt64OffAddrzh : function (a, n, v, s) {
-        new Int64Array(a[0],a[1]+n*8)[0] = v;
+        (new Int64Array(a[0],a[1]+n*8))[0] = v;
         return s;
     },
     writeWord8OffAddrzh : function (a, n, v, s) {
-        new Uint8Array(a[0],a[1]+n)[0] = v;
+        (new Uint8Array(a[0],a[1]+n))[0] = v;
         return s;
     },
     writeWord16OffAddrzh : function (a, n, v, s) {
-        new Uint16Array(a[0],a[1]+n*2)[0] = v;
+        (new Uint16Array(a[0],a[1]+n*2))[0] = v;
         return s;
     },
     writeWord32OffAddrzh : function (a, n, v, s) {
-        new Uint32Array(a[0],a[1]+n*4)[0] = v;
+        (new Uint32Array(a[0],a[1]+n*4))[0] = v;
         return s;
     },
     writeWord64OffAddrzh : function (a, n, v, s) {
-        new Uint64Array(a[0],a[1]+n*8)[0] = v;
+        (new Uint64Array(a[0],a[1]+n*8))[0] = v;
         return s;
     },
 
@@ -561,6 +597,33 @@ var $hs = {
     deRefWeakzh : function(p, s) { return [s, 1, p]; },
     finalizeWeakzh : function(p, s) { return [s, 0, null]; },
     touchzh : function(a, s) { return s; }
+};
+
+$hs.logger = goog.debug.Logger.getLogger('hs');
+
+$hs.utf32 = function(s) {
+    var res = $hs.newByteArrayzh(s.length*4+4)[1];
+    var dest = new Uint32Array(res[0]);
+    for(var i=0;i!=s.length;i++)
+        dest[i]=s.charCodeAt(i);
+    dest[i]=0;
+    return res;
+};
+$hs.fromUtf32 = function(s) {
+    var res = "";
+    var src = new Uint32Array(s[0],s[1]);
+    var len = src[src.length-1] === 0 ? src.length - 1 : src.length;
+    for(var i=0;i!=len;i++)
+        res=res+String.fromCharCode(src[i]);
+    return res;
+};
+$hs.ascii = function(s) {
+    var res = $hs.newByteArrayzh(s.length+1)[1];
+    var dest = new Uint8Array(res[0]);
+    for(var i=0;i!=s.length;i++)
+        dest[i]=s.charCodeAt(i);
+    dest[i]=0;
+    return res;
 };
 
 var _hs_text_memcpy = function (dest, doff, src, soff, count) {
@@ -589,8 +652,22 @@ var _hs_text_memcmp = function(a, aoff, b, boff, count) {
     return 0;
 };
 
-var u_iswspace = function(a) { return 0; };
-var u_iswalpha = function(a) { return 0; };
+var u_iswalpha = function(a) {
+    return goog.string.isAlpha(String.fromCharCode(a)) ? 1 : 0;
+};
+var u_iswalnum = function(a) {
+    return goog.string.isAlphaNumeric(String.fromCharCode(a)) ? 1 : 0;
+};
+var u_iswspace = function(a) {
+    return goog.string.isSpace(String.fromCharCode(a)) ? 1 : 0;
+};
+var u_iswlower = function(a) {
+    return a === u_towupper(a) ? 1 : 0;
+};
+var u_iswupper = function(a) {
+    return a === u_towlower(a) ? 1 : 0;
+};
+var u_towlower = function(a) { return String.fromCharCode(a).toLowerCase().charCodeAt(); };
 var u_towupper = function(a) { return String.fromCharCode(a).toUpperCase().charCodeAt(); };
 var rtsSupportsBoundThreads = function () { return 0; };
 var getOrSetGHCConcSignalSignalHandlerStore = function (x) { return x; };
@@ -599,10 +676,71 @@ var localeEncoding = function() { return $hs.ascii("UTF-32LE"); };
 var hs_iconv_open = function(to,from) { return 1; };
 var hs_iconv_close = function(h) { return 0; };
 
-var errno = 0;
-var __hscore_get_errno = function() { return 0; }
-var __hscore_set_errno = function(e) { errno = e; };
+var unsignedCompare = function(a,b) {
+    if (a.equals(b)) return 0;
 
+    var aneg = a.isNegative();
+    var bneg = b.isNegative();
+    if (aneg && !bneg) return 1;
+    if (!aneg && bneg) return -1;
+
+    return a.subtract(b).isNegative() ? -1 : 1;
+};
+
+var hs_gtWord64 = function(a, b) { return $hs.mkBool(unsignedCompare(a, b) > 0); };
+var hs_geWord64 = function(a, b) { return $hs.mkBool(unsignedCompare(a, b) >= 0); };
+var hs_eqWord64 = function(a, b) { return $hs.mkBool(a.equals(b)); };
+var hs_neWord64 = function(a, b) { return $hs.mkBool(a.notEquals(b)); };
+var hs_ltWord64 = function(a, b) { return $hs.mkBool(unsignedCompare(a, b) < 0); };
+var hs_leWord64 = function(a, b) { return $hs.mkBool(unsignedCompare(a, b) <= 0); };
+
+var hs_gtInt64 = function(a, b) { return $hs.mkBool(a.compare(b) > 0); };
+var hs_geInt64 = function(a, b) { return $hs.mkBool(a.compare(b) >= 0); };
+var hs_eqInt64 = function(a, b) { return $hs.mkBool(a.equals(b)); };
+var hs_neInt64 = function(a, b) { return $hs.mkBool(a.notEquals(b)); };
+var hs_ltInt64 = function(a, b) { return $hs.mkBool(a.compare(b) < 0); };
+var hs_leInt64 = function(a, b) { return $hs.mkBool(a.compare(b) <= 0); };
+
+var hs_remWord64 = function(a, b) { return a.modulo(b); }; // TODO make unsigned
+var hs_quotWord64 = function(a, b) { return a.div(b); };   // TODO make unsigned
+
+var hs_remInt64 = function(a, b) { return a.modulo(b); };
+var hs_quotInt64 = function(a, b) { return a.div(b); };
+var hs_negateInt64 = function(a) { return a.negate(); };
+var hs_plusInt64 = function(a, b) { return a.add(b); };
+var hs_minusInt64 = function(a, b) { return a.subtract(b); };
+var hs_timesInt64 = function(a, b) { return a.multiply(b); };
+
+var hs_and64 = function(a, b) { return a.and(b); };
+var hs_or64 = function(a, b) { return a.or(b); };
+var hs_xor64 = function(a, b) { return a.xor(b); };
+var hs_not64 = function(a) { return a.not(); };
+
+var hs_uncheckedShiftL64 = function(a, b) { return a.shiftLeft(b); };
+var hs_uncheckedShiftRL64 = function(a, b) { return a.shiftRight(b); };
+var hs_uncheckedIShiftL64 = function(a, b) { return a.shiftLeft(b); };
+var hs_uncheckedIShiftRA64 = function(a, b) { return a.shiftRight(b); };
+var hs_uncheckedIShiftRL64 = function(a, b) { return a.shiftRight(b); };
+
+var hs_intToInt64 = function(i) { return goog.math.Long.fromInt(i); };
+var hs_int64ToInt = function(i) { return i.toInt(); };
+var hs_int64ToWord64 = function(i) { return i; };
+var hs_wordToWord64 = function(i) { return goog.math.Long.fromBits(i,0); };
+var hs_word64ToWord = function(i) { return i.getLowBits(); };
+var hs_word64ToInt64 = function(i) { return i; };
+
+var errno = 0;
+var __hscore_get_errno = function() {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_get_errno');
+    return errno;
+}
+var __hscore_set_errno = function(e) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_set_errno');
+    errno = e;
+};
+var strerror = function(e) {
+    return $hs.utf32("Error "+e);
+}
 var __hscore_s_isreg = function(m) { return 1; };
 var __hscore_s_isdir = function(m) { return 0; };
 var __hscore_s_isfifo = function(m) { return 0; };
@@ -616,8 +754,7 @@ var __hscore_sigaddset = function(set, s) { return 0; };
 var __hscore_sigdelset = function(set, s) { return 0; };
 var __hscore_sigismember = function(set, s) { return 0; };
 
-var __hscore_memcpy_src_off = function(dest, src, soff, count)
-{
+var __hscore_memcpy_src_off = function(dest, src, soff, count) {
     var doff = 0;
     srcarray = new Uint8Array(src[0]);
     destarray = new Uint8Array(dest[0]);
@@ -644,8 +781,14 @@ var __hscore_o_trunc = function() { return 0x0400; };
 var __hscore_o_noctty = function() { return 0x20000; };
 var __hscore_o_nonblock = function() { return 0x0004; };
 
-var __hscore_ftruncate = function(fd, where) { return 0; };
-var __hscore_setmode = function(fd, toBin) { return 0; };
+var __hscore_ftruncate = function(fd, where) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_ftruncate');
+    return 0;
+};
+var __hscore_setmode = function(fd, toBin) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_setmode');
+    return 0;
+};
 
 var __hscore_sizeof_stat = function() { return 0; };
 var __hscore_st_mtime = function(st) { return 0; };
@@ -653,13 +796,31 @@ var __hscore_st_size = function(st) { return 0; };
 var __hscore_st_mode = function(st) { return 0; };
 var __hscore_st_dev = function(st) { return 0; };
 var __hscore_st_ino = function(st) { return 0; };
-var __hscore_stat = function(file, buf) { return 0; };
-var __hscore_fstat = function(fd, buf) { return 0; };
-var __hscore_lstat = function(fname, buf) { return 0; };
+var __hscore_stat = function(file, buf) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_stat');
+    return 0;
+};
+var __hscore_fstat = function(fd, buf) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_fstat');
+    return 0;
+};
+var __hscore_lstat = function(fname, buf) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_lstat');
+    return 0;
+};
 
-var __hscore_lflag = function(ts) { return ts.c_lflag; };
-var __hscore_poke_lflag = function(ts, t) { ts.c_lflag = t; };
-var __hscore_ptr_c_cc = function(ts) { return ts.c_cc; };
+var __hscore_lflag = function(ts) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_fstat');
+    return ts.c_lflag;
+};
+var __hscore_poke_lflag = function(ts, t) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_poke_lflag');
+    ts.c_lflag = t;
+};
+var __hscore_ptr_c_cc = function(ts) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_ptr_c_cc');
+    return ts.c_cc;
+};
 var __hscore_sizeof_termios = function() { return 0; };
 var __hscore_sizeof_sigset_t = function() { return 0; };
 
@@ -676,57 +837,142 @@ var __hscore_f_getfl = function() { return 0; };
 var __hscore_f_setfl = function() { return 0; };
 var __hscore_f_setfd = function() { return 0; };
 var __hscore_fd_cloexec = function() { return 0; };
-var __hscore_get_saved_termios = function(fd) { return null; };
-var __hscore_set_saved_termios = function(fd, ts) {};
-var __hscore_hs_fileno = function(f) { return 0; };
-
-var __hscore_open = function(f,h,m) {
+var __hscore_get_saved_termios = function(fd) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_get_saved_termios');
+    return null;
+};
+var __hscore_set_saved_termios = function(fd, ts) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_set_saved_termios');
+};
+var __hscore_hs_fileno = function(f) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_hs_fileno');
     return 0;
 };
-var __hscore_lseek = function(fd, off, whence) { return 0; };
+$hs.fstab = [];
+$hs.getFileURL = function(f) {
+    for(var i=0;i!==$hs.fstab.length;i++) {
+        if(f.slice(0, $hs.fstab[i].mountPoint.length) === $hs.fstab[i].mountPoint)
+            return $hs.fstab[i].url + f.slice($hs.fstab[i].mountPoint.length);
+    }
+    return null;
+};
+$hs.allFiles = [];
+$hs.findFile = function(f) {
+    for(var i=0;i!==$hs.allFiles.length;i++) {
+        if(f===$hs.allFiles[i].path)
+            return i;
+    }
+    return -1;
+};
+var __hscore_open = function(f,h,m) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_open '+$hs.fromUtf32(f));
+    var p = $hs.fromUtf32(f);
+    var result=$hs.findFile(p);
+    if(result===-1) {
+        var url = $hs.getFileURL(p);
+        if(url!==null) {
+            try {
+                var transport = new XMLHttpRequest();
+                transport.open("GET", url, false);
+                transport.send(null);
+                if (transport.status == 200 || transport.status == 0) {
+                    result = $hs.allFiles.length;
+                    $hs.allFiles[result] = {text:transport.responseText, fptr:0, path:p};
+                }
+                else {
+                   $hs.logError("Error " + transport.status + " opening file: " + p +" ( " + url + " )");
+                }
+            } catch (e) {
+                $hs.logError("Error opening file: " + p + " ( " + url + " ) :\n" + e);
+            }
+        }
+        else {
+            if(m & __hscore_o_creat() !== 0) {
+                result = $hs.allFiles.length;
+                $hs.allFiles[result] = {text:"", fptr:0, path:p};
+            }
+        }
+    }
+    return result;
+};
+var close = function(fd) {
+    HS_RTS_TRACE && $hs.logger.info('close');
+    return 0;
+};
+var __hscore_lseek = function(fd, off, whence) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_lseek');
+    return 0;
+};
 
 var hsFD_SETSIZE = function() { return 1024; };
 var hsFD_ISSET = function(fd, fds) {
+    HS_RTS_TRACE && $hs.logger.info('hsFD_ISSET');
     return 0;
 };
-var hsFD_SET = function(fd, fds) {};
+var hsFD_SET = function(fd, fds) {
+    HS_RTS_TRACE && $hs.logger.info('hsFD_SET');
+};
 var sizeof_fd_set = function() {
+    HS_RTS_TRACE && $hs.logger.info('sizeof_fd_set');
     return 0;
 };
 var hsFD_ZERO = function(fds) {
+    HS_RTS_TRACE && $hs.logger.info('hsFD_ZERO');
 };
 
 var __hscore_select = function(nfds, readfds, writefds, exceptfds, timeout) {
+    HS_RTS_TRACE && $hs.logger.info('hsFD_ZERO');
     return 0;
 };
+
 var environ = {};
-var __hscore_environ = function() { return environ; };
-
-var lockFile = function(fd, dev, ino, for_writing) { return 0; };
-var unlockFile = function(fd) { return 0; };
-var isatty = function(fd) { return 0; };
-var read = function(fd, p, s) { return 0; };
-
-$hs.utf32 = function(s) {
-    res = $hs.newByteArrayzh(s.length*4+4);
-    var dest = new Uint32Array(res[0]);
-    for(i=0;i!=s.length;i++)
-        dest[i]=s.charCodeAt(i);
-    return [res, 0];
+environ['TMPDIR'] = $hs.utf32("/tmp");
+var __hscore_environ = function() {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_environ');
+    return environ;
 };
-$hs.fromUtf32 = function(s) {
-    var res = "";
-    var src = new Uint32Array(s[0],s[1]);
-    for(i=0;i!=src.length;i++)
-        res=res+String.fromCharCode(src[i]);
-    return res;
+var getenv = function(e) {
+    var s = $hs.fromUtf32(e);
+    HS_RTS_TRACE && $hs.logger.info('getenv '+s);
+    var v = environ[s];
+    return v===undefined?null:v;
 };
-$hs.ascii = function(s) {
-    var res = new ArrayBuffer(s.length+1);
-    var dest = new Uint8Array(res);
-    for(i=0;i!=s.length;i++)
-        dest[i]=s.charCodeAt(i);
-    return [res, 0];
+var lockFile = function(fd, dev, ino, for_writing) {
+    HS_RTS_TRACE && $hs.logger.info('lockFile');
+    return 0;
+};
+var unlockFile = function(fd) {
+    HS_RTS_TRACE && $hs.logger.info('unlockFile');
+    return 0;
+};
+var isatty = function(fd) {
+    HS_RTS_TRACE && $hs.logger.info('isatty');
+    return 0;
+};
+var read = function(fd, p, s) {
+    HS_RTS_TRACE && $hs.logger.info('read');
+    var f = $hs.allFiles[fd];
+    if (f === undefined || f === null)
+        return -1;
+
+    var n = f.text.length - f.fptr;
+    if( n <= 0 ) {
+        HS_RTS_TRACE && $hs.logger.info('read : end of file');
+        return 0;
+    }
+
+    var maxChars = s/4;
+    if( n > maxChars )
+        n = maxChars;
+
+    var end = f.fptr + n;
+    var dest = new Uint32Array(p[0], p[1]);
+    for(var i=f.fptr;i!=end;i++)
+        dest[i]=f.text.charCodeAt(i);
+    f.fptr=end;
+
+    HS_RTS_TRACE && $hs.logger.info('read : '+n*4);
+    return n * 4;
 };
 
 $hs.loaded = [];
@@ -797,4 +1043,4 @@ $hs.cons = function(x, xs) {
 $hs.init = function() {
     $$GHCziPrim_realWorldzh = $D(1, function(){return []}, "realWorld#");
     $$GHCziPrim_coercionTokenzh = $D(1, function(){return []}, "coercionToken#");
-}
+};

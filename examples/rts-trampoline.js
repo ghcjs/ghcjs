@@ -325,11 +325,13 @@ $tr.Thread.prototype = {
   }
 }
 
-if(HS_TRACE) {
+if(HS_TRACE_CALLS) {
     function logCall(obj, args) {
         var msg = 'hscall ' + obj.toString();
-        for(var n = 0; n != args.length; n++) {
-            msg = msg + ' (' + args[n].toString() + ')';
+        if(HS_TRACE_ARGS) {
+            for(var n = 0; n != args.length; n++) {
+                msg = msg + ' (' + args[n].toString() + ')';
+            }
         }
         console.log(msg);
     };
@@ -339,7 +341,7 @@ if(HS_TRACE) {
  * @constructor
  */
 $hs.hscall = function () {
-    if(HS_TRACE) logCall(this, arguments);
+    if(HS_TRACE_CALLS) logCall(this, arguments);
     var argc = arguments.length;
     if (this.arity == argc) { // EXACT and THUNK rules
         return new $tr.Jump(this.evaluate, this, arguments);
@@ -387,37 +389,22 @@ $hs.Pap.prototype = {
     }
 };
 
-if(HS_DEBUG) {
-    /**
-     * @constructor
-     */
-    function $Func(a, f, info) {
-        this.arity = a;
-        this.evaluate = f;
-        this.info = info;
-    };
-    function $F(a, f, info) {
-        return new $Func(a, f, info);
-    };
-    function $f(a, f, info) {
-        return new $Func(a, f, info);
-    };
-}
-else {
-    /**
-     * @constructor
-     */
-    function $Func(a, f) {
-        this.arity = a;
-        this.evaluate = f;
-    };
-    function $F(a, f) {
-        return new $Func(a, f);
-    };
-    function $f(a, f, info) {
-        return new $Func(a, f);
-    };
-}
+/**
+ * @constructor
+ */
+function $Func(a, f, info) {
+    this.arity = a;
+    this.evaluate = f;
+    if(HS_DEBUG) this.info = info;
+};
+function $F(a, f, info) {
+    if(HS_DEBUG)  return new $Func(a, f, info);
+    if(!HS_DEBUG) return new $Func(a, f);
+};
+function $f(a, f, info) {
+    if(HS_DEBUG)  return new $Func(a, f, info);
+    if(!HS_DEBUG) return new $Func(a, f);
+};
 $Func.prototype = {
     hscall: $hs.hscall,
     notEvaluated: false,
@@ -434,36 +421,21 @@ if(HS_DEBUG) {
     };
 }
 
-if(HS_DEBUG) {
-    /**
-     * @constructor
-     */
-    function $Thunk(f, info) {
-        this.evaluateOnce = f;
-        this.info = info;
-    };
-    function $T(f, info) {
-        return new $Thunk(f, info);
-    };
-    function $t(f, info) {
-        return new $Thunk(f, info);
-    };
-}
-else {
-    /**
-     * @constructor
-     */
-    function $Thunk(f) {
-        this.evaluateOnce = f;
-    };
-    function $T(f, info) {
-        return new $Thunk(f, info);
-    };
-    function $t(f, info) {
-        return new $Thunk(f, info);
-    };
-}
-
+/**
+ * @constructor
+ */
+function $Thunk(f, info) {
+    this.evaluateOnce = f;
+    if(HS_DEBUG) this.info = info;
+};
+function $T(f, info) {
+    if(HS_DEBUG)  return new $Thunk(f, info);
+    if(!HS_DEBUG) return new $Thunk(f);
+};
+function $t(f, info) {
+    if(HS_DEBUG)  return new $Thunk(f, info);
+    if(!HS_DEBUG) return new $Thunk(f);
+};
 $Thunk.prototype = {
     hscall: $hs.hscall,
     arity: 0,
@@ -488,33 +460,24 @@ if(HS_DEBUG) {
     };
 }
 
-if(HS_DEBUG) {
-    /**
-     * @constructor
-     */
-    function $Data(t, f, info) {
-        this.g = t;
-        this.evaluateOnce = f;
-        this.info = info;
-    };
-    function $D(tag, f, info) {
+/**
+ * @constructor
+ */
+function $Data(t, f, info) {
+    this.g = t;
+    this.evaluateOnce = f;
+    if(HS_DEBUG) this.info = info;
+};
+function $D(tag, f, info) {
+    if(HS_DEBUG) {
         if (typeof f != 'function')
             throw "Not a function!";
         return new $Data(tag, f, info);
-    };
-}
-else {
-    /**
-     * @constructor
-     */
-    function $Data(t, f) {
-        this.g = t;
-        this.evaluateOnce = f;
-    };
-    function $D(tag, f) {
+    }
+    if(!HS_DEBUG) {
         return new $Data(tag, f);
-    };
-}
+    }
+};
 $Data.prototype = {
     hscall: $hs.hscall,
     arity: 0,
@@ -558,47 +521,40 @@ if(HS_DEBUG) {
     };
 }
 
-if(HS_DEBUG) {
-    /**
-     * @constructor
-     */
-    function $DataValue(t, v, info) {
-        this.g = t;
-        this.v = v;
-        this.info = info;
-    };
-    function $R(tag, v, info) {
+/**
+ * @constructor
+ */
+function $DataValue(t, v, info) {
+    this.g = t;
+    this.v = v;
+    if(HS_DEBUG) this.info = info;
+};
+function $R(tag, v, info) {
+    if(HS_DEBUG) {
         if (!(v instanceof Array))
             throw "Not an array!";
         for(var n = 0; n != v.length; n++)
             if(v[n] === undefined)
                 throw "Undefined"
         $tr.currentResult = new $DataValue(tag, v, info);
-    };
-    function $d(tag, v, info) {
+    }
+    if(!HS_DEBUG) {
+        $tr.currentResult = new $DataValue(tag, v);
+    }
+};
+function $d(tag, v, info) {
+    if(HS_DEBUG) {
         if (!(v instanceof Array))
             throw "Not an array!";
         for(var n = 0; n != v.length; n++)
             if(v[n] === undefined)
                 throw "Undefined"
         return new $DataValue(tag, v, info);
-    };
-}
-else {
-    /**
-     * @constructor
-     */
-    function $DataValue(t, v) {
-        this.g = t;
-        this.v = v;
-    };
-    function $R(tag, v) {
-        $tr.currentResult = new $DataValue(tag, v);
-    };
-    function $d(tag, v) {
+    }
+    if(!HS_DEBUG) {
         return new $DataValue(tag, v);
-    };
-}
+    }
+};
 $DataValue.prototype = {
     hscall: $hs.hscall,
     arity: 0,
