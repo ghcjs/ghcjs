@@ -59,14 +59,14 @@ class JavascriptBase js => JavascriptNativeCall js
         nativeMethodCall :: Expression js -> Id -> [Expression js] -> Expression js
 
 class JavascriptBase js => JavascriptCall js
-  where callMethod :: Expression js -> Id -> [Expression js] -> js -> js
-        assignMethodCallResult :: Id -> Expression js -> Id -> [Expression js] -> js -> js
-        declareApplyMethodCallResult :: Id -> Expression js -> [Expression js] -> js -> js
-        declareMethodCallResult :: Id -> Expression js -> Id -> [Expression js] -> js -> js
-        callFunction :: Expression js -> [Expression js] -> js -> js
-        assignFunctionCallResult :: Id -> Expression js -> [Expression js] -> js -> js
-        declareFunctionCallResult :: Id -> Expression js -> [Expression js] -> js -> js
-        maybeAssignApplyMethodCallResult :: Id -> Expression js -> js -> js
+  where callMethod :: Expression js -> Id -> [Expression js] -> js -> Expression js -> js
+        assignMethodCallResult :: Id -> Expression js -> Id -> [Expression js] -> js -> Expression js -> js
+        declareApplyMethodCallResult :: Id -> Expression js -> [Expression js] -> js -> Expression js -> js
+        declareMethodCallResult :: Id -> Expression js -> Id -> [Expression js] -> js -> Expression js -> js
+        callFunction :: Expression js -> [Expression js] -> js -> Expression js -> js
+        assignFunctionCallResult :: Id -> Expression js -> [Expression js] -> js -> Expression js -> js
+        declareFunctionCallResult :: Id -> Expression js -> [Expression js] -> js -> Expression js -> js
+        maybeAssignApplyMethodCallResult :: Id -> Expression js -> js -> Expression js -> js
 
 class JavascriptBase js => JavascriptJump js
   where jumpToApplyMethod :: Expression js -> [Expression js] -> js

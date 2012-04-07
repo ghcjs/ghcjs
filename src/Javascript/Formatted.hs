@@ -8,28 +8,28 @@ import Data.Monoid (Monoid(..))
 import qualified RTS.Objects as RTS
 
 instance JavascriptCall Formatted
-  where assignMethodCallResult v obj method args rest = mconcat
+  where assignMethodCallResult v obj method args rest _live = mconcat
             [ assign (var v) $ nativeMethodCall obj method args
             , rest ]
-        declareApplyMethodCallResult var obj args rest = mconcat
+        declareApplyMethodCallResult var obj args rest _live = mconcat
             [ declare [(var, nativeMethodCall obj RTS.applyMethodName args)]
             , rest ]
-        declareMethodCallResult var obj method args rest = mconcat
+        declareMethodCallResult var obj method args rest _live = mconcat
             [ declare [(var, nativeMethodCall obj method args)]
             , rest ]
-        callMethod obj method args rest = mconcat
+        callMethod obj method args rest _live = mconcat
             [ expression $ nativeMethodCall obj method args
             , rest ]
-        assignFunctionCallResult v func args rest = mconcat
+        assignFunctionCallResult v func args rest _live = mconcat
             [ assign (var v) $ nativeFunctionCall func args
             , rest ]
-        declareFunctionCallResult var func args rest = mconcat
+        declareFunctionCallResult var func args rest _live = mconcat
             [ declare [(var, nativeFunctionCall func args)]
             , rest ]
-        callFunction func args rest = mconcat
+        callFunction func args rest _live = mconcat
             [ expression $ nativeFunctionCall func args
             , rest ]
-        maybeAssignApplyMethodCallResult v obj rest = mconcat
+        maybeAssignApplyMethodCallResult v obj rest _live = mconcat
             [ Js.declare [(v, obj)]
             , Js.if_ (RTS.isNotEvaluatedAndNotPrimitive obj) $
                 assign (Js.var v) $ nativeMethodCall obj RTS.applyMethodName []

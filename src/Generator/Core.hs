@@ -26,6 +26,7 @@ import Name (pprNameDefnLoc, getName)
 import Outputable (showSDoc)
 #endif
 import OccName (occNameString)
+import UniqSet (uniqSetToList)
 
 binding :: Javascript js => StgBinding -> Gen js
 binding (StgNonRec id rhs) = nonRecDeclAndDef id rhs
@@ -124,8 +125,8 @@ nonRecDeclAndDef id rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt args body) = d
                 else Js.nativeFunctionCall (RTS.makeFunc) $ [Js.int (stgRhsArity rhs), Js.function a e] ++ info)]
 
 expression :: Javascript js => StgExpr -> Gen js
-expression (StgCase expr _liveVars _liveRhsVars bndr _srt alttype alts) =
-  caseExpression expr bndr alttype alts
+expression (StgCase expr _liveVars liveRhsVars bndr _srt alttype alts) =
+  caseExpression expr bndr alttype alts (uniqSetToList liveRhsVars)
 expression (StgLet bndn body) = mconcat <$> sequence [binding bndn, expression body]
 expression (StgLetNoEscape _ _ bndn body) = mconcat <$> sequence [binding bndn, expression body]
 #if __GLASGOW_HASKELL__ >= 703
@@ -150,16 +151,17 @@ expression (StgOpApp (StgPrimOp op) args _ty) = returnPrimitiveOperationResult o
 expression (StgOpApp (StgPrimCallOp call) args _ty) = returnPrimitiveCallResult call args
 expression (StgLam{}) = panic "unexpected StgLam" -- StgLam is used *only* during CoreToStg's work (StgSyn.lhs:196)
 
-caseExpression :: Javascript js => StgExpr -> Stg.Id -> Stg.AltType -> [StgAlt] -> Gen js
-caseExpression expr bndr alttype alts = do
+caseExpression :: Javascript js => StgExpr -> Stg.Id -> Stg.AltType -> [StgAlt] -> [Stg.Id] -> Gen js
+caseExpression expr bndr alttype alts live = do
   altsJs <- caseExpressionAlternatives bndr alttype alts
-  caseExpressionScrut bndr expr altsJs
+  l <- mapM stgIdToJs live
+  caseExpressionScrut bndr expr altsJs (Js.list (map Js.var l))
 
 -- | 'caseExpressionScrut' is absolutely the same as expression
 -- the difference is that 'expression' "returns" result
 -- but 'caseExpressionScrut' "binds" result
-caseExpressionScrut :: Javascript js => Stg.Id -> StgExpr -> js -> Gen js
-caseExpressionScrut binder expr altsJs = go expr
+caseExpressionScrut :: Javascript js => Stg.Id -> StgExpr -> js -> Expression js -> Gen js
+caseExpressionScrut binder expr altsJs live = go expr
   where go (StgConApp con args)
           | isUnboxedTupleCon con = do
               v <- stgIdToJsId binder
@@ -175,13 +177,12 @@ caseExpressionScrut binder expr altsJs = go expr
         go (StgApp f []) = do
           v <- stgIdToJsId binder
           object <- stgIdToJs f
-          return $ mconcat
-            [ Js.maybeAssignApplyMethodCallResult v (Js.var object) altsJs]
+          return $ Js.maybeAssignApplyMethodCallResult v (Js.var object) altsJs live
         go (StgApp f args) = do
           v <- stgIdToJsId binder
           object <- stgIdToJs f
           jsargs <- mapM stgArgToJs args
-          return $ Js.declareApplyMethodCallResult v (Js.var object) jsargs altsJs
+          return $ Js.declareApplyMethodCallResult v (Js.var object) jsargs altsJs live
         go (StgLit lit) = do
           v <- stgIdToJsId binder
           l <- stgLiteralToJs lit
@@ -189,13 +190,13 @@ caseExpressionScrut binder expr altsJs = go expr
         go (StgOpApp (StgFCallOp f g) args _ty) = mconcat <$> sequence
             [ declareForeignFunctionCallResult binder f g args, return altsJs ]
         go (StgOpApp (StgPrimOp op) args _ty) =
-            declarePrimitiveOperationResult binder op args altsJs
+            declarePrimitiveOperationResult binder op args altsJs live
         go (StgOpApp (StgPrimCallOp call) args _ty) = mconcat <$> sequence
             [ declarePrimitiveCallResult binder call args, return altsJs ]
         go e = do
           v <- stgIdToJsId binder
           f <- Js.function [] <$> expression e
-          return $ Js.declareFunctionCallResult v f [] altsJs
+          return $ Js.declareFunctionCallResult v f [] altsJs live
 
 caseExpressionAlternatives :: Javascript js => Stg.Id -> Stg.AltType -> [(Stg.AltCon, [Stg.Id], [Bool], StgExpr)] -> Gen js
 caseExpressionAlternatives bndr altType [(_altCon, args, useMask, expr)] =

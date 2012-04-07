@@ -41,17 +41,36 @@ main = do
         "-Xmx1G", "-jar", "~/closure-compiler/compiler.jar",
         "--pages_module", "Test",
         "--js", "~/closure-library/closure/goog/base.js",
+        "--js", "~/closure-library/closure/goog/object/object.js",
+        "--js", "~/closure-library/closure/goog/string/string.js",
+        "--js", "~/closure-library/closure/goog/debug/error.js",
+        "--js", "~/closure-library/closure/goog/asserts/asserts.js",
+        "--js", "~/closure-library/closure/goog/array/array.js",
+        "--js", "~/closure-library/closure/goog/math/long.js",
+        "--js", "~/closure-library/closure/goog/debug/relativetimeprovider.js",
+        "--js", "~/closure-library/closure/goog/debug/formatter.js",
+        "--js", "~/closure-library/closure/goog/structs/structs.js",
+        "--js", "~/closure-library/closure/goog/structs/collection.js",
+        "--js", "~/closure-library/closure/goog/iter/iter.js",
+        "--js", "~/closure-library/closure/goog/structs/map.js",
+        "--js", "~/closure-library/closure/goog/structs/set.js",
+        "--js", "~/closure-library/closure/goog/useragent/useragent.js",
+        "--js", "~/closure-library/closure/goog/debug/debug.js",
+        "--js", "~/closure-library/closure/goog/debug/logrecord.js",
+        "--js", "~/closure-library/closure/goog/debug/logbuffer.js",
+        "--js", "~/closure-library/closure/goog/debug/logger.js",
+        "--js", "~/closure-library/closure/goog/debug/console.js",
         "--js", concat [dstPath env, "/rts-common.js"],
         "--define='HS_DEBUG=false'",
         "--js", concat [dstPath env, "/rts-", conv, ".js"],
-        "--module", "rts:3:",
+        "--module", "rts:22:",
         "--hjs", concat [dstPath env, "/ghc-prim"],
-        "--hjs", concat [dstPath env, "/integer-simple"],
+        "--hjs", concat [dstPath env, "/integer-gmp"],
         "--hjs", concat [dstPath env, "/base"],
         "--hjs", concat [dstPath env, "/main"],
         "--js", "examples/TestJS.js",
         "--module", "test:2:rts",
-        "--module_output_path_prefix", concat [dstPath env, "/out/"],
+        "--module_output_path_prefix", concat [dstPath env, "/"],
         "--compilation_level", "ADVANCED_OPTIMIZATIONS"]
     checkExit $ system "open examples/test.html"
   where
@@ -79,7 +98,7 @@ packages =
 #endif
       ]
     )
-  , ("integer-simple"
+  , ("integer-gmp"
     , [ "GHC.Integer"
 #if __GLASGOW_HASKELL__ >= 702
       , "GHC.Integer.Logarithms"

@@ -38,8 +38,8 @@ returnPrimitiveOperationResult op args = do
     TrampolineM o m args -> return $ jumpToMethod o m args
     UnknownOp            -> return $ Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
 
-declarePrimitiveOperationResult :: Javascript js => Stg.Id -> PrimOp -> [StgArg] -> js -> Gen js
-declarePrimitiveOperationResult id op args rest = do
+declarePrimitiveOperationResult :: Javascript js => Stg.Id -> PrimOp -> [StgArg] -> js -> Expression js -> Gen js
+declarePrimitiveOperationResult id op args rest live = do
   exp <- primOp' op args
   case exp of
      PlainE e             -> do
@@ -47,7 +47,7 @@ declarePrimitiveOperationResult id op args rest = do
         return $ mconcat [Js.declare [(i, e)], rest]
      TrampolineM o m args -> do
         i    <- stgIdToJsId id
-        return $ declareMethodCallResult i o m args rest
+        return $ declareMethodCallResult i o m args rest live
      UnknownOp            -> return $ Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
 
 primOp' :: Javascript js => PrimOp -> [StgArg] -> Gen (PrimOpExp js)

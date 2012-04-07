@@ -1,3 +1,7 @@
+goog.require('goog.math.Long');
+goog.require('goog.debug.Logger');
+goog.require('goog.debug.Console');
+
 /**
  * @define {boolean} HS_DEBUG is like goog.DEBUG, but for ghcjs internals
  */
@@ -70,7 +74,7 @@ var $hs = {
          var bh = b >>> 16;
          var r = $hs.Int.addCarry(al * bh, bl * ah, 0)[0]
          return $hs.Int.addCarry(al * bl, (r & 0xFFFF) << 16, 0)[0];
-      },
+      }
     },
     modules: {},
     alert: function (str) {
@@ -589,14 +593,7 @@ var $hs = {
     writeWord64OffAddrzh : function (a, n, v, s) {
         (new Uint64Array(a[0],a[1]+n*8))[0] = v;
         return s;
-    },
-
-    // Propper weak pointers will be hard and probably slow.
-    mkWeakzh : function(o, b, c, s) { return [s, b]; },
-    mkWeakForeignEnvzh : function(o, b, w, x, y, z, s) { return [s, b]; },
-    deRefWeakzh : function(p, s) { return [s, 1, p]; },
-    finalizeWeakzh : function(p, s) { return [s, 0, null]; },
-    touchzh : function(a, s) { return s; }
+    }
 };
 
 $hs.logger = goog.debug.Logger.getLogger('hs');
@@ -741,12 +738,30 @@ var __hscore_set_errno = function(e) {
 var strerror = function(e) {
     return $hs.utf32("Error "+e);
 }
-var __hscore_s_isreg = function(m) { return 1; };
-var __hscore_s_isdir = function(m) { return 0; };
-var __hscore_s_isfifo = function(m) { return 0; };
-var __hscore_s_isblk = function(m) { return 0; };
-var __hscore_s_ischr = function(m) { return 0; };
-var __hscore_s_issock = function(m) { return 0; };
+var __hscore_s_isreg = function(m) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_s_isreg');
+    return 1;
+};
+var __hscore_s_isdir = function(m) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_s_isdir');
+    return 0;
+};
+var __hscore_s_isfifo = function(m) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_s_isfifo');
+    return 0;
+};
+var __hscore_s_isblk = function(m) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_s_isblk');
+    return 0;
+};
+var __hscore_s_ischr = function(m) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_s_ischr');
+    return 0;
+};
+var __hscore_s_issock = function(m) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_s_issock');
+    return 0;
+};
 
 var __hscore_sigemptyset = function(set) { return 0; };
 var __hscore_sigfillset = function(set) { return 0; };
@@ -790,22 +805,39 @@ var __hscore_setmode = function(fd, toBin) {
     return 0;
 };
 
-var __hscore_sizeof_stat = function() { return 0; };
-var __hscore_st_mtime = function(st) { return 0; };
-var __hscore_st_size = function(st) { return 0; };
-var __hscore_st_mode = function(st) { return 0; };
-var __hscore_st_dev = function(st) { return 0; };
-var __hscore_st_ino = function(st) { return 0; };
-var __hscore_stat = function(file, buf) {
-    HS_RTS_TRACE && $hs.logger.info('__hscore_stat');
+var __hscore_sizeof_stat = function() { return 4; };
+var __hscore_st_mtime = function(st) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_st_mtime');
+    return 0;
+};
+var __hscore_st_size = function(st) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_st_size');
+    return 0;
+};
+var __hscore_st_mode = function(st) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_st_mode');
+    return 0;
+};
+var __hscore_st_dev = function(st) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_st_dev');
+    return 0;
+};
+var __hscore_st_ino = function(st) {
+    HS_RTS_TRACE && $hs.logger.info('__hscore_st_ino');
+    return 0;
+};
+var __hscore_stat = function(f, buf) {
+    var p = $hs.fromUtf32(f);
+    HS_RTS_TRACE && $hs.logger.info('__hscore_stat '+p);
     return 0;
 };
 var __hscore_fstat = function(fd, buf) {
     HS_RTS_TRACE && $hs.logger.info('__hscore_fstat');
     return 0;
 };
-var __hscore_lstat = function(fname, buf) {
-    HS_RTS_TRACE && $hs.logger.info('__hscore_lstat');
+var __hscore_lstat = function(f, buf) {
+    var p = $hs.fromUtf32(f);
+    HS_RTS_TRACE && $hs.logger.info('__hscore_lstat '+p);
     return 0;
 };
 
@@ -865,8 +897,8 @@ $hs.findFile = function(f) {
     return -1;
 };
 var __hscore_open = function(f,h,m) {
-    HS_RTS_TRACE && $hs.logger.info('__hscore_open '+$hs.fromUtf32(f));
     var p = $hs.fromUtf32(f);
+    HS_RTS_TRACE && $hs.logger.info('__hscore_open '+p);
     var result=$hs.findFile(p);
     if(result===-1) {
         var url = $hs.getFileURL(p);
@@ -986,7 +1018,9 @@ $hs.load = function (modules) {
             transport.send(null);
             if (transport.status == 200 || transport.status == 0) {
                 try {
+                    $hs.loadingModule=true;
                     goog.globalEval(transport.responseText);
+                    $hs.loadingModule=false;
                     $hs.loaded[modules[i]] = true;
                 } catch (e) {
                     $hs.logError("Error evaluating module: " + path + ":\n" + e);
