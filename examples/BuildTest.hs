@@ -105,7 +105,9 @@ packages =
       , "GHC.Integer.Logarithms.Internals"
 #endif
       ])
-  , ("base", ["Prelude"])
+  , ("base", [
+        "Prelude",
+        "System.Mem.Weak"])
   ]
 
 buildCommand conv env package modules =

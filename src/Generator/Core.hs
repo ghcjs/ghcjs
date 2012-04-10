@@ -66,17 +66,19 @@ creation :: Javascript js => Stg.Id -> StgRhs -> Gen (Expression js)
 creation id (StgRhsCon _cc con args) = do
     a <- mapM stgArgToJs args
     dataCreation id con a
-creation id rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt args body)
+creation id rhs@(StgRhsClosure _cc _bi live upd_flag _srt args body)
   | isUpdatable upd_flag = do
+        l <- Js.list . map Js.var <$> mapM stgIdToJs (filter (/=id) live)
         a <- mapM stgIdToJsId args
         b <- expression body
         info <- debugInfo id
-        return $ Js.new RTS.makeThunkLocalStub $ [Js.function a b] ++ info
+        return $ Js.new RTS.makeThunkLocalStub $ [Js.function a b, l] ++ info
   | otherwise = do
+        l <- Js.list . map Js.var <$> mapM stgIdToJs (filter (/=id) live)
         a <- mapM stgIdToJsId args
         b <- expression body
         info <- debugInfo id
-        return $ Js.new RTS.makeFuncLocalStub $ [Js.int (stgRhsArity rhs), Js.function a b] ++ info
+        return $ Js.new RTS.makeFuncLocalStub $ [Js.int (stgRhsArity rhs), Js.function a b, l] ++ info
 
 dataCreation :: Javascript js => Stg.Id -> DataCon -> [Expression js] -> Gen (Expression js)
 dataCreation id con args
@@ -94,14 +96,15 @@ definition id (StgRhsCon _cc con args)
                 Js.new RTS.makeDataStub $ [Js.int (dataConTag con), Js.function [] (Js.return $ Js.list a)] ++ info)]
   | otherwise = do
             return $ Js.declare [(stgIdToJsExternalName id, Js.null)]
-definition id rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt args body) = do
+definition id rhs@(StgRhsClosure _cc _bi live upd_flag _srt args body) = do
+            l <- Js.list . map Js.var <$> mapM stgIdToJs (filter (/=id) live)
             a <- mapM stgIdToJsId args
             b <- expression body
             info <- debugInfo id
             return $ Js.declare [(stgIdToJsExternalName id,
                 if isUpdatable upd_flag
-                    then Js.new (RTS.makeThunkStub) $ [Js.function a b] ++ info
-                    else Js.new (RTS.makeFuncStub) $ [Js.int (stgRhsArity rhs), Js.function a b] ++ info)]
+                    then Js.new (RTS.makeThunkStub) $ [Js.function a b, l] ++ info
+                    else Js.new (RTS.makeFuncStub) $ [Js.int (stgRhsArity rhs), Js.function a b, l] ++ info)]
 
 nonRecDeclAndDef :: Javascript js => Stg.Id -> StgRhs -> Gen js
 nonRecDeclAndDef id (StgRhsCon _cc con args)
@@ -115,14 +118,15 @@ nonRecDeclAndDef id (StgRhsCon _cc con args)
             i <- stgIdToJsId id
             a <- mapM stgArgToJs args
             return $ Js.declare [(i, Js.list a)]
-nonRecDeclAndDef id rhs@(StgRhsClosure _cc _bi _fvs upd_flag _srt args body) = do
+nonRecDeclAndDef id rhs@(StgRhsClosure _cc _bi live upd_flag _srt args body) = do
             i <- stgIdToJsId id
+            l <- Js.list . map Js.var <$> mapM stgIdToJs live
             a <- mapM stgIdToJsId args
             e <- expression body
             info <- debugInfo id
             return $ Js.declare [(i, if isUpdatable upd_flag
-                then Js.nativeFunctionCall (RTS.makeThunk) $ [Js.function a e] ++ info
-                else Js.nativeFunctionCall (RTS.makeFunc) $ [Js.int (stgRhsArity rhs), Js.function a e] ++ info)]
+                then Js.nativeFunctionCall (RTS.makeThunk) $ [Js.function a e, l] ++ info
+                else Js.nativeFunctionCall (RTS.makeFunc) $ [Js.int (stgRhsArity rhs), Js.function a e, l] ++ info)]
 
 expression :: Javascript js => StgExpr -> Gen js
 expression (StgCase expr _liveVars liveRhsVars bndr _srt alttype alts) =

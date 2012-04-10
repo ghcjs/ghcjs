@@ -1,18 +1,19 @@
 {-# LANGUAGE ForeignFunctionInterface, EmptyDataDecls #-}
-module Test (test1, test2, test3, test4, test5, test6, test7, test8, test9, test10) where
+module Test (test1, test2, test3, test4, test5, test6, test7, test8, test9, test10, test11, test12) where
 
 import Data.List
 import Foreign.C.Types
 import Foreign.Ptr
 import Control.Concurrent
+import System.Mem.Weak
 
 data JSObject
 
-foreign import ccall "zdhszicons" -- $hs.cons
+foreign import ccall "hs_cons"
   jscons :: CChar -> Ptr JSObject -> IO (Ptr JSObject)
-foreign import ccall "zdhszinil" -- $hs.nil
+foreign import ccall "hs_nil"
   jsnil :: IO (Ptr JSObject)
-foreign import ccall "alert"
+foreign import ccall "logResult"
   jsalert :: Ptr JSObject -> IO ()
 
 string2JSString :: String -> IO (Ptr JSObject)
@@ -63,4 +64,31 @@ test10 =
          putMVar x 5
      y <- takeMVar x
      return y
+
+test11 :: String -> Int
+test11 = read
+
+test12 :: String -> IO Int
+test12 a = do
+    addFinalizer a $ string2JSString "Finalize Called" >>= jsalert
+    string2JSString ("Work done (ref still held) " ++ show (sum [1..10000])) >>= jsalert
+    string2JSString ("You passed in " ++ a ++ " (ref could now be freed)") >>= jsalert
+    string2JSString ("More work done " ++ show (sum [1..10000])) >>= jsalert
+    return 1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

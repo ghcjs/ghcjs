@@ -1,11 +1,12 @@
-goog.require('goog.math.Long');
-goog.require('goog.debug.Logger');
-goog.require('goog.debug.Console');
-
 /**
  * @define {boolean} HS_DEBUG is like goog.DEBUG, but for ghcjs internals
  */
 var HS_DEBUG = true;
+
+/**
+ * @define {boolean} enable weak pointers and finalizers
+ */
+var HS_WEAKS = true;
 
 /**
  * @define {boolean} enable traceLog in the run loop
@@ -1068,10 +1069,10 @@ $hs.toHaskellInt = function(i) {
     console.log("toHaskellInt");
     return new $DataValue(1, [(0 + i) & ~0]);
 };
-$hs.nil = function() {
+hs_nil = function() {
     return "";
 };
-$hs.cons = function(x, xs) {
+hs_cons = function(x, xs) {
     return String.fromCharCode(x) + xs;
 };
 $hs.init = function() {
