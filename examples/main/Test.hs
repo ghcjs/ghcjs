@@ -1,5 +1,5 @@
-{-# LANGUAGE ForeignFunctionInterface, EmptyDataDecls #-}
-module Test (test1, test2, test3, test4, test5, test6, test7, test8, test9, test10, test11, test12) where
+{-# LANGUAGE ForeignFunctionInterface, EmptyDataDecls, ScopedTypeVariables #-}
+module Test (test1, test2, test3, test4, test5, test6, test7, test8, test9, test10, test11, test12, test13) where
 
 import Data.List
 import Foreign.C.Types
@@ -76,7 +76,15 @@ test12 a = do
     string2JSString ("More work done " ++ show (sum [1..10000])) >>= jsalert
     return 1
 
-
+-- Recusive let
+test13 :: String -> String
+test13 x =
+    let a, b :: Int -> String
+        a 0 = "A"
+        a n  = b (n-1)
+        b 0 = "B"
+        b n  = a (n-1)
+    in a (read x) ++ b (read x)
 
 
 

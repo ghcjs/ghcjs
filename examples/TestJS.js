@@ -27,6 +27,8 @@ window.onload = function() {
         $hs.force($$GHCziCString_unpackCStringzh, "42\x00"))));
       logResult($hs.fromHaskellInt($hs.fromHaskellIO($hs.force($$$Test_test12(),
         $hs.force($$GHCziCString_unpackCStringzh, "42\x00")))));
+      logResult($hs.fromHaskellString($hs.force($$$Test_test13(),
+        $hs.force($$GHCziCString_unpackCStringzh, "1\x00"))));
     } catch (e) {
       alert(e);
     }

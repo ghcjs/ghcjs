@@ -618,18 +618,16 @@ function $Func(a, f, live, info) {
         this.info = info;
         if (typeof f !== 'function')
             throw "Not a function!";
-        if(HS_WEAKS) {
+        if(HS_WEAKS && live !== undefined) {
             for(var i = 0; i !== live.length; i++)
                 if(live[i] === undefined)
                     throw "Undefined live var!";
         }
     }
 };
-function $F(a, f, live, info) {
-    if(HS_DEBUG && HS_WEAKS)   return new $Func(a, f, live, info);
-    if(!HS_DEBUG && HS_WEAKS)  return new $Func(a, f, live);
-    if(HS_DEBUG && !HS_WEAKS)  return new $Func(a, f, undefined, info);
-    if(!HS_DEBUG && !HS_WEAKS) return new $Func(a, f);
+function $F(a, f, info) {
+    if(HS_DEBUG)  return new $Func(a, f, undefined, info);
+    if(!HS_DEBUG) return new $Func(a, f);
 };
 function $f(a, f, live, info) {
     if(HS_DEBUG && HS_WEAKS)   return new $Func(a, f, live, info);
@@ -637,6 +635,9 @@ function $f(a, f, live, info) {
     if(HS_DEBUG && !HS_WEAKS)  return new $Func(a, f, undefined, info);
     if(!HS_DEBUG && !HS_WEAKS) return new $Func(a, f);
 };
+function $S(o, live) {
+    if(HS_WEAKS) o.live = live;
+}
 $Func.prototype = {
     hscall: $hs.hscall,
     notEvaluated: false,
@@ -679,18 +680,16 @@ function $Thunk(f, live, info) {
         this.info = info;
         if (typeof f !== 'function')
             throw "Not a function!";
-        if(HS_WEAKS) {
+        if(HS_WEAKS && live !== undefined) {
             for(var i = 0; i !== live.length; i++)
                 if(live[i] === undefined)
                     throw "Undefined live var!";
         }
     }
 };
-function $T(f, live, info) {
-    if(HS_DEBUG && HS_WEAKS)   return new $Thunk(f, live, info);
-    if(!HS_DEBUG && HS_WEAKS)  return new $Thunk(f, live);
-    if(HS_DEBUG && !HS_WEAKS)  return new $Thunk(f, undefined, info);
-    if(!HS_DEBUG && !HS_WEAKS) return new $Thunk(f);
+function $T(f, info) {
+    if(HS_DEBUG)  return new $Thunk(f, undefined, info);
+    if(!HS_DEBUG) return new $Thunk(f);
 };
 function $t(f, live, info) {
     if(HS_DEBUG && HS_WEAKS)   return new $Thunk(f, live, info);

@@ -38,13 +38,13 @@ instance JavascriptCall Formatted
 
 instance JavascriptJump Formatted
   where jumpToApplyMethod obj args = Js.return $ nativeMethodCall obj RTS.applyMethodName args
-	jumpToMethod obj method args = Js.return $ nativeMethodCall obj method args
-	jumpToFunction func args = Js.return $ nativeFunctionCall func args
+        jumpToMethod obj method args = Js.return $ nativeMethodCall obj method args
+        jumpToFunction func args = Js.return $ nativeFunctionCall func args
         maybeJumpToApplyMethod obj =
             Js.ifelse (RTS.isNotEvaluatedAndNotPrimitive obj)
                 (Js.jumpToApplyMethod obj [])
                 (Js.return obj)
-        returnValue v = Js.return $ Js.nativeFunctionCall (RTS.returnData) v
+        returnValue tag v info = Js.return $ RTS.returnData tag v info
 
 instance Javascript Formatted
 

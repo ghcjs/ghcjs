@@ -36,7 +36,7 @@ instance Javascript js => JavascriptJump (Trampoline js)
         maybeJumpToApplyMethod (TCE obj) =
           TC $ expression $ nativeFunctionCall (var "$A") [obj]
 
-        returnValue args = TC $ expression $ nativeFunctionCall RTS.returnData (map runTCE args)
+        returnValue tag v info = TC $ expression $ RTS.returnData tag (map runTCE v) (runTCE info)
 
 instance Javascript js => JavascriptCall (Trampoline js)
   where assignMethodCallResult v (TCE obj) method args (TC rest) (TCE live) =

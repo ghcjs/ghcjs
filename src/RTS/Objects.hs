@@ -12,35 +12,43 @@ true = Js.var "$$GHCziTypes_True"
 false :: Javascript js => Expression js
 false = Js.var "$$GHCziTypes_False"
 
-makeThunkStub :: Javascript js => Expression js
-makeThunkStub = Js.var "$Thunk" -- Js.property (Js.var "m") "T"
+--makeThunkStub :: Javascript js => Expression js
+--makeThunkStub = Js.var "$Thunk" -- Js.property (Js.var "m") "T"
+--
+--makeFuncStub :: Javascript js => Expression js
+--makeFuncStub = Js.var "$Func" -- Js.property (Js.var "m") "F"
 
-makeFuncStub :: Javascript js => Expression js
-makeFuncStub = Js.var "$Func" -- Js.property (Js.var "m") "F"
+--makeDataStub :: Javascript js => Expression js
+--makeDataStub = Js.var "$Data" -- Js.property (Js.var "m") "D"
 
-makeDataStub :: Javascript js => Expression js
-makeDataStub = Js.var "$Data" -- Js.property (Js.var "m") "D"
+-- makeThunkLocalStub :: Javascript js => Expression js
+-- makeThunkLocalStub = Js.var "$Thunk"
 
-makeThunkLocalStub :: Javascript js => Expression js
-makeThunkLocalStub = Js.var "$Thunk"
+-- makeFuncLocalStub :: Javascript js => Expression js
+-- makeFuncLocalStub = Js.var "$Func"
+--
+--makeDataLocalStub :: Javascript js => Expression js
+--makeDataLocalStub = Js.var "$Data"
 
-makeFuncLocalStub :: Javascript js => Expression js
-makeFuncLocalStub = Js.var "$Func"
+makeThunk :: Javascript js => Expression js -> Maybe ([Expression js]) -> [Expression js] -> Expression js
+makeThunk f (Just live) info = Js.nativeFunctionCall (Js.var "$t") ([f, Js.list live] ++ info)
+makeThunk f Nothing info = Js.nativeFunctionCall (Js.var "$T") (f:info)
 
-makeDataLocalStub :: Javascript js => Expression js
-makeDataLocalStub = Js.var "$Data"
+makeFunc :: Javascript js => Int -> Expression js -> Maybe ([Expression js]) -> [Expression js] -> Expression js
+makeFunc arity f (Just live) info = Js.nativeFunctionCall (Js.var "$f") ([Js.int arity, f, Js.list live] ++ info)
+makeFunc arity f Nothing info = Js.nativeFunctionCall (Js.var "$F") ([Js.int arity, f] ++ info)
 
-makeThunk :: Javascript js => Expression js
-makeThunk = Js.var "$t"
+makeDataF :: Javascript js => Int -> Expression js -> [Expression js] -> Expression js
+makeDataF tag f info = Js.nativeFunctionCall (Js.var "$D") ([Js.int tag, f] ++ info)
 
-makeFunc :: Javascript js => Expression js
-makeFunc = Js.var "$f"
+makeDataValue :: Javascript js => Int -> [Expression js] -> [Expression js] -> Expression js
+makeDataValue tag v info = Js.nativeFunctionCall (Js.var "$d") ([Js.int tag, Js.list v] ++ info)
 
-makeData :: Javascript js => Expression js
-makeData = Js.var "$d"
+setLiveList :: Javascript js => Expression js -> [Expression js] -> Expression js
+setLiveList o live = Js.nativeFunctionCall (Js.var "$S") [o, Js.list live]
 
-returnData :: Javascript js => Expression js
-returnData = Js.var "$R"
+returnData :: Javascript js => Int -> [Expression js] -> Expression js -> Expression js
+returnData tag v info = Js.nativeFunctionCall (Js.var "$R") ([Js.int tag, Js.list v] ++ [info])
 
 conAppArgVector :: Javascript js => Expression js -> Expression js
 conAppArgVector object = Js.property object "v"

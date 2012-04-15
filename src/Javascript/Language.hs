@@ -73,7 +73,7 @@ class JavascriptBase js => JavascriptJump js
         jumpToMethod :: Expression js -> Id -> [Expression js] -> js
         jumpToFunction :: Expression js -> [Expression js] -> js
         maybeJumpToApplyMethod :: Expression js -> js
-        returnValue :: [Expression js] -> js
+        returnValue :: Int -> [Expression js] -> Expression js -> js
 
 class JavascriptBase js => JavascriptReturnResult js
   where return :: Expression js -> js

@@ -23,7 +23,7 @@ generate :: Module -> [(StgBinding, BindDependInfo)] -> (forall js. Javascript j
 generate thisMod binds = do
   addTopLevelIds thisMod $ map fst notExportedBindings
   exports <- withBindings definition exportedBindings
-  decls   <- map (\(i, r) -> Js.declare [(i, r)]) <$> mapM notExportedDecl notExportedBindings
+  decls   <- map (\(i, r) -> Js.declare [(i, r)]) <$> mapM (notExportedDecl False) notExportedBindings
   allDeps <- mapM deps allBindings
   return . mconcat $
     [Js.comment $ "GHCJS Haskell Module " ++ show (moduleNameString $ moduleName thisMod, modDeps)]
