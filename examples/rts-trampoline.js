@@ -1127,3 +1127,19 @@ $hs.finalizeWeakzh = function(p, s) {
 $hs.touchzh = function(a, s) {
     return s;
 };
+$hs.seqzh = function(a, s) {
+    if(a.notEvaluated) {
+        if(HS_WEAKS) {
+            return new $tr.Call(a.hscall, a, [], function(result) {
+                return new $tr.Result([s, result]);
+            }, [s]);
+        }
+        else {
+            return new $tr.Call(a.hscall, a, [], function(result) {
+                return new $tr.Result([s, result]);
+            });
+        }
+    }
+    else
+        return new $tr.Result([s, a]);
+};

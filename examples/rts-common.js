@@ -374,7 +374,10 @@ var $hs = {
         return s;
     },
     plusAddrzh : function (a, n) {
-        return [a[0],a[1]+n,a[2]+n];
+        if(typeof(a) === 'string')
+            return [a, n, n];
+        else
+            return [a[0],a[1]+n,a[2]+n];
     },
     minusAddrzh : function (a, b) {
         return a[1]-b[1];
@@ -464,7 +467,12 @@ var $hs = {
         return new Int64Array(a[0],a[1]+n*8)[0];
     },
     indexWord8OffAddrzh : function (a, n) {
-        return new Uint8Array(a[0],a[1]+n)[0];
+        if(typeof(a) === 'string')
+            return a.charCodeAt(n);
+        else if(typeof(a[0]) === 'string')
+            return a[0].charCodeAt(a[1]+n);
+        else
+            return new Uint8Array(a[0],a[1]+n)[0];
     },
     indexWord16OffAddrzh : function (a, n) {
         return new Uint16Array(a[0],a[1]+n*2)[0];
@@ -518,7 +526,10 @@ var $hs = {
         return [s, new Int64Array(a[0],a[1]+n*8)[0]];
     },
     readWord8OffAddrzh : function (a, n, s) {
-        return [s, new Uint8Array(a[0],a[1]+n)[0]];
+        if(typeof(a) === 'string')
+            return [s, a.charCodeAt(n)];
+        else
+            return [s, new Uint8Array(a[0],a[1]+n)[0]];
     },
     readWord16OffAddrzh : function (a, n, s) {
         return [s, new Uint16Array(a[0],a[1]+n*2)[0]];
@@ -633,6 +644,7 @@ var _hs_text_memcpy = function (dest, doff, src, soff, count) {
         doff++;
         count--;
     }
+    return dest;
 };
 
 var _hs_text_memcmp = function(a, aoff, b, boff, count) {
@@ -643,11 +655,38 @@ var _hs_text_memcmp = function(a, aoff, b, boff, count) {
             return -1;
         if( aarray[aoff] > barray[boff] )
             return 1;
-        soff++;
-        doff++;
+        aoff++;
+        boff++;
         count--;
     }
     return 0;
+};
+var memcpy = function(dest, src, count) {
+    if(typeof(src) === 'string') {
+        destarray = new Uint8Array(dest[0],dest[1]);
+        var soff = 0;
+        var doff = 0;
+        while(count != 0) {
+            destarray[doff] = src[soff];
+            soff++;
+            doff++;
+            count--;
+        }
+        return dest;
+    }
+    else {
+        destarray = new Uint8Array(dest[0],dest[1]);
+        srcarray = new Uint8Array(src[0],src[1]);
+        var doff = 0;
+        var soff = 0;
+        while(count != 0) {
+            destarray[doff] = srcarray[soff];
+            soff++;
+            doff++;
+            count--;
+        }
+        return dest;
+    }
 };
 
 var u_iswalpha = function(a) {
@@ -1007,7 +1046,15 @@ var read = function(fd, p, s) {
     HS_RTS_TRACE && $hs.logger.info('read : '+n*4);
     return n * 4;
 };
-
+var ghc_strlen = function(s) {
+    return s.indexOf('\x00');
+};
+var initLinker = function() {
+    HS_RTS_TRACE && $hs.logger.info('initLinker');
+};
+var exitLinker = function() {
+    HS_RTS_TRACE && $hs.logger.info('exitLinker');
+};
 $hs.loaded = [];
 $hs.loadPath = "./";
 $hs.load = function (modules) {
