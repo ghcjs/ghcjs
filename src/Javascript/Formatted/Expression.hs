@@ -84,16 +84,16 @@ instance JavascriptExpression Formatted
         greater a b =        leftBinOp   ">"   8 a b
         greaterOrEqual a b = leftBinOp   ">="  8 a b
         shiftLL a b =        leftBinOp   "<<"  7 a b
-        shiftRL a b =        leftBinOp   ">>"  7 a b
-        shiftRA a b =        leftBinOp   ">>>" 7 a b
+        shiftRA a b =        leftBinOp   ">>"  7 a b
+        shiftRL a b =        leftBinOp   ">>>" 7 a b
         plus a b =           leftBinOp   "+"   6 a b
         minus a b =          leftBinOp   "-"   6 a b
         multiply a b =       leftBinOp   "*"   5 a b
         divide a b =         leftBinOp   "/"   5 a b
         mod a b =            leftBinOp   "%"   5 a b
-        not =                leftUnaryOp "!"   4
-        bitNot =             leftUnaryOp "~"   4
-        unaryMinus =         leftUnaryOp "-"   4
+        not =                leftUnaryOp " !"   4
+        bitNot =             leftUnaryOp " ~"   4
+        unaryMinus =         leftUnaryOp " -"   4
 
 instance JavascriptNativeCall Formatted
   where nativeFunctionCall func args = mkOperation 2 $

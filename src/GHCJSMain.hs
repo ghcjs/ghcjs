@@ -10,7 +10,7 @@ import System.FilePath (replaceExtension)
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
 import DynFlags (DynFlags(..))
 import Module (PackageId)
-import System.FilePath (dropExtension, replaceExtension, (</>), (<.>))
+import System.FilePath (dropExtension, replaceExtension, (</>), (<.>), takeFileName)
 import System.Directory (doesFileExist)
 import Packages (getPreloadPackagesAnd, PackageConfig, importDirs)
 import Data.List (nub)
@@ -55,8 +55,10 @@ linkJavaScript dyflags o_files dep_packages = do
     debugTraceMsg dyflags 1 (ptext (sLit "Java Script Linking") <+> text jsexe
                              <+> text "...")
     createDirectoryIfMissingVerbose normal False jsexe
-    jsFiles <- mapM (mbFile . (flip replaceExtension ".js")) o_files
-    closureArgs <- Js.link (jsexe++"/") importPaths (catMaybes jsFiles) ["JS"] []
+    mbJsFiles <- mapM (mbFile . (flip replaceExtension ".js")) o_files
+    let jsFiles = catMaybes mbJsFiles
+    let pagesMod = if any ((=="JS") . takeFileName) jsFiles then "JS" else "Main"
+    closureArgs <- Js.link (jsexe++"/") importPaths jsFiles [pagesMod] []
     writeFile (jsexe </> "closure.args") $ unwords closureArgs
   where
     mbFile f = do

@@ -1,7 +1,11 @@
 var testLog;
 
-logResult = function(a) {
+var logResult = function(a) {
     testLog.innerHTML = testLog.innerHTML + "<p>" + a + "</p>"
+};
+
+var logException = function(e) {
+    testLog.innerHTML = testLog.innerHTML + "<p>Error " + e + "</p>"
 };
 
 window.onload = function() {
@@ -9,26 +13,28 @@ window.onload = function() {
     try {
       testLog = document.getElementById("log");
 
-      logResult($hs.fromHaskellInt($$$Test_test1()));
-      logResult($hs.fromHaskellInt($$$Test_test2()));
-      logResult($hs.fromHaskellInt($$$Test_test3()));
-      logResult($hs.fromHaskellString($$$Test_test4()));
-      logResult($hs.fromHaskellString($$$Test_test5()));
-      logResult($hs.fromHaskellString($$$Test_test6()));
-      logResult($hs.fromHaskellString($$$Test_test7()));
-      logResult($hs.fromHaskellInt($hs.fromHaskellIO($$$Test_test9())));
+      $hs.fromHaskellInt([$$$Test_test1()], logResult, logException);
+      $hs.fromHaskellInt([$$$Test_test2()], logResult, logException);
+      $hs.fromHaskellInt([$$$Test_test3()], logResult, logException);
+      $hs.fromHaskellString([$$$Test_test4()], logResult, logException);
+      $hs.fromHaskellString([$$$Test_test5()], logResult, logException);
+      $hs.fromHaskellString([$$$Test_test6()], logResult, logException);
+      $hs.fromHaskellString([$$$Test_test7()], logResult, logException);
+      $hs.fromHaskellIO([$$$Test_test9()], function(i) {
+        $hs.fromHaskellInt([i], logResult, logException);}, logException);
 
       if ($hs.Thread && $hs.MVar) {
-        logResult("Thread test returned " +
-            $hs.fromHaskellInt($hs.fromHaskellIO($$$Test_test10())));
+        $hs.fromHaskellIO([$$$Test_test10()], function(i) {
+            $hs.fromHaskellInt([i], logResult, logException);}, logException);
       }
-
-      logResult($hs.fromHaskellInt($hs.force($$$Test_test11(),
-        $hs.force($$GHCziCString_unpackCStringzh, "42\x00"))));
-      logResult($hs.fromHaskellInt($hs.fromHaskellIO($hs.force($$$Test_test12(),
-        $hs.force($$GHCziCString_unpackCStringzh, "42\x00")))));
-      logResult($hs.fromHaskellString($hs.force($$$Test_test13(),
-        $hs.force($$GHCziCString_unpackCStringzh, "1\x00"))));
+      $hs.force([$$GHCziCString_unpackCStringzh, "42\x00"], function(s42) {
+        $hs.force([$$$Test_test11(), s42], function(i) {
+            $hs.fromHaskellInt([i], logResult, logException);}, logException);
+        $hs.fromHaskellIO([$$$Test_test12(), s42], function(i) {
+            $hs.fromHaskellInt([i], logResult, logException);}, logException);
+        $hs.force([$$$Test_test13(), s42], function(s) {
+            $hs.fromHaskellString([s], logResult, logException);}, logException);
+      }, logException);
     } catch (e) {
       alert(e);
     }

@@ -132,9 +132,15 @@ function $d(tag, v, info) {
     return new $DataValue(tag, v, info);
 };
 
-$hs.force = function () {
-    var f = arguments[0];
-    var args = Array.prototype.slice.call(arguments, 1, arguments.length);
-    return f.hscall.apply(f, args);
+$hs.force = function (a, onComplete, onException) {
+    var f = a[0];
+    var args = Array.prototype.slice.call(a, 1, a.length);
+    try {
+        onComplete(f.hscall.apply(f, args));
+    }
+    catch(e) {
+        onException(e);
+    }
 };
+
 

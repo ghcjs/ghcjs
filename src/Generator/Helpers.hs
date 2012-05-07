@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP, TypeFamilies #-}
+#include "MachDeps.h"
 module Generator.Helpers where
 
 import Id as Stg (Id)
@@ -61,21 +62,28 @@ newGenState = GenState M.empty safeIds
 stgLiteralToJs :: Javascript js => Stg.Literal -> Gen (Expression js)
 stgLiteralToJs (Stg.MachChar c) = return $ Js.string [c] -- Char#
 stgLiteralToJs (Stg.MachStr s) = return $ Js.string (unpackFS s ++ "\0") -- Addr#
+#if WORD_SIZE_IN_BITS == 32
 stgLiteralToJs (Stg.MachInt i) = return $ Js.int i -- Int#
+#else
+stgLiteralToJs (Stg.MachInt i)
+    = return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
+        Js.int (i .&. 0xFFFFFFFF),
+        Js.int (i `shiftR` 32 .&. 0xFFFFFFFF)]
+#endif
 stgLiteralToJs (Stg.MachInt64 i)
     = return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
         Js.int (i .&. 0xFFFFFFFF),
         Js.int (i `shiftR` 32 .&. 0xFFFFFFFF)]
-stgLiteralToJs (Stg.MachWord i) -- Word#
-  | i >= 2^(31 :: Int) = return $ Js.int (i - 2^(32 :: Int) + 1)
-  | otherwise = return $ Js.int i
+#if WORD_SIZE_IN_BITS == 32
+stgLiteralToJs (Stg.MachWord i) = return $ Js.int i -- Word#
+#else
+stgLiteralToJs (Stg.MachWord i)
+    = return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
+        Js.int (i .&. 0xFFFFFFFF),
+        Js.int (i `shiftR` 32 .&. 0xFFFFFFFF)]
+#endif
 stgLiteralToJs (Stg.MachWord64 i)
-  | i >= 2^(63 :: Int) = do
-    let c = i - 2^(64 :: Int) + 1
-    return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
-        Js.int (c .&. 0xFFFFFFFF),
-        Js.int (c `shiftR` 32 .&. 0xFFFFFFFF)]
-  | otherwise = return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
+    = return $ Js.nativeMethodCall (Js.var "goog.math.Long") "fromBits" [
         Js.int (i .&. 0xFFFFFFFF),
         Js.int (i `shiftR` 32 .&. 0xFFFFFFFF)]
 stgLiteralToJs (Stg.MachFloat i) = return $ Js.float i -- Float#

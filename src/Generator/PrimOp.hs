@@ -1,14 +1,15 @@
 {-# LANGUAGE CPP #-}
+#include "MachDeps.h"
 -- | Tries to implement GHC primitive operations as described at
 --   http://www.haskell.org/ghc/docs/6.12.2/html/libraries/ghc-prim-0.2.0.0/GHC-Prim.html
 -- Char# is Javascript string
 -- Int# is Javascript number
--- Word# is Javascript number
+-- Word# is Javascript number (positive)
 -- Float# is Javascript number
 -- Doable# is Javascript number
--- Addr# is Javascript string
--- MutableByteArray# s is Javascript string
--- ByteArray# s is Javascript string
+-- Addr# is not defined here
+-- MutableByteArray# is not defined here
+-- ByteArray# is not defined here
 module Generator.PrimOp
   ( returnPrimitiveOperationResult
   , declarePrimitiveOperationResult
@@ -63,9 +64,8 @@ primOp CharEqOp [a, b] = PlainE $ boolOp Js.equal a b
 primOp CharNeOp [a, b] = PlainE $ boolOp Js.notEqual a b
 primOp CharLtOp [a, b] = PlainE $ boolOp Js.less  a b
 primOp CharLeOp [a, b] = PlainE $ boolOp Js.lessOrEqual a b
-primOp OrdOp    [a]    = PlainE $ Js.nativeMethodCall a "charCodeAt" [Js.int (0 :: Int)]
-primOp ChrOp    [a]    = PlainE $ Js.nativeMethodCall (Js.var "String") "fromCharCode" [a]
 
+#if WORD_SIZE_IN_BITS == 32
 -- int:
 primOp IntGtOp  [a, b] = PlainE $ boolOp Js.greater a b
 primOp IntGeOp  [a, b] = PlainE $ boolOp Js.greaterOrEqual a b
@@ -74,56 +74,45 @@ primOp IntNeOp  [a, b] = PlainE $ boolOp Js.notEqual a b
 primOp IntLtOp  [a, b] = PlainE $ boolOp Js.less  a b
 primOp IntLeOp  [a, b] = PlainE $ boolOp Js.lessOrEqual a b
 
--- $hs.Int.addCarry(a, b, 0)[0]
-primOp IntAddOp [a, b] = PlainE $ flip Js.subscript (Js.int (0 :: Int)) $ Js.nativeMethodCall (Js.property RTS.root "Int") "addCarry" [a, b, Js.int (0 :: Int)]
+primOp IntAddOp [a, b] = PlainE $ Js.bitOr (Js.plus a b) (Js.int (0 :: Int))
+primOp IntSubOp [a, b] = PlainE $ Js.bitOr (Js.minus a b) (Js.int (0 :: Int))
+primOp IntMulOp [a, b] = PlainE $ Js.bitOr (Js.multiply a b) (Js.int (0 :: Int))
 
--- $hs.Int.addCarry(a, ~b, 1)[0]
-primOp IntSubOp [a, b] = PlainE $ flip Js.subscript (Js.int (0 :: Int)) $ Js.nativeMethodCall (Js.property RTS.root "Int") "addCarry" [a, Js.bitNot b, Js.int (1 :: Int)]
-primOp IntMulOp [a, b] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "Int") "mul" [a, b]
 primOp IntNegOp [a]    = PlainE $ Js.unaryMinus a
 
--- overflow sensitive operations:
--- (a >>> 16) + (b >>> 16)
-primOp IntMulMayOfloOp [a, b] = PlainE $ Js.plus (test a) (test b)
-  where sixteen = Js.int (16 :: Int)
-        test x = Js.shiftRA x sixteen
-
--- $hs.Int.addCarry(a, b, 0)
-primOp IntAddCOp [a, b] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "Int") "addCarry" [a, b, Js.int (0 :: Int)]
-
--- $hs.Int.addCarry(a, ~b, 1)
-primOp IntSubCOp [a, b] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "Int") "addCarry" [a, Js.bitNot b, Js.int (1 :: Int)]
-
--- (a / b) & ~0
-primOp IntQuotOp [a, b] = PlainE $ Js.bitAnd (Js.divide a b) (Js.bitNot $ Js.int (0 :: Int))
+-- (a / b) |0
+primOp IntQuotOp [a, b] = PlainE $ Js.bitOr (Js.divide a b) (Js.int (0 :: Int))
 primOp IntRemOp  [a, b] = PlainE $ Js.mod a b
 primOp ISllOp     [a, b] = PlainE $ Js.shiftLL a b
 primOp ISrlOp     [a, b] = PlainE $ Js.shiftRL a b
 primOp ISraOp     [a, b] = PlainE $ Js.shiftRA a b
-primOp Int2WordOp  [a] = PlainE $ a
+primOp Int2WordOp  [a] = PlainE $ Js.shiftRL a (Js.int (0 :: Int))
+primOp Int2FloatOp  [a] = PlainE $ a
+primOp Int2DoubleOp  [a] = PlainE $ a
 
 -- word:
+primOp WordAddOp  [a, b] = PlainE $ Js.shiftRL (Js.plus a b) (Js.int (0 :: Int))
+primOp WordSubOp  [a, b] = PlainE $ Js.shiftRL (Js.minus a b) (Js.int (0 :: Int))
+primOp WordMulOp  [a, b] = PlainE $ Js.shiftRL (Js.multiply a b) (Js.int (0 :: Int))
+primOp WordQuotOp [a, b] = PlainE $ Js.shiftRL (Js.divide a b) (Js.int (0 :: Int))
+primOp WordRemOp  [a, b] = PlainE $ Js.mod a b
+
 -- imlement word as a bit reinterpretation of int
-primOp WordGtOp  [a, b] = PlainE $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "Word") "gt" [a, b]
-primOp WordGeOp  [a, b] = PlainE $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "Word") "ge" [a, b]
-primOp WordEqOp  [a, b] = PlainE $ boolOp Js.equal a b
-primOp WordNeOp  [a, b] = PlainE $ boolOp Js.notEqual a b
-primOp WordLtOp  [a, b] = PlainE $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "Word") "lt" [a, b]
-primOp WordLeOp  [a, b] = PlainE $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "Word") "le" [a, b]
-
--- $hs.Int.addCarry(a, b, 0)[0]
-primOp WordAddOp [a, b] = PlainE $ flip Js.subscript (Js.int (0 :: Int)) $ Js.nativeMethodCall (Js.property RTS.root "Int") "addCarry" [a, b, Js.int (0 :: Int)]
-
--- $hs.Int.addCarry(a, ~b, 1)[0]
-primOp WordSubOp [a, b] = PlainE $ flip Js.subscript (Js.int (0 :: Int)) $ Js.nativeMethodCall (Js.property RTS.root "Int") "addCarry" [a, Js.bitNot b, Js.int (1 :: Int)]
-primOp WordMulOp [a, b] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "Int") "mul" [a, b]
 primOp SllOp     [a, b] = PlainE $ Js.shiftLL a b
 primOp SrlOp     [a, b] = PlainE $ Js.shiftRL a b
 primOp AndOp     [a, b] = PlainE $ Js.bitAnd a b
 primOp OrOp      [a, b] = PlainE $ Js.bitOr a b
 primOp XorOp     [a, b] = PlainE $ Js.bitXOr a b
 primOp NotOp     [a] = PlainE $ Js.bitNot a
-primOp Word2IntOp[a] = PlainE $ a
+
+primOp Word2IntOp[a] = PlainE $ Js.bitOr a (Js.int (0 :: Int))
+
+primOp WordGtOp  [a, b] = PlainE $ boolOp Js.greater a b
+primOp WordGeOp  [a, b] = PlainE $ boolOp Js.greaterOrEqual a b
+primOp WordEqOp  [a, b] = PlainE $ boolOp Js.equal a b
+primOp WordNeOp  [a, b] = PlainE $ boolOp Js.notEqual a b
+primOp WordLtOp  [a, b] = PlainE $ boolOp Js.less  a b
+primOp WordLeOp  [a, b] = PlainE $ boolOp Js.lessOrEqual a b
 
 primOp Narrow8IntOp [arg] = PlainE $
   Js.minus bits signBit
@@ -134,60 +123,49 @@ primOp Narrow16IntOp [arg] = PlainE $
   where bits = Js.bitAnd arg (Js.int (0x7FFF :: Int))
         signBit = Js.bitAnd arg (Js.int (0x8000 :: Int))
 primOp Narrow32IntOp [a] = PlainE $ a
-primOp Narrow8WordOp [arg] = PlainE $
-  Js.minus bits signBit
-  where bits = Js.bitAnd arg (Js.int (0x7F :: Int))
-        signBit = Js.bitAnd arg (Js.int (0x80 :: Int))
-primOp Narrow16WordOp [arg] = PlainE $
-  Js.minus bits signBit
-  where bits = Js.bitAnd arg (Js.int (0x7FFF :: Int))
-        signBit = Js.bitAnd arg (Js.int (0x8000 :: Int))
+primOp Narrow8WordOp [a] = PlainE $ Js.bitAnd a (Js.int (0xFF :: Int))
+primOp Narrow16WordOp [a] = PlainE $ Js.bitAnd a (Js.int (0xFFFF :: Int))
 primOp Narrow32WordOp [a] = PlainE $ a
+#endif
+
+#if WORD_SIZE_IN_BITS == 64
+-- Only inlining methods that are the same for goog.math.Long
+-- and goog.math.Integer.  That way we can easily switch
+-- as between them for the 64bit Int and Word as it is not clear
+-- which will be a better fit.
+
+-- int:
+compareMethod a m b = PlainE $ jsBoolToHs $ Js.nativeMethodCall a m [b]
+primOp IntGtOp  [a, b] = compareMethod a "greaterThan" b
+primOp IntGeOp  [a, b] = compareMethod a "greaterThanOrEqual" b
+primOp IntEqOp  [a, b] = compareMethod a "equals" b
+primOp IntNeOp  [a, b] = compareMethod a "notEquals" b
+primOp IntLtOp  [a, b] = compareMethod a "lessThan" b
+primOp IntLeOp  [a, b] = compareMethod a "lessThanOrEqual" b
+
+primOp IntAddOp [a, b] = PlainE $ Js.nativeMethodCall a "add" [b]
+primOp IntSubOp [a, b] = PlainE $ Js.nativeMethodCall a "subtract" [b]
+primOp IntMulOp [a, b] = PlainE $ Js.nativeMethodCall a "multiply" [b]
+
+primOp IntNegOp [a]    = PlainE $ Js.nativeMethodCall a "negate" []
+
+-- word:
+primOp WordAddOp  [a, b] = PlainE $ Js.nativeMethodCall a "add" [b]
+primOp WordSubOp  [a, b] = PlainE $ Js.nativeMethodCall a "subtract" [b]
+primOp WordMulOp  [a, b] = PlainE $ Js.nativeMethodCall a "multiply" [b]
+
+-- imlement word as a bit reinterpretation of int
+primOp AndOp     [a, b] = PlainE $ Js.nativeMethodCall a "and" [b]
+primOp OrOp      [a, b] = PlainE $ Js.nativeMethodCall a "or" [b]
+primOp XorOp     [a, b] = PlainE $ Js.nativeMethodCall a "xor" [b]
+primOp NotOp     [a] = PlainE $ Js.nativeMethodCall a "not"
+#endif
 
 primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
 
-primOp IndexOffAddrOp_Char [a, b] = PlainE $ Js.nativeMethodCall a "charAt" [b]
-
 -- StablePtr:
-primOp MakeStablePtrOp [a, b] = PlainE $ Js.list [b, a]
-primOp DeRefStablePtrOp [a, b] = PlainE $ Js.list [b, a]
-
-primOp NewArrayOp    [n, a, s]    = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "newArray"    [n, a, s]
-primOp SameMutableArrayOp [a, b]  = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "same"        [a, b]
-primOp ReadArrayOp   [a, n, s]    = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "read"        [a, n, s]
-primOp WriteArrayOp  [a, n, b, s] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "write"       [a, n, b, s]
---primOp SizeofArrayOp [a]          = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "sizeof"      [a]
---primOp SizeofMutableArrayOp [a]   = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "sizeofMut"   [a]
-primOp IndexArrayOp  [a, n]       = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "index"       [a, n]
-primOp UnsafeFreezeArrayOp [a, s] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "unsafeFreeze"[a, s]
-primOp UnsafeThawArrayOp [a, s]   = PlainE $ Js.nativeMethodCall (Js.property RTS.root "_Array") "unsafeThaw"  [a, s]
-
-primOp NewMutVarOp   [a, s]    = PlainE $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "newMutVar" [a, s]
-primOp ReadMutVarOp  [a, s]    = PlainE $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "read" [a, s]
-primOp WriteMutVarOp [a, b, s] = PlainE $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "write" [a, b, s]
-primOp SameMutVarOp  [a, b]    = PlainE $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "MutVar") "same" [a, b]
-primOp AtomicModifyMutVarOp  [a, b, s] = TrampolineM (Js.property RTS.root "MutVar") "atomicModify" [a, b, s]
-#if __GLASGOW_HASKELL__ >= 702
-primOp CasMutVarOp   [a, b, c, s] = TrampolineM (Js.property RTS.root "MutVar") "cas" [a, b, c, s]
-#endif
-
-primOp ForkOp [a, s]      = TrampolineM (Js.property RTS.root "Thread") "fork" [a, s]
-primOp ForkOnOp [a, b, s] = TrampolineM (Js.property RTS.root "Thread") "forkOn" [a, b, s]
-primOp YieldOp [s]        = TrampolineM (Js.property RTS.root "Thread") "yieldThread" [s]
-primOp MyThreadIdOp [s]   = TrampolineM (Js.property RTS.root "Thread") "myThreadId" [s]
-primOp NoDuplicateOp [s]  = TrampolineM (Js.property RTS.root "Thread") "noDuplicate" [s]
-primOp DelayOp [a, s]     = TrampolineM (Js.property RTS.root "Thread") "delay" [a, s]
-
-primOp CatchOp [a, b, s] = TrampolineM (Js.property RTS.root "Exception") "tryCatch" [a, b, s]
-primOp RaiseOp [a]       = PlainE $ Js.nativeMethodCall (Js.property RTS.root "Exception") "raise" [a]
-primOp RaiseIOOp [a, s]  = PlainE $ Js.nativeMethodCall (Js.property RTS.root "Exception") "raiseIO" [a, s]
-
-primOp NewMVarOp     [s]       = PlainE $ Js.nativeMethodCall (Js.property RTS.root "MVar") "newMVar" [s]
-primOp TakeMVarOp    [a, s]    = TrampolineM (Js.property RTS.root "MVar") "take" [a, s]
-primOp TryTakeMVarOp [a, s]    = TrampolineM (Js.property RTS.root "MVar") "tryTake" [a, s]
-primOp PutMVarOp     [a, b, s] = TrampolineM (Js.property RTS.root "MVar") "put" [a, b, s]
-primOp SameMVarOp    [a, b, s] = PlainE $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "MVar") "same" [a, b, s]
-primOp IsEmptyMVarOp [a, s]    = PlainE $ jsBoolToHs $ Js.nativeMethodCall (Js.property RTS.root "MVar") "isEmpty" [a, s]
+primOp MakeStablePtrOp [a, s] = PlainE $ Js.list [s, a]
+primOp DeRefStablePtrOp [a, s] = PlainE $ Js.list [s, a]
 
 primOp op args = TrampolineM RTS.root (zEncodeString (show op))  args
 

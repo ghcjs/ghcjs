@@ -12,24 +12,6 @@ true = Js.var "$$GHCziTypes_True"
 false :: Javascript js => Expression js
 false = Js.var "$$GHCziTypes_False"
 
---makeThunkStub :: Javascript js => Expression js
---makeThunkStub = Js.var "$Thunk" -- Js.property (Js.var "m") "T"
---
---makeFuncStub :: Javascript js => Expression js
---makeFuncStub = Js.var "$Func" -- Js.property (Js.var "m") "F"
-
---makeDataStub :: Javascript js => Expression js
---makeDataStub = Js.var "$Data" -- Js.property (Js.var "m") "D"
-
--- makeThunkLocalStub :: Javascript js => Expression js
--- makeThunkLocalStub = Js.var "$Thunk"
-
--- makeFuncLocalStub :: Javascript js => Expression js
--- makeFuncLocalStub = Js.var "$Func"
---
---makeDataLocalStub :: Javascript js => Expression js
---makeDataLocalStub = Js.var "$Data"
-
 makeThunk :: Javascript js => Expression js -> Maybe ([Expression js]) -> [Expression js] -> Expression js
 makeThunk f (Just live) info = Js.nativeFunctionCall (Js.var "$t") ([f, Js.list live] ++ info)
 makeThunk f Nothing info = Js.nativeFunctionCall (Js.var "$T") (f:info)
