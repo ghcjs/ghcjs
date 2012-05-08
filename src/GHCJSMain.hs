@@ -6,11 +6,10 @@ import StgSyn (StgBinding)
 import CostCentre (CollectedCCs)
 import Module (ml_hi_file, moduleNameString, moduleName)
 import Distribution.Verbosity (normal)
-import System.FilePath (replaceExtension)
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
 import DynFlags (DynFlags(..))
 import Module (PackageId)
-import System.FilePath (dropExtension, replaceExtension, (</>), (<.>), takeFileName)
+import System.FilePath (replaceExtension, dropExtension, replaceExtension, (</>), (<.>), takeBaseName)
 import System.Directory (doesFileExist)
 import Packages (getPreloadPackagesAnd, PackageConfig, importDirs)
 import Data.List (nub)
@@ -57,7 +56,7 @@ linkJavaScript dyflags o_files dep_packages = do
     createDirectoryIfMissingVerbose normal False jsexe
     mbJsFiles <- mapM (mbFile . (flip replaceExtension ".js")) o_files
     let jsFiles = catMaybes mbJsFiles
-    let pagesMod = if any ((=="JS") . takeFileName) jsFiles then "JS" else "Main"
+    let pagesMod = if any ((=="JS") . takeBaseName) jsFiles then "JS" else "Main"
     closureArgs <- Js.link (jsexe++"/") importPaths jsFiles [pagesMod] []
     writeFile (jsexe </> "closure.args") $ unwords closureArgs
   where
