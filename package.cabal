@@ -12,6 +12,13 @@ Cabal-Version:  >= 1.10
 
 flag ghc7
 
+Library
+    build-depends: base -any
+    exposed-modules: GHCJS
+    exposed: True
+    buildable: True
+    hs-source-dirs: rts
+
 Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
