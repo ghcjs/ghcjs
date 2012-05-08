@@ -18,7 +18,7 @@ Integrated
  * Takes a while to install (mostly just follow the regular GHC build instructions).
 
 Stand Alone
- * Uses GHC API to .
+ * Uses GHC API to make a ghcjs executable.
  * Quicker to install (because you don't have actaully build 7.4).
  * Good for trying out changes in the code generator itself.
  * Still requires some messing with GHC source.
@@ -311,25 +311,27 @@ parameters than the function needs it will remove them from the call site.
        <td>function (first param is the arity)</td>
     </tr>
     <tr>
-       <td>$t/td>
+       <td>$t</td>
        <td>thunk</td>
     </tr>
     <tr>
-       <td>$R and $r/td>
+       <td>$R and $r</td>
        <td>are short for return</td>
     </tr>
     <tr>
-       <td>$M/td>
+       <td>$M</td>
        <td>evaluates its first param (if not already evaluated) and and passes the result to the function provided</td>
     </tr>
     <tr>
-       <td>$A/td>
+       <td>$A</td>
        <td>evaluates if not already evaluated and returns the result</td>
     </tr>
     <tr>
-       <td>.C/td>
-       <td>calls the function with the list of arguments and passes the result to the function provided
-.J/td>
+       <td>.C</td>
+       <td>calls the function with the list of arguments and passes the result to the function provided</td>
+    </tr>
+    <tr>
+       <td>.J</td>
        <td>jump t a function</td>
     </tr>
 </table>
