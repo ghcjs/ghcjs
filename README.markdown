@@ -5,7 +5,7 @@ Project aims to provide solution to
 
  * compile modern Haskell libraries to Javascript files and use
    them in Ajax applications or
- * develop entire Ajax application in Haskell language
+ * develop entire Ajax application in Haskell
 
 Previous version of project is located at [vir.mskhug.ru](http://vir.mskhug.ru/).
 
@@ -13,13 +13,13 @@ This version of GHCJS can be built stand alone or integrated into GHC.
 You can install both (if you know you want both do Integrated first).
 
 Integrated
- * A full GHC that laso outputs .js files and .jsexe directories when you build.
+ * A full GHC that also outputs .js files and .jsexe directories when you build.
  * A patched Cabal that installs the .js files along with the .hi ones.
  * Takes a while to install (mostly just follow the regular GHC build instructions).
 
 Stand Alone
  * Uses GHC API to make a ghcjs executable.
- * Quicker to install (because you don't have actaully build 7.4).
+ * Quicker to install (because you don't have actually build 7.4).
  * Good for trying out changes in the code generator itself.
  * Still requires some messing with GHC source.
 
@@ -113,8 +113,8 @@ cd libraries/Cabal/cabal-install
 cabal install --ghc-options='-XFlexibleInstances'
 </pre>
 
-There is a catch.  Because your old cabal install installed the dependancies
-the .js files for these libraries will not have been installed.  So you shoule
+There is a catch.  Because your old cabal install installed the dependencies
+the .js files for these libraries will not have been installed.  So you should
 unregister then so they will be installed again with the new cabal-install.
 
 <pre>
@@ -138,9 +138,9 @@ Aditional Requirements
  * GHC 7.4.1 source configured and used to do a build
 
 If you built the integrated version you will have the source ready to go.  If
-not you will need to follow the steps in Building Prelude.  The unit tests
-will lock for the ghc source in ../ghc and the for the closure compiler
-in ~/closure-compiler/compiler.jar and library in ~/closure-library
+not, you will need to follow the steps in Building Prelude.  The unit tests
+will look for the ghc source in `../ghc` and the for the closure compiler
+in `~/closure-compiler/compiler.jar` and library in `~/closure-library`
 
 Installing
 ----------
