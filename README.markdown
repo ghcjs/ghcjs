@@ -46,13 +46,13 @@ Getting The Source
 ------------------
 
 <pre>
-clone https://github.com/hamishmack/ghc
+clone https://github.com/ghcjs/ghc
 cd ghc
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
-./sync-all -r git@github.com:hamishmack --ghcjs get
+./sync-all -r git@github.com:ghcjs --ghcjs get
 ./sync-all checkout ghc-7.4
 </pre>
 
@@ -60,9 +60,9 @@ cd ghc
 
 <pre>
 cd libraries/Cabal
-git remote add hamishmack git@github.com:hamishmack/packages-Cabal.git
-git pull hamishmack
-git branch ghc-7.4 hamishmack/ghc-7.4
+git remote add ghcjs git@github.com:ghcjs/packages-Cabal.git
+git pull ghcjs
+git branch ghc-7.4 ghcjs/ghc-7.4
 git checkout ghc-7.4
 cd ../..
 </pre>
