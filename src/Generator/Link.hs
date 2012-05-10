@@ -25,7 +25,7 @@ import Control.Exception (catch, IOException)
 import System.IO.Error (isDoesNotExistError)
 import System.IO (openFile, hGetLine, hIsEOF, IOMode(..), Handle, hClose)
 import Encoding (zEncodeString)
-import Module (ModuleName, moduleNameString, mkModuleName, moduleNameSlashes)
+import Module (Module, ModuleName, mkModule, moduleNameString, mkModuleName, moduleName, moduleNameSlashes, stringToPackageId)
 import Distribution.Verbosity (Verbosity, normal)
 import Distribution.Simple.Utils (findFileWithExtension, info, getDirectoryContentsRecursive, installOrdinaryFiles)
 
@@ -204,7 +204,8 @@ readDeps file = do
                                     functionDeps <- loop h []
                                     return fileDeps{
                                         modules   = S.singleton $ mkModuleName mod,
-                                        toSearch  = map mkModuleName $ filter (not . (":" `isPrefixOf`)) toSearch,
+                                        toSearch  = map (moduleName.makeModule) $
+                                                    filter (\m -> not (":" `isPrefixOf` snd m)) toSearch,
                                         functionDeps}
                         _ -> return fileDeps
     hClose h
@@ -226,6 +227,8 @@ readDeps file = do
                     ((x, ""):_) -> Just x
                     _           -> Nothing
 
+makeModule :: (String, String) -> Module
+makeModule (pkgid, modulename) = mkModule (stringToPackageId pkgid) (mkModuleName modulename)
 
 makeScript :: (FilePath, [String]) -> IO String
 makeScript (_, []) = return ""

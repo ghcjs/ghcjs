@@ -4,7 +4,7 @@ module Generator.TopLevel (generate) where
 import Data.Monoid (mconcat)
 import Data.List (partition)
 
-import Module as Stg (Module, moduleName, moduleNameString)
+import Module as Stg (Module, moduleName, moduleNameString, modulePackageId, packageIdString)
 import Id as Stg (Id)
 
 import StgSyn
@@ -37,7 +37,8 @@ generate thisMod binds = do
             return . Js.comment $ show (thisId, filter isTopLevel depIds)
         isTopLevel ('$':'$':_) = True
         isTopLevel _ = False
-        modDeps = map (moduleNameString . moduleName) $ dependencies thisMod allBindings
+        modDeps = let mkDep mod = (packageIdString . modulePackageId $ mod, moduleNameString . moduleName $ mod)
+                  in  map mkDep (dependencies thisMod allBindings)
 
 joinBindings :: [(StgBinding, BindDependInfo)] -> [(Stg.Id, StgRhs)]
 joinBindings = concat . map (stgBindingToList . fst)
