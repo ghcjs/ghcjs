@@ -26,12 +26,19 @@ import MonadUtils (MonadIO(..))
 import Generator.Helpers (runGen, newGenState)
 import System.FilePath (replaceExtension)
 
+import Control.Monad (when)
+import System.Exit (exitSuccess)
+import System.Process (rawSystem)
+
 data CallingConvention = Plain | Trampoline
 
 main :: IO ()
 main =
   do args <- getArgs
-
+     -- pass these options to the real ghc, lets ghcjs be used by cabal
+     when (any (`elem` ["--supported-languages", "--numeric-version", "--info", "--print-libdir", "-c"]) args) $ do
+       _ <- rawSystem "ghc" args
+       exitSuccess
      -- FIXME: I wasn't able to find any sane command line parsing
      --        library that allow sending unprocessed arguments to GHC...
      let (callingConvention, args') =
@@ -47,7 +54,7 @@ main =
 #endif
         $ runGhc (Just GHC.Paths.libdir) $
        do sdflags <- getSessionDynFlags
-          (dflags, fileargs', _) <- parseDynamicFlags sdflags (map noLoc args') -- ("-DWORD_SIZE_IN_BITS=32":args'))
+          (dflags, fileargs', _) <- parseDynamicFlags sdflags (map noLoc $ filter (/="--make") args') -- ("-DWORD_SIZE_IN_BITS=32":args'))
           _ <- setSessionDynFlags dflags
           let fileargs = map unLoc fileargs'
           targets <- mapM (flip guessTarget Nothing) fileargs
