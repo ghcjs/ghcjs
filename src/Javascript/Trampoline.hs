@@ -31,7 +31,7 @@ instance Javascript js => JavascriptJump (Trampoline js)
           TC $ expression $ nativeFunctionCall (var "$j") [property obj method, obj, runTCE . list $ args]
 
         jumpToFunction (TCE func) args =
-          TC $ expression $ nativeFunctionCall (var "$j") [func, Js.null, runTCE . list $ args]
+          TC $ expression $ nativeFunctionCall (var "$k") [func, runTCE . list $ args]
 
         maybeJumpToApplyMethod (TCE obj) =
           TC $ expression $ nativeFunctionCall (var "$A") [obj]
@@ -56,16 +56,16 @@ instance Javascript js => JavascriptCall (Trampoline js)
             [property obj method, obj, runTCE . list $ args, function ["_"] rest, live]
 
         assignFunctionCallResult v (TCE func) args (TC rest) (TCE live) =
-          TC $ expression $ nativeFunctionCall (var "$c")
-            [func, Js.null, runTCE . list $ args, function [v] rest, live]
+          TC $ expression $ nativeFunctionCall (var "$b")
+            [func, runTCE . list $ args, function [v] rest, live]
 
         declareFunctionCallResult v (TCE func) args (TC rest) (TCE live) =
-          TC $ expression $ nativeFunctionCall (var "$c")
-            [func, Js.null, runTCE . list $ args, function [v] rest, live]
+          TC $ expression $ nativeFunctionCall (var "$b")
+            [func, runTCE . list $ args, function [v] rest, live]
 
         callFunction (TCE func) args (TC rest) (TCE live) =
-          TC $ expression $ nativeFunctionCall (var "$c")
-            [func, Js.null, runTCE . list $ args, function ["_"] rest, live]
+          TC $ expression $ nativeFunctionCall (var "$b")
+            [func, runTCE . list $ args, function ["_"] rest, live]
 
         maybeAssignApplyMethodCallResult v (TCE obj) (TC rest) (TCE live) =
           TC $ expression $ nativeFunctionCall (var "$M") [obj, function [v] rest, live]

@@ -41,6 +41,12 @@ Executable ghcjs-link
     Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time
     Other-Modules:  Generator.Link
 
+Executable ghcjs-min
+    Main-Is:        Minify.hs
+    Default-Language: Haskell2010
+    Hs-Source-Dirs: src
+    Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time
+
 test-suite test
     type:       exitcode-stdio-1.0
     Default-Language: Haskell2010

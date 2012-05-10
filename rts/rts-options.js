@@ -26,17 +26,12 @@ var HS_TRACE_ARGS = false;
 /**
  * @define {boolean} enable tracing of RTS calls
  */
-var HS_RTS_TRACE = true;
+var HS_RTS_TRACE = false;
 
 /**
- * @define {boolean} enable tracing of RTS calls
+ * @define {boolean} enable the trampoline calling convention
  */
-var HS_RTS_TRACE = true;
-
-/**
- * @define {number} enable the trampoline calling convention
- */
-var HS_TRAMPOLINE = false;
+var HS_TRAMPOLINE = true;
 
 /**
  * @define {number} size of Word and Int. If 64 we use goog.math.Long.

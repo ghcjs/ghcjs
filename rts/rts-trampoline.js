@@ -1,4 +1,6 @@
-var $tr = {}
+// This is used to return a value to the trampoline function
+// without using the return keyword
+var $tr_currentResult = null;
 
 /**
  * @constructor Tail call
@@ -6,7 +8,7 @@ var $tr = {}
  * @param {!Object}                  object Object to call the method on.
  * @param {Array.<Object>}           args   Arguments to pass.
  */
-$tr.Jump = function(method, object, args) {
+var $tr_Jump = function(method, object, args) {
     if(HS_DEBUG) {
         if(typeof method !== 'function')
             throw "Not a function!";
@@ -21,12 +23,9 @@ $tr.Jump = function(method, object, args) {
     this.args = args;
 };
 if(HS_WEAKS) {
-    $tr.Jump.prototype = {
-        mark : function(m) {
-            if(this.object.mark !== undefined) this.object.mark(m);
-            for (var i = 0; i !== this.args.length; i++) {
-                if(this.args[i].mark !== undefined) this.args[i].mark(m);
-            }
+    $tr_Jump.prototype = {
+        getLive : function() {
+            return [[this.object],this.args];
         }
     };
 }
@@ -40,7 +39,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed in rest.
  */
-$tr.Call = function(method, object, args, rest, live) {
+var $tr_Call = function(method, object, args, rest, live) {
     if(HS_DEBUG) {
         if (typeof method !== 'function')
             throw "Not a function!";
@@ -64,16 +63,9 @@ $tr.Call = function(method, object, args, rest, live) {
     if(HS_WEAKS) this.live = live;
 };
 if(HS_WEAKS) {
-    $tr.Call.prototype = {
-        mark : function(m) {
-            if(this.object.mark !== undefined) this.object.mark(m);
-            var i = 0;
-            for (; i !== this.args.length; i++) {
-                if(this.args[i].mark !== undefined) this.args[i].mark(m);
-            }
-            for (i = 0; i !== this.live.length; i++) {
-                if(this.live[i].mark !== undefined) this.live[i].mark(m);
-            }
+    $tr_Call.prototype = {
+        getLive : function() {
+            return [[this.object],this.args,this.live];
         }
     };
 }
@@ -86,7 +78,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>}           live    Lists things to keep alive.
  *      We won't finalize these as they will be needed if we catch an exception
  */
-$tr.Catch = function(next, catcher, live) {
+var $tr_Catch = function(next, catcher, live) {
     if(HS_DEBUG) {
         if(next === undefined)
             throw "Next undefined!";
@@ -103,13 +95,9 @@ $tr.Catch = function(next, catcher, live) {
     if(HS_WEAKS) this.live = live;
 };
 if(HS_WEAKS) {
-    $tr.Catch.prototype = {
-        mark : function(m) {
-            if(this.next.mark !== undefined) this.next.mark(m);
-            for (var i = 0; i !== this.live.length; i++) {
-                if(this.live[i].mark !== undefined) this.live[i].mark(m);
-            }
-            if(this.catcher.mark !== undefined) this.catcher.mark(m);
+    $tr_Catch.prototype = {
+        getLive : function() {
+            return [[this.next],this.live];
         }
     };
 }
@@ -122,12 +110,12 @@ if(HS_WEAKS) {
  *      We won't finalize these as they will be needed if we catch an exception
  * @return {!Object}
  */
-$tr.ctch = function(next, catcher, live) {
+var $tr_ctch = function(next, catcher, live) {
     if(HS_WEAKS) {
-        $tr.currentResult = new $tr.Catch(next, catcher, live);
+        $tr_currentResult = new $tr_Catch(next, catcher, live);
     }
     else {
-        $tr.currentResult = new $tr.Catch(next, catcher);
+        $tr_currentResult = new $tr_Catch(next, catcher);
     }
 };
 
@@ -137,16 +125,14 @@ $tr.ctch = function(next, catcher, live) {
  * @param {Array.<Object>}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed when we resume
  */
-$tr.Suspend = function(resume, live) {
+var $tr_Suspend = function(resume, live) {
     this.resume = resume;
     if(HS_WEAKS) this.live = live;
 };
 if(HS_WEAKS) {
-    $tr.Suspend.prototype = {
-        mark : function(m) {
-            for (var i = 0; i !== this.live.length; i++) {
-                if(this.live[i].mark !== undefined) this.live[i].mark(m);
-            }
+    $tr_Suspend.prototype = {
+        getLive : function() {
+            return [this.live];
         }
     };
 }
@@ -157,66 +143,79 @@ if(HS_WEAKS) {
  *      We won't finalize these as they will be needed when we resume
  * @return {!Object}
  */
-$tr.suspend = function(resume, live) {
+var $tr_suspend = function(resume, live) {
     if(HS_WEAKS) {
-        $tr.currentResult = new $tr.Suspend(resume, live);
+        $tr_currentResult = new $tr_Suspend(resume, live);
     }
     else {
-        $tr.currentResult = new $tr.Suspend(resume, live);
+        $tr_currentResult = new $tr_Suspend(resume, live);
     }
 };
 
 /**
  * @constructor
  */
-$tr.Yield = function(next) {
+var $tr_Yield = function(next) {
     this.next = next;
 };
 if(HS_WEAKS) {
-    $tr.Yield.prototype = {
-        mark : function(m) {
-            if(this.next.mark !== undefined) this.next.mark(m);
+    $tr_Yield.prototype = {
+        getLive : function() {
+            return [[this.next]];
         }
     };
 }
-$tr.yield = function(next) {
-    $tr.currentResult = new $tr.Yield(next);
+var $tr_yield = function(next) {
+    $tr_currentResult = new $tr_Yield(next);
 };
 
 /**
  * @constructor
  */
-$tr.Result = function(result) {
+var $tr_Result = function(result) {
     this.value = result;
 };
 if(HS_WEAKS) {
-    $tr.Result.prototype = {
-        mark : function(m) {
-            if(this.value.mark !== undefined) this.value.mark(m);
+    $tr_Result.prototype = {
+        getLive : function() {
+            return [[this.value]];
         }
     };
 }
 
 function $j(method, object, args) {
-    $tr.currentResult = new $tr.Jump(method, object, args);
+    $tr_currentResult = new $tr_Jump(method, object, args);
+};
+
+function $k(method, args) {
+    $tr_currentResult = new $tr_Jump(method, null, args);
 };
 
 function $c(method, object, args, rest, live) {
     if(HS_WEAKS) {
-        $tr.currentResult = new $tr.Call(method, object, args, rest, live);
+        $tr_currentResult = new $tr_Call(method, object, args, rest, live);
     }
     else {
-        $tr.currentResult = new $tr.Call(method, object, args, rest);
+        $tr_currentResult = new $tr_Call(method, object, args, rest);
+    }
+};
+
+function $b(method, args, rest, live) {
+    if(HS_WEAKS) {
+        $tr_currentResult = new $tr_Call(method, null, args, rest, live);
+    }
+    else {
+        $tr_currentResult = new $tr_Call(method, null, args, rest);
     }
 };
 
 function $M(object, rest, live) {
     if(object.notEvaluated) {
         if(HS_WEAKS) {
-            $tr.currentResult = new $tr.Call(object.hscall, object, [], rest, live);
+            $tr_currentResult = new $tr_Call(object.hscall, object, [], rest, live);
         }
         else {
-            $tr.currentResult = new $tr.Call(object.hscall, object, [], rest);
+            $tr_currentResult = new $tr_Call(object.hscall, object, [], rest);
         }
     }
     else
@@ -225,22 +224,22 @@ function $M(object, rest, live) {
 
 function $A(object) {
     if(object.notEvaluated)
-        $tr.currentResult = new $tr.Jump(object.hscall, object, []);
+        $tr_currentResult = new $tr_Jump(object.hscall, object, []);
     else
-        $tr.currentResult = new $tr.Result(object);
+        $tr_currentResult = new $tr_Result(object);
 };
 
 function $r(result) {
-    $tr.currentResult = new $tr.Result(result);
+    $tr_currentResult = new $tr_Result(result);
 };
 
-$tr.Scheduler = {
+var $tr_Scheduler = {
     waiting : [],
     maxID   : 0,
     running : false,
     finalizers : [],
     runWaiting : function() {
-        var s = $tr.Scheduler;
+        var s = $tr_Scheduler;
         if(HS_DEBUG && s.running) throw "Already Running";
         s.running = true;
         while (s.waiting.length !== 0) {
@@ -254,11 +253,11 @@ $tr.Scheduler = {
         s.running = false
     },
     schedule : function(thread) {
-        $tr.Scheduler.waiting.push(thread);
+        $tr_Scheduler.waiting.push(thread);
     },
     start : function(r, onComplete, onException) {
-        var s = $tr.Scheduler;
-        var thread = new $tr.Thread(r, onComplete, onException);
+        var s = $tr_Scheduler;
+        var thread = new $tr_Thread(r, onComplete, onException);
         s.schedule(thread);
         s.maxID++;
         thread.threadID = s.maxID;
@@ -267,70 +266,112 @@ $tr.Scheduler = {
     finalizerMark : 0,
     scheduleFinalizers : function() {
         if(HS_WEAKS) {
-            var s = $tr.Scheduler;
+            var s = $tr_Scheduler;
+
+            // No weak pointers? then there is nothing to do.
+            if($tr_Weaks.length === 0)
+                return;
 
             // Mark all non top level reachable nodes
-            if($tr.Weaks.length === 0)
-                return;
-            s.finalizerMark++;
-            s.currentThread.mark(s.finalizerMark);
-            var i = 0;
-            for(; i !== s.waiting.length; i++) {
-                s.waiting[i].mark(s.finalizerMark);
-            }
+            s.mark();
 
-            // Enumerate all the weak pointer
+            // Enumerate all the weak pointers
             var changed = false;
-            for(i = $tr.Weaks.length; i !== 0;) {
+            for(var i = $tr_Weaks.length; i !== 0;) {
                 i--;
-                if($tr.Weaks[i].keepMark !== s.finalizerMark) {
+                if($tr_Weaks[i].keepMark !== s.finalizerMark) {
                     // Schedule finalizer and set weak pointer to null
-                    s.start($tr.Weaks[i].finalize.hscall($tr.Weaks[i].realWorld));
+                    s.start($tr_Weaks[i].finalize.hscall($tr_Weaks[i].realWorld));
                     changed = true;
 
                     // Set these to null so that deRefWeak will return null
-                    $tr.Weaks[i].value = null;
-                    $tr.Weaks[i].finalize = null;
-                    $tr.Weaks[i].realWorld = null;
+                    $tr_Weaks[i].value = null;
+                    $tr_Weaks[i].finalize = null;
+                    $tr_Weaks[i].realWorld = null;
                 }
             }
 
             // Update the list of weak references if necessary
             if(changed) {
                 var newWeaks = [];
-                for(i = 0; i !== $tr.Weaks.length; i++) {
-                    if($tr.Weaks[i].keepMark === s.finalizerMark) {
-                        newWeaks.push($tr.Weaks[i]);
+                for(var i = 0; i !== $tr_Weaks.length; i++) {
+                    if($tr_Weaks[i].keepMark === s.finalizerMark) {
+                        newWeaks.push($tr_Weaks[i]);
                     }
                 }
-                $tr.Weaks = newWeaks;
+                $tr_Weaks = newWeaks;
+            }
+        }
+    },
+    getLive : function (n) {
+        var s = $tr_Scheduler;
+        return [[s.currentThread],s.waiting];
+    },
+    mark : function() {
+        var s = $tr_Scheduler;
+
+        // Move on to the next mark value
+        s.finalizerMark++;
+        var m = s.finalizerMark;
+
+        // To avoid oveflowing the JavaScript stack we have our own
+        var workStack = [[0, [s]]];
+        var top;
+        var item;
+        while (workStack.length != 0) {
+            top = workStack[workStack.length-1];
+            // Something left to do on the top
+            if(top[0] != top[1].length) {
+                item = top[1][top[0]++];
+                if(        item            !== null
+                        && item            !== undefined
+                        && item.isTopLevel === undefined
+                        && item.marked     !== m) {
+                    // Mark this item as done
+                    item.marked=m;
+
+                    // Add the "keepMark" to an week pointers
+                    // that are pointing to this item
+                    $tr_markWeaks(item, m);
+
+                    // Add and references this item wants to keep alive
+                    // to the stack of work we have.
+                    if(item.getLive !== undefined) {
+                        var newLive = item.getLive();
+                        for(var nlive = 0; nlive !== newLive.length; nlive++)
+                            workStack.push([0, newLive[nlive]]);
+                    }
+                }
+            }
+            else {
+                workStack.pop();
             }
         }
     }
 };
 
-$tr.trace = function(msg) {
-    console.log($tr.Scheduler.currentThread.threadID + " : " + msg);
+var $tr_trace = function(msg) {
+    console.log($tr_Scheduler.currentThread.threadID + " : " + msg);
 };
 
-$tr.traceThread = function(msg) {
-    $tr.trace(msg);
+var $tr_traceThread = function(msg) {
+    $tr_trace(msg);
 };
 
-$tr.traceMVar = function(msg) {
-    $tr.trace(msg);
+var $tr_traceMVar = function(msg) {
+    $tr_trace(msg);
 };
 
-$tr.traceException = function(msg) {
-    $tr.trace(msg);
+var $tr_traceException = function(msg) {
+    $tr_trace(msg);
 };
 
-$tr.counter = 0;
+var $tr_counter = 0;
 
 /**
  * @constructor
  */
-$tr.Thread = function (next, onComplete, onException) {
+var $tr_Thread = function (next, onComplete, onException) {
   this.next = next;
   this.isException = false;
   this._stack = [];
@@ -341,7 +382,7 @@ $tr.Thread = function (next, onComplete, onException) {
   this._onException = onException;
 }
 
-$tr.Thread.prototype = {
+$tr_Thread.prototype = {
 
   /* Returns true if the Thread has run to completion. */
   finished: function() {
@@ -366,10 +407,10 @@ $tr.Thread.prototype = {
   /* Suspends a running Thread until this Thread is complete. */
   join: function() {
     if (this._state === "run") {
-      this.waitingThreads.push($tr.Scheduler.currentThread);
-      return new $tr.Suspend(null, []);
+      this.waitingThreads.push($tr_Scheduler.currentThread);
+      return new $tr_Suspend(null, []);
     } else {
-      return new $tr.Result(this.value());
+      return new $tr_Result(this.value());
     }
   },
 
@@ -398,16 +439,16 @@ $tr.Thread.prototype = {
     var isException = this.isException;
     var traceLog = [];
     while (true) {
-      $tr.currentResult = null;
+      $tr_currentResult = null;
 
       // See if it is time to let another thread have a go
-      $tr.counter++;
-      if($tr.counter === 10000) {
-        $tr.counter = 0;
+      $tr_counter++;
+      if($tr_counter === 10000) {
+        $tr_counter = 0;
         this.next = r;
         this.isException = isException;
-        if(HS_WEAKS) $tr.Scheduler.scheduleFinalizers();
-        $tr.Scheduler.schedule(this);
+        if(HS_WEAKS) $tr_Scheduler.scheduleFinalizers();
+        $tr_Scheduler.schedule(this);
         return;
       }
 
@@ -428,8 +469,8 @@ $tr.Thread.prototype = {
           var catcher = this.popCatcher();
           if (catcher !== null) {
             r = catcher(r);
-            if ($tr.currentResult !== null)
-              r = $tr.currentResult;
+            if ($tr_currentResult !== null)
+              r = $tr_currentResult;
           }
           else {
             this._state = "throw";
@@ -439,25 +480,25 @@ $tr.Thread.prototype = {
             return;
           }
         }
-        if (r instanceof $tr.Jump) {
+        if (r instanceof $tr_Jump) {
           if (r.method === undefined) this.load(r.method);
           r = r.method.apply(r.object, r.args);
-          if ($tr.currentResult !== null)
-            r = $tr.currentResult;
+          if ($tr_currentResult !== null)
+            r = $tr_currentResult;
         }
-        else if(r instanceof $tr.Call) {
+        else if(r instanceof $tr_Call) {
           if (r.method === undefined) this.load(r.method);
           this._stack.push([r.rest, null, r.live]);
           r = r.method.apply(r.object, r.args);
-          if ($tr.currentResult !== null)
-            r = $tr.currentResult;
+          if ($tr_currentResult !== null)
+            r = $tr_currentResult;
         }
-        else if(r instanceof $tr.Result) {
+        else if(r instanceof $tr_Result) {
           var handler = this.popReturnHandler();
           if (handler !== null) {
             r = handler(r.value);
-            if ($tr.currentResult !== null)
-              r = $tr.currentResult;
+            if ($tr_currentResult !== null)
+              r = $tr_currentResult;
           }
           else {
             this._state = "return";
@@ -467,21 +508,21 @@ $tr.Thread.prototype = {
             return;
           }
         }
-        else if(r instanceof $tr.Catch) {
+        else if(r instanceof $tr_Catch) {
           this._stack.push([null, r.catcher, r.live]);
           r = r.next;
         }
-        else if(r instanceof $tr.Suspend) {
+        else if(r instanceof $tr_Suspend) {
           if(r.resume !== null)
             this._stack.push([r.resume, null, r.live]);
           this.next = null;
           this.isException = false;
           return;
         }
-        else if(r instanceof $tr.Yield) {
+        else if(r instanceof $tr_Yield) {
           this.next = r.next;
           this.isException = false;
-          $tr.Scheduler.schedule(this);
+          $tr_Scheduler.schedule(this);
           return;
         }
         // Must be just a plain return value
@@ -489,8 +530,8 @@ $tr.Thread.prototype = {
           var handler = this.popReturnHandler();
           if (handler !== null) {
             r = handler(r);
-            if ($tr.currentResult !== null)
-              r = $tr.currentResult;
+            if ($tr_currentResult !== null)
+              r = $tr_currentResult;
           }
           else {
             this._state = "return";
@@ -521,14 +562,14 @@ $tr.Thread.prototype = {
   }
 };
 if(HS_WEAKS) {
-    $tr.Thread.prototype.mark = function(m) {
-        if(this.next !== null && this.next.mark !== undefined) this.next.mark(m);
+    $tr_Thread.prototype.getLive = function() {
+        var stackLive = [];
         for (var i = 0; i !== this._stack.length; i++) {
-            var live = this._stack[i][2];
-            for (var j = 0; j !== live.length; j++)
-                if(live[j].mark!==undefined) live[j].mark(m);
+            stackLive[i] = this._stack[i][2];
         }
-   };
+        stackLive[i] = [this.next];
+        return stackLive;
+    };
 }
 
 if(HS_TRACE_CALLS) {
@@ -546,38 +587,38 @@ if(HS_TRACE_CALLS) {
 /**
  * @constructor
  */
-$hs.hscall = function () {
+var $hs_hscall = function () {
     if(HS_TRACE_CALLS) logCall(this, arguments);
     var argc = arguments.length;
     if (this.arity === argc) { // EXACT and THUNK rules
-        return new $tr.Jump(this.evaluate, this, arguments);
+        return new $tr_Jump(this.evaluate, this, arguments);
     } else if (this.arity < argc) { // CALLK and TCALL rules
         var remainingArguments = Array.prototype.slice.call(arguments, this.arity, argc);
         arguments.length = this.arity;
-        return new $tr.Call(this.evaluate, this, arguments,
-            function (result) {return new $tr.Jump(result.hscall, result, remainingArguments)},
+        return new $tr_Call(this.evaluate, this, arguments,
+            function (result) {return new $tr_Jump(result.hscall, result, remainingArguments)},
             remainingArguments);
     } else if (argc === 0) { // RETFUN
-        return new $tr.Result(this);
-    } else if (this instanceof $hs.Pap) { // PCALL rule, we can bypass this rule by building PAPs of PAPs
-        return new $tr.Jump(this.evaluate, this, arguments);
+        return new $tr_Result(this);
+    } else if (this instanceof $hs_Pap) { // PCALL rule, we can bypass this rule by building PAPs of PAPs
+        return new $tr_Jump(this.evaluate, this, arguments);
     } else {
         // PAP2 rule and then RETFUN (jump to continuation)
-        return new $tr.Result(new $hs.Pap (this, arguments));
+        return new $tr_Result(new $hs_Pap (this, arguments));
     }
 };
 
 /**
  * @constructor
  */
-$hs.Pap = function(obj, args) {
+var $hs_Pap = function(obj, args) {
     this.arity = obj.arity - args.length;
     this.object = obj;
     this.savedArguments = args;
-    if($hs.loadingModule) this.isTopLevel = true;
+    if($hs_loadingModule) this.isTopLevel = true;
 };
-$hs.Pap.prototype = {
-    hscall: $hs.hscall,
+$hs_Pap.prototype = {
+    hscall: $hs_hscall,
     notEvaluated: false,
     evaluate: function () {
         var k = arguments.length;
@@ -587,27 +628,19 @@ $hs.Pap.prototype = {
             newArguments[i] = this.savedArguments[i];
         for (var i = 0; i < k; i++)
             newArguments[n + i] = arguments[i];
-        return new $tr.Jump(this.object.hscall, this.object, newArguments);
+        return new $tr_Jump(this.object.hscall, this.object, newArguments);
     },
     J : function() {
-        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+        $tr_currentResult = new $tr_Jump(this.hscall, this, arguments);
     },
     C : function(args, rest, live) {
-        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest, live);
+        $tr_currentResult = new $tr_Call(this.hscall, this, args, rest, live);
     }
 };
 if(HS_WEAKS) {
-    $hs.Pap.prototype.mark = function(m) {
-        if(this.isTopLevel===undefined && this.marked!==m) {
-            this.marked = m;
-            $tr.markWeaks(this,m);
-            for (var i = 0; i !== this.savedArguments.length; i++) {
-                if(this.savedArguments[i].mark !== undefined)
-                    this.savedArguments[i].mark(m);
-                $tr.markWeaks(this.savedArguments[i],m);
-            }
-        }
-    }
+    $hs_Pap.prototype.getLive = function() {
+        return [this.savedArguments];
+    };
 };
 
 /**
@@ -618,7 +651,7 @@ function $Func(a, f, live, info) {
     this.evaluate = f;
     if(HS_WEAKS) {
         this.live = live;
-        if($hs.loadingModule) this.isTopLevel = true;
+        if($hs_loadingModule) this.isTopLevel = true;
     }
     if(HS_DEBUG) {
         this.info = info;
@@ -645,27 +678,19 @@ function $S(o, live) {
     if(HS_WEAKS) o.live = live;
 }
 $Func.prototype = {
-    hscall: $hs.hscall,
+    hscall: $hs_hscall,
     notEvaluated: false,
     J : function() {
-        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+        $tr_currentResult = new $tr_Jump(this.hscall, this, arguments);
     },
     C : function(args, rest, live) {
-        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest, live);
+        $tr_currentResult = new $tr_Call(this.hscall, this, args, rest, live);
     }
 };
 if(HS_WEAKS) {
-    $Func.prototype.mark = function(m) {
-        if(this.isTopLevel===undefined && this.marked!==m) {
-            this.marked = m;
-            $tr.markWeaks(this,m);
-            for (var i = 0; i !== this.live.length; i++) {
-                if(this.live[i].mark !== undefined)
-                    this.live[i].mark(m);
-                $tr.markWeaks(this.live[i],m);
-            }
-        }
-    }
+    $Func.prototype.getLive = function() {
+        return [this.live];
+    };
 };
 if(HS_DEBUG) {
     $Func.prototype.toString = function () {
@@ -680,7 +705,7 @@ function $Thunk(f, live, info) {
     this.evaluateOnce = f;
     if(HS_WEAKS) {
         this.live = live;
-        if($hs.loadingModule) this.isTopLevel = true;
+        if($hs_loadingModule) this.isTopLevel = true;
     }
     if(HS_DEBUG) {
         this.info = info;
@@ -704,40 +729,28 @@ function $t(f, live, info) {
     if(!HS_DEBUG && !HS_WEAKS) return new $Thunk(f);
 };
 $Thunk.prototype = {
-    hscall: $hs.hscall,
+    hscall: $hs_hscall,
     arity: 0,
     notEvaluated: true,
     evaluate: function() {
         var _this = this;
-        return new $tr.Call(this.evaluateOnce, this, [], function (res) {
+        return new $tr_Call(this.evaluateOnce, this, [], function (res) {
             _this.result = res;
             _this.live = [];
-            _this.evaluate = function () { return new $tr.Result(_this.result); };
-            return new $tr.Result(_this.result);
+            _this.evaluate = function () { return new $tr_Result(_this.result); };
+            return new $tr_Result(_this.result);
         }, []);
     },
     J : function() {
-        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+        $tr_currentResult = new $tr_Jump(this.hscall, this, arguments);
     },
     C : function(args, rest, live) {
-        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest, live);
+        $tr_currentResult = new $tr_Call(this.hscall, this, args, rest, live);
     }
 };
 if(HS_WEAKS) {
-    $Thunk.prototype.mark = function(m) {
-        if(this.isTopLevel===undefined && this.marked!==m) {
-            this.marked = m;
-            $tr.markWeaks(this,m);
-            if(this.result!==undefined && this.result.mark!==undefined) {
-                this.result.mark(m);
-                $tr.markWeaks(this.result,m);
-            }
-            for (var i = 0; i !== this.live.length; i++) {
-                if(this.live[i].mark !== undefined)
-                    this.live[i].mark(m);
-                $tr.markWeaks(this.live[i],m);
-            }
-        }
+    $Thunk.prototype.getLive = function() {
+        return [this.live,[this.result]];
     };
 }
 if(HS_DEBUG) {
@@ -752,7 +765,7 @@ if(HS_DEBUG) {
 function $Data(t, f, info) {
     this.g = t;
     this.evaluateOnce = f;
-    if(HS_WEAKS && $hs.loadingModule) this.isTopLevel = true;
+    if(HS_WEAKS && $hs_loadingModule) this.isTopLevel = true;
     if(HS_DEBUG) this.info = info;
 };
 function $D(tag, f, info) {
@@ -766,12 +779,12 @@ function $D(tag, f, info) {
     }
 };
 $Data.prototype = {
-    hscall: $hs.hscall,
+    hscall: $hs_hscall,
     arity: 0,
     notEvaluated: true,
     evaluate: function() {
         var _this = this;
-        return new $tr.Call(_this.evaluateOnce, _this, [], function (res) {
+        return new $tr_Call(_this.evaluateOnce, _this, [], function (res) {
             if (!(res instanceof Array))
                 throw "Not an array!";
             for(var n = 0; n !== res.length; n++)
@@ -779,31 +792,21 @@ $Data.prototype = {
                     throw "Undefined"
             _this.v = res;
             _this.notEvaluated = false;
-            _this.evaluate = function () { return new $tr.Result(_this); };
-            return new $tr.Result(_this);
+            _this.evaluate = function () { return new $tr_Result(_this); };
+            return new $tr_Result(_this);
         }, []);
     },
     J : function() {
-        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+        $tr_currentResult = new $tr_Jump(this.hscall, this, arguments);
     },
     C : function(args, rest, live) {
-        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest, live);
+        $tr_currentResult = new $tr_Call(this.hscall, this, args, rest, live);
     }
 };
 if(HS_WEAKS) {
-    $Data.prototype.mark = function(m) {
-        if(this.isTopLevel===undefined && this.marked!==m) {
-            this.marked = m;
-            $tr.markWeaks(this,m);
-            if(this.v!==undefined) {
-                for (var i = 0; i < this.v.length; i++) {
-                    if(this.v[i].mark !== undefined)
-                        this.v[i].mark(m);
-                    $tr.markWeaks(this.v[i],m);
-                }
-            }
-        }
-    }
+    $Data.prototype.getLive = function() {
+        return this.v !== undefined ? [this.v] : [];
+    };
 };
 if(HS_DEBUG) {
     $Data.prototype.toString = function () {
@@ -829,7 +832,7 @@ if(HS_DEBUG) {
 function $DataValue(t, v, info) {
     this.g = t;
     this.v = v;
-    if(HS_WEAKS && $hs.loadingModule) this.isTopLevel = true;
+    if(HS_WEAKS && $hs_loadingModule) this.isTopLevel = true;
     if(HS_DEBUG) this.info = info;
 };
 function $R(tag, v, info) {
@@ -839,10 +842,10 @@ function $R(tag, v, info) {
         for(var n = 0; n !== v.length; n++)
             if(v[n] === undefined)
                 throw "Undefined";
-        $tr.currentResult = new $DataValue(tag, v, info);
+        $tr_currentResult = new $DataValue(tag, v, info);
     }
     if(!HS_DEBUG) {
-        $tr.currentResult = new $DataValue(tag, v);
+        $tr_currentResult = new $DataValue(tag, v);
     }
 };
 function $d(tag, v, info) {
@@ -859,31 +862,23 @@ function $d(tag, v, info) {
     }
 };
 $DataValue.prototype = {
-    hscall: $hs.hscall,
+    hscall: $hs_hscall,
     arity: 0,
     notEvaluated: false,
     evaluate: function() {
-        return new $tr.Result(this);
+        return new $tr_Result(this);
     },
     J : function() {
-        $tr.currentResult = new $tr.Jump(this.hscall, this, arguments);
+        $tr_currentResult = new $tr_Jump(this.hscall, this, arguments);
     },
     C : function(args, rest, live) {
-        $tr.currentResult = new $tr.Call(this.hscall, this, args, rest, live);
+        $tr_currentResult = new $tr_Call(this.hscall, this, args, rest, live);
     }
 }
 if(HS_WEAKS) {
-    $DataValue.prototype.mark = function(m) {
-        if(this.isTopLevel===undefined && this.marked!==m) {
-            this.marked = m;
-            $tr.markWeaks(this,m);
-            for (var i = 0; i < this.v.length; i++) {
-                if(this.v[i].mark !== undefined)
-                    this.v[i].mark(m);
-                $tr.markWeaks(this.v[i],m);
-            }
-        }
-    }
+    $DataValue.prototype.getLive = function() {
+        return [this.v];
+    };
 };
 if(HS_DEBUG) {
     $DataValue.prototype.toString = function () {
@@ -903,48 +898,48 @@ if(HS_DEBUG) {
 }
 
 // Run haskell function
-$hs.force = function (args, onComplete, onException) {
+var $hs_force = function (args, onComplete, onException) {
     var f = args[0];
     var args = Array.prototype.slice.call(args, 1, args.length);
-    $tr.Scheduler.start(f.hscall.apply(f, args), onComplete, onException);
-    if(!$tr.Scheduler.running)
-        $tr.Scheduler.runWaiting();
+    $tr_Scheduler.start(f.hscall.apply(f, args), onComplete, onException);
+    if(!$tr_Scheduler.running)
+        $tr_Scheduler.runWaiting();
 };
 
 // Schedule a haskell function to run the next time haskell runs
-$hs.schedule = function (args, onComplete, onException) {
+var $hs_schedule = function (args, onComplete, onException) {
     var f = args[0];
     var args = Array.prototype.slice.call(args, 1, args.length);
-    $tr.Scheduler.start(f.hscall.apply(f, args), onComplete, onException);
+    $tr_Scheduler.start(f.hscall.apply(f, args), onComplete, onException);
 };
 
 // --- Threads ---
-$hs.forkzh = function (a, s) {
-    var t = $tr.Scheduler.start(a.hscall(s));
-    $tr.traceThread("fork thread " + t.threadID);
-    return new $tr.Result([s, t]);
+var $hs_forkzh = function (a, s) {
+    var t = $tr_Scheduler.start(a.hscall(s));
+    $tr_traceThread("fork thread " + t.threadID);
+    return new $tr_Result([s, t]);
 };
-$hs.forkOnzh = function (n, a, s) {
-    return $hs.forkzh(a,s);
+var $hs_forkOnzh = function (n, a, s) {
+    return $hs_forkzh(a,s);
 };
-$hs.yieldzh = function (s) {
-    $tr.traceThread("yield thread");
-    return new $tr.Yield(new $tr.Result(s));
-},
-$hs.myThreadIdzh = function (s) {
-    return new $tr.Result([s, $tr.Scheduler.currentThread]);
-},
-$hs.isCurrentThreadBoundzh = function (s) {
+var $hs_yieldzh = function (s) {
+    $tr_traceThread("yield thread");
+    return new $tr_Yield(new $tr_Result(s));
+};
+var $hs_myThreadIdzh = function (s) {
+    return new $tr_Result([s, $tr_Scheduler.currentThread]);
+};
+var $hs_isCurrentThreadBoundzh = function (s) {
     return [s, 1];
 };
-$hs.noDuplicatezh = function (s) {
+var $hs_noDuplicatezh = function (s) {
     return s;
 };
 
-$hs.atomicModifyMutVarzh = function (a, b, s) {
-    return new $tr.Call(b.hscall, b, [a.value], function (res) {
+var $hs_atomicModifyMutVarzh = function (a, b, s) {
+    return new $tr_Call(b.hscall, b, [a.value], function (res) {
             a.value = res.v[0];
-            return new $tr.Result([s, res.v[1]]);
+            return new $tr_Result([s, res.v[1]]);
         }, [a, s]);
 };
 
@@ -952,127 +947,117 @@ $hs.atomicModifyMutVarzh = function (a, b, s) {
 /**
  * @constructor MVar
  */
-$tr.MVar = function(value, waiting) {
+var $tr_MVar = function(value, waiting) {
     this.value = null;
     this.waiting = [];
-    if($hs.loadingModule) this.isTopLevel = true;
+    if($hs_loadingModule) this.isTopLevel = true;
 };
 if(HS_WEAKS) {
-    $tr.MVar.prototype = {
-        mark : function(m) {
-            if(this.isTopLevel===undefined && this.marked!==m) {
-                this.marked = m;
-                $tr.markWeaks(this,m);
-                if(this.value !== null) {
-                    if(this.value.mark !== undefined) this.value.mark(m);
-                    $tr.markWeaks(this.value,m);
-                }
-                for(var i = 0; i !== this.waiting.length; i++) {
-                    if(this.waiting[i].mark !== undefined) this.waiting[i].mark(m);
-                }
-            }
+    $tr_MVar.prototype = {
+        getLive : function() {
+            return [this.waiting,[this.value]];
         }
     };
 }
-$hs.newMVarzh = function(s) {
-    $tr.traceMVar("newMVar");
-    return [s, new $tr.MVar()];
+var $hs_newMVarzh = function(s) {
+    $tr_traceMVar("newMVar");
+    return [s, new $tr_MVar()];
 };
-$hs.takeMVarzh = function (a, s) {
+var $hs_takeMVarzh = function (a, s) {
     var takeWhenNotEmpty = function (_) {
-        $tr.traceMVar("take taking");
+        $tr_traceMVar("take taking");
         var result = a.value;
         a.value = null;
         if (a.waiting.length !== 0) {
-            $tr.traceMVar("take waking waiters");
+            $tr_traceMVar("take waking waiters");
             var w = a.waiting[0];
             a.waiting = Array.prototype.slice.call(a.waiting, 1, a.waiting.length)
-            $tr.Scheduler.schedule(w);
+            $tr_Scheduler.schedule(w);
         }
-        return new $tr.Result([s, result]);
+        return new $tr_Result([s, result]);
     };
     if (a.value === null) {
-        $tr.traceMVar("take waiting");
-        a.waiting.push($tr.Scheduler.currentThread);
-        return new $tr.Suspend(takeWhenNotEmpty, [a,s]);
+        $tr_traceMVar("take waiting");
+        a.waiting.push($tr_Scheduler.currentThread);
+        return new $tr_Suspend(takeWhenNotEmpty, [a,s]);
     }
     return takeWhenNotEmpty(null);
 };
-$hs.tryTakeMVarzh = function (a, s) {
+var $hs_tryTakeMVarzh = function (a, s) {
     if (a.value === null) {
-        $tr.traceMVar("tryTake nothing to take");
-        return new $tr.Result([s, 0, null]);
+        $tr_traceMVar("tryTake nothing to take");
+        return new $tr_Result([s, 0, null]);
     }
-    $tr.traceMVar("tryTake taking");
+    $tr_traceMVar("tryTake taking");
     var result = a.value;
     a.value = null;
     if (a.waiting.length !== 0) {
-        $tr.traceMVar("tryTake waking waiters");
+        $tr_traceMVar("tryTake waking waiters");
         var w = a.waiting[0];
         a.waiting = Array.prototype.slice.call(a.waiting, 1, a.waiting.length)
-        $tr.Scheduler.schedule(w);
+        $tr_Scheduler.schedule(w);
     }
-    return new $tr.Result([s, 1, result]);
+    return new $tr_Result([s, 1, result]);
 };
-$hs.putMVarzh = function (a, b, s) {
+var $hs_putMVarzh = function (a, b, s) {
     var putWhenEmpty = function (_) {
-        $tr.traceMVar("put putting");
+        $tr_traceMVar("put putting");
         a.value = b;
         if (a.waiting.length !== 0) {
-            $tr.traceMVar("put waking waiters");
+            $tr_traceMVar("put waking waiters");
             var w = a.waiting[0];
             a.waiting = Array.prototype.slice.call(a.waiting, 1, a.waiting.length)
-            $tr.Scheduler.schedule(w);
+            $tr_Scheduler.schedule(w);
         }
-        return new $tr.Result(s);
+        return new $tr_Result(s);
     }
     if (a.value !== null) {
-        $tr.traceMVar("put waiting");
-        a.waiting.push($tr.Scheduler.currentThread);
-        return new $tr.Suspend(putWhenEmpty, [a,b,s]);
+        $tr_traceMVar("put waiting");
+        a.waiting.push($tr_Scheduler.currentThread);
+        return new $tr_Suspend(putWhenEmpty, [a,b,s]);
     }
     return putWhenEmpty(null);
 };
-$hs.sameMVarzh = function (a, b, s) {
+var $hs_sameMVarzh = function (a, b, s) {
     return [s, a === b];
 };
-$hs.isEmptyMVarzh = function (a, b, s) {
+var $hs_isEmptyMVarzh = function (a, b, s) {
     return [s, a.value === null];
 };
 
 // --- Exceptions ---
-$hs.catchzh = function(a, b, s) {
-    return new $tr.Catch(
-        new $tr.Jump(a.hscall, a, [s]),
-        function (e) { return new $tr.Jump(b.hscall, b, [e, s]); },
+var $hs_catchzh = function(a, b, s) {
+    return new $tr_Catch(
+        new $tr_Jump(a.hscall, a, [s]),
+        function (e) { return new $tr_Jump(b.hscall, b, [e, s]); },
         [b, s]);
 };
-$hs.raisezh = function(a) {
-    $tr.traceException("raise");
+var $hs_raisezh = function(a) {
+    $tr_traceException("raise");
     throw a;
 };
-$hs.raiseIOzh = function(a, s) {
-    $tr.traceException("raiseIO");
+var $hs_raiseIOzh = function(a, s) {
+    $tr_traceException("raiseIO");
     throw a;
 };
 
 // TODO add support for async excpetions
-//$hs.killThreadzh = function (t, e, s) {
-//    $tr.traceThread("kill thread");
+//$hs_killThreadzh = function (t, e, s) {
+//    $tr_traceThread("kill thread");
 //};
-$hs.maskAsyncExceptionszh = function (a, s) {
-    return new $tr.Jump(a.hscall, a, [s]);
+var $hs_maskAsyncExceptionszh = function (a, s) {
+    return new $tr_Jump(a.hscall, a, [s]);
 };
-$hs.unmaskAsyncExceptionszh = function (a, s) {
-    return new $tr.Jump(a.hscall, a, [s]);
+var $hs_unmaskAsyncExceptionszh = function (a, s) {
+    return new $tr_Jump(a.hscall, a, [s]);
 };
-$hs.getMaskingStatezh = function (s) {
-    return new $tr.Result([s, 0]);
+var $hs_getMaskingStatezh = function (s) {
+    return new $tr_Result([s, 0]);
 };
 
 // --- Weak pointers and finalizers ---
 if(HS_WEAKS) {
-    $tr.Weaks = [];
+    var $tr_Weaks = [];
 }
 
 /**
@@ -1081,7 +1066,7 @@ if(HS_WEAKS) {
  * (via markWeaks).  This will let us know that the weak pointer is
  * still needed.
  */
-$tr.Weak = function(key, value, finalize, realWorld) {
+var $tr_Weak = function(key, value, finalize, realWorld) {
     this.value = value;
     this.finalize = finalize;
     this.realWorld = realWorld;
@@ -1089,11 +1074,11 @@ $tr.Weak = function(key, value, finalize, realWorld) {
         if(key.weaks===undefined)
             key.weaks=[];
         key.weaks.push(this);
-        $tr.Weaks.push(this);
+        $tr_Weaks.push(this);
     }
 };
 if(HS_WEAKS) {
-    $tr.markWeaks = function(o,m) {
+    var $tr_markWeaks = function(o,m) {
         // If the object has weak pointers mark them as still in use
         var ws = o.weaks;
         if(ws !== undefined) {
@@ -1104,51 +1089,51 @@ if(HS_WEAKS) {
         }
     };
 }
-$hs.mkWeakzh = function(o, b, c, s) {
-    return [s, new $tr.Weak(o, b, c, s)];
+var $hs_mkWeakzh = function(o, b, c, s) {
+    return [s, new $tr_Weak(o, b, c, s)];
 };
-$hs.mkWeakForeignEnvzh = function(o, b, w, x, y, z, s) {
-    return [s, new $tr.Weak(o, b, c, s)];
+var $hs_mkWeakForeignEnvzh = function(o, b, w, x, y, z, s) {
+    return [s, new $tr_Weak(o, b, c, s)];
 };
-$hs.deRefWeakzh = function(p, s) {
+var $hs_deRefWeakzh = function(p, s) {
     return [s, p.value === null ? 0 : 1, p.value];
 };
-$hs.finalizeWeakzh = function(p, s) {
+var $hs_finalizeWeakzh = function(p, s) {
     return [s, p.finalize === null ? 0 : 1, p.finalize];
 };
-$hs.touchzh = function(a, s) {
+var $hs_touchzh = function(a, s) {
     return s;
 };
 
 // --- Parallelism ---
-$hs.seqzh = function(a, s) {
+var $hs_seqzh = function(a, s) {
     if(a.notEvaluated) {
         if(HS_WEAKS) {
-            return new $tr.Call(a.hscall, a, [], function(result) {
-                return new $tr.Result([s, result]);
+            return new $tr_Call(a.hscall, a, [], function(result) {
+                return new $tr_Result([s, result]);
             }, [s]);
         }
         else {
-            return new $tr.Call(a.hscall, a, [], function(result) {
-                return new $tr.Result([s, result]);
+            return new $tr_Call(a.hscall, a, [], function(result) {
+                return new $tr_Result([s, result]);
             });
         }
     }
     else
-        return new $tr.Result([s, a]);
+        return new $tr_Result([s, a]);
 };
 
 // --- IO ---
-$hs.waitReadzh = function(fd, s) {
-    var f = $hs.allFiles[fd];
+var $hs_waitReadzh = function(fd, s) {
+    var f = $hs_allFiles[fd];
     if(f.text.length > f.fptr)
         return s;
-    f.waitingToRead.push($tr.Scheduler.currentThread);
-    return new $tr.Suspend(function(_) { return s; }, [s]);
+    f.waitingToRead.push($tr_Scheduler.currentThread);
+    return new $tr_Suspend(function(_) { return s; }, [s]);
 };
-$hs.waitWritezh = function(fd, s) {
+var $hs_waitWritezh = function(fd, s) {
     return s;
-//    var f = $hs.allFiles[fd];
-//    f.waitingToWrite.push($tr.Scheduler.currentThread);
-//    return new $tr.Suspend(function(_) { return s; }, [s]);
+//    var f = $hs_allFiles[fd];
+//    f.waitingToWrite.push($tr_Scheduler.currentThread);
+//    return new $tr_Suspend(function(_) { return s; }, [s]);
 };

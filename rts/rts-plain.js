@@ -1,4 +1,4 @@
-$hs.hscall = function () {
+var $hs_hscall = function () {
     if (this.arity == arguments.length) { // EXACT and THUNK rules
         return this.evaluate.apply(this, arguments);
     } else if (this.arity < arguments.length) { // CALLK and TCALL rules
@@ -8,21 +8,21 @@ $hs.hscall = function () {
         return result.hscall.apply(result, remainingArguments);
     } else if (arguments.length == 0) { // RETFUN
         return this;
-    } else if (this instanceof $hs.Pap) { // PCALL rule, we can bypass this rule by building PAPs of PAPs
+    } else if (this instanceof $hs_Pap) { // PCALL rule, we can bypass this rule by building PAPs of PAPs
         return this.evaluate.apply(this, arguments);
     } else {
         // PAP2 rule and then RETFUN (jump to continuation)
-        return new $hs.Pap (this, arguments);
+        return new $hs_Pap (this, arguments);
     }
 };
 
-$hs.Pap = function(obj, args) {
+var $hs_Pap = function(obj, args) {
     this.arity = obj.arity - args.length;
     this.object = obj;
     this.savedArguments = args;
 };
-$hs.Pap.prototype = {
-    hscall: $hs.hscall,
+$hs_Pap.prototype = {
+    hscall: $hs_hscall,
     notEvaluated: false,
     evaluate: function () {
             var k = arguments.length;
@@ -45,7 +45,7 @@ function $Func(a, f, info) {
     this.n = info;
 };
 $Func.prototype = {
-    hscall: $hs.hscall,
+    hscall: $hs_hscall,
     notEvaluated: false
 };
 function $F(a, f, info) {
@@ -63,7 +63,7 @@ function $Thunk(f, info) {
     this.info=info;
 };
 $Thunk.prototype = {
-    hscall: $hs.hscall,
+    hscall: $hs_hscall,
     arity: 0,
     notEvaluated: true,
     evaluate: function() {
@@ -88,7 +88,7 @@ function $Data(t, f, info) {
     this.info = info;
 };
 $Data.prototype = {
-    hscall: $hs.hscall,
+    hscall: $hs_hscall,
     arity: 0,
     notEvaluated: true,
     evaluate: function() {
@@ -114,7 +114,7 @@ function $DataValue(t, v, info) {
     this.info = info;
 };
 $DataValue.prototype = {
-    hscall: $hs.hscall,
+    hscall: $hs_hscall,
     arity: 0,
     notEvaluated: false,
     evaluate: function() {
@@ -132,7 +132,7 @@ function $d(tag, v, info) {
     return new $DataValue(tag, v, info);
 };
 
-$hs.force = function (a, onComplete, onException) {
+var $hs_force = function (a, onComplete, onException) {
     var f = a[0];
     var args = Array.prototype.slice.call(a, 1, a.length);
     try {

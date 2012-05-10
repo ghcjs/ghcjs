@@ -10,8 +10,8 @@ class JavascriptBase js
 
 class JavascriptBase js => JavascriptExpression js
   where var :: Id -> Expression js
-        int :: (Num a, Show a) => a -> Expression js
-        float :: (Fractional a, Show a) => a -> Expression js
+        int :: (Num a, Ord a, Show a) => a -> Expression js
+        float :: (Fractional a, Ord a, Show a) => a -> Expression js
         string :: String -> Expression js
         list :: [Expression js] -> Expression js
         object :: [(Id, Expression js)] -> Expression js

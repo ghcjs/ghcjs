@@ -125,7 +125,7 @@ link out searchPath objFiles pageModules pageFunctions = do
 
         loader = map makeLoader (M.toList pageToCMod)
 
-        makeLoader (p, mods) = concat ["var $", lookupKey p, "=function() { $hs.load(",
+        makeLoader (p, mods) = concat ["var $", lookupKey p, "=function() { $hs_load(",
             show mods, "); return ", lookupKey p, "; };"]
 
     writeFile (out++"hsloader.js") $ unlines loader

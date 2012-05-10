@@ -28,28 +28,28 @@ import Encoding (zEncodeString)
 
 data Javascript js => PrimOpExp js =
     PlainE (Expression js)
-  | TrampolineM (Expression js) Js.Id [Expression js]
+  | TrampolineM (Expression js) [Expression js]
   | UnknownOp
 
 returnPrimitiveOperationResult :: Javascript js => PrimOp -> [StgArg] -> Gen js
 returnPrimitiveOperationResult op args = do
   exp <- primOp' op args
   case exp of
-    PlainE e             -> return $ Js.return e
-    TrampolineM o m args -> return $ jumpToMethod o m args
-    UnknownOp            -> return $ Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
+    PlainE e           -> return $ Js.return e
+    TrampolineM f args -> return $ jumpToFunction f args
+    UnknownOp          -> return $ Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
 
 declarePrimitiveOperationResult :: Javascript js => Stg.Id -> PrimOp -> [StgArg] -> js -> Expression js -> Gen js
 declarePrimitiveOperationResult id op args rest live = do
   exp <- primOp' op args
   case exp of
-     PlainE e             -> do
+     PlainE e           -> do
         i   <- stgIdToJsId id
         return $ mconcat [Js.declare [(i, e)], rest]
-     TrampolineM o m args -> do
+     TrampolineM f args -> do
         i    <- stgIdToJsId id
-        return $ declareMethodCallResult i o m args rest live
-     UnknownOp            -> return $ Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
+        return $ declareFunctionCallResult i f args rest live
+     UnknownOp          -> return $ Js.throw . Js.string . concat $ ["primitive operation ", show op, ". Not implemeted yet."]
 
 primOp' :: Javascript js => PrimOp -> [StgArg] -> Gen (PrimOpExp js)
 primOp' op a = do
@@ -135,7 +135,6 @@ primOp Narrow32WordOp [a] = PlainE $ a
 -- which will be a better fit.
 
 -- int:
-compareMethod a m b = PlainE $ jsBoolToHs $ Js.nativeMethodCall a m [b]
 primOp IntGtOp  [a, b] = compareMethod a "greaterThan" b
 primOp IntGeOp  [a, b] = compareMethod a "greaterThanOrEqual" b
 primOp IntEqOp  [a, b] = compareMethod a "equals" b
@@ -158,7 +157,7 @@ primOp WordMulOp  [a, b] = PlainE $ Js.nativeMethodCall a "multiply" [b]
 primOp AndOp     [a, b] = PlainE $ Js.nativeMethodCall a "and" [b]
 primOp OrOp      [a, b] = PlainE $ Js.nativeMethodCall a "or" [b]
 primOp XorOp     [a, b] = PlainE $ Js.nativeMethodCall a "xor" [b]
-primOp NotOp     [a] = PlainE $ Js.nativeMethodCall a "not"
+primOp NotOp     [a] = PlainE $ Js.nativeMethodCall a "not" []
 #endif
 
 primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
@@ -167,7 +166,11 @@ primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
 primOp MakeStablePtrOp [a, s] = PlainE $ Js.list [s, a]
 primOp DeRefStablePtrOp [a, s] = PlainE $ Js.list [s, a]
 
-primOp op args = TrampolineM RTS.root (zEncodeString (show op))  args
+primOp op args = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
 
 boolOp :: Javascript js => (Expression js -> Expression js -> Expression js) -> Expression js -> Expression js -> Expression js
 boolOp op a b = jsBoolToHs $ op a b
+
+#if WORD_SIZE_IN_BITS == 64
+compareMethod a m b = PlainE $ jsBoolToHs $ Js.nativeMethodCall a m [b]
+#endif

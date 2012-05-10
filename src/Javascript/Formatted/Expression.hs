@@ -27,10 +27,14 @@ leftUnaryOp op p a = mkOperation p $
   do tell op
      tellWithPrecedenceConstraint a p
 
+-- Avoid the risk of getting "a--1" when we want "a- -1"
+showNum :: (Num a, Ord a, Show a) => a -> String
+showNum n = if n < 0 then " " ++ show n else show n
+
 instance JavascriptExpression Formatted
   where var = mkOperation 0 . tell
-	int = mkOperation 0 . tell . show
-	float = mkOperation 0 . tell . show
+	int = mkOperation 0 . tell . showNum
+	float = mkOperation 0 . tell . showNum
 	string = mkOperation 0 . tell . showJsString
 	list xs = mkOperation 0 $
           do tell "["
