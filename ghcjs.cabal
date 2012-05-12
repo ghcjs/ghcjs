@@ -10,7 +10,8 @@ Stability:      Experimental
 Build-Type:     Custom
 Cabal-Version:  >= 1.10
 
-flag ghc7
+flag boot
+  default:            False
 
 Library
     Default-Language: Haskell2010
@@ -24,11 +25,11 @@ Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    if flag(ghc7)
-      Build-Depends:  base >=3 && <5, ghc >= 7.0 && < 7.5, ghc-paths, monads-tf, containers, filepath, process
-      cpp-options:     -DGHC7
+    Build-Depends:  base >=4 && <5, ghc >= 7.0 && < 7.5, ghc-paths, monads-tf, containers, filepath, process
+    if flag(boot)
+      x-boot:     True
     else
-      Build-Depends:  base >=3 && <5, ghc == 6.12.3, ghc-paths, monads-tf, containers, filepath
+      x-boot:     False
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans
     Other-Modules:  Javascript.Language, Javascript.Trampoline, Javascript.Formatted.Base,
                     Javascript.Formatted.Expression, Javascript.Formatted.Statement,
