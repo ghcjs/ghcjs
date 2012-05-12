@@ -27,7 +27,7 @@ window.onload = function() {
         $hs_fromHaskellIO([$$$Test_test10()], function(i) {
             $hs_fromHaskellInt([i], logResult, logException);}, logException);
       }
-      $hs_force([$$GHCziCString_unpackCStringzh, "42\x00"], function(s42) {
+      $hs_force([$$GHCziCString_unpackCStringzh, "42"], function(s42) {
         $hs_force([$$$Test_test11(), s42], function(i) {
             $hs_fromHaskellInt([i], logResult, logException);}, logException);
         $hs_fromHaskellIO([$$$Test_test12(), s42], function(i) {

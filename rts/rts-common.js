@@ -554,9 +554,9 @@ var $hs_leAddrzh = function (a, b) {
 };
 var $hs_indexCharOffAddrzh = function (a, n) {
     if(typeof(a) === 'string')
-        return a.charAt(n);
+        return n==a.length?'\x00':a.charAt(n);
     else if(typeof(a[0]) === 'string')
-        return a[0].charAt(a[1]+n);
+        return n==a[0].length?'\x00':a[0].charAt(a[1]+n);
     else
         return String.fromCharCode(new Uint8Array(a[0],a[1]+n)[0]);
 };
@@ -614,9 +614,9 @@ var $hs_indexInt64OffAddrzh = function (a, n) {
 };
 var $hs_indexWord8OffAddrzh = function (a, n) {
     if(typeof(a) === 'string')
-        return a.charCodeAt(n);
+        return n==a.length?'\x00':a.charCodeAt(n);
     else if(typeof(a[0]) === 'string')
-        return a[0].charCodeAt(a[1]+n);
+        return n==a[0].length?'\x00':a[0].charCodeAt(a[1]+n);
     else
         return new Uint8Array(a[0],a[1]+n)[0];
 };
