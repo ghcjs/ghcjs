@@ -137,7 +137,7 @@ var $hs_sizeofMutableArrayzh = function (a, s) {
     return [s, a.length];
 };
 var $hs_indexArrayzh = function (a, n) {
-    return a[n];
+    return [a[n]]; // Unboxed singleton
 };
 var $hs_unsafeFreezeArrayzh = function (a, s) {
     return [s, a];
@@ -1557,28 +1557,7 @@ var exitLinker = function() {
 };
 var $hs_loaded = [];
 var $hs_loadPath = "./";
-var $hs_loadingModule = false;
-var $hs_load = function (modules) {
-    for (var i = 0; i < modules.length; i++) {
-        if($hs_loaded[modules[i]]===undefined) {
-            var path = $hs_loadPath + "hs" + modules[i] + (COMPILED ? "min.js" : ".js");
-            var transport = new XMLHttpRequest();
-            transport.open("GET", path, false);
-            transport.send(null);
-            if (transport.status == 200 || transport.status == 0) {
-                try {
-                    $hs_loadingModule=true;
-                    goog.globalEval(transport.responseText);
-                    $hs_loadingModule=false;
-                    $hs_loaded[modules[i]] = true;
-                } catch (e) {
-                    $hs_logError("Error evaluating module: " + path + ":\n" + e);
-                    return false;
-                }
-            }
-        }
-    }
-};
+var $hs_loading = false;
 
 var $hs_fromHaskellString = function(args, onComplete, onException) {
     console.log("fromHaskellString");
@@ -1615,7 +1594,7 @@ var $hs_fromHaskellIO = function(args, onComplete, onException) {
 };
 var $hs_toHaskellInt = function(i) {
     console.log("toHaskellInt");
-    return new $DataValue(1, [(0 + i) & ~0]);
+    return new $DataValue(1, [i|0]);
 };
 var hs_nil = function() {
     return "";
@@ -1623,7 +1602,7 @@ var hs_nil = function() {
 var hs_cons = function(x, xs) {
     return String.fromCharCode(x) + xs;
 };
+var $$GHCziPrim_realWorldzh = 0;
+var $$GHCziPrim_coercionTokenzh = 0;
 var $hs_init = function() {
-    $$GHCziPrim_realWorldzh = $D(1, function(){return []}, "realWorld#");
-    $$GHCziPrim_coercionTokenzh = $D(1, function(){return []}, "coercionToken#");
 };

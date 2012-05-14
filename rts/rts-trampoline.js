@@ -235,6 +235,7 @@ function $r(result) {
 
 var $tr_Scheduler = {
     waiting : [],
+    waitingForBundle : [],
     maxID   : 0,
     running : false,
     finalizers : [],
@@ -305,7 +306,11 @@ var $tr_Scheduler = {
     },
     getLive : function (n) {
         var s = $tr_Scheduler;
-        return [[s.currentThread],s.waiting];
+        var result = [[s.currentThread],s.waiting];
+        for(var i = 0; i != s.waitingForBundle.length; i++)
+            if(s.waitingForBundle[i] !== undefined && s.waitingForBundle[i].length !== 0)
+                result.push(s.waitingForBundle[i]);
+        return result;
     },
     mark : function() {
         var s = $tr_Scheduler;
@@ -615,7 +620,7 @@ var $hs_Pap = function(obj, args) {
     this.arity = obj.arity - args.length;
     this.object = obj;
     this.savedArguments = args;
-    if($hs_loadingModule) this.isTopLevel = true;
+    if($hs_loading) this.isTopLevel = true;
 };
 $hs_Pap.prototype = {
     hscall: $hs_hscall,
@@ -651,7 +656,7 @@ function $Func(a, f, live, info) {
     this.evaluate = f;
     if(HS_WEAKS) {
         this.live = live;
-        if($hs_loadingModule) this.isTopLevel = true;
+        if($hs_loading) this.isTopLevel = true;
     }
     if(HS_DEBUG) {
         this.info = info;
@@ -705,7 +710,7 @@ function $Thunk(f, live, info) {
     this.evaluateOnce = f;
     if(HS_WEAKS) {
         this.live = live;
-        if($hs_loadingModule) this.isTopLevel = true;
+        if($hs_loading) this.isTopLevel = true;
     }
     if(HS_DEBUG) {
         this.info = info;
@@ -765,7 +770,7 @@ if(HS_DEBUG) {
 function $Data(t, f, info) {
     this.g = t;
     this.evaluateOnce = f;
-    if(HS_WEAKS && $hs_loadingModule) this.isTopLevel = true;
+    if(HS_WEAKS && $hs_loading) this.isTopLevel = true;
     if(HS_DEBUG) this.info = info;
 };
 function $D(tag, f, info) {
@@ -832,7 +837,7 @@ if(HS_DEBUG) {
 function $DataValue(t, v, info) {
     this.g = t;
     this.v = v;
-    if(HS_WEAKS && $hs_loadingModule) this.isTopLevel = true;
+    if(HS_WEAKS && $hs_loading) this.isTopLevel = true;
     if(HS_DEBUG) this.info = info;
 };
 function $R(tag, v, info) {
@@ -901,7 +906,7 @@ if(HS_DEBUG) {
 var $hs_force = function (args, onComplete, onException) {
     var f = args[0];
     var args = Array.prototype.slice.call(args, 1, args.length);
-    $tr_Scheduler.start(f.hscall.apply(f, args), onComplete, onException);
+    $tr_Scheduler.start(new $tr_Jump(f.hscall, f, args), onComplete, onException);
     if(!$tr_Scheduler.running)
         $tr_Scheduler.runWaiting();
 };
@@ -910,7 +915,106 @@ var $hs_force = function (args, onComplete, onException) {
 var $hs_schedule = function (args, onComplete, onException) {
     var f = args[0];
     var args = Array.prototype.slice.call(args, 1, args.length);
-    $tr_Scheduler.start(f.hscall.apply(f, args), onComplete, onException);
+    $tr_Scheduler.start(new $tr_Jump(f.hscall, f, args), onComplete, onException);
+};
+
+/**
+ * @constructor
+ */
+function $Loader(bundles, f) {
+    this.bundles = bundles;
+    this.get = f;
+};
+function $L(bundles, f) {
+    return new $Loader(bundles, f);
+};
+$Loader.prototype = {
+    hscall: function() {
+        var this_ = this;
+        var args = arguments;
+        return hs_loadBundles(this.bundles, function() {
+            var newFunction = this_.get();
+            return newFunction.hscall.apply(newFunction, args);
+        });
+    },
+    // arity: undefined,
+    notEvaluated: true,
+    evaluate: function() {
+        var this_ = this;
+        return hs_loadBundles(this.bundles, function() {
+            var newFunction = this_.get();
+            return newFunction.evaluate();
+        });
+    },
+    J : function() {
+        $tr_currentResult = new $tr_Jump(this.hscall, this, arguments);
+    },
+    C : function(args, rest, live) {
+        $tr_currentResult = new $tr_Call(this.hscall, this, args, rest, live);
+    }
+};
+if(HS_WEAKS) {
+    $Loader.prototype.getLive = function() {
+        return [];
+    };
+}
+var hs_loadBundles = function (bundles, f) {
+    if(bundles.length===0)
+        return f();
+
+    var bundle = bundles.pop();
+    if($hs_loaded[bundle]===undefined) {
+        // Let's load the function set
+        if($tr_Scheduler.waitingForBundle[bundle]===undefined) {
+            // No one else has asked for this function set lets send a request
+            $tr_Scheduler.waitingForBundle[bundle]=[$tr_Scheduler.currentThread];
+
+            var transport = new XMLHttpRequest();
+
+            // Set up function to handle the response
+            transport.onreadystatechange = function() {
+                if(transport.readyState === 4) {
+                    var waiting = $tr_Scheduler.waitingForBundle[bundle];
+                    try {
+                        // Evaluate the response
+                        $hs_loading=true;
+                        goog.globalEval(transport.responseText);
+                        $hs_loading=false;
+                        $hs_loaded[bundle] = true; // Don't need to load this again
+
+                        // Wake all the threads waiting for this
+                        for(var w = 0; w !== waiting.length; w++) {
+                            $tr_Scheduler.schedule(waiting[w]);
+                        }
+                    } catch (e) {
+                        $hs_logError("Error evaluating function set: " + path + ":\n" + e);
+                        for(var w = 0; w !== waiting.length; w++) {
+                            waiting[w].next = e;
+                            waiting[w].isException = true;
+                            $tr_Scheduler.schedule(waiting[w]);
+                        }
+                    }
+                    $tr_Scheduler.waitingForBundle[bundle] = [];
+                }
+            };
+
+            // Send the request
+            var path = $hs_loadPath + "hs" + bundle + (COMPILED ? "min.js" : ".js");
+            transport.open("GET", path, false);
+            transport.send(null);
+        }
+        else {
+            // Add this thread to the list of those waiting for the function set
+            $tr_Scheduler.waitingForBundle[bundle].push($tr_Scheduler.currentThread);
+        }
+        return new $tr_Suspend(function(_) {
+            return hs_loadBundles(bundles, f);
+        }, []);
+    }
+    else {
+        // This one is loaded already
+        return hs_loadBundles(bundles, f);
+    }
 };
 
 // --- Threads ---
@@ -950,7 +1054,7 @@ var $hs_atomicModifyMutVarzh = function (a, b, s) {
 var $tr_MVar = function(value, waiting) {
     this.value = null;
     this.waiting = [];
-    if($hs_loadingModule) this.isTopLevel = true;
+    if($hs_loading) this.isTopLevel = true;
 };
 if(HS_WEAKS) {
     $tr_MVar.prototype = {

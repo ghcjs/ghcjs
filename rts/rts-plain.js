@@ -143,4 +143,27 @@ var $hs_force = function (a, onComplete, onException) {
     }
 };
 
+var hs_loadBundles = function (bundles, f) {
+    for(var i = 0; i !== bundles.length; i++) {
+        var bundle = bundles[i];
+        if($hs_loaded[bundle]===undefined) {
+            var path = $hs_loadPath + "hs" + bundle + (COMPILED ? "min.js" : ".js");
+            var transport = new XMLHttpRequest();
+            transport.open("GET", path, false);
+            transport.send(null);
+            if (transport.status == 200 || transport.status == 0) {
+                try {
+                    $hs_loading=true;
+                    goog.globalEval(transport.responseText);
+                    $hs_loading=false;
+                    $hs_loaded[bundle] = true;
+                } catch (e) {
+                    $hs_logError("Error evaluating function set: " + path + ":\n" + e);
+                    return false;
+                }
+            }
+        }
+    }
+    return f();
+};
 

@@ -1,4 +1,4 @@
-{-# LANGUAGE ForeignFunctionInterface, EmptyDataDecls, ScopedTypeVariables #-}
+{-# LANGUAGE ForeignFunctionInterface, EmptyDataDecls, ScopedTypeVariables, MagicHash #-}
 module Test (test1, test2, test3, test4, test5, test6, test7, test8, test9, test10, test11, test12, test13) where
 
 import Data.List
@@ -6,6 +6,10 @@ import Foreign.C.Types
 import Foreign.Ptr
 import Control.Concurrent
 import System.Mem.Weak
+import GHC.Prim
+import GHC.CString (unpackCString#)
+
+type CString = Addr#
 
 data JSObject
 
@@ -65,11 +69,12 @@ test10 =
      y <- takeMVar x
      return y
 
-test11 :: String -> Int
-test11 = read
+test11 :: CString -> Int
+test11 s = read $ unpackCString# s
 
-test12 :: String -> IO Int
-test12 a = do
+test12 :: CString -> IO Int
+test12 ca = do
+    let a = unpackCString# ca
     addFinalizer a $ string2JSString "Finalize Called" >>= jsalert
     string2JSString ("Work done (ref still held) " ++ show (sum [1..10000])) >>= jsalert
     string2JSString ("You passed in " ++ a ++ " (ref could now be freed)") >>= jsalert
@@ -77,9 +82,10 @@ test12 a = do
     return 1
 
 -- Recusive let
-test13 :: String -> String
-test13 x =
-    let a, b :: Int -> String
+test13 :: CString -> String
+test13 cx =
+    let x = unpackCString# cx
+        a, b :: Int -> String
         a 0 = "A"
         a n  = b (n-1)
         b 0 = "B"

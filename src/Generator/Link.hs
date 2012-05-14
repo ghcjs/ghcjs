@@ -115,25 +115,28 @@ link out searchPath objFiles pageModules pageFunctions = do
         combineSmall x = x
         combinedScripts = map snd $ combineSmall scriptsBySize
 
-    closureMods <- forM (zip [1..] combinedScripts) $ \(n, (pageSet, script)) -> do
+    bundles <- forM (zip [1..] combinedScripts) $ \(n, (pageSet, script)) -> do
         writeFile (out++"hs"++show n++".js") . unlines $
             (pageSetComment $ S.toList pageSet) ++ script ++
             [("//@ sourceURL=hs"++show n++".js")]
         return (n, pageSet)
 
-    let pageToCMod = M.fromListWith (++) $ concatMap (\(m, ps) -> map (\p -> (p, [m])) $ S.toList ps) closureMods
+    -- Work out the loader functions
+    let pageToBundles = M.fromListWith (++) $ concatMap
+                            (\(m, ps) -> map (\p -> (p, [m])) $ S.toList ps)
+                            bundles
 
-        loader = map makeLoader (M.toList pageToCMod)
+        loader = map makeLoader (M.toList pageToBundles)
 
-        makeLoader (p, mods) = concat ["var $", lookupKey p, "=function() { $hs_load(",
-            show mods, "); return ", lookupKey p, "; };"]
+        makeLoader (p, bs) = concat ["var $", lookupKey p,
+            "=$L(", show bs,", function() { return ", lookupKey p, "; });"]
 
     writeFile (out++"hsloader.js") $ unlines loader
 
     return $ concatMap (\(n, _) -> [
                         "--js", concat [out, "hs", show n, ".js"],
                         "--module", concat ["hs", show n, "min:1:rts"]]
-                        ) closureMods ++ [
+                        ) bundles ++ [
                         "--js", concat [out, "hsloader.js"]]
 
 -- | This installs all the java script (.js) files in a directory to a target loction
