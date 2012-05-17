@@ -1,6 +1,8 @@
 {-# LANGUAGE CPP, TypeFamilies #-}
 module Main where
 
+import Paths_ghcjs
+
 import qualified GHC.Paths
 import GHC
 import HscMain (hscSimplify)
@@ -8,9 +10,9 @@ import TidyPgm (tidyProgram)
 import CoreToStg (coreToStg)
 import SimplStg (stg2stg)
 #if __GLASGOW_HASKELL__ >= 702
-import DynFlags (defaultLogAction)
+import DynFlags (defaultLogAction, defaultDynFlags, supportedLanguagesAndExtensions, compilerInfo)
 #else
-import DynFlags (defaultDynFlags)
+import DynFlags (defaultDynFlags, supportedLanguagesAndExtensions, compilerInfo)
 #endif
 import HscTypes (ModGuts, CgGuts (..))
 import CorePrep (corePrepPgm)
@@ -18,17 +20,21 @@ import DriverPhases (HscSource (HsBootFile))
 
 import System.Environment (getArgs)
 
+import Compiler.Info
 import qualified Generator.TopLevel as Js (generate)
 import Javascript.Language (Javascript)
 import qualified Javascript.Formatted as Js
 import qualified Javascript.Trampoline as Js
 import MonadUtils (MonadIO(..))
 import Generator.Helpers (runGen, newGenState)
-import System.FilePath (replaceExtension)
+import System.FilePath (replaceExtension, (</>))
 
 import Control.Monad (when)
-import System.Exit (exitSuccess)
+import System.Exit (exitSuccess, exitFailure)
 import System.Process (rawSystem)
+import System.IO
+import Data.Monoid (mconcat, First(..))
+import Data.List (isSuffixOf, isPrefixOf, tails)
 
 data CallingConvention = Plain | Trampoline
 
@@ -36,9 +42,7 @@ main :: IO ()
 main =
   do args <- getArgs
      -- pass these options to the real ghc, lets ghcjs be used by cabal
-     when (any (`elem` ["--supported-languages", "--numeric-version", "--info", "--print-libdir", "-c"]) args) $ do
-       _ <- rawSystem "ghc" args
-       exitSuccess
+     handleCommandline args
      -- FIXME: I wasn't able to find any sane command line parsing
      --        library that allow sending unprocessed arguments to GHC...
      let (callingConvention, args') =
@@ -54,14 +58,61 @@ main =
 #endif
         $ runGhc (Just GHC.Paths.libdir) $
        do sdflags <- getSessionDynFlags
-          (dflags, fileargs', _) <- parseDynamicFlags sdflags (map noLoc $ filter (/="--make") args') -- ("-DWORD_SIZE_IN_BITS=32":args'))
-          _ <- setSessionDynFlags dflags
+          let oneshot = "-c" `elem` args
+              sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
+                                 , ghcLink = if oneshot then NoLink  else ghcLink sdflags
+                                 }
+          (dflags, fileargs', _) <- parseDynamicFlags sdflags' (map noLoc $ ignoreUnsupported args') -- ("-DWORD_SIZE_IN_BITS=32":args'))
+          dflags' <- liftIO $ addPkgConf dflags
+          _ <- setSessionDynFlags dflags'
           let fileargs = map unLoc fileargs'
           targets <- mapM (flip guessTarget Nothing) fileargs
           setTargets targets
           _ <- load LoadAllTargets
           mgraph <- depanal [] False
           mapM_ (compileModSummary callingConvention) mgraph
+
+addPkgConf :: DynFlags -> IO DynFlags
+addPkgConf df = do
+  db <- getGlobalPackageDB
+  return $ df { extraPkgConfs = db : extraPkgConfs df }
+
+ignoreUnsupported :: [String] -> [String]
+ignoreUnsupported args = filter (`notElem` ["--make", "-c"]) args'
+    where
+      args' = filter (\x -> not $ any (`isPrefixOf` x) ["-H"]) args
+
+handleCommandline :: [String] -> IO ()
+handleCommandline args
+    | "-c" `elem` args      = handleOneShot args
+    | Just act <- lookupAct = act >> exitSuccess
+    | otherwise             = return ()
+   where
+     lookupAct = getFirst . mconcat . map (First . (`lookup` acts)) $ args
+     unsupported xs = putStrLn (xs ++ " is currently unsupported") >> exitFailure
+     acts :: [(String, IO ())]
+     acts = [ ("--supported-languages", mapM_ putStrLn supportedLanguagesAndExtensions)
+            , ("--numeric-version", putStrLn getCompilerVersion)
+            , ("--info", print =<< getCompilerInfo)
+            , ("--print-libdir", putStrLn =<< getLibDir)
+            , ("--abi-hash", fallbackGhc args)
+            , ("-M", fallbackGhc args)
+            ]
+
+handleOneShot :: [String] -> IO ()
+handleOneShot args | fallback  = fallbackGhc args >> exitSuccess
+                   | otherwise = return ()
+    where
+      fallback = any isFb (tails args)
+      isFb ("-c":c:_) = any (`isSuffixOf` c) [".c", ".cmm", ".hs-boot", ".lhs-boot"]
+      isFb _          = False
+
+-- call ghc for things that we don't handle internally
+-- fixme: either remove this hack or properly check that the version of the called ghc is the expected one
+fallbackGhc args = do
+  db <- getGlobalPackageDB
+  rawSystem "ghc" $ "-package-conf" : db : args
+  return ()
 
 compileModSummary :: GhcMonad m => CallingConvention -> ModSummary -> m ()
 compileModSummary callingConvention mod =

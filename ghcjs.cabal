@@ -25,7 +25,8 @@ Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    Build-Depends:  base >=4 && <5, ghc >= 7.0 && < 7.5, ghc-paths, monads-tf, containers, filepath, process
+    Build-Depends:  base >=4 && <5, ghc >= 7.0 && < 7.5, ghc-paths, monads-tf, containers, filepath, process,
+                    directory
     if flag(boot)
       x-boot:     True
     else
@@ -34,7 +35,7 @@ Executable ghcjs
     Other-Modules:  Javascript.Language, Javascript.Trampoline, Javascript.Formatted.Base,
                     Javascript.Formatted.Expression, Javascript.Formatted.Statement,
                     Javascript.Formatted, RTS.Objects, Generator.Helpers, Generator.Dependencies,
-                    Generator.PrimOp, Generator.FFI, Generator.Core, Generator.TopLevel
+                    Generator.PrimOp, Generator.FFI, Generator.Core, Generator.TopLevel, Compiler.Info
 
 Executable ghcjs-link
     Main-Is:        Linker/Main.hs
@@ -53,7 +54,16 @@ Executable ghcjs-pkg
     Main-Is:        Pkg.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time
+    Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time, ghc-paths
+    Other-Modules: Compiler.Info
+
+Executable ghcjs-boot
+    Main-Is:        Boot.hs
+    Default-Language: Haskell2010
+    Hs-Source-Dirs: src
+    Build-Depends:  base >=3 && <5, Cabal, shelly, filepath, directory, bzlib-conduit,
+                    process, tar, http-conduit, conduit, network, bytestring, text,
+                    transformers
 
 test-suite test
     type:       exitcode-stdio-1.0
