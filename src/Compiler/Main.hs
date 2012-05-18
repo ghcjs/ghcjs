@@ -55,13 +55,14 @@ main =
                   _ -> (Plain, args1)
 
      handleCommandline args2
+     libDir <- getGlobalPackageBase
      defaultErrorHandler
 #if __GLASGOW_HASKELL__ >= 702
         defaultLogAction
 #else
         defaultDynFlags
 #endif
-        $ runGhc (mbMinusB `mplus` Just GHC.Paths.libdir) $ -- fixme should we add GHC.Paths.libdir at all?
+        $ runGhc (mbMinusB `mplus` Just libDir) $
        do sdflags <- getSessionDynFlags
           let oneshot = "-c" `elem` args2
               sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
@@ -79,8 +80,13 @@ main =
 
 addPkgConf :: DynFlags -> IO DynFlags
 addPkgConf df = do
-  db <- getGlobalPackageDB
-  return $ df { extraPkgConfs = db : extraPkgConfs df }
+  db1 <- getGlobalPackageDB
+  db2 <- getUserPackageDB
+  base <- getGlobalPackageBase
+  return $ df
+             { extraPkgConfs = db1 : db2 : extraPkgConfs df
+             , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
+             }
 
 ignoreUnsupported :: [String] -> [String]
 ignoreUnsupported args = filter (`notElem` ["--make", "-c"]) args'

@@ -58,7 +58,7 @@ fromString :: String -> FilePath
 fromString = fromText . T.pack
 
 toString :: FilePath -> String
-toString = T.unpack . toTextIgnore 
+toString = T.unpack . toTextIgnore
 
 -- autoboots roll out
 -- download and configure a fresh ghc source tree
@@ -88,7 +88,7 @@ installBootPackages = do
     (Just ghcjs, Just ghcjspkg) -> do
       echo $ "Booting: " <> toTextIgnore ghcjs <> " (" <> toTextIgnore ghcjspkg <> ")"
       addWrappers ghcjs ghcjspkg
---      run_ "make" ["all_libraries", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"]
+      run_ "make" ["all_libraries", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"]
       initGlobalDB
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) ["ghc-prim", "integer-gmp", "base"]
@@ -120,17 +120,23 @@ installRts :: ShIO ()
 installRts = do
   echo "installing RTS"
   dest <- liftIO getGlobalPackageDB
-  writefile (dest </> "builtin_rts.conf") rtsConf
+  base  <- liftIO getGlobalPackageBase
+  let inc = base </> "include"
+  writefile (dest </> "builtin_rts.conf") (rtsConf $ toTextIgnore inc)
   run_ "ghcjs-pkg" ["recache"]
+  mkdir_p inc
+  sub $ cd "includes" >> cp_r "." inc
+  cp "settings" (base </> "settings")
 
-rtsConf :: Text
-rtsConf = T.unlines
+rtsConf :: Text -> Text
+rtsConf incl = T.unlines
             [ "name:           rts"
             , "version:        1.0"
             , "id:             builtin_rts"
             , "license:        BSD3"
             , "maintainer:     stegeman@gmail.com"
             , "exposed:        True"
+            , "include-dirs:   " <> incl
             ]
 
 initGlobalDB :: ShIO ()
