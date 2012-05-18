@@ -29,41 +29,46 @@ import MonadUtils (MonadIO(..))
 import Generator.Helpers (runGen, newGenState)
 import System.FilePath (replaceExtension, (</>))
 
-import Control.Monad (when)
+import Control.Monad (when, mplus)
 import System.Exit (exitSuccess, exitFailure)
 import System.Process (rawSystem)
 import System.IO
 import Data.Monoid (mconcat, First(..))
-import Data.List (isSuffixOf, isPrefixOf, tails)
+import Data.List (isSuffixOf, isPrefixOf, tails, partition)
+import Data.Maybe (isJust)
 
 data CallingConvention = Plain | Trampoline
 
 main :: IO ()
 main =
-  do args <- getArgs
-     -- pass these options to the real ghc, lets ghcjs be used by cabal
-     handleCommandline args
-     -- FIXME: I wasn't able to find any sane command line parsing
-     --        library that allow sending unprocessed arguments to GHC...
-     let (callingConvention, args') =
-           case args
-             of ("--calling-convention=plain":args) -> (Plain, args)
-                ("--calling-convention=trampoline":args) -> (Trampoline, args)
-                _ -> (Plain, args)
+  do args0 <- getArgs
+       
+     let (minusB_args, args1) = partition ("-B" `isPrefixOf`) args0
+         mbMinusB | null minusB_args = Nothing
+                  | otherwise = Just . drop 2 . last $ minusB_args
+         -- FIXME: I wasn't able to find any sane command line parsing
+         --        library that allow sending unprocessed arguments to GHC...
+         (callingConvention, args2) =
+             case args1
+               of ("--calling-convention=plain":args1') -> (Plain, args1')
+                  ("--calling-convention=trampoline":args1') -> (Trampoline, args1')
+                  _ -> (Plain, args1)
+
+     handleCommandline args2
      defaultErrorHandler
 #if __GLASGOW_HASKELL__ >= 702
         defaultLogAction
 #else
         defaultDynFlags
 #endif
-        $ runGhc (Just GHC.Paths.libdir) $
+        $ runGhc (mbMinusB `mplus` Just GHC.Paths.libdir) $ -- fixme should we add GHC.Paths.libdir at all?
        do sdflags <- getSessionDynFlags
-          let oneshot = "-c" `elem` args
+          let oneshot = "-c" `elem` args2
               sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
                                  , ghcLink = if oneshot then NoLink  else ghcLink sdflags
                                  }
-          (dflags, fileargs', _) <- parseDynamicFlags sdflags' (map noLoc $ ignoreUnsupported args') -- ("-DWORD_SIZE_IN_BITS=32":args'))
-          dflags' <- liftIO $ addPkgConf dflags
+          (dflags, fileargs', _) <- parseDynamicFlags sdflags' (map noLoc $ ignoreUnsupported args2) -- ("-DWORD_SIZE_IN_BITS=32":args'))
+          dflags' <- liftIO $ if isJust mbMinusB then return dflags else addPkgConf dflags
           _ <- setSessionDynFlags dflags'
           let fileargs = map unLoc fileargs'
           targets <- mapM (flip guessTarget Nothing) fileargs

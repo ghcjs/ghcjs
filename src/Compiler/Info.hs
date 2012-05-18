@@ -24,13 +24,19 @@ getCompilerInfo = do
            , ("Project version", getCompilerVersion)
            ] ++ compilerInfo df
 
-getGlobalPackageDB = do
+getGlobalPackageBase = do
   appdir <- getAppUserDataDirectory "ghcjs"
-  return (appdir </> subdir </> "package.conf.d")
+  return (appdir </> subdir)
       where
         targetARCH = arch
         targetOS   = os
         subdir     = targetARCH ++ '-':targetOS ++ '-':getCompilerVersion
+
+getGlobalPackageDB = fmap (</> "package.conf.d") getGlobalPackageInst
+
+getUserPackageDB = fmap (</> "package.conf.d") getGlobalPackageBase
+
+getGlobalPackageInst = fmap (</> "lib") getGlobalPackageBase
 
 -- fixme, cabal cannot determine the version if it contains text
 getCompilerVersion = cProjectVersion ++ "." {-++ "ghcjs" -} ++ Version.showVersion version

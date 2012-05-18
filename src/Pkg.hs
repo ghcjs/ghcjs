@@ -10,14 +10,41 @@ import System.Exit
 
 import Compiler.Info
 
+import Data.List (isPrefixOf)
+
+import System.Process (runProcess, waitForProcess)
+
 main :: IO ()
-main = do pkgConf <- getGlobalPackageDB
+main = do gPkgConf <- getGlobalPackageDB
+          uPkgConf <- getUserPackageDB
           args <- getArgs
-          if any (=="--version") args
-            then putStrLn $ "GHCJS package manager version " ++ getCompilerVersion
-            else exitWith =<< system (unwords (["ghc-pkg"]++ args ++
-                                               ["--package-conf=" ++ pkgConf
-                                               ,"--global-conf=" ++ pkgConf
-                                               ,"--no-user-package-conf"]))
+          appendFile "/tmp/jsargs.txt" (show args ++ "\n")
+          ghcjsPkg args gPkgConf uPkgConf
+
+ghcjsPkg :: [String] -> String -> String -> IO ()
+ghcjsPkg args gPkgConf uPkgConf
+    | any (=="initglobal") args   =
+        ghcPkg gPkgConf ["init", gPkgConf]
+    | any (=="inituser") args     =
+        ghcPkg gPkgConf ["init", uPkgConf]
+    | any (=="--version") args    = do
+        putStrLn $ "GHCJS package manager version " ++ getCompilerVersion
+        exitSuccess
+    | any (=="--no-user-package-conf") args =
+        ghcPkg gPkgConf args
+    | any (=="--global") args = -- if global, flip package conf arguments (rightmost one is used by ghc-pkg)
+        ghcPkg gPkgConf $ args ++ [ "--package-conf=" ++ uPkgConf
+                                  , "--package-conf=" ++ gPkgConf
+                                  ]
+    | otherwise                   =
+        ghcPkg gPkgConf $ args ++ [ "--package-conf=" ++ gPkgConf
+                                  , "--package-conf=" ++ uPkgConf
+                                  ]
+
+ghcPkg :: String -> [String] -> IO ()
+ghcPkg globaldb args = do
+  ph <- runProcess "ghc-pkg" args Nothing (Just [("GHC_PACKAGE_PATH", globaldb)]) Nothing Nothing Nothing
+  exitWith =<< waitForProcess ph
+
 
 

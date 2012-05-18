@@ -61,9 +61,9 @@ Executable ghcjs-boot
     Main-Is:        Boot.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    Build-Depends:  base >=3 && <5, Cabal, shelly, filepath, directory, bzlib-conduit,
+    Build-Depends:  base >=3 && <5, Cabal, shelly >= 0.9, filepath, directory, bzlib-conduit,
                     process, tar, http-conduit, conduit, network, bytestring, text,
-                    transformers
+                    transformers, ghc, ghc-paths, system-filepath
 
 test-suite test
     type:       exitcode-stdio-1.0
