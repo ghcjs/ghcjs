@@ -89,7 +89,7 @@ installBootPackages = do
       echo $ "Booting: " <> toTextIgnore ghcjs <> " (" <> toTextIgnore ghcjspkg <> ")"
       initPackageDB
       addWrappers ghcjs ghcjspkg
-      run_ "make" ["all_libraries", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"] `sh_catchany` (const (return ()))
+      run_ "make" ["all_libraries", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"] `catchany_sh` (const (return ()))
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) ["ghc-prim", "integer-gmp", "base"]
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
