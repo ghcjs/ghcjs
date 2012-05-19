@@ -87,9 +87,9 @@ installBootPackages = do
   case (mghcjs, mghcjspkg) of
     (Just ghcjs, Just ghcjspkg) -> do
       echo $ "Booting: " <> toTextIgnore ghcjs <> " (" <> toTextIgnore ghcjspkg <> ")"
+      initPackageDB
       addWrappers ghcjs ghcjspkg
-      run_ "make" ["all_libraries", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"]
-      initGlobalDB
+      run_ "make" ["all_libraries", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"] `sh_catchany` (const (return ()))
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) ["ghc-prim", "integer-gmp", "base"]
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
@@ -122,14 +122,27 @@ installRts = do
   dest <- liftIO getGlobalPackageDB
   base  <- liftIO getGlobalPackageBase
   let inc = base </> "include"
-  writefile (dest </> "builtin_rts.conf") (rtsConf $ toTextIgnore inc)
-  run_ "ghcjs-pkg" ["recache"]
+      lib = base </> "lib"
+  rtsConf <- readfile "rts/package.conf.install"
+  writefile (dest </> "builtin_rts.conf") $
+                 fixRtsConf (toTextIgnore inc) (toTextIgnore lib) rtsConf
+  run_ "ghcjs-pkg" ["recache", "--global"]
   mkdir_p inc
   sub $ cd "includes" >> cp_r "." inc
+  mkdir_p lib
+  sub $ cd "rts/dist/build" >> cp_r "." lib
   cp "settings" (base </> "settings")
 
-rtsConf :: Text -> Text
-rtsConf incl = T.unlines
+fixRtsConf :: Text -> Text -> Text -> Text
+fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
+    where
+      fixLine l
+          | "library-dirs:" `T.isPrefixOf` l = "library-dirs: " <> lib
+          | "include-dirs:" `T.isPrefixOf` l = "include-dirs: " <> incl
+          | otherwise                        = l
+
+rtsConf :: Text -> Text -> Text
+rtsConf incl lib = T.unlines
             [ "name:           rts"
             , "version:        1.0"
             , "id:             builtin_rts"
@@ -137,14 +150,20 @@ rtsConf incl = T.unlines
             , "maintainer:     stegeman@gmail.com"
             , "exposed:        True"
             , "include-dirs:   " <> incl
+            , "includes:       Stg.h"
+            , "library-dirs:   " <> lib
+            , "hs-libraries:   HSrts"
             ]
 
-initGlobalDB :: ShIO ()
-initGlobalDB = do
---  db   <- liftIO getGlobalPackageDB      
+initPackageDB :: ShIO ()
+initPackageDB = do
+  base <- liftIO getGlobalPackageBase
+  inst <- liftIO getGlobalPackageInst
+  mkdir_p (fromString base)
+  mkdir_p (fromString inst)
   run_ "ghcjs-pkg" ["initglobal"] `catchany_sh` const (return ())
   run_ "ghcjs-pkg" ["inituser"] `catchany_sh` const (return ())
---   run_ "ghcjs-pkg" ["init", T.pack db] `catchany_sh` const (return ())
+
 
 installPkg :: FilePath -> FilePath -> Text -> ShIO ()
 installPkg ghcjs ghcjspkg pkg = do

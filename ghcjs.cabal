@@ -25,8 +25,8 @@ Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    Build-Depends:  base >=4 && <5, ghc >= 7.0 && < 7.5, ghc-paths, monads-tf, containers, filepath, process,
-                    directory
+    Build-Depends:  base >=4 && <5, ghc >= 7.0.3 && < 7.5, ghc-paths, monads-tf, containers, filepath, process,
+                    directory, base16-bytestring, bytestring, skein, crypto-api, cereal, crypto-conduit
     if flag(boot)
       x-boot:     True
     else
@@ -64,6 +64,14 @@ Executable ghcjs-boot
     Build-Depends:  base >=3 && <5, Cabal, shelly >= 0.9, filepath, directory, bzlib-conduit,
                     process, tar, http-conduit, conduit, network, bytestring, text,
                     transformers, ghc, ghc-paths, system-filepath
+
+Executable cabaljs
+    Main-Is:        CabalJs.hs
+    Default-Language: Haskell2010
+    Hs-Source-Dirs: src
+    Build-Depends:  base >=3 && <5, process, base16-bytestring, skein, crypto-api, shelly >= 0.9,
+                    system-filepath, crypto-conduit, bytestring, containers, text, ghc, ghc-paths,
+                    filepath, directory, cereal
 
 test-suite test
     type:       exitcode-stdio-1.0

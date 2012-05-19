@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TypeFamilies #-}
+{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables #-}
 module Main where
 
 import Paths_ghcjs
@@ -27,7 +27,8 @@ import qualified Javascript.Formatted as Js
 import qualified Javascript.Trampoline as Js
 import MonadUtils (MonadIO(..))
 import Generator.Helpers (runGen, newGenState)
-import System.FilePath (replaceExtension, (</>))
+import System.FilePath (dropExtension, replaceExtension, (</>))
+import System.Directory (createDirectoryIfMissing)
 
 import Control.Monad (when, mplus)
 import System.Exit (exitSuccess, exitFailure)
@@ -36,6 +37,12 @@ import System.IO
 import Data.Monoid (mconcat, First(..))
 import Data.List (isSuffixOf, isPrefixOf, tails, partition)
 import Data.Maybe (isJust)
+
+import Crypto.Skein
+import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Char8  as C8
+import Crypto.Conduit (hashFile)
+import qualified Data.Serialize as C
 
 data CallingConvention = Plain | Trampoline
 
@@ -89,7 +96,7 @@ addPkgConf df = do
              }
 
 ignoreUnsupported :: [String] -> [String]
-ignoreUnsupported args = filter (`notElem` ["--make", "-c"]) args'
+ignoreUnsupported args = filter (`notElem` ["--make", "-c", "-threaded"]) args'
     where
       args' = filter (\x -> not $ any (`isPrefixOf` x) ["-H"]) args
 
@@ -115,7 +122,7 @@ handleOneShot args | fallback  = fallbackGhc args >> exitSuccess
                    | otherwise = return ()
     where
       fallback = any isFb (tails args)
-      isFb ("-c":c:_) = any (`isSuffixOf` c) [".c", ".cmm", ".hs-boot", ".lhs-boot"]
+      isFb ({- "-c": -} c:_) = any (`isSuffixOf` c) [".c", ".cmm", ".hs-boot", ".lhs-boot"]
       isFb _          = False
 
 -- call ghc for things that we don't handle internally
@@ -148,10 +155,26 @@ writeDesugaredModule callingConvention mod =
      liftIO $
        do putStrLn $ concat ["Writing module ", name, " (to ", outputFile, ")"]
           writeFile outputFile program
+          writeCachedFile outputFile program
   where summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
         outputFile = replaceExtension (ml_hi_file . ms_location $ summary) ".js"
         name = moduleNameString . moduleName . ms_mod $ summary
         dflags = ms_hspp_opts $ summary
+
+{-
+   temporary workaround for lacking Cabal support: 
+   - write .js source to cache, file name based on the skein hash of
+     the corresponding .hi file. cabaljs picks this up to complete
+     the package installation
+-}
+writeCachedFile :: FilePath -> String -> IO ()
+writeCachedFile jsFile program = do
+  let hiFile = (dropExtension jsFile) ++ ".hi"
+  (hash :: Skein_512_512) <- hashFile hiFile
+  cacheDir <- getGlobalCache
+  let basename = C8.unpack . B16.encode . C.encode $ hash
+  createDirectoryIfMissing True cacheDir
+  writeFile (cacheDir </> basename ++ ".js") program
 
 cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
 cgGutsFromModGuts guts =
