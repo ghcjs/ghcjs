@@ -1559,8 +1559,8 @@ var $hs_loaded = [];
 var $hs_loadPath = "./";
 var $hs_loading = false;
 
-var $hs_fromHaskellString = function(args, onComplete, onException) {
-    console.log("fromHaskellString");
+var $hs_fromString = function(args, onComplete, onException) {
+    console.log("fromString");
     var loop = function(res, a) {
         $hs_force(a, function(s) {
             switch (s.g) {
@@ -1580,20 +1580,64 @@ var $hs_fromHaskellString = function(args, onComplete, onException) {
     }
     loop("", args);
 };
-var $hs_fromHaskellInt = function(args, onComplete, onException) {
-    console.log("fromHaskellInt");
-    $hs_force(args, function(i){onComplete(i.v[0]);}, onException);
+var $hs_fromText = function(args, onComplete, onException) {
+    console.log("fromText");
+    $hs_force(args, function(s) {
+        if(HS_DEBUG && !
+          (s.g === 1
+            && s.v[0].g === 1
+            && s.v[1].g === 1
+            && s.v[2].g === 1)) throw "Invalid Text";
+        var arr = s.v[0].v[0];
+        var off = s.v[1].v[0];
+        var end = off + s.v[2].v[0];
+        var buf = new Uint16Array(arr[0]);
+        var result = "";
+        for(var n = off; n !== end; n++)
+            result += String.fromCharCode(buff[n]);
+        onComplete(result);
+    }, onException);
 };
-var $hs_fromHaskellIO = function(args, onComplete, onException) {
-    console.log("fromHaskellIO");
+var $hs_fromLazyText = function(args, onComplete, onException) {
+    console.log("fromLazyText");
+    var loop = function(res, a) {
+        $hs_force(a, function(s) {
+            switch (s.g) {
+                case 1: // Empty
+                    onComplete(res);
+                    break;
+                case 2: // Chunk
+                    var arr = s.v[0];
+                    var off = s.v[1];
+                    var end = off + s.v[2];
+                    var buff = new Uint16Array(arr[0]);
+                    for(var n = off; n !== end; n++)
+                        res += String.fromCharCode(buff[n]);
+                    loop(res,[s.v[3]]);
+                    break;
+                default:
+                    throw "undefined";
+            }
+        }, onException);
+    }
+    loop("", args);
+};
+var $hs_fromInt = function(args, onComplete, onException) {
+    console.log("fromInt");
+    $hs_force(args, function(i){
+        if(HS_DEBUG && i.g !== 1) throw "Invalid Int"
+        onComplete(i.v[0]);}, onException);
+};
+var $hs_runIO = function(args, onComplete, onException) {
+    console.log("fromIO");
     var newArguments = [];
     for (var i = 0; i < args.length; i++)
         newArguments[i] = args[i];
     newArguments[args.length] = $$GHCziPrim_realWorldzh;
     $hs_force(newArguments, function(i){onComplete(i[1]);}, onException);
 };
-var $hs_toHaskellInt = function(i) {
-    console.log("toHaskellInt");
+var $hs_toInt = function(i) {
+    console.log("toInt");
     return new $DataValue(1, [i|0]);
 };
 var hs_nil = function() {
