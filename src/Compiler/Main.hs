@@ -96,7 +96,7 @@ addPkgConf df = do
              }
 
 ignoreUnsupported :: [String] -> [String]
-ignoreUnsupported args = filter (`notElem` ["--make", "-c", "-threaded"]) args'
+ignoreUnsupported args = filter (`notElem` ["--make", "-c", "-threaded", "-prof", "-fPIC", "-dynamic"]) args'
     where
       args' = filter (\x -> not $ any (`isPrefixOf` x) ["-H"]) args
 
