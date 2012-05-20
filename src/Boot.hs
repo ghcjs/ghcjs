@@ -37,6 +37,7 @@ import Data.Conduit (($$), ($=), (=$=))
 import Data.Conduit.Lazy (lazyConsume)
 import Data.Conduit.BZlib
 import Network.HTTP.Conduit
+import System.Directory ( setPermissions, getPermissions, Permissions(..) )
 
 default (T.Text)
 
@@ -97,10 +98,16 @@ installBootPackages = do
 -- add inplace/bin/ghcjs and inplace/bin/ghcjs-pkg wrappers
 addWrappers :: FilePath -> FilePath -> ShIO ()
 addWrappers ghcjs ghcjspkg = do
-  ghcwrapper <- readfile "inplace/bin/ghc-stage1"
-  writefile "inplace/bin/ghcjs" (fixGhcWrapper ghcwrapper ghcjs)
-  pkgwrapper <- readfile "inplace/bin/ghc-pkg"
-  writefile "inplace/bin/ghcjs-pkg" (fixPkgWrapper pkgwrapper ghcjspkg)
+    ghcwrapper <- readfile "inplace/bin/ghc-stage1"
+    writefile "inplace/bin/ghcjs" (fixGhcWrapper ghcwrapper ghcjs)
+    makeExecutable "inplace/bin/ghcjs"
+    pkgwrapper <- readfile "inplace/bin/ghc-pkg"
+    writefile "inplace/bin/ghcjs-pkg" (fixPkgWrapper pkgwrapper ghcjspkg)
+    makeExecutable "inplace/bin/ghcjs-pkg"
+ where
+    makeExecutable f = liftIO $ do
+        p <- getPermissions f
+        setPermissions f (p {executable = True})
 
 fixGhcWrapper :: Text -> FilePath -> Text
 fixGhcWrapper wrapper ghcjs = T.unlines . map fixLine . T.lines $ wrapper
