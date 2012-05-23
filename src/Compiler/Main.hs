@@ -59,7 +59,7 @@ main =
              case args1
                of ("--calling-convention=plain":args1') -> (Plain, args1')
                   ("--calling-convention=trampoline":args1') -> (Trampoline, args1')
-                  _ -> (Plain, args1)
+                  _ -> (Trampoline, args1)
 
      handleCommandline args2
      libDir <- getGlobalPackageBase

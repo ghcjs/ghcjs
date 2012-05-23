@@ -18,7 +18,6 @@ main :: IO ()
 main = do gPkgConf <- getGlobalPackageDB
           uPkgConf <- getUserPackageDB
           args <- getArgs
-          appendFile "/tmp/jsargs.txt" (show args ++ "\n")
           ghcjsPkg args gPkgConf uPkgConf
 
 ghcjsPkg :: [String] -> String -> String -> IO ()
@@ -30,8 +29,12 @@ ghcjsPkg args gPkgConf uPkgConf
     | any (=="--version") args    = do
         putStrLn $ "GHCJS package manager version " ++ getCompilerVersion
         exitSuccess
-    | any (=="--no-user-package-conf") args =
+    | any ("--package-conf" `isPrefixOf`) args =
         ghcPkg gPkgConf args
+    | any ("--global-conf" `isPrefixOf`) args =
+        ghcPkgPlain args
+    | any (=="--no-user-package-conf") args =
+        ghcPkgPlain args
     | any (=="--global") args = -- if global, flip package conf arguments (rightmost one is used by ghc-pkg)
         ghcPkg gPkgConf $ args ++ [ "--package-conf=" ++ uPkgConf
                                   , "--package-conf=" ++ gPkgConf
@@ -46,5 +49,8 @@ ghcPkg globaldb args = do
   ph <- runProcess "ghc-pkg" args Nothing (Just [("GHC_PACKAGE_PATH", globaldb)]) Nothing Nothing Nothing
   exitWith =<< waitForProcess ph
 
-
+ghcPkgPlain :: [String] -> IO ()
+ghcPkgPlain args = do
+  ph <- runProcess "ghc-pkg" args Nothing Nothing Nothing Nothing Nothing
+  exitWith =<< waitForProcess ph
 

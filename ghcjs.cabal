@@ -31,7 +31,7 @@ Executable ghcjs
       x-boot:     True
     else
       x-boot:     False
-    GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans
+    GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
     Other-Modules:  Javascript.Language, Javascript.Trampoline, Javascript.Formatted.Base,
                     Javascript.Formatted.Expression, Javascript.Formatted.Statement,
                     Javascript.Formatted, RTS.Objects, Generator.Helpers, Generator.Dependencies,
