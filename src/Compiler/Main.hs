@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies, ScopedTypeVariables #-}
 module Main where
 
 import Paths_ghcjs
@@ -9,11 +9,7 @@ import HscMain (hscSimplify)
 import TidyPgm (tidyProgram)
 import CoreToStg (coreToStg)
 import SimplStg (stg2stg)
-#if __GLASGOW_HASKELL__ >= 702
 import DynFlags (defaultLogAction, defaultDynFlags, supportedLanguagesAndExtensions, compilerInfo)
-#else
-import DynFlags (defaultDynFlags, supportedLanguagesAndExtensions, compilerInfo)
-#endif
 import HscTypes (ModGuts, CgGuts (..))
 import CorePrep (corePrepPgm)
 import DriverPhases (HscSource (HsBootFile))
@@ -64,11 +60,7 @@ main =
      handleCommandline args2
      libDir <- getGlobalPackageBase
      defaultErrorHandler
-#if __GLASGOW_HASKELL__ >= 702
         defaultLogAction
-#else
-        defaultDynFlags
-#endif
         $ runGhc (mbMinusB `mplus` Just libDir) $
        do sdflags <- getSessionDynFlags
           let oneshot = "-c" `elem` args2
@@ -179,22 +171,14 @@ writeCachedFile jsFile program = do
 cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
 cgGutsFromModGuts guts =
   do hscEnv <- getSession
-#if __GLASGOW_HASKELL__ >= 702
      simplGuts <- liftIO $ hscSimplify hscEnv guts
-#else
-     simplGuts <- hscSimplify guts
-#endif
      (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
      return cgGuts
 
 concreteJavascriptFromCgGuts :: DynFlags -> CallingConvention -> CgGuts -> IO String
 concreteJavascriptFromCgGuts dflags callingConvention core =
   do core_binds <- corePrepPgm dflags (cg_binds core) (cg_tycons $ core)
-#if __GLASGOW_HASKELL__ >= 703
      stg <- coreToStg dflags core_binds
-#else
-     stg <- coreToStg (modulePackageId . cg_module $ core) core_binds
-#endif
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
      let abstract :: Javascript js => js
          abstract = fst $ runGen (Js.generate (cg_module core) stg') newGenState
