@@ -1782,3 +1782,17 @@ var $$GHCziPrim_realWorldzh = 0;
 var $$GHCziPrim_coercionTokenzh = 0;
 var $hs_init = function() {
 };
+var MD5Init = function(ctx) {
+    ctx.googCtx = new goog.crypt.Md5();
+};
+var MD5Update = function(ctx, dat, len) {
+    var i8 = new Int8Array(dat[0]);
+    ctx.googCtx.update(i8, len);
+};
+var MD5Final = function(dst, ctx) {
+    var digest = ctx.googCtx.digest();
+    var i8 = new Int8Array(dst);
+    for(var i=0;i<16;i++) {
+      i8[i] = digest[i];
+    }
+};

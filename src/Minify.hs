@@ -40,6 +40,8 @@ main = do
                 "--js", "~/closure-library/closure/goog/debug/logbuffer.js",
                 "--js", "~/closure-library/closure/goog/debug/logger.js",
                 "--js", "~/closure-library/closure/goog/debug/console.js",
+                "--js", "~/closure-library/closure/goog/crypt/hash.js",
+                "--js", "~/closure-library/closure/goog/crypt/md5.js",
                 "--js", jsexe </> "rts.jso/rts-options.js",
                 "--define='HS_DEBUG=false'",
                 "--define='HS_TRACE=false'"
