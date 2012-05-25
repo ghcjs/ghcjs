@@ -562,7 +562,7 @@ $tr_Thread.prototype = {
       t = this.waitingThreads[i];
       t.next = this._value;
       t.isException = this._state === "throw";
-      $scheduler.schedule(t);
+      $tr_Scheduler.schedule(t);
     }
   }
 };

@@ -101,6 +101,109 @@ if(WORD_SIZE_IN_BITS==32) {
 else {
     var $hs_popCntzh = $hs_popCnt64zh;
 }
+var $hs_expDoublezh = function(a) {
+    return Math.exp(a);
+};
+var $hs_logDoublezh = function(a) {
+    return Math.log(a);
+};
+var $hs_sqrtDoublezh = function(a) {
+    return Math.sqrt(a);
+};
+var $hs_sinDoublezh = function(a) {
+    return Math.sin(a);
+};
+var $hs_cosDoublezh = function(a) {
+    return Math.cos(a);
+};
+var $hs_tanDoublezh = function(a) {
+    return Math.tan(a);
+};
+var $hs_asinDoublezh = function(a) {
+    return Math.asin(a);
+};
+var $hs_acosDoublezh = function(a) {
+    return Math.acos(a);
+};
+var $hs_atanDoublezh = function(a) {
+    return Math.atan(a);
+};
+var $hs_sinhDoublezh = function(a) {
+    return (Math.exp(a) - Math.exp(-a)) / 2;
+};
+var $hs_coshDoublezh = function(a) {
+    return (Math.exp(a) + Math.exp(-a)) / 2;
+};
+var $hs_tanhDoublezh = function(a) {
+    var expA = Math.exp(a);
+    var expNegA = Math.exp(-a);
+    return (expA - expNegA) / (expA + expNegA);
+};
+var $hs_ztztzhzh = function(a, b) {
+    return Math.pow(a,b);
+};
+var $hs_decodeDouble_2Intzh = function(a) {
+    if( x < 0 ) {
+        var result = decodeDouble_2Int(-x);
+        return [-1, result[1], result[2], result[3]];
+    }
+    // 60bits is more than the 53 that the double has and small enought to fit
+    // in just 2 32 bit ints.
+    var exponent = 60 - (Math.log(x)/0.6931471805599453); // Math.log(2)
+    var mantissa = goog.math.Long.fromNumber(x * Math.pow(2, exponent));
+    return [1, mantissa.getHighBits(), mantissa.getLowBits(), exponent];
+};
+var $hs_expFloatzh = function(a) {
+    return Math.exp(a);
+};
+var $hs_logFloatzh = function(a) {
+    return Math.log(a);
+};
+var $hs_sqrtFloatzh = function(a) {
+    return Math.sqrt(a);
+};
+var $hs_sinFloatzh = function(a) {
+    return Math.sin(a);
+};
+var $hs_cosFloatzh = function(a) {
+    return Math.cos(a);
+};
+var $hs_tanFloatzh = function(a) {
+    return Math.tan(a);
+};
+var $hs_asinFloatzh = function(a) {
+    return Math.asin(a);
+};
+var $hs_acosFloatzh = function(a) {
+    return Math.acos(a);
+};
+var $hs_atanFloatzh = function(a) {
+    return Math.atan(a);
+};
+var $hs_sinhFloatzh = function(a) {
+    return (Math.exp(a) - Math.exp(-a)) / 2;
+};
+var $hs_coshFloatzh = function(a) {
+    return (Math.exp(a) + Math.exp(-a)) / 2;
+};
+var $hs_tanhFloatzh = function(a) {
+    var expA = Math.exp(a);
+    var expNegA = Math.exp(-a);
+    return (expA - expNegA) / (expA + expNegA);
+};
+var $hs_powerFloatzh = function(a, b) {
+    return Math.pow(a, b);
+};
+var $hs_decodeFloat_2Intzh = function(a) {
+    if( x < 0 ) {
+        var result = hs_decodeFloat_2Intzh(-x);
+        return [-result[1], result[2]];
+    }
+    // 28bits is more than the 24 that the float has and small enought to fit
+    // in just a 32 bit int.
+    var exponent = 30 - (Math.log(x)/0.6931471805599453); // Math.log(2)
+    return [(x * Math.pow(2, exponent))|0, exponent];
+};
 var $hs_newMutVarzh = function(a, s) {
     return [s, {value : a}];
 };
@@ -116,7 +219,7 @@ var $hs_sameMutVarzh = function (a, b) {
 };
 var $hs_newArrayzh = function(n, a, s) {
     var result = [];
-    for (x = 0; x != n; x++)
+    for (var x = 0; x != n; x++)
       result[x] = a;
     return [s, result];
 };
@@ -483,8 +586,8 @@ var $hs_writeWord64Arrayzh = function (a, n, v, s) {
     return s;
 };
 var $hs_copyByteArrayzh = function (src, soff, dest, doff, count, s) {
-    srcarray = new Uint8Array(src[0]);
-    destarray = new Uint8Array(dest[0]);
+    var srcarray = new Uint8Array(src[0]);
+    var destarray = new Uint8Array(dest[0]);
     while(count != 0) {
         destarray[doff] = srcarray[soff];
         soff++;
@@ -494,8 +597,8 @@ var $hs_copyByteArrayzh = function (src, soff, dest, doff, count, s) {
     return s;
 };
 var $hs_copyMutableByteArrayzh = function (src, soff, dest, doff, count, s) {
-    srcarray = new Uint8Array(src[0]);
-    destarray = new Uint8Array(dest[0]);
+    var srcarray = new Uint8Array(src[0]);
+    var destarray = new Uint8Array(dest[0]);
     while(count != 0) {
         destarray[doff] = srcarray[soff];
         soff++;
@@ -614,9 +717,9 @@ var $hs_indexInt64OffAddrzh = function (a, n) {
 };
 var $hs_indexWord8OffAddrzh = function (a, n) {
     if(typeof(a) === 'string')
-        return n==a.length?'\x00':a.charCodeAt(n);
+        return n==a.length?0:a.charCodeAt(n);
     else if(typeof(a[0]) === 'string')
-        return n==a[0].length?'\x00':a[0].charCodeAt(a[1]+n);
+        return n==a[0].length?0:a[0].charCodeAt(a[1]+n);
     else
         return new Uint8Array(a[0],a[1]+n)[0];
 };
@@ -953,7 +1056,11 @@ var integer_cmm_gcdIntzh = function(a, b) {
     }
 };
 var integer_cmm_decodeDoublezh = function(x) {
-    // 60bits is more than the 53 that the flote has and small enought to fit
+    if( x < 0 ) {
+        var result = integer_cmm_decodeDoublezh(-x);
+        return [result[0], -result[1], result[2]];
+    }
+    // 60bits is more than the 53 that the double has and small enought to fit
     // in just 2 32 bit ints.
     var exponent = 60 - (Math.log(x)/0.6931471805599453); // Math.log(2)
     return [exponent].concat($hs_googToGMP(
@@ -1014,8 +1121,8 @@ var hs_integerToWord64 = function(as, abits) {
 };
 
 var _hs_text_memcpy = function (dest, doff, src, soff, count) {
-    srcarray = new Uint16Array(src[0],src[1]);
-    destarray = new Uint16Array(dest[0],dest[1]);
+    var srcarray = new Uint16Array(src[0],src[1]);
+    var destarray = new Uint16Array(dest[0],dest[1]);
     while(count != 0) {
         destarray[doff] = srcarray[soff];
         soff++;
@@ -1026,8 +1133,8 @@ var _hs_text_memcpy = function (dest, doff, src, soff, count) {
 };
 
 var _hs_text_memcmp = function(a, aoff, b, boff, count) {
-    aarray = new Uint16Array(a[0],a[1]);
-    barray = new Uint16Array(b[0],b[1]);
+    var aarray = new Uint16Array(a[0],a[1]);
+    var barray = new Uint16Array(b[0],b[1]);
     while(count != 0) {
         if( aarray[aoff] < barray[boff] )
             return -1;
@@ -1041,7 +1148,7 @@ var _hs_text_memcmp = function(a, aoff, b, boff, count) {
 };
 var memcpy = function(dest, src, count) {
     if(typeof(src) === 'string') {
-        destarray = new Uint8Array(dest[0],dest[1]);
+        var destarray = new Uint8Array(dest[0],dest[1]);
         var soff = 0;
         var doff = 0;
         while(count != 0) {
@@ -1053,8 +1160,8 @@ var memcpy = function(dest, src, count) {
         return dest;
     }
     else {
-        destarray = new Uint8Array(dest[0],dest[1]);
-        srcarray = new Uint8Array(src[0],src[1]);
+        var destarray = new Uint8Array(dest[0],dest[1]);
+        var srcarray = new Uint8Array(src[0],src[1]);
         var doff = 0;
         var soff = 0;
         while(count != 0) {
@@ -1281,8 +1388,8 @@ var __hscore_sigismember = function(set, s) { return 0; };
 
 var __hscore_memcpy_src_off = function(dest, src, soff, count) {
     var doff = 0;
-    srcarray = new Uint8Array(src[0]);
-    destarray = new Uint8Array(dest[0]);
+    var srcarray = new Uint8Array(src[0]);
+    var destarray = new Uint8Array(dest[0]);
     while(count != 0) {
         destarray[doff] = srcarray[soff];
         soff++;
@@ -1591,7 +1698,7 @@ var $hs_fromText = function(args, onComplete, onException) {
         var arr = s.v[0].v[0];
         var off = s.v[1].v[0];
         var end = off + s.v[2].v[0];
-        var buf = new Uint16Array(arr[0]);
+        var buff = new Uint16Array(arr[0]);
         var result = "";
         for(var n = off; n !== end; n++)
             result += String.fromCharCode(buff[n]);

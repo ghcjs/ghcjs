@@ -160,6 +160,44 @@ primOp XorOp     [a, b] = PlainE $ Js.nativeMethodCall a "xor" [b]
 primOp NotOp     [a] = PlainE $ Js.nativeMethodCall a "not" []
 #endif
 
+-- double:
+primOp DoubleGtOp  [a, b] = PlainE $ boolOp Js.greater a b
+primOp DoubleGeOp  [a, b] = PlainE $ boolOp Js.greaterOrEqual a b
+primOp DoubleEqOp  [a, b] = PlainE $ boolOp Js.equal a b
+primOp DoubleNeOp  [a, b] = PlainE $ boolOp Js.notEqual a b
+primOp DoubleLtOp  [a, b] = PlainE $ boolOp Js.less  a b
+primOp DoubleLeOp  [a, b] = PlainE $ boolOp Js.lessOrEqual a b
+
+primOp DoubleAddOp [a, b] = PlainE $ Js.plus a b
+primOp DoubleSubOp [a, b] = PlainE $ Js.minus a b
+primOp DoubleMulOp [a, b] = PlainE $ Js.multiply a b
+primOp DoubleDivOp [a, b] = PlainE $ Js.divide a b
+
+primOp DoubleNegOp [a]    = PlainE $ Js.unaryMinus a
+
+primOp Double2IntOp [a]   = PlainE $ Js.bitOr a (Js.int (0 :: Int))
+
+primOp Double2FloatOp [a] = PlainE $ a
+
+-- float:
+primOp FloatGtOp   [a, b] = PlainE $ boolOp Js.greater a b
+primOp FloatGeOp   [a, b] = PlainE $ boolOp Js.greaterOrEqual a b
+primOp FloatEqOp   [a, b] = PlainE $ boolOp Js.equal a b
+primOp FloatNeOp   [a, b] = PlainE $ boolOp Js.notEqual a b
+primOp FloatLtOp   [a, b] = PlainE $ boolOp Js.less  a b
+primOp FloatLeOp   [a, b] = PlainE $ boolOp Js.lessOrEqual a b
+
+primOp FloatAddOp  [a, b] = PlainE $ Js.plus a b
+primOp FloatSubOp  [a, b] = PlainE $ Js.minus a b
+primOp FloatMulOp  [a, b] = PlainE $ Js.multiply a b
+primOp FloatDivOp  [a, b] = PlainE $ Js.divide a b
+
+primOp FloatNegOp  [a]    = PlainE $ Js.unaryMinus a
+
+primOp Float2IntOp [a]    = PlainE $ Js.bitOr a (Js.int (0 :: Int))
+
+primOp Float2DoubleOp [a] = PlainE $ a
+
 primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
 
 -- StablePtr:
