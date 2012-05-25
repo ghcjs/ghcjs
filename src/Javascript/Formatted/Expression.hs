@@ -28,13 +28,23 @@ leftUnaryOp op p a = mkOperation p $
      tellWithPrecedenceConstraint a p
 
 -- Avoid the risk of getting "a--1" when we want "a- -1"
-showNum :: (Num a, Ord a, Show a) => a -> String
-showNum n = if n < 0 then " " ++ show n else show n
+showJsInt :: (Integral a) => a -> String
+showJsInt n
+    | n < 0     = " -" ++ showJsInt (negate n)
+    | otherwise = show . toInteger $ n
+
+showJsFrac :: (RealFrac a) => a -> String
+showJsFrac f
+    | f < 0     =  "-" ++ showJsFrac (negate f)
+    | otherwise =  show df -- hopefully javascript always understands the output of this
+    where
+      df :: Double
+      df = realToFrac f
 
 instance JavascriptExpression Formatted
   where var = mkOperation 0 . tell
-	int = mkOperation 0 . tell . showNum
-	float = mkOperation 0 . tell . showNum
+	int = mkOperation 0 . tell . showJsInt
+	float = mkOperation 0 . tell . showJsFrac
 	string = mkOperation 0 . tell . showJsString
 	list xs = mkOperation 0 $
           do tell "["
