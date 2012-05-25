@@ -48,12 +48,17 @@ ghcDownloadLocation ver =
 --    "http://server/ghc/dist/" ++ ver ++ "/ghc-" ++ ver ++ "-src.tar.bz2"
     "http://www.haskell.org/ghc/dist/" ++ ver ++ "/ghc-" ++ ver ++ "-src.tar.bz2"
 
+data BootSettings = BootSettings { skipRts :: Bool } deriving (Ord, Eq)
+
+bootSettings :: [String] -> BootSettings
+bootSettings args = BootSettings (any (=="--skip-rts") args)
+
 main = withSocketsDo $ do
   args <- getArgs
   tmp <- getTemporaryDirectory
   withTempDirectory normal tmp "ghcjs-boot" $ \tmpDir -> shelly $ do
     when (any (=="--auto") args) (autoBoot $ fromString tmpDir)
-    installBootPackages
+    installBootPackages (bootSettings args)
 
 fromString :: String -> FilePath
 fromString = fromText . T.pack
@@ -80,9 +85,12 @@ autoBoot tmp = shelly $ do
   run_ "sh" ["configure"]
   run_ "make" ["stage1"]
 
+corePackages :: [Text]
+corePackages = ["ghc-prim", "integer-gmp", "base"]
+
 -- to be called from a configured and built (at least stage 1) ghc tree
-installBootPackages :: ShIO ()
-installBootPackages = do
+installBootPackages :: BootSettings -> ShIO ()
+installBootPackages settings = do
   mghcjs <- which "ghcjs"
   mghcjspkg <- which "ghcjs-pkg"
   case (mghcjs, mghcjspkg) of
@@ -90,10 +98,12 @@ installBootPackages = do
       echo $ "Booting: " <> toTextIgnore ghcjs <> " (" <> toTextIgnore ghcjspkg <> ")"
       initPackageDB
       addWrappers ghcjs ghcjspkg
-      run_ "make" ["all_rts", "-j4"] `catchany_sh` (const (return ()))
-      run_ "make" ["all_libraries", "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"] `catchany_sh` (const (return ()))
+      when (not $ skipRts settings) $
+           run_ "make" ["all_rts", "-j4"] `catchany_sh` (const (return ()))
+      forM_ corePackages $ \pkg ->
+        run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"] `catchany_sh` (const (return ()))
       installRts
-      mapM_ (installPkg ghcjs ghcjspkg) ["ghc-prim", "integer-gmp", "base"]
+      mapM_ (installPkg ghcjs ghcjspkg) corePackages
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
 
 -- add inplace/bin/ghcjs and inplace/bin/ghcjs-pkg wrappers
