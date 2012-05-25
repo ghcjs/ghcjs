@@ -71,7 +71,7 @@ Executable cabaljs
     Hs-Source-Dirs: src
     Build-Depends:  base >=3 && <5, process, base16-bytestring, skein, crypto-api, shelly >= 0.9,
                     system-filepath, crypto-conduit, bytestring, containers, text, ghc, ghc-paths,
-                    filepath, directory, cereal
+                    filepath, directory, cereal, mtl, old-time
 
 test-suite test
     type:       exitcode-stdio-1.0
