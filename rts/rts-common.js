@@ -1071,9 +1071,9 @@ var integer_cmm_decodeDoublezh = function(x) {
     }
     // 60bits is more than the 53 that the double has and small enought to fit
     // in just 2 32 bit ints.
-    var exponent = 60 - (Math.log(x)/0.6931471805599453); // Math.log(2)
+    var exponent = Math.floor((Math.log(x)/0.6931471805599453))-52; // Math.log(2)
     return [exponent].concat($hs_googToGMP(
-        goog.math.Integer.fromNumber(x * Math.pow(2, exponent))));
+        goog.math.Integer.fromNumber(x / Math.pow(2, exponent))));
 };
 var integer_cmm_int2Integerzh = function(i) {
     if(WORD_SIZE_IN_BITS==32) {
