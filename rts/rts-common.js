@@ -194,11 +194,8 @@ var $hs_tanhFloatzh = function(a) {
 var $hs_powerFloatzh = function(a, b) {
     return Math.pow(a, b);
 };
-var $hs_decodeFloat_2Intzh = function(a) {
-    if( x < 0 ) {
-        var result = hs_decodeFloat_2Intzh(-x);
-        return [-result[1], result[2]];
-    }
+var $hs_decodeFloatzuIntzh = function(x) {
+    throw "unsupported"; // this one looks wrong
     // 28bits is more than the 24 that the float has and small enought to fit
     // in just a 32 bit int.
     var exponent = 30 - (Math.log(x)/0.6931471805599453); // Math.log(2)
@@ -212,6 +209,25 @@ var isDoubleNaN = function(a) {
 };
 var isDoubleInfinite = function(a) {
     return (isFinite(a)||isNaN(a))?0:1;
+};
+var isFloatNegativeZero = function(a) { // fixme switch to proper 32 bit floats
+    return (a==-0.0)?1:0;
+};
+var isFloatNaN = function(a) {
+    return (isNaN(a))?1:0;
+};
+var isFloatInfinite = function(a) {
+    return (isFinite(a)||isNaN(a))?0:1;
+};
+var integer_cbits_encodeDouble = function(s, bits, e) {
+    var g = $hs_gmpToGoog(s, bits);
+    return Math.pow(2,e)*g.toNumber();
+};
+var __int_encodeDouble = function(b, e) {
+    return Math.pow(2,e) * b;
+};
+var rintDouble = function(a) {
+    return Math.round(a);
 };
 var $hs_newMutVarzh = function(a, s) {
     return [s, {value : a}];
