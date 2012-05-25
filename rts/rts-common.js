@@ -204,6 +204,15 @@ var $hs_decodeFloat_2Intzh = function(a) {
     var exponent = 30 - (Math.log(x)/0.6931471805599453); // Math.log(2)
     return [(x * Math.pow(2, exponent))|0, exponent];
 };
+var isDoubleNegativeZero = function(a) {
+    return (a==-0.0)?1:0;
+};
+var isDoubleNaN = function(a) {
+    return (isNaN(a))?1:0;
+};
+var isDoubleInfinite = function(a) {
+    return (isFinite(a)||isNaN(a))?0:1;
+};
 var $hs_newMutVarzh = function(a, s) {
     return [s, {value : a}];
 };
@@ -242,7 +251,7 @@ var $hs_sizeofMutableArrayzh = function (a, s) {
 var $hs_indexArrayzh = function (a, n) {
     return [a[n]]; // Unboxed singleton
 };
-var $hs_unsafeFreezeArrayzh = function (a, s) {
+var $hs_unsafeFreezzeArrayzh = function (a, s) {
     return [s, a];
 };
 var $hs_unsafeThawArrayzh = function (a, s) {
