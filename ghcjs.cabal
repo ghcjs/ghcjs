@@ -9,6 +9,8 @@ Maintainer:     Victor Nazarov <asviraspossible@gmail.com>
 Stability:      Experimental
 Build-Type:     Custom
 Cabal-Version:  >= 1.10
+data-dir:       .
+data-files:     rts/*.js
 
 flag boot
   default:            False
@@ -48,7 +50,7 @@ Executable ghcjs-min
     Main-Is:        Minify.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time
+    Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time, ghcjs-closure
 
 Executable ghcjs-pkg
     Main-Is:        Pkg.hs
