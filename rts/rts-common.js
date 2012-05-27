@@ -409,7 +409,7 @@ var $hs_indexIntArrayzh = function (a, n) {
 var $hs_indexWordArrayzh = function (a, n) {
     if(WORD_SIZE_IN_BITS==32) {
         // fixme there should be something better than checking this manually
-        if(a instanceof goog.math.Integer) return a.getBits(n);
+        if(a instanceof goog.math.Integer) return $hs_absolute(a).getBits(n);
         else return new Uint32Array(a[0])[n];
     }
     else {
