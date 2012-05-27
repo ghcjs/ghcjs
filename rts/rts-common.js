@@ -142,16 +142,14 @@ var $hs_tanhDoublezh = function(a) {
 var $hs_ztztzhzh = function(a, b) {
     return Math.pow(a,b);
 };
-var $hs_decodeDouble_2Intzh = function(a) {
+var $hs_decodeDoublezu2Intzh = function(a) {
     if( x < 0 ) {
-        var result = decodeDouble_2Int(-x);
+        var result = $hs_decodeDoublezu2Int(-x);
         return [-1, result[1], result[2], result[3]];
     }
-    // 60bits is more than the 53 that the double has and small enought to fit
-    // in just 2 32 bit ints.
-    var exponent = 60 - (Math.log(x)/0.6931471805599453); // Math.log(2)
-    var mantissa = goog.math.Long.fromNumber(x * Math.pow(2, exponent));
-    return [1, mantissa.getHighBits(), mantissa.getLowBits(), exponent];
+    var negExponent = 52-Math.floor(Math.log(x) * 1.4426950408889634); // 1/log(2)
+    var mantissa = goog.math.Long.fromNumber(x * Math.pow(2, negExponent));
+    return [1, mantissa.getHighBits(), mantissa.getLowBits(), -negExponent];
 };
 var $hs_expFloatzh = function(a) {
     return Math.exp(a);
@@ -195,11 +193,16 @@ var $hs_powerFloatzh = function(a, b) {
     return Math.pow(a, b);
 };
 var $hs_decodeFloatzuIntzh = function(x) {
-    throw "unsupported"; // this one looks wrong
-    // 28bits is more than the 24 that the float has and small enought to fit
-    // in just a 32 bit int.
-    var exponent = 30 - (Math.log(x)/0.6931471805599453); // Math.log(2)
-    return [(x * Math.pow(2, exponent))|0, exponent];
+    // This probably gives unexpected results.
+    // In particular we need to check...
+    //   * NaN
+    //   * Infinity
+    if( x < 0 ) {
+        var result = $hs_decodeFloatzuIntzh(-x);
+        return [-result[0], result[1]];
+    }
+    var negExponent = 23-Math.floor(Math.log(x) * 1.4426950408889634); // 1/log(2)
+    return [(x * Math.pow(2, negExponent))|0, -negExponent];
 };
 var isDoubleNegativeZero = function(a) {
     return (a==-0.0)?1:0;
@@ -406,7 +409,7 @@ var $hs_indexIntArrayzh = function (a, n) {
 var $hs_indexWordArrayzh = function (a, n) {
     if(WORD_SIZE_IN_BITS==32) {
         // fixme there should be something better than checking this manually
-        if(a instanceof goog.math.Integer) return a.getBits(n);
+        if(a instanceof goog.math.Integer) return $hs_absolute(a).getBits(n);
         else return new Uint32Array(a[0])[n];
     }
     else {
@@ -1087,11 +1090,9 @@ var integer_cmm_decodeDoublezh = function(x) {
         var result = integer_cmm_decodeDoublezh(-x);
         return [result[0], -result[1], result[2]];
     }
-    // 60bits is more than the 53 that the double has and small enought to fit
-    // in just 2 32 bit ints.
-    var exponent = Math.floor((Math.log(x)/0.6931471805599453))-52; // Math.log(2)
-    return [exponent].concat($hs_googToGMP(
-        goog.math.Integer.fromNumber(x / Math.pow(2, exponent))));
+    var negExponent = 52-Math.floor(Math.log(x) * 1.4426950408889634); // 1/log(2)
+    return [-negExponent].concat($hs_googToGMP(
+        goog.math.Integer.fromNumber(x * Math.pow(2, negExponent))));
 };
 var integer_cmm_int2Integerzh = function(i) {
     if(WORD_SIZE_IN_BITS==32) {
