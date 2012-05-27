@@ -31,7 +31,7 @@ var $hs_subIntCzh = function(a, b) {
     }
     else {
         var x = goog.math.Integer.fromBits([a.getLowBits(), a.getHighBits()])
-            .sub(goog.math.Integer.fromBits([b.getLowBits(), b.getHighBits()]));
+            .subtract(goog.math.Integer.fromBits([b.getLowBits(), b.getHighBits()]));
         return [goog.math.Long.fromBits(x.getBits(0), x.getBits(1)),
             x.sign_===x.getBits(2)?0:1];
     }
@@ -52,7 +52,7 @@ var $hs_popCntTab =
     2,3,3,4,3,4,4,5,3,4,4,5,4,5,5,6,3,4,4,5,4,5,5,6,4,5,5,6,5,6,6,7,
     3,4,4,5,4,5,5,6,4,5,5,6,5,6,6,7,4,5,5,6,5,6,6,7,5,6,6,7,6,7,7,8];
 var $hs_popCnt8 = function(a) {
-    return $hs_popCntTab(a & 0xFF);
+    return $hs_popCntTab[a & 0xFF];
 };
 var $hs_popCnt8zh = function(a) {
     if(WORD_SIZE_IN_BITS==32) {
@@ -95,12 +95,7 @@ var $hs_popCnt64zh = function(a) {
         return goog.math.Long.fromNumber(result);
     }
 };
-if(WORD_SIZE_IN_BITS==32) {
-    var $hs_popCntzh = $hs_popCnt32zh;
-}
-else {
-    var $hs_popCntzh = $hs_popCnt64zh;
-}
+var $hs_popCntzh = WORD_SIZE_IN_BITS==32 ? $hs_popCnt32zh : $hs_popCnt64zh;
 var $hs_expDoublezh = function(a) {
     return Math.exp(a);
 };
@@ -142,9 +137,9 @@ var $hs_tanhDoublezh = function(a) {
 var $hs_ztztzhzh = function(a, b) {
     return Math.pow(a,b);
 };
-var $hs_decodeDoublezu2Intzh = function(a) {
+var $hs_decodeDoublezu2Intzh = function(x) {
     if( x < 0 ) {
-        var result = $hs_decodeDoublezu2Int(-x);
+        var result = $hs_decodeDoublezu2Intzh(-x);
         return [-1, result[1], result[2], result[3]];
     }
     var negExponent = 52-Math.floor(Math.log(x) * 1.4426950408889634); // 1/log(2)
@@ -280,18 +275,30 @@ var $hs_unsafeThawArrayzh = function (a, s) {
 // ByteArray support
 var $hs_ptrBase = 0;
 
+/**
+ * @param {!number} n
+ * @param {Object=} s
+ */
 var $hs_newByteArrayzh = function (n, s) {
     var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
     result[0].ptrs=[];
     $hs_ptrBase += n;
     return [s, result];
 };
+/**
+ * @param {!number} n
+ * @param {Object=} s
+ */
 var $hs_newPinnedByteArrayzh = function (n, s) {
     var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
     result[0].ptrs=[];
     $hs_ptrBase += n;
     return [s, result];
 };
+/**
+ * @param {!number} n
+ * @param {Object=} s
+ */
 var $hs_newAlignedPinnedByteArrayzh = function (n, k, s) {
     $hs_ptrBase += $hs_ptrBase%k;
     var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
@@ -424,10 +431,10 @@ var $hs_indexAddrArrayzh = function (a, n) {
     return res;
 };
 var $hs_indexFloatArrayzh = function (a, n) {
-    return Float32Array(a[0])[n];
+    return new Float32Array(a[0])[n];
 };
 var $hs_indexDoubleArrayzh = function (a, n) {
-    return Float64Array(a[0])[n];
+    return new Float64Array(a[0])[n];
 };
 var $hs_indexStablePtrArrayzh = function (a, n) {
     var res = a[0].ptrs[n];
@@ -492,10 +499,10 @@ var $hs_readAddrArrayzh = function (a, n, s) {
     return [s, res];
 };
 var $hs_readFloatArrayzh = function (a, n, s) {
-    return [s, Float32Array(a[0])[n]];
+    return [s, new Float32Array(a[0])[n]];
 };
 var $hs_readDoubleArrayzh = function (a, n, s) {
-    return [s, Float64Array(a[0])[n]];
+    return [s, new Float64Array(a[0])[n]];
 };
 var $hs_readStablePtrArrayzh = function (a, n, s) {
     var res = a[0].ptrs[n];
@@ -567,11 +574,11 @@ var $hs_writeAddrArrayzh = function (a, n, v, s) {
     return s;
 };
 var $hs_writeFloatArrayzh = function (a, n, v, s) {
-    Float32Array(a[0])[n] = v;
+    new Float32Array(a[0])[n] = v;
     return s;
 };
 var $hs_writeDoubleArrayzh = function (a, n, v, s) {
-    Float64Array(a[0])[n] = v;
+    new Float64Array(a[0])[n] = v;
     return s;
 };
 var $hs_writeStablePtrArrayzh = function (a, n, v, s) {
@@ -721,10 +728,10 @@ var $hs_indexAddrOffAddrzh = function (a, n) {
     return res;
 };
 var $hs_indexFloatOffAddrzh = function (a, n) {
-    return Float32Array(a[0],a[1]+(n<<2))[0];
+    return new Float32Array(a[0],a[1]+(n<<2))[0];
 };
 var $hs_indexDoubleOffAddrzh = function (a, n) {
-    return Float64Array(a[0],a[1]+(n<<3))[0];
+    return new Float64Array(a[0],a[1]+(n<<3))[0];
 };
 var $hs_indexStablePtrOffAddrzh = function (a, n) {
     var res = a[0].ptrs[a[1]+(n<<2)];
@@ -794,10 +801,10 @@ var $hs_readAddrOffAddrzh = function (a, n, s) {
     return [s, res];
 };
 var $hs_readFloatOffAddrzh = function (a, n, s) {
-    return [s, Float32Array(a[0],a[1]+(n<<2))[0]];
+    return [s, new Float32Array(a[0],a[1]+(n<<2))[0]];
 };
 var $hs_readDoubleOffAddrzh = function (a, n, s) {
-    return [s, Float64Array(a[0],a[1]+(n<<3))[0]];
+    return [s, new Float64Array(a[0],a[1]+(n<<3))[0]];
 };
 var $hs_readStablePtrOffAddrzh = function (a, n, s) {
     var res = a[0].ptrs[a[1]+(n<<2)];
@@ -1159,7 +1166,6 @@ var _hs_text_memcpy = function (dest, doff, src, soff, count) {
     }
     return dest;
 };
-
 var _hs_text_memcmp = function(a, aoff, b, boff, count) {
     var aarray = new Uint16Array(a[0],a[1]);
     var barray = new Uint16Array(b[0],b[1]);
@@ -1173,6 +1179,92 @@ var _hs_text_memcmp = function(a, aoff, b, boff, count) {
         count--;
     }
     return 0;
+};
+/**
+ * @define {number} size of Word and Int. If 64 we use goog.math.Long.
+ */
+var $hs_UTF8_ACCEPT = 0;
+/**
+ * @define {number} size of Word and Int. If 64 we use goog.math.Long.
+ */
+var $hs_UTF8_REJECT = 12
+
+var $hs_utf8d =
+   [
+  /*
+   * The first part of the table maps bytes to character classes that
+   * to reduce the size of the transition table and create bitmasks.
+   */
+   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+   1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,  9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,9,
+   7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,  7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
+   8,8,2,2,2,2,2,2,2,2,2,2,2,2,2,2,  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
+  10,3,3,3,3,3,3,3,3,3,3,3,3,4,3,3, 11,6,6,6,5,8,8,8,8,8,8,8,8,8,8,8,
+
+  /*
+   * The second part is a transition table that maps a combination of
+   * a state of the automaton and a character class to a state.
+   */
+   0,12,24,36,60,96,84,12,12,12,48,72, 12,12,12,12,12,12,12,12,12,12,12,12,
+  12, 0,12,12,12,12,12, 0,12, 0,12,12, 12,24,12,12,12,12,12,24,12,24,12,12,
+  12,12,12,12,12,12,12,24,12,12,12,12, 12,24,12,12,12,12,12,12,12,24,12,12,
+  12,12,12,12,12,12,12,36,12,36,12,12, 12,36,12,12,12,12,12,36,12,36,12,12,
+  12,36,12,12,12,12,12,12,12,12,12,12];
+
+var $hs_decode = function(state, cp, b) {
+  var type = $hs_utf8d[b];
+
+  var codep = (state != $hs_UTF8_ACCEPT) ?
+    (b & 0x3f) | (cp << 6) :
+    (0xff >>> type) & b;
+
+  return [$hs_utf8d[256 + state + type], codep];
+};
+/*
+ * A best-effort decoder. Runs until it hits either end of input or
+ * the start of an invalid byte sequence.
+ *
+ * At exit, updates *destoff with the next offset to write to, and
+ * returns the next source offset to read from.
+ */
+var _hs_text_decode_utf8 = function(dest, doffptr, src, srcend)
+{
+    // Assumes src[0] is srcend[0]
+    var srcarray = new Uint8Array(src[0],0);
+    var s = src[1];
+    var send = srcend[1];
+    var destarray = new Uint16Array(dest[0],dest[1]);
+    // Should really check the size of size_t and CSize here somehow
+    var doffArray = new Uint32Array(doffptr[0], doffptr[1]);
+    var doff = doffArray[0];
+    var state = $hs_UTF8_ACCEPT;
+
+    var codepoint = 0;
+    while (s != srcend) {
+        if ($hs_decode(state, codepoint, srcarray[s++]) != $hs_UTF8_ACCEPT) {
+            if (state != $hs_UTF8_REJECT)
+                continue;
+            break;
+        }
+
+        if ((codepoint >>> 0) <= 0xffff)
+            destarray[doff++] = codepoint;
+        else {
+            destarray[doff++] = 0xD7C0 + (codepoint >>> 10);
+            destarray[doff++] = 0xDC00 + (codepoint & 0x3FF);
+        }
+    }
+
+    /* Error recovery - if we're not in a valid finishing state, back up. */
+    if (state != $hs_UTF8_ACCEPT)
+        s -= 1;
+
+    doffArray[0] = doff;
+
+    return [src[0], s, src[2] + (s - src[1])];
 };
 var memcpy = function(dest, src, count) {
     if(typeof(src) === 'string') {
@@ -1201,7 +1293,58 @@ var memcpy = function(dest, src, count) {
         return dest;
     }
 };
-
+var memcmp = function(a, b, count) {
+    if(typeof(a) === 'string') {
+        if(typeof(b) === 'string') {
+            var x = a.slice(0,count).localeCompare(b.slice(0,count));
+            return x === 0 ? 0 : (x < 0 ? -1 : 1);
+        }
+        var barray = new Uint8Array(b[0],b[1]);
+        var aoff = 0;
+        var boff = 0;
+        while(count != 0) {
+            if( a[aoff] < barray[boff] )
+                return -1;
+            if( a[aoff] > barray[boff] )
+                return 1;
+            aoff++;
+            boff++;
+            count--;
+        }
+        return 0;
+    }
+    else {
+        if(typeof(b) === 'string') {
+            var aarray = new Uint8Array(a[0],a[1]);
+            var aoff = 0;
+            var boff = 0;
+            while(count != 0) {
+                if( aarray[aoff] < b[boff] )
+                    return -1;
+                if( aarray[aoff] > b[boff] )
+                    return 1;
+                aoff++;
+                boff++;
+                count--;
+            }
+            return 0;
+        }
+        var aarray = new Uint8Array(a[0],a[1]);
+        var barray = new Uint8Array(b[0],b[1]);
+        var aoff = 0;
+        var boff = 0;
+        while(count != 0) {
+            if( aarray[aoff] < barray[boff] )
+                return -1;
+            if( aarray[aoff] > barray[boff] )
+                return 1;
+            aoff++;
+            boff++;
+            count--;
+        }
+        return 0;
+    }
+};
 var u_iswalpha = function(a) {
     return goog.string.isAlpha(String.fromCharCode(a)) ? 1 : 0;
 };
@@ -1694,8 +1837,12 @@ var $hs_loaded = [];
 var $hs_loadPath = "./";
 var $hs_loading = false;
 
+/**
+ * @param {Array.<Object>}      args
+ * @param {function(!string)}   onComplete
+ * @param {function(!Object)=}  onException
+ */
 var $hs_fromString = function(args, onComplete, onException) {
-    console.log("fromString");
     var loop = function(res, a) {
         $hs_force(a, function(s) {
             switch (s.g) {
@@ -1715,8 +1862,12 @@ var $hs_fromString = function(args, onComplete, onException) {
     }
     loop("", args);
 };
+/**
+ * @param {Array.<Object>}      args
+ * @param {function(!string)}   onComplete
+ * @param {function(!Object)=}  onException
+ */
 var $hs_fromText = function(args, onComplete, onException) {
-    console.log("fromText");
     $hs_force(args, function(s) {
         if(HS_DEBUG && !
           (s.g === 1
@@ -1733,8 +1884,12 @@ var $hs_fromText = function(args, onComplete, onException) {
         onComplete(result);
     }, onException);
 };
+/**
+ * @param {Array.<Object>}      args
+ * @param {function(!string)}   onComplete
+ * @param {function(!Object)=}  onException
+ */
 var $hs_fromLazyText = function(args, onComplete, onException) {
-    console.log("fromLazyText");
     var loop = function(res, a) {
         $hs_force(a, function(s) {
             switch (s.g) {
@@ -1757,23 +1912,33 @@ var $hs_fromLazyText = function(args, onComplete, onException) {
     }
     loop("", args);
 };
+/**
+ * @param {Array.<Object>}      args
+ * @param {function(!number)}   onComplete
+ * @param {function(!Object)=}  onException
+ */
 var $hs_fromInt = function(args, onComplete, onException) {
-    console.log("fromInt");
     $hs_force(args, function(i){
         if(HS_DEBUG && i.g !== 1) throw "Invalid Int"
         onComplete(i.v[0]);}, onException);
 };
+/**
+ * @param {Array.<Object>}      args
+ * @param {function(!Object)}   onComplete
+ * @param {function(!Object)=}  onException
+ */
 var $hs_runIO = function(args, onComplete, onException) {
-    console.log("fromIO");
     var newArguments = [];
     for (var i = 0; i < args.length; i++)
         newArguments[i] = args[i];
     newArguments[args.length] = $$GHCziPrim_realWorldzh;
     $hs_force(newArguments, function(i){onComplete(i[1]);}, onException);
 };
+/**
+ * @param {number} i
+ */
 var $hs_toInt = function(i) {
-    console.log("toInt");
-    return new $DataValue(1, [i|0]);
+    return $d(1, [i|0]);
 };
 var hs_nil = function() {
     return "";

@@ -4,9 +4,9 @@ var $tr_currentResult = null;
 
 /**
  * @constructor Tail call
- * @param {function(...):!Object}    method Method to call.
- * @param {!Object}                  object Object to call the method on.
- * @param {Array.<Object>}           args   Arguments to pass.
+ * @param {function(...):!Object}     method Method to call.
+ * @param {?Object}                   object Object to call the method on.
+ * @param {!Array.<Object>|Arguments} args   Arguments to pass.
  */
 var $tr_Jump = function(method, object, args) {
     if(HS_DEBUG) {
@@ -32,11 +32,11 @@ if(HS_WEAKS) {
 
 /**
  * @constructor Function call
- * @param {function(...):!Object}    method Method to call.
- * @param {!Object}                  object Object to call the method on.
- * @param {Array.<Object>}           args   Arguments to pass.
- * @param {function(Object):!Object} rest   Continuation to handle result.
- * @param {Array.<Object>}           live   Lists things to keep alive.
+ * @param {function(...):!Object}     method Method to call.
+ * @param {?Object}                   object Object to call the method on.
+ * @param {!Array.<Object>|Arguments} args   Arguments to pass.
+ * @param {function(Object):!Object}  rest   Continuation to handle result.
+ * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed in rest.
  */
 var $tr_Call = function(method, object, args, rest, live) {
@@ -75,7 +75,7 @@ if(HS_WEAKS) {
  * @param {!Object}                  next    What to do next.
  *      Normal a tail call to the try block.
  * @param {function(Object):!Object} catcher Continuation to handle exceptions
- * @param {Array.<Object>}           live    Lists things to keep alive.
+ * @param {Array.<Object>=}          live    Lists things to keep alive.
  *      We won't finalize these as they will be needed if we catch an exception
  */
 var $tr_Catch = function(next, catcher, live) {
@@ -106,9 +106,8 @@ if(HS_WEAKS) {
  * @param {!Object}                  next    What to do next.
  *      Normal a tail call to the try block.
  * @param {function(Object):!Object} catcher Continuation to handle exceptions
- * @param {Array.<Object>}           live    Lists things to keep alive.
+ * @param {Array.<Object>=}          live    Lists things to keep alive.
  *      We won't finalize these as they will be needed if we catch an exception
- * @return {!Object}
  */
 var $tr_ctch = function(next, catcher, live) {
     if(HS_WEAKS) {
@@ -121,8 +120,8 @@ var $tr_ctch = function(next, catcher, live) {
 
 /**
  * @constructor Suspend the current thread
- * @param {function(Object):!Object} resume Continuation to use when resuming
- * @param {Array.<Object>}           live   Lists things to keep alive.
+ * @param {?function(Object):!Object} resume Continuation to use when resuming
+ * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed when we resume
  */
 var $tr_Suspend = function(resume, live) {
@@ -139,9 +138,8 @@ if(HS_WEAKS) {
 
 /**
  * @param {function(Object):!Object} resume Continuation to use when resuming
- * @param {Array.<Object>}           live   Lists things to keep alive.
+ * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed when we resume
- * @return {!Object}
  */
 var $tr_suspend = function(resume, live) {
     if(HS_WEAKS) {
@@ -154,6 +152,7 @@ var $tr_suspend = function(resume, live) {
 
 /**
  * @constructor
+ * @param {Object} next
  */
 var $tr_Yield = function(next) {
     this.next = next;
@@ -171,6 +170,7 @@ var $tr_yield = function(next) {
 
 /**
  * @constructor
+ * @param {Object} result
  */
 var $tr_Result = function(result) {
     this.value = result;
@@ -356,7 +356,7 @@ var $tr_Scheduler = {
 };
 
 var $tr_trace = function(msg) {
-    console.log($tr_Scheduler.currentThread.threadID + " : " + msg);
+    HS_TRACE && $hs_logger.info($tr_Scheduler.currentThread.threadID + " : " + msg);
 };
 
 var $tr_traceThread = function(msg) {
@@ -375,6 +375,9 @@ var $tr_counter = 0;
 
 /**
  * @constructor
+ * @param {!Object}            next
+ * @param {function(Object)=}  onComplete
+ * @param {function(!Object)=} onException
  */
 var $tr_Thread = function (next, onComplete, onException) {
   this.next = next;
@@ -435,10 +438,6 @@ $tr_Thread.prototype = {
     return catcher;
   },
 
-  load : function(method) {
-    console.log(method);
-  },
-
   _run : function() {
     var r = this.next;
     var isException = this.isException;
@@ -486,13 +485,11 @@ $tr_Thread.prototype = {
           }
         }
         if (r instanceof $tr_Jump) {
-          if (r.method === undefined) this.load(r.method);
           r = r.method.apply(r.object, r.args);
           if ($tr_currentResult !== null)
             r = $tr_currentResult;
         }
         else if(r instanceof $tr_Call) {
-          if (r.method === undefined) this.load(r.method);
           this._stack.push([r.rest, null, r.live]);
           r = r.method.apply(r.object, r.args);
           if ($tr_currentResult !== null)
@@ -585,14 +582,15 @@ if(HS_TRACE_CALLS) {
                 msg = msg + ' (' + args[n].toString() + ')';
             }
         }
-        console.log(msg);
+        $hs_logger.info(msg);
     };
 }
 
 /**
  * @constructor
+ * @param {...Object} var_args
  */
-var $hs_hscall = function () {
+var $hs_hscall = function (var_args) {
     if(HS_TRACE_CALLS) logCall(this, arguments);
     var argc = arguments.length;
     if (this.arity === argc) { // EXACT and THUNK rules
@@ -615,6 +613,8 @@ var $hs_hscall = function () {
 
 /**
  * @constructor
+ * @param {!Object}                   obj
+ * @param {!Array.<Object>|Arguments} args
  */
 var $hs_Pap = function(obj, args) {
     this.arity = obj.arity - args.length;
@@ -650,6 +650,10 @@ if(HS_WEAKS) {
 
 /**
  * @constructor
+ * @param {number}          a      Arity
+ * @param {function(...)}   f      Function definition.
+ * @param {Array.<Object>=} live   Lists things to keep alive.
+ * @param {string=}         info   Debug info.
  */
 function $Func(a, f, live, info) {
     this.arity = a;
@@ -705,6 +709,9 @@ if(HS_DEBUG) {
 
 /**
  * @constructor
+ * @param {function(...)}   f      Function definition.
+ * @param {Array.<Object>=} live   Lists things to keep alive.
+ * @param {string=}         info   Debug info.
  */
 function $Thunk(f, live, info) {
     this.evaluateOnce = f;
@@ -766,6 +773,9 @@ if(HS_DEBUG) {
 
 /**
  * @constructor
+ * @param {!number}       t      Data tag.
+ * @param {function(...)} f      Function that to initialise the data.
+ * @param {string=}       info   Debug info.
  */
 function $Data(t, f, info) {
     this.g = t;
@@ -833,6 +843,9 @@ if(HS_DEBUG) {
 
 /**
  * @constructor
+ * @param {!number}         t      Data tag.
+ * @param {!Array.<Object>} v      Data values.
+ * @param {string=}         info   Debug info.
  */
 function $DataValue(t, v, info) {
     this.g = t;
@@ -853,6 +866,13 @@ function $R(tag, v, info) {
         $tr_currentResult = new $DataValue(tag, v);
     }
 };
+/**
+ * @constructor
+ * @param {!number}         tag    Data tag.
+ * @param {!Array.<Object>} v      Data values.
+ * @param {string=}         info   Debug info.
+ * @return {!$DataValue}
+ */
 function $d(tag, v, info) {
     if(HS_DEBUG) {
         if (!(v instanceof Array))
@@ -862,9 +882,7 @@ function $d(tag, v, info) {
                 throw "Undefined";
         return new $DataValue(tag, v, info);
     }
-    if(!HS_DEBUG) {
-        return new $DataValue(tag, v);
-    }
+    return new $DataValue(tag, v);
 };
 $DataValue.prototype = {
     hscall: $hs_hscall,
@@ -905,8 +923,8 @@ if(HS_DEBUG) {
 // Run haskell function
 var $hs_force = function (args, onComplete, onException) {
     var f = args[0];
-    var args = Array.prototype.slice.call(args, 1, args.length);
-    $tr_Scheduler.start(new $tr_Jump(f.hscall, f, args), onComplete, onException);
+    var a = Array.prototype.slice.call(args, 1, args.length);
+    $tr_Scheduler.start(new $tr_Jump(f.hscall, f, a), onComplete, onException);
     if(!$tr_Scheduler.running)
         $tr_Scheduler.runWaiting();
 };
@@ -914,8 +932,8 @@ var $hs_force = function (args, onComplete, onException) {
 // Schedule a haskell function to run the next time haskell runs
 var $hs_schedule = function (args, onComplete, onException) {
     var f = args[0];
-    var args = Array.prototype.slice.call(args, 1, args.length);
-    $tr_Scheduler.start(new $tr_Jump(f.hscall, f, args), onComplete, onException);
+    var a = Array.prototype.slice.call(args, 1, args.length);
+    $tr_Scheduler.start(new $tr_Jump(f.hscall, f, a), onComplete, onException);
 };
 
 /**
@@ -1051,7 +1069,7 @@ var $hs_atomicModifyMutVarzh = function (a, b, s) {
 /**
  * @constructor MVar
  */
-var $tr_MVar = function(value, waiting) {
+var $tr_MVar = function() {
     this.value = null;
     this.waiting = [];
     if($hs_loading) this.isTopLevel = true;
@@ -1197,7 +1215,8 @@ var $hs_mkWeakzh = function(o, b, c, s) {
     return [s, new $tr_Weak(o, b, c, s)];
 };
 var $hs_mkWeakForeignEnvzh = function(o, b, w, x, y, z, s) {
-    return [s, new $tr_Weak(o, b, c, s)];
+    HS_WEAKS && $hs_logger.warning("Weak Foreign Ignored");
+    // return [s, new $tr_Weak(o, b, c, s)];
 };
 var $hs_deRefWeakzh = function(p, s) {
     return [s, p.value === null ? 0 : 1, p.value];
