@@ -21,11 +21,12 @@ flag boot
 
 Library
     Default-Language: Haskell2010
-    build-depends: base -any
-    exposed-modules: GHCJS
+    build-depends: base -any, Cabal, ghc, directory, filepath, containers, process, ghcjs-closure
+    exposed-modules: Generator.Minify
+    other-modules: Paths_ghcjs
     exposed: True
     buildable: True
-    hs-source-dirs: rts
+    hs-source-dirs: src
 
 Executable ghcjs
     Main-Is:        Compiler/Main.hs

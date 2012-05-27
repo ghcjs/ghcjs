@@ -126,7 +126,8 @@ link out searchPath objFiles pageModules pageFunctions = do
                             (\(m, ps) -> map (\p -> (p, [m])) $ S.toList ps)
                             bundles
 
-        loader = map makeLoader (M.toList pageToBundles)
+        loader = ("// Bundle Count " ++ show (length combinedScripts)):
+            map makeLoader (M.toList pageToBundles)
 
         makeLoader (p, bs) = concat ["var $", lookupKey p,
             "=$L(", show bs,", function() { return ", lookupKey p, "; });"]
