@@ -12,6 +12,10 @@ Cabal-Version:  >= 1.10
 data-dir:       .
 data-files:     rts/*.js
 
+source-repository head
+  type:     git
+  location: https://github.com/ghcjs/ghcjs.git
+
 flag boot
   default:            False
 
