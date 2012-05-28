@@ -72,7 +72,7 @@ Executable ghcjs-boot
                     process, tar, http-conduit, conduit, network, bytestring, text,
                     transformers, ghc, ghc-paths, system-filepath
 
-Executable cabaljs
+Executable ghcjs-cabal
     Main-Is:        CabalJs.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
