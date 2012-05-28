@@ -1,4 +1,8 @@
-{-# LANGUAGE NoImplicitPrelude, OverloadedStrings, NoMonomorphismRestriction, ExtendedDefaultRules #-}
+{-# LANGUAGE NoImplicitPrelude, 
+    OverloadedStrings,
+    NoMonomorphismRestriction,
+    ExtendedDefaultRules
+  #-}
 {-
    Boot program to build the GHCJS core libraries from a configured GHC source tree
 
@@ -45,7 +49,6 @@ default (T.Text)
 
 ghcDownloadLocation :: String -> String
 ghcDownloadLocation ver =
---    "http://server/ghc/dist/" ++ ver ++ "/ghc-" ++ ver ++ "-src.tar.bz2"
     "http://www.haskell.org/ghc/dist/" ++ ver ++ "/ghc-" ++ ver ++ "-src.tar.bz2"
 
 data BootSettings = BootSettings { skipRts :: Bool } deriving (Ord, Eq)
@@ -58,13 +61,15 @@ main = withSocketsDo $ do
   tmp <- getTemporaryDirectory
   withTempDirectory normal tmp "ghcjs-boot" $ \tmpDir -> shelly $ do
     when (any (=="--auto") args) (autoBoot $ fromString tmpDir)
-    installBootPackages (bootSettings args)
+    ignoreExcep $ installBootPackages (bootSettings args)
 
 fromString :: String -> FilePath
 fromString = fromText . T.pack
 
 toString :: FilePath -> String
 toString = T.unpack . toTextIgnore
+
+ignoreExcep a = a `catchany_sh` (const (return ()))
 
 -- autoboots roll out
 -- download and configure a fresh ghc source tree
@@ -83,7 +88,7 @@ autoBoot tmp = shelly $ do
                           liftIO $ Tar.unpack (toString tmp)  (Tar.read $ L.fromChunks tar) -- (Tar.checkTarbomb ("ghc-" ++ ghcVer) $ Tar.read tar)
   cd (tmp </> T.pack ghcDir)
   run_ "sh" ["configure"]
-  run_ "make" ["stage1"]
+  ignoreExcep $ run_ "make" ["-j4", "1"] -- for some reason this still fails after a succesful build
 
 corePackages :: [Text]
 corePackages = ["ghc-prim", "integer-gmp", "base"]
@@ -96,12 +101,13 @@ installBootPackages settings = do
   case (mghcjs, mghcjspkg) of
     (Just ghcjs, Just ghcjspkg) -> do
       echo $ "Booting: " <> toTextIgnore ghcjs <> " (" <> toTextIgnore ghcjspkg <> ")"
+      ghcjsVer <- T.strip <$> run ghcjs ["--numeric-version"]
       initPackageDB
       addWrappers ghcjs ghcjspkg
       when (not $ skipRts settings) $
-           run_ "make" ["all_rts", "-j4"] `catchany_sh` (const (return ()))
+           run_ "make" ["all_rts","-j4", "ProjectVersion="<>ghcjsVer] `catchany_sh` (const (return ()))
       forM_ corePackages $ \pkg ->
-        run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"] `catchany_sh` (const (return ()))
+        run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg", "ProjectVersion="<>ghcjsVer]
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePackages
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
@@ -121,11 +127,16 @@ addWrappers ghcjs ghcjspkg = do
         setPermissions f (p {executable = True})
 
 fixGhcWrapper :: Text -> FilePath -> Text
-fixGhcWrapper wrapper ghcjs = T.unlines . map fixLine . T.lines $ wrapper
+fixGhcWrapper wrapper ghcjs = T.unlines . concatMap fixLine . T.lines $ wrapper
     where
+      exec = "executablename="
       fixLine line
-          | "executablename=" `T.isPrefixOf` line = "executablename=\"" <> toTextIgnore ghcjs <> "\""
-          | otherwise                             = line
+          | exec `T.isPrefixOf` line =
+              [ exec <> "\"" <> toTextIgnore ghcjs <> "\""
+              , "export GHCJS_FALLBACK_GHC=" <> T.drop (T.length exec) line
+              , "export GHCJS_FALLBACK_PLAIN=1"
+              ]
+          | otherwise                             = [line]
 
 fixPkgWrapper :: Text -> FilePath -> Text
 fixPkgWrapper wrapper ghcjspkg = T.unlines . map fixLine . T.lines $ wrapper
@@ -232,3 +243,4 @@ mkRels a = do
   files <- a
   d <- pwd
   return . catMaybes . map (stripPrefix (d </> empty)) $ files
+
