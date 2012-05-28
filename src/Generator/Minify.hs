@@ -33,12 +33,14 @@ minify jsexe mainFiles options args = do
                         Nothing -> 0
 
     cj <- closureCompilerJar
+    defOpts <- rtsDefaultOptions
     deps <- rtsDeps trampolineVariant
     system . intercalate " " $
                 [ "java"
                 , "-Xmx1G"
                 , "-jar", cj
-                , define "HS_DEBUG" hsDebug
+                ] ++ js defOpts                                    ++
+                [ define "HS_DEBUG" hsDebug
                 , define "HS_TRACE" hsTrace
                 , define "HS_WEAKS" hsWeaks
                 ] ++ jss deps                                      ++

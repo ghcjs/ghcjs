@@ -17,6 +17,10 @@ rtsDeps v = do
   return $ map (rtsPath </>) (rtsSrcs v)
         ++ map (closurePath </>) closureDeps
 
+-- | the file that defines the default options for the RTS
+rtsDefaultOptions  :: IO FilePath
+rtsDefaultOptions = getDataFileName "rts/rts-options.js"
+
 rtsSrcs :: Variant -> [FilePath]
 rtsSrcs v =
     case variantCallingConvention v of
