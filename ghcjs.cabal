@@ -21,8 +21,9 @@ flag boot
 
 Library
     Default-Language: Haskell2010
-    build-depends: base -any, Cabal, ghc, directory, filepath, containers, process, ghcjs-closure
-    exposed-modules: Generator.Minify
+    build-depends: base -any, Cabal, ghc, directory, filepath, containers, process, ghcjs-closure,
+                   monads-tf
+    exposed-modules: Generator.Minify, Compiler.Variants, RTS.Dependencies
     other-modules: Paths_ghcjs
     exposed: True
     buildable: True
@@ -55,7 +56,7 @@ Executable ghcjs-min
     Main-Is:        Minify.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
-    Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time, ghcjs-closure
+    Build-Depends:  base >=3 && <5, ghc, Cabal, containers, filepath, directory, process, time, ghcjs-closure, monads-tf
 
 Executable ghcjs-pkg
     Main-Is:        Pkg.hs
