@@ -14,7 +14,7 @@ import HscTypes (ModGuts, CgGuts (..))
 import CorePrep (corePrepPgm)
 import DriverPhases (HscSource (HsBootFile))
 
-import System.Environment (getArgs)
+import System.Environment (getArgs, getEnv)
 
 import Compiler.Info
 import Compiler.Variants
@@ -27,6 +27,7 @@ import MonadUtils (MonadIO(..))
 import Generator.Helpers (runGen, newGenState)
 import System.FilePath (dropExtension, addExtension, replaceExtension, (</>))
 import System.Directory (createDirectoryIfMissing)
+import qualified Control.Exception as Ex
 
 import Control.Monad (when, mplus, forM, forM_)
 import System.Exit (exitSuccess, exitFailure)
@@ -34,7 +35,7 @@ import System.Process (rawSystem)
 import System.IO
 import Data.Monoid (mconcat, First(..))
 import Data.List (isSuffixOf, isPrefixOf, tails, partition)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromMaybe)
 
 import Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
@@ -52,6 +53,7 @@ main =
 
      handleCommandline args1
      libDir <- getGlobalPackageBase
+     (argsS, _) <- parseStaticFlags $ map noLoc args1
      defaultErrorHandler
         defaultLogAction
         $ runGhc (mbMinusB `mplus` Just libDir) $
@@ -60,7 +62,7 @@ main =
               sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
                                  , ghcLink = if oneshot then NoLink  else ghcLink sdflags
                                  }
-          (dflags, fileargs', _) <- parseDynamicFlags sdflags' (map noLoc $ ignoreUnsupported args1) -- ("-DWORD_SIZE_IN_BITS=32":args'))
+          (dflags, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS --  (map noLoc $ ignoreUnsupported args1) -- ("-DWORD_SIZE_IN_BITS=32":args'))
           dflags' <- liftIO $ if isJust mbMinusB then return dflags else addPkgConf dflags
           _ <- setSessionDynFlags dflags'
           let fileargs = map unLoc fileargs'
@@ -80,10 +82,16 @@ addPkgConf df = do
              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
              }
 
-ignoreUnsupported :: [String] -> [String]
-ignoreUnsupported args = filter (`notElem` ["--make", "-c", "-threaded", "-prof", "-fPIC", "-dynamic"]) args'
+ignoreUnsupported :: [Located String] -> [Located String]
+ignoreUnsupported =
+  removeBy (`elem` unsup) .
+  removeBy (\x -> any (x `isPrefixOf`) unsupPre)
     where
-      args' = filter (\x -> not $ any (`isPrefixOf` x) ["-H"]) args
+      removeBy :: (a -> Bool) -> [Located a] -> [Located a]
+      removeBy g = filter (not . g . unLoc)
+      unsup    = ["--make", "-c"] -- remove these arguments
+      unsupPre = ["-H"]           -- remove arguments that start with these
+
 
 handleCommandline :: [String] -> IO ()
 handleCommandline args
@@ -100,6 +108,7 @@ handleCommandline args
             , ("--print-libdir", putStrLn =<< getLibDir)
             , ("--abi-hash", fallbackGhc args)
             , ("-M", fallbackGhc args)
+            , ("-shared", fallbackGhc args)
             ]
 
 handleOneShot :: [String] -> IO ()
@@ -112,10 +121,22 @@ handleOneShot args | fallback  = fallbackGhc args >> exitSuccess
 
 -- call ghc for things that we don't handle internally
 -- fixme: either remove this hack or properly check that the version of the called ghc is the expected one
+-- GHCJS_FALLBACK_GHC is the location of the ghc executable
+-- if GHCJS_FALLBACK_PLAIN is set, all arguments are passed through verbatim
+-- to the fallback ghc, including -B
 fallbackGhc args = do
   db <- getGlobalPackageDB
-  rawSystem "ghc" $ "-package-conf" : db : args
+  ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
+  plain <- getEnvMay "GHCJS_FALLBACK_PLAIN"
+  case plain of
+    Just _  -> getArgs >>= rawSystem ghc
+    Nothing -> rawSystem ghc $ "-package-conf" : db : args
   return ()
+
+getEnvMay :: String -> IO (Maybe String)
+getEnvMay xs = fmap Just (getEnv xs)
+               `Ex.catch` \(_::Ex.SomeException) -> return Nothing 
+
 
 compileModSummary :: GhcMonad m => ModSummary -> m ()
 compileModSummary mod =
