@@ -204,7 +204,20 @@ primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
 primOp MakeStablePtrOp [a, s] = PlainE $ Js.list [s, a]
 primOp DeRefStablePtrOp [a, s] = PlainE $ Js.list [s, a]
 
-primOp op args = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+-- We can't inline these
+primOp op@YieldOp args                 = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@AtomicModifyMutVarOp args    = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@TakeMVarOp args              = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@TryTakeMVarOp args           = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@PutMVarOp args               = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@CatchOp args                 = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@MaskAsyncExceptionsOp args   = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@UnmaskAsyncExceptionsOp args = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@WaitReadOp args              = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@WaitWriteOp args             = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@SeqOp args             = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+
+primOp op args = PlainE $ Js.nativeFunctionCall (Js.var ("$hs_" ++ zEncodeString (show op))) args
 
 boolOp :: Javascript js => (Expression js -> Expression js -> Expression js) -> Expression js -> Expression js -> Expression js
 boolOp op a b = jsBoolToHs $ op a b

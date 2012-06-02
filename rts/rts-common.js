@@ -37,7 +37,7 @@ var $hs_subIntCzh = function(a, b) {
     }
 };
 var $hs_ordzh = function(a) {
-    return a.charCodeAt(0);
+    return a.charCodeAt();
 };
 var $hs_chrzh = function(a) {
     return String.fromCharCode(a);
@@ -1154,7 +1154,13 @@ var hs_integerToWord64 = function(as, abits) {
     var a = $hs_gmpToGoog(as, abits);
     return goog.math.Long.fromBits(a.getBits(0), a.getBits(1));
 };
-
+/**
+ * @param {!Array.<Object>}     dest
+ * @param {!number}             doff
+ * @param {!Array.<Object>}     src
+ * @param {!number}             soff
+ * @param {!number}             count
+ */
 var _hs_text_memcpy = function (dest, doff, src, soff, count) {
     var srcarray = new Uint16Array(src[0],src[1]);
     var destarray = new Uint16Array(dest[0],dest[1]);
@@ -1164,7 +1170,6 @@ var _hs_text_memcpy = function (dest, doff, src, soff, count) {
         doff++;
         count--;
     }
-    return dest;
 };
 var _hs_text_memcmp = function(a, aoff, b, boff, count) {
     var aarray = new Uint16Array(a[0],a[1]);
@@ -1869,14 +1874,10 @@ var $hs_fromString = function(args, onComplete, onException) {
  */
 var $hs_fromText = function(args, onComplete, onException) {
     $hs_force(args, function(s) {
-        if(HS_DEBUG && !
-          (s.g === 1
-            && s.v[0].g === 1
-            && s.v[1].g === 1
-            && s.v[2].g === 1)) throw "Invalid Text";
-        var arr = s.v[0].v[0];
-        var off = s.v[1].v[0];
-        var end = off + s.v[2].v[0];
+        if(HS_DEBUG && s.g !== 1) throw "Invalid Text";
+        var arr = s.v[0];
+        var off = s.v[1];
+        var end = off + s.v[2];
         var buff = new Uint16Array(arr[0]);
         var result = "";
         for(var n = off; n !== end; n++)
@@ -1911,6 +1912,18 @@ var $hs_fromLazyText = function(args, onComplete, onException) {
         }, onException);
     }
     loop("", args);
+};
+/**
+ * @param {string} s
+ * @return {!Object}
+ */
+var $hs_toText = function(s) {
+    var a = $hs_newByteArrayzh((s.length << 1) + 2)[1];
+    var dest = new Uint16Array(a[0]);
+    for(var i=0;i!=s.length;i++)
+        dest[i]=s.charCodeAt(i);
+    dest[i]=0;
+    return $d(1, [a, 0, s.length]);
 };
 /**
  * @param {Array.<Object>}      args

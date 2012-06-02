@@ -256,6 +256,11 @@ var $tr_Scheduler = {
     schedule : function(thread) {
         $tr_Scheduler.waiting.push(thread);
     },
+    /**
+     * @param {!Object}            r
+     * @param {function(Object)=}  onComplete
+     * @param {function(!Object)=} onException
+     */
     start : function(r, onComplete, onException) {
         var s = $tr_Scheduler;
         var thread = new $tr_Thread(r, onComplete, onException);
@@ -587,7 +592,7 @@ if(HS_TRACE_CALLS) {
 }
 
 /**
- * @constructor
+ * @this {$hs_Pap|$Func|$Thunk|$Data|$DataValue}
  * @param {...Object} var_args
  */
 var $hs_hscall = function (var_args) {
@@ -987,6 +992,8 @@ var hs_loadBundles = function (bundles, f) {
             // No one else has asked for this function set lets send a request
             $tr_Scheduler.waitingForBundle[bundle]=[$tr_Scheduler.currentThread];
 
+            var path = $hs_loadPath + "hs" + bundle + (COMPILED ? "min.js" : ".js");
+
             var transport = new XMLHttpRequest();
 
             // Set up function to handle the response
@@ -996,7 +1003,8 @@ var hs_loadBundles = function (bundles, f) {
                     try {
                         // Evaluate the response
                         $hs_loading=true;
-                        goog.globalEval(transport.responseText);
+                        goog.globalEval(transport.responseText
+                            + "\n//@ sourceURL="+path);
                         $hs_loading=false;
                         $hs_loaded[bundle] = true; // Don't need to load this again
 
@@ -1017,7 +1025,6 @@ var hs_loadBundles = function (bundles, f) {
             };
 
             // Send the request
-            var path = $hs_loadPath + "hs" + bundle + (COMPILED ? "min.js" : ".js");
             transport.open("GET", path, false);
             transport.send(null);
         }
@@ -1039,7 +1046,7 @@ var hs_loadBundles = function (bundles, f) {
 var $hs_forkzh = function (a, s) {
     var t = $tr_Scheduler.start(a.hscall(s));
     $tr_traceThread("fork thread " + t.threadID);
-    return new $tr_Result([s, t]);
+    return [s, t];
 };
 var $hs_forkOnzh = function (n, a, s) {
     return $hs_forkzh(a,s);
@@ -1049,7 +1056,7 @@ var $hs_yieldzh = function (s) {
     return new $tr_Yield(new $tr_Result(s));
 };
 var $hs_myThreadIdzh = function (s) {
-    return new $tr_Result([s, $tr_Scheduler.currentThread]);
+    return [s, $tr_Scheduler.currentThread];
 };
 var $hs_isCurrentThreadBoundzh = function (s) {
     return [s, 1];
@@ -1174,7 +1181,7 @@ var $hs_unmaskAsyncExceptionszh = function (a, s) {
     return new $tr_Jump(a.hscall, a, [s]);
 };
 var $hs_getMaskingStatezh = function (s) {
-    return new $tr_Result([s, 0]);
+    return [s, 0];
 };
 
 // --- Weak pointers and finalizers ---
