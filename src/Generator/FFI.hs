@@ -16,6 +16,7 @@ import PrimOp
 import Javascript.Language as Js hiding(return)
 import qualified Javascript.Language as Js (return)
 import Generator.Helpers
+import Data.Monoid (mconcat)
 
 returnForeignFunctionCallResult :: Javascript js => ForeignCall -> Stg.Unique -> [StgArg] -> Gen js
 returnForeignFunctionCallResult (CCall (CCallSpec target _ccallConv _safety)) _ args =
@@ -27,7 +28,9 @@ returnForeignFunctionCallResult (CCall (CCallSpec target _ccallConv _safety)) _ 
      (StaticTarget clabelString) -> do
 #endif
            a <- mapM stgArgToJs args
-           return . Js.return $ foreignCall clabelString a
+           return $ mconcat [
+                foreignCall clabelString a
+              , Js.return $ Js.list [last $ a, Js.var "$ff"]]
 
 declareForeignFunctionCallResult :: Javascript js => Stg.Id -> ForeignCall -> Stg.Unique -> [StgArg] -> Gen js
 declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _safety)) _ args =
@@ -40,11 +43,13 @@ declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _saf
 #endif
             b <- stgIdToJsId binder
             a <- mapM stgArgToJs args
-            return $ Js.declare [(b, foreignCall clabelString a)]
+            return $ mconcat [
+                foreignCall clabelString a
+              , Js.declare [(b, Js.list [last $ a, Js.var "$ff"])]]
 
-foreignCall :: Javascript js => FastString -> [Expression js] -> Expression js
+foreignCall :: Javascript js => FastString -> [Expression js] -> js
 foreignCall clabelString args =
-  Js.list [last $ args, nativeFunctionCall (Js.var . unpackFS $ clabelString) (init args)]
+  Js.declare [("$ff", nativeFunctionCall (Js.var . unpackFS $ clabelString) (init args))]
 
 returnPrimitiveCallResult :: Javascript js => PrimCall -> [StgArg] -> Gen js
 returnPrimitiveCallResult (PrimCall clabelString _) args = do
