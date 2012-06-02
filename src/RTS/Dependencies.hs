@@ -14,8 +14,8 @@ rtsDeps :: Variant -> IO [FilePath]
 rtsDeps v = do
   rtsPath <- getDataFileName "rts"
   closurePath <- closureLibraryPath
-  return $ map (rtsPath </>) (rtsSrcs v)
-        ++ map (closurePath </>) closureDeps
+  return $ map (closurePath </>) closureDeps
+        ++ map (rtsPath </>) (rtsSrcs v)
 
 -- | the file that defines the default options for the RTS
 rtsDefaultOptions  :: IO FilePath
