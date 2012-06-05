@@ -8,11 +8,18 @@ import Control.Applicative ((<$>))
 import System.FilePath ((</>))
 import Data.List (stripPrefix, intercalate)
 import System.Process (system)
-import System.Exit (ExitCode)
+import System.Exit (ExitCode, ExitCode(..))
 
 import Closure.Paths
 import Compiler.Variants
 import RTS.Dependencies
+import System.Directory (setCurrentDirectory)
+import qualified Data.ByteString.Lazy as B (readFile, writeFile)
+import Paths_ghcjs
+import Data.SourceMap
+import Data.Attoparsec.ByteString.Lazy (many1, parse, Result(..))
+import Control.Monad (forM_)
+import Data.Aeson (json, fromJSON, Result(..), encode)
 
 data MinifyOptions = MinifyOptions {
     hsDebug :: Bool,
@@ -35,7 +42,7 @@ minify jsexe mainFiles options args = do
     cj <- closureCompilerJar
     defOpts <- rtsDefaultOptions
     deps <- rtsDeps trampolineVariant
-    system . intercalate " " $
+    ec <- system . intercalate " " $
                 [ "java"
                 , "-Xmx1G"
                 , "-jar", cj
@@ -51,7 +58,35 @@ minify jsexe mainFiles options args = do
                 mod "main" "rts" (length mainFiles + 1)            ++
                 [ "--module_output_path_prefix", jsexe ++ "/"
                 , "--compilation_level", "ADVANCED_OPTIMIZATIONS"
+                , "--create_source_map", jsexe </> "hsmin.js.allmaps"
+                , "--source_map_format", "V3"
                 ] ++ args
+
+    -- Make paths in the source map relative and split it up
+    closurePath <- closureLibraryPath
+    rtsPath <- getDataFileName "rts/"
+    let fixMap sm@SourceMap{sources = s} = sm {sources = map fixPath s}
+        fixPath = replacePrefix closurePath ("../closure-library"</>)
+                  . replacePrefix rtsPath ("../rts"</>)
+                  . replacePrefix (jsexe++"/") id
+        replacePrefix a with p = maybe p with (stripPrefix a p)
+    case ec of
+        ExitSuccess -> do
+            allmaps <- B.readFile $ jsexe </> "hsmin.js.allmaps"
+            case parse (many1 json) allmaps of
+                Fail _ _ctx msg -> do
+                    putStrLn $ "Error processing source maps : " ++ msg
+                    return $ ExitFailure 1
+                Done _ maps -> do
+                    forM_ maps $ \m -> do
+                        case fromJSON m of
+                            Error msg -> do
+                                putStrLn $ "Error processing source map : " ++ msg
+                            Success sm -> do
+                                B.writeFile (jsexe </> file sm ++ ".js.map") (encode $ fixMap sm)
+                                appendFile (jsexe </> file sm ++ ".js") ("\n//@ sourceMappingURL=" ++ file sm ++ ".js.map")
+                    return ExitSuccess
+        _ -> return ec
   where
     define s f       = "--define='" ++ s ++ if f options then "=true'" else "=false'"
     js f             = ["--js", f]
