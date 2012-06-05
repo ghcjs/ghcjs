@@ -1926,6 +1926,18 @@ var $hs_toText = function(s) {
     return $d(1, [a, 0, s.length]);
 };
 /**
+ * @param {string} s
+ * @return {!Object}
+ */
+var $hs_toLazyText = function(s) {
+    var a = $hs_newByteArrayzh((s.length << 1) + 2)[1];
+    var dest = new Uint16Array(a[0]);
+    for(var i=0;i!=s.length;i++)
+        dest[i]=s.charCodeAt(i);
+    dest[i]=0;
+    return $d(2, [a, 0, s.length, $d(1, [])]);
+};
+/**
  * @param {Array.<Object>}      args
  * @param {function(!number)}   onComplete
  * @param {function(!Object)=}  onException
