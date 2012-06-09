@@ -1868,6 +1868,16 @@ var $hs_fromString = function(args, onComplete, onException) {
     loop("", args);
 };
 /**
+ * @param {string} s
+ * @return {!Object}
+ */
+var $hs_toString = function(s) {
+    var x = $d(1, []);
+    for(var i=s.length;i!=0;)
+        x=$d(2, [$d(1, [s.charAt(--i)]), x]);
+    return x;
+};
+/**
  * @param {Array.<Object>}      args
  * @param {function(!string)}   onComplete
  * @param {function(!Object)=}  onException
