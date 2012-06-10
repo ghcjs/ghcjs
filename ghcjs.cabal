@@ -86,7 +86,7 @@ Executable ghcjs-boot
                     transformers, ghc, ghc-paths, system-filepath
 
 Executable ghcjs-cabal
-    Main-Is:        CabalJs.hs
+    Main-Is:        Cabal.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src
     Build-Depends:  base >=3 && <5, process, base16-bytestring, skein, crypto-api, shelly >= 0.9,
