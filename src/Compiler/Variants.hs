@@ -9,8 +9,9 @@ import qualified Javascript.Formatted as Js
 import qualified Javascript.Trampoline as Js
 import Generator.Helpers (runGen, newGenState)
 
-import GHC
 import StgSyn (StgBinding)
+import Module (Module(..))
+import Id (Id)
 
 data CallingConvention = Plain | Trampoline
 

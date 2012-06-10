@@ -82,7 +82,7 @@ main =
                           mgraph <- depanal [] False
                           mapM_ compileModSummary mgraph
                           case (ghcLink dflags2) of
-                            LinkBinary -> when (not oneshot) $ buildExecutable trampolineVariant dflags2
+                            LinkBinary -> when (not oneshot) $ buildExecutable dflags2
                             LinkDynLib -> liftIO (fallbackGhc args1) -- use GHC to build the native version of the lib
                             _          -> return ()
 
@@ -159,7 +159,7 @@ fallbackGhc args = do
 
 getEnvMay :: String -> IO (Maybe String)
 getEnvMay xs = fmap Just (getEnv xs)
-               `Ex.catch` \(_::Ex.SomeException) -> return Nothing 
+               `Ex.catch` \(_::Ex.SomeException) -> return Nothing
 
 
 compileModSummary :: GhcMonad m => ModSummary -> m ()
@@ -188,7 +188,7 @@ writeDesugaredModule mod =
           writeFile outputFile program
           return (variant, program)
      liftIO $ writeCachedFiles dflags outputBase versions
-  where 
+  where
     summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
     outputBase = dropExtension (ml_hi_file . ms_location $ summary)
     name = moduleNameString . moduleName . ms_mod $ summary
@@ -233,17 +233,17 @@ concreteJavascriptFromCgGuts dflags core variant =
   cabaljs can install the executable
 -}
 
-buildExecutable :: GhcMonad m => Variant -> DynFlags -> m ()
-buildExecutable var df = do
+buildExecutable :: GhcMonad m => DynFlags -> m ()
+buildExecutable df = do
   case outputFile df of
     Just file -> liftIO $ writeFile file "ghcjs generated executable"
     Nothing   -> return ()
   graph <- fmap hsc_mod_graph $ getSession
   ifaces <- fmap catMaybes $ mapM modsumToInfo graph
   let ofiles = map (ml_obj_file . ms_location) graph
-  -- publish all modules in the current package, for now...
-  -- alternative: topsort and publish first?
-  liftIO $ GHCJSMain.linkJavaScript var df ofiles (collectDeps ifaces) (map ms_mod graph)
+  -- TODO find a suitable way to get a list of Modules to use
+  -- passing [] now defaults to JSMain (or failing tha Main)
+  liftIO $ GHCJSMain.linkJavaScript df ofiles (collectDeps ifaces) []
 
 modsumToInfo :: GhcMonad m => ModSummary -> m (Maybe ModuleInfo)
 modsumToInfo ms = getModuleInfo (ms_mod ms)

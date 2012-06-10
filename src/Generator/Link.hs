@@ -47,10 +47,8 @@ appendDeps a b = DependencyInfo
                     (toSearch a ++ toSearch b)
                     (functionDeps a ++ functionDeps b)
 
-link :: Variant -> String -> [FilePath] -> [FilePath] -> [Module] -> [String] -> IO [String]
+link :: Variant -> String -> [FilePath] -> [FilePath] -> [ModuleName] -> [String] -> IO [String]
 link var out searchPath objFiles pageModules pageFunctions = do
-    let pageModules' = map moduleName pageModules -- map mkModuleName pageModules
-
     -- Copy all the .js dependencies
     forM_ searchPath (\dir -> installJavaScriptFiles var normal dir out)
 
@@ -62,7 +60,7 @@ link var out searchPath objFiles pageModules pageFunctions = do
     objDeps <- (M.fromList . catMaybes . map maybeObjectDeps) <$> mapM readDeps objFiles
 
     -- Search for the required modules in the packages
-    let initDeps = emptyDeps{modules=S.singleton (mkModuleName "GHC.Prim"), toSearch=pageModules'}
+    let initDeps = emptyDeps{modules=S.singleton (mkModuleName "GHC.Prim"), toSearch=pageModules}
     allDeps <- searchModules var searchPath objDeps initDeps
 
     let deps = functionDeps allDeps
@@ -71,7 +69,7 @@ link var out searchPath objFiles pageModules pageFunctions = do
         (graph, lookupEdges, lookupVertex) = G.graphFromEdges deps
 
         -- Make a set of all module prefix's.
-        moduleSet = S.fromList $ map (("$$"++) . zEncodeString) (map moduleNameString pageModules')
+        moduleSet = S.fromList $ map (("$$"++) . zEncodeString) (map moduleNameString pageModules)
 
         -- Make a set of the functions in their encoded form.
         encodeFunction s = mod ++ "_" ++ (zEncodeString $ reverse rFunc)
