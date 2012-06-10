@@ -34,27 +34,33 @@ import Data.Monoid (mappend)
 import Control.Monad (forM_)
 
 import Compiler.Info
-import System.Directory (removeDirectoryRecursive, createDirectoryIfMissing)
+import System.Directory (getAppUserDataDirectory, removeDirectoryRecursive, createDirectoryIfMissing)
 import Control.Exception (SomeException, catch)
 import Crypto.Conduit (hashFile)
 import qualified Data.Serialize as C
 
 import Compiler.Variants
+import Compiler.Info
 
 default (L.Text)
 (<>) = mappend
 
-extraArgs = [ "--with-compiler=ghcjs"
-            , "--with-hc-pkg=ghcjs-pkg"
-            , "--with-hsc2hs=hsc2hs"
-            ]
+extraArgs = do
+  prefix <- getAppUserDataDirectory "ghcjs-cabal"
+  return [ "--with-compiler=ghcjs"
+         , "--with-hc-pkg=ghcjs-pkg"
+         , "--with-hsc2hs=hsc2hs"
+         , "--prefix=" <> prefix <> "/" <> getGhcjsCompilerVersion
+         , "--bindir=" <> prefix <> "/" <> "bin"
+         ]
 
 main :: IO ()
 main = do
   emptyCache
   args <- getArgs
+  extra <- extraArgs
   ec <- if any (`elem` ["install", "configure"]) args
-    then rawSystem "cabal" (extraArgs ++ args)
+    then rawSystem "cabal" (extra ++ args)
     else rawSystem "cabal" args
   installFromCache
   exitWith ec
@@ -77,6 +83,7 @@ installFromCache = do
   cache <- fmap fromString getGlobalCache
   mapM_ (installCachedFile cache) hiFiles
 
+-- fixme: should we also handle .hi_dyn ?
 installCachedFile :: FilePath -> FilePath -> IO ()
 installCachedFile cache hiFile = do
   (hash :: Skein_512_512) <- hashFile (toString hiFile ++ ".hi")
@@ -149,3 +156,4 @@ fromString = fromText . L.pack
 
 toString :: FilePath -> String
 toString = L.unpack . toTextIgnore
+

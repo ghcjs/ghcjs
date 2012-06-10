@@ -26,14 +26,19 @@ import System.IO.Error (isDoesNotExistError)
 import System.IO (openFile, hGetLine, hIsEOF, IOMode(..), Handle, hClose)
 import Encoding (zEncodeString)
 import Module (Module, ModuleName, mkModule, moduleNameString, mkModuleName, moduleName, moduleNameSlashes, stringToPackageId)
+import Outputable (showPpr)
 import Distribution.Verbosity (Verbosity, normal)
 import Distribution.Simple.Utils (findFileWithExtension, info, getDirectoryContentsRecursive, installOrdinaryFiles)
+import Compiler.Variants
+
+instance Show ModuleName where show = moduleNameString
 
 data DependencyInfo = DependencyInfo {
     modules      :: S.Set ModuleName
   , files        :: S.Set FilePath
   , toSearch     :: [ModuleName]
   , functionDeps :: [(FilePath, String, [String])]}
+  deriving (Eq, Show)
 
 emptyDeps = DependencyInfo S.empty S.empty [] []
 appendDeps a b = DependencyInfo
@@ -42,12 +47,12 @@ appendDeps a b = DependencyInfo
                     (toSearch a ++ toSearch b)
                     (functionDeps a ++ functionDeps b)
 
-link :: String -> [FilePath] -> [FilePath] -> [String] -> [String] -> IO [String]
-link out searchPath objFiles pageModules pageFunctions = do
-    let pageModules' = map mkModuleName pageModules
+link :: Variant -> String -> [FilePath] -> [FilePath] -> [Module] -> [String] -> IO [String]
+link var out searchPath objFiles pageModules pageFunctions = do
+    let pageModules' = map moduleName pageModules -- map mkModuleName pageModules
 
-    -- Copy all the .jso directories
-    forM_ searchPath (\dir -> installJavaScriptObjects dir out)
+    -- Copy all the .js dependencies
+    forM_ searchPath (\dir -> installJavaScriptFiles var normal dir out)
 
     -- Read in the dependencies stored at the start of each .js file.
     -- Read the .js files that corrispond to .o files.  We need to load them to get the ModuleName.
@@ -58,7 +63,7 @@ link out searchPath objFiles pageModules pageFunctions = do
 
     -- Search for the required modules in the packages
     let initDeps = emptyDeps{modules=S.singleton (mkModuleName "GHC.Prim"), toSearch=pageModules'}
-    allDeps <- searchModules searchPath objDeps initDeps
+    allDeps <- searchModules var searchPath objDeps initDeps
 
     let deps = functionDeps allDeps
 
@@ -66,7 +71,7 @@ link out searchPath objFiles pageModules pageFunctions = do
         (graph, lookupEdges, lookupVertex) = G.graphFromEdges deps
 
         -- Make a set of all module prefix's.
-        moduleSet = S.fromList $ map (("$$"++) . zEncodeString) pageModules
+        moduleSet = S.fromList $ map (("$$"++) . zEncodeString) (map moduleNameString pageModules')
 
         -- Make a set of the functions in their encoded form.
         encodeFunction s = mod ++ "_" ++ (zEncodeString $ reverse rFunc)
@@ -146,11 +151,11 @@ link out searchPath objFiles pageModules pageFunctions = do
 --
 -- Only files with newer modification times are copied.
 --
-installJavaScriptFiles :: Verbosity -> FilePath -> FilePath -> IO ()
-installJavaScriptFiles verbosity srcDir destDir = do
-    info verbosity $ "Copying Java Script From" ++ srcDir
+installJavaScriptFiles :: Variant -> Verbosity -> FilePath -> FilePath -> IO ()
+installJavaScriptFiles var verbosity srcDir destDir = do
+    info verbosity $ "Copying JavaScript From" ++ srcDir
     srcFiles <- getDirectoryContentsRecursive srcDir >>= filterM modTimeDiffers
-    installOrdinaryFiles verbosity destDir [ (srcDir, f) | f <- srcFiles, takeExtension f == ".js" ]
+    installOrdinaryFiles verbosity destDir [ (srcDir, f) | f <- srcFiles, variantExtension var `L.isSuffixOf` f ]
   where
     modTimeDiffers f = do
             srcTime  <- getModificationTime $ srcDir </> f
@@ -160,18 +165,9 @@ installJavaScriptFiles verbosity srcDir destDir = do
                             then return True
                             else ioError e
 
-installJavaScriptObjects :: FilePath -> FilePath -> IO ()
-installJavaScriptObjects dir out = do
-    contents <- getDirectoryContents dir
-    forM_ (filter ((/= '.') . head) contents) $ \item -> do
-        let full = dir </> item
-        isDir <- doesDirectoryExist full
-        case (isDir, takeExtension item) of
-            (True, ".jso") -> installJavaScriptFiles normal full (out </> item)
-            _              -> return ()
-
-searchModules :: [FilePath] -> M.Map ModuleName DependencyInfo -> DependencyInfo -> IO DependencyInfo
-searchModules searchPath objDeps = loop
+searchModules :: Variant -> [FilePath] -> M.Map ModuleName DependencyInfo -> DependencyInfo -> IO DependencyInfo
+searchModules var searchPath objDeps = \d -> do
+ loop d
   where
     loop deps@DependencyInfo{toSearch=[]} = return deps -- No more modules to search
     loop deps@DependencyInfo{toSearch=(mod:mods)} = do
@@ -179,7 +175,7 @@ searchModules searchPath objDeps = loop
             (True, _)        -> loop deps{toSearch=mods} -- We already seearched this module
             (False, Just d)  -> loop (appendDeps deps d) -- It was in an object file
             (False, Nothing) -> do
-                mbFile <- findFileWithExtension ["js"] searchPath (moduleNameSlashes mod)
+                mbFile <- findFileWithExtension [variantExtension' var] searchPath (moduleNameSlashes mod)
                 case mbFile of
                     Just file | not (file `S.member` (files deps)) -> do
                         fileDeps <- readDeps file

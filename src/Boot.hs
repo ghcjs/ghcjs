@@ -3,6 +3,7 @@
     NoMonomorphismRestriction,
     ExtendedDefaultRules
   #-}
+
 {-
    Boot program to build the GHCJS core libraries from a configured GHC source tree
 
@@ -92,6 +93,7 @@ autoBoot tmp = shelly $ do
 
 corePackages :: [Text]
 corePackages = ["ghc-prim", "integer-gmp", "base"]
+-- corePackages = ["ghc-prim", "integer-gmp", "base", "array", "deepseq", "containers", "template-haskell"]
 
 -- to be called from a configured and built (at least stage 1) ghc tree
 installBootPackages :: BootSettings -> ShIO ()
@@ -105,9 +107,9 @@ installBootPackages settings = do
       initPackageDB
       addWrappers ghcjs ghcjspkg
       when (not $ skipRts settings) $
-           run_ "make" ["all_rts","-j4", "ProjectVersion="<>ghcjsVer] `catchany_sh` (const (return ()))
+           run_ "make" ["all_rts","-j4"] `catchany_sh` (const (return ()))
       forM_ corePackages $ \pkg ->
-        run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg", "ProjectVersion="<>ghcjsVer]
+        run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"]
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePackages
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
@@ -152,7 +154,7 @@ installRts = do
   base  <- liftIO getGlobalPackageBase
   let inc = base </> "include"
       lib = base </> "lib"
-  rtsConf <- readfile "rts/package.conf.install"
+  rtsConf <- readfile "rts/package.conf.inplace"
   writefile (dest </> "builtin_rts.conf") $
                  fixRtsConf (toTextIgnore inc) (toTextIgnore lib) rtsConf
   run_ "ghcjs-pkg" ["recache", "--global"]
@@ -199,7 +201,7 @@ installPkg ghcjs ghcjspkg pkg = do
   echo $ "installing package: " <> pkg
   base <- liftIO getGlobalPackageBase
   dest <- liftIO getGlobalPackageInst
-  db   <- liftIO getGlobalPackageDB      
+  db   <- liftIO getGlobalPackageDB
   run_ "inplace/bin/ghc-cabal" [ "install"
                                , toTextIgnore ghcjs
                                , toTextIgnore ghcjspkg
@@ -221,11 +223,13 @@ installPkg ghcjs ghcjspkg pkg = do
       sub $ do
         cd ("libraries" </> pkg </> "dist-install" </> "build")
         files <- findRel
-        forM_ (filter isJsFile files) $ \file -> cp file (dest </> d </> file)
+        forM_ (filter isJsFile files) $ \file -> do
+           echo $ "installing " <> toTextIgnore file
+           cp file (dest </> d </> file)
     _ -> errorExit $ "could not find installed package " <> pkg
 
 isPathPrefix :: Text -> FilePath -> Bool
-isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file 
+isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file
 
 isJsFile :: FilePath -> Bool
 isJsFile file = ".js" `T.isSuffixOf` toTextIgnore file

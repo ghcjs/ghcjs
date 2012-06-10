@@ -10,14 +10,17 @@ import TidyPgm (tidyProgram)
 import CoreToStg (coreToStg)
 import SimplStg (stg2stg)
 import DynFlags (defaultLogAction, defaultDynFlags, supportedLanguagesAndExtensions, compilerInfo)
-import HscTypes (ModGuts, CgGuts (..))
+import HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..))
 import CorePrep (corePrepPgm)
 import DriverPhases (HscSource (HsBootFile))
+import Packages (initPackages)
+import Outputable (showPpr)
 
 import System.Environment (getArgs, getEnv)
 
 import Compiler.Info
 import Compiler.Variants
+import qualified GHCJSMain
 
 import qualified Generator.TopLevel as Js (generate)
 import Javascript.Language (Javascript)
@@ -25,7 +28,8 @@ import qualified Javascript.Formatted as Js
 import qualified Javascript.Trampoline as Js
 import MonadUtils (MonadIO(..))
 import Generator.Helpers (runGen, newGenState)
-import System.FilePath (dropExtension, addExtension, replaceExtension, (</>))
+import qualified Generator.Link as Link
+import System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
 import System.Directory (createDirectoryIfMissing)
 import qualified Control.Exception as Ex
 
@@ -34,19 +38,20 @@ import System.Exit (exitSuccess, exitFailure)
 import System.Process (rawSystem)
 import System.IO
 import Data.Monoid (mconcat, First(..))
-import Data.List (isSuffixOf, isPrefixOf, tails, partition)
-import Data.Maybe (isJust, fromMaybe)
+import Data.List (isSuffixOf, isPrefixOf, tails, partition, nub)
+import Data.Maybe (isJust, fromMaybe, catMaybes)
+import Data.Char (toLower)
 
 import Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Char8  as C8
 import Crypto.Conduit (hashFile)
 import qualified Data.Serialize as C
+import qualified Data.List as L
 
 main :: IO ()
 main =
   do args0 <- getArgs
-       
      let (minusB_args, args1) = partition ("-B" `isPrefixOf`) args0
          mbMinusB | null minusB_args = Nothing
                   | otherwise = Just . drop 2 . last $ minusB_args
@@ -62,15 +67,26 @@ main =
               sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
                                  , ghcLink = if oneshot then NoLink  else ghcLink sdflags
                                  }
-          (dflags, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS --  (map noLoc $ ignoreUnsupported args1) -- ("-DWORD_SIZE_IN_BITS=32":args'))
-          dflags' <- liftIO $ if isJust mbMinusB then return dflags else addPkgConf dflags
-          _ <- setSessionDynFlags dflags'
+          (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
+          dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
+          (dflags2, _) <- liftIO $ initPackages dflags1
+          _ <- setSessionDynFlags dflags2
           let fileargs = map unLoc fileargs'
-          targets <- mapM (flip guessTarget Nothing) fileargs
-          setTargets targets
-          _ <- load LoadAllTargets
-          mgraph <- depanal [] False
-          mapM_ compileModSummary mgraph
+          -- if guessing targets results in an exception, there were non-haskell files: fallback
+          mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
+          case mtargets of
+            Nothing      -> liftIO (fallbackGhc args1)
+            Just targets -> do
+                          setTargets targets
+                          _ <- load LoadAllTargets
+                          mgraph <- depanal [] False
+                          mapM_ compileModSummary mgraph
+                          case (ghcLink dflags2) of
+                            LinkBinary -> when (not oneshot) $ buildExecutable trampolineVariant dflags2
+                            LinkDynLib -> liftIO (fallbackGhc args1) -- use GHC to build the native version of the lib
+                            _          -> return ()
+
+catchMaybe a = (fmap Just a) `gcatch` \(_::Ex.SomeException) -> return Nothing
 
 addPkgConf :: DynFlags -> IO DynFlags
 addPkgConf df = do
@@ -81,6 +97,12 @@ addPkgConf df = do
              { extraPkgConfs = db1 : db2 : extraPkgConfs df
              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
              }
+
+pkgConfArgs :: IO [String]
+pkgConfArgs = do
+  db1 <- getGlobalPackageDB
+  db2 <- getUserPackageDB
+  return $ map ("-package-conf"++) [db1,db2]
 
 ignoreUnsupported :: [Located String] -> [Located String]
 ignoreUnsupported =
@@ -103,12 +125,11 @@ handleCommandline args
      unsupported xs = putStrLn (xs ++ " is currently unsupported") >> exitFailure
      acts :: [(String, IO ())]
      acts = [ ("--supported-languages", mapM_ putStrLn supportedLanguagesAndExtensions)
-            , ("--numeric-version", putStrLn getCompilerVersion)
+            , ("--numeric-version", fallbackGhc args) -- putStrLn getCompilerVersion)
             , ("--info", print =<< getCompilerInfo)
             , ("--print-libdir", putStrLn =<< getLibDir)
             , ("--abi-hash", fallbackGhc args)
             , ("-M", fallbackGhc args)
-            , ("-shared", fallbackGhc args)
             ]
 
 handleOneShot :: [String] -> IO ()
@@ -119,18 +140,21 @@ handleOneShot args | fallback  = fallbackGhc args >> exitSuccess
       isFb ({- "-c": -} c:_) = any (`isSuffixOf` c) [".c", ".cmm", ".hs-boot", ".lhs-boot"]
       isFb _          = False
 
--- call ghc for things that we don't handle internally
--- fixme: either remove this hack or properly check that the version of the called ghc is the expected one
--- GHCJS_FALLBACK_GHC is the location of the ghc executable
--- if GHCJS_FALLBACK_PLAIN is set, all arguments are passed through verbatim
--- to the fallback ghc, including -B
+{-
+   call GHC for things that we don't handle internally
+
+   fixme: either remove this hack or properly check that the version of the called ghc is the expected one
+   GHCJS_FALLBACK_GHC is the location of the ghc executable
+   if GHCJS_FALLBACK_PLAIN is set, all arguments are passed through verbatim
+   to the fallback ghc, including -B
+-}
 fallbackGhc args = do
-  db <- getGlobalPackageDB
+  pkgargs <- pkgConfArgs
   ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
   plain <- getEnvMay "GHCJS_FALLBACK_PLAIN"
   case plain of
     Just _  -> getArgs >>= rawSystem ghc
-    Nothing -> rawSystem ghc $ "-package-conf" : db : args
+    Nothing -> rawSystem ghc $ pkgargs ++ args
   return ()
 
 getEnvMay :: String -> IO (Maybe String)
@@ -163,21 +187,22 @@ writeDesugaredModule mod =
           putStrLn $ concat ["Writing module ", name, " (", outputFile, ")"]
           writeFile outputFile program
           return (variant, program)
-     liftIO $ writeCachedFiles outputBase versions
-  where summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
-        outputBase = dropExtension (ml_hi_file . ms_location $ summary)
-        name = moduleNameString . moduleName . ms_mod $ summary
-        dflags = ms_hspp_opts $ summary
+     liftIO $ writeCachedFiles dflags outputBase versions
+  where 
+    summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
+    outputBase = dropExtension (ml_hi_file . ms_location $ summary)
+    name = moduleNameString . moduleName . ms_mod $ summary
+    dflags = ms_hspp_opts $ summary
 
 {-
-   temporary workaround for lacking Cabal support: 
+   temporary workaround for lacking Cabal support:
    - write .js source to cache, file name based on the skein hash of
-     the corresponding .hi file. cabaljs picks this up to complete
+     the corresponding .hi file. ghcjs-cabal picks this up to complete
      the package installation
 -}
-writeCachedFiles :: FilePath -> [(Variant, String)] -> IO ()
-writeCachedFiles jsFile variants = do
-  let hiFile = (dropExtension jsFile) ++ ".hi"
+writeCachedFiles :: DynFlags -> FilePath -> [(Variant, String)] -> IO ()
+writeCachedFiles df jsFile variants = do
+  let hiFile = (dropExtension jsFile) ++ "." ++ hiSuf df
   (hash :: Skein_512_512) <- hashFile hiFile
   cacheDir <- getGlobalCache
   let basename = C8.unpack . B16.encode . C.encode $ hash
@@ -198,4 +223,33 @@ concreteJavascriptFromCgGuts dflags core variant =
      stg <- coreToStg dflags core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
      return $ variantRender variant stg' (cg_module core)
+
+{-
+  with -o x, ghcjs links all required functions into an executable
+  bundle, which is a directory x.jsbundle, rather than a filename
+
+  if the executable is built with cabal, it also writes
+  the file, and the executable bundle to the cache, so that
+  cabaljs can install the executable
+-}
+
+buildExecutable :: GhcMonad m => Variant -> DynFlags -> m ()
+buildExecutable var df = do
+  case outputFile df of
+    Just file -> liftIO $ writeFile file "ghcjs generated executable"
+    Nothing   -> return ()
+  graph <- fmap hsc_mod_graph $ getSession
+  ifaces <- fmap catMaybes $ mapM modsumToInfo graph
+  let ofiles = map (ml_obj_file . ms_location) graph
+  -- publish all modules in the current package, for now...
+  -- alternative: topsort and publish first?
+  liftIO $ GHCJSMain.linkJavaScript var df ofiles (collectDeps ifaces) (map ms_mod graph)
+
+modsumToInfo :: GhcMonad m => ModSummary -> m (Maybe ModuleInfo)
+modsumToInfo ms = getModuleInfo (ms_mod ms)
+
+collectDeps :: [ModuleInfo] -> [PackageId]
+collectDeps mis = nub $ concatMap pkgs mis
+    where
+      pkgs mi = maybe [] (map fst . dep_pkgs . mi_deps) $ modInfoIface mi
 

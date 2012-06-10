@@ -21,6 +21,8 @@ data Variant = Variant
     , variantRender            :: StgPgm -> Module -> String
     }
 
+variantExtension' = tail . variantExtension
+
 variants :: [Variant]
 variants = [ plainVariant, trampolineVariant ]
 

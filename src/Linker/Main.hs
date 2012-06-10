@@ -9,6 +9,7 @@ import System.Exit (exitFailure, exitWith, ExitCode(..))
 import System.Process (system)
 
 import Generator.Link (link)
+import Compiler.Variants
 
 -- As well as the normal closure-compiler options this function accepts
 --     --haskell_output_path_prefix (overrides --module_output_path_prefix for ghcjs-link output)
@@ -37,7 +38,7 @@ main = do
         initArgs      = filterOut isHaskellOpt initArgs'
         remainingArgs = filterOut isHaskellOpt remainingArgs'
 
-    closureArgs <- link out dirs files pageModules pageFunctions
+    closureArgs <- link trampolineVariant out dirs files [] pageFunctions -- fimxe pagemodules
     checkExit . system . intercalate " " $ ["java"] ++ initArgs ++ closureArgs ++ remainingArgs
   where
     checkExit f = do

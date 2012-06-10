@@ -40,6 +40,14 @@ getGlobalPackageInst = fmap (</> "lib") getGlobalPackageBase
 
 getGlobalCache = fmap (</> "cache") getGlobalPackageBase
 
--- fixme, cabal cannot determine the version if it contains text
-getCompilerVersion = cProjectVersion ++ "." {-++ "ghcjs" -} ++ Version.showVersion version
+-- Just the GHC version
+getGhcCompilerVersion = cProjectVersion
+
+-- Just the GHCJS version
+getGhcjsCompilerVersion = Version.showVersion version
+
+-- ghcversion-ghcjsversion
+getCompilerVersion = cProjectVersion ++ "-" ++ Version.showVersion version
+
+getCompilerSubdir = "ghcjs-" ++ getCompilerVersion
 

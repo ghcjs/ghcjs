@@ -10,7 +10,7 @@ import System.Exit
 
 import Compiler.Info
 
-import Data.List (isPrefixOf)
+import Data.List (partition, isPrefixOf)
 
 import System.Process (runProcess, waitForProcess)
 
@@ -18,31 +18,30 @@ main :: IO ()
 main = do gPkgConf <- getGlobalPackageDB
           uPkgConf <- getUserPackageDB
           args <- getArgs
-          ghcjsPkg args gPkgConf uPkgConf
+          let (pkgArgs, args') = partition ("--pkg-conf" `isPrefixOf`) args
+          ghcjsPkg args' pkgArgs gPkgConf uPkgConf
 
-ghcjsPkg :: [String] -> String -> String -> IO ()
-ghcjsPkg args gPkgConf uPkgConf
+ghcjsPkg :: [String] -> [String] -> String -> String -> IO ()
+ghcjsPkg args pkgArgs gPkgConf uPkgConf
     | any (=="initglobal") args   =
         ghcPkg gPkgConf ["init", gPkgConf]
     | any (=="inituser") args     =
         ghcPkg gPkgConf ["init", uPkgConf]
     | any (=="--version") args    = do
-        putStrLn $ "GHCJS package manager version " ++ getCompilerVersion
+        putStrLn $ "GHCJS package manager version " ++ getGhcCompilerVersion
         exitSuccess
-    | any ("--package-conf" `isPrefixOf`) args =
-        ghcPkg gPkgConf args
     | any ("--global-conf" `isPrefixOf`) args =
-        ghcPkgPlain args
+        ghcPkgPlain $ args ++ pkgArgs
     | any (=="--no-user-package-conf") args =
-        ghcPkgPlain args
-    | any (=="--global") args = -- if global, flip package conf arguments (rightmost one is used by ghc-pkg)
+        ghcPkgPlain $ args ++ pkgArgs
+    | any (=="--global") args  && not (any (=="--user") args) = -- if global, flip package conf arguments (rightmost one is used by ghc-pkg)
         ghcPkg gPkgConf $ args ++ [ "--package-conf=" ++ uPkgConf
                                   , "--package-conf=" ++ gPkgConf
-                                  ]
+                                  ] ++ pkgArgs
     | otherwise                   =
         ghcPkg gPkgConf $ args ++ [ "--package-conf=" ++ gPkgConf
                                   , "--package-conf=" ++ uPkgConf
-                                  ]
+                                  ] ++ pkgArgs
 
 ghcPkg :: String -> [String] -> IO ()
 ghcPkg globaldb args = do
