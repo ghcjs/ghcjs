@@ -125,13 +125,16 @@ link var out searchPath objFiles pageModules pageFunctions = do
         return (n, pageSet)
 
     -- Work out the loader functions
-    let pageToBundles = M.fromListWith (++) $ concatMap
+    let pageToBundles :: M.Map Int [Int]
+        pageToBundles = M.fromListWith (++) $ concatMap
                             (\(m, ps) -> map (\p -> (p, [m])) $ S.toList ps)
                             bundles
 
+        loader :: [String]
         loader = ("// Bundle Count " ++ show (length combinedScripts)):
             map makeLoader (M.toList pageToBundles)
 
+        makeLoader :: (Int, [Int]) -> String
         makeLoader (p, bs) = concat ["var $", lookupKey p,
             "=$L(", show bs,", function() { return ", lookupKey p, "; });"]
 
