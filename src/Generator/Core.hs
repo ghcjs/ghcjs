@@ -234,8 +234,13 @@ caseExpressionAlternatives bndr altType alts =
        PrimAlt   {} -> do
             n  <- name
             dc <- defaultCase
+#if WORD_SIZE_IN_BITS == 32
             c  <- cases
             return $ Js.switch n dc c
+#else
+            c  <- stringCases
+            return $ Js.switch (Js.nativeMethodCall n "toString" []) dc c
+#endif
        AlgAlt    {} -> do
             n  <- name
             dc <- defaultCase
@@ -269,6 +274,18 @@ caseExpressionAlternatives bndr altType alts =
       case alt
       of DataAlt con -> return $ Js.int (dataConTag con)
          LitAlt lit  -> stgLiteralToJs lit
+         DEFAULT     -> panic "Default alternative!"
+    stringCases = sequence . map stringAlternative . filter (not . isDefault) $ alts
+    stringAlternative :: Javascript js => (Stg.AltCon, [Stg.Id], [Bool], StgExpr) -> Gen (Expression js, js)
+    stringAlternative alt = do
+        c <- alternativeStringConst alt
+        b <- alternativeBody alt
+        return (c, b)
+    alternativeStringConst :: Javascript js => (Stg.AltCon, [Stg.Id], [Bool], StgExpr) -> Gen (Expression js)
+    alternativeStringConst (alt, _args, _useMask, _expr) =
+      case alt
+      of DataAlt con -> return $ Js.int (dataConTag con)
+         LitAlt lit  -> stgLiteralToJsString lit
          DEFAULT     -> panic "Default alternative!"
 
 unpackData :: Javascript js => Expression js -> [Bool] -> [Stg.Id] -> Gen js

@@ -61,7 +61,7 @@ newGenState = GenState M.empty safeIds
 -- this function should really go into PrimOp module...
 stgLiteralToJs :: Javascript js => Stg.Literal -> Gen (Expression js)
 stgLiteralToJs (Stg.MachChar c) = return $ Js.string [c] -- Char#
-stgLiteralToJs (Stg.MachStr s) = return $ Js.string (unpackFS s ++ "\0") -- Addr#
+stgLiteralToJs (Stg.MachStr s) = return $ Js.string (unpackFS s) -- Addr#
 #if WORD_SIZE_IN_BITS == 32
 stgLiteralToJs (Stg.MachInt i) = return $ Js.int i -- Int#
 #else
@@ -91,6 +91,19 @@ stgLiteralToJs (Stg.MachDouble i) = return $ Js.float i -- Doable#
 stgLiteralToJs (Stg.MachNullAddr) = return $ Js.null -- Addr#
 stgLiteralToJs (Stg.MachLabel {}) = return $ Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: MachLabel"]
 stgLiteralToJs _ = error "Unknown literal type"
+
+stgLiteralToJsString :: Javascript js => Stg.Literal -> Gen (Expression js)
+stgLiteralToJsString (Stg.MachChar c) = return $ Js.string [c] -- Char#
+stgLiteralToJsString (Stg.MachStr s) = return $ Js.string (unpackFS s) -- Addr#
+stgLiteralToJsString (Stg.MachInt i) = return $ Js.string (show i) -- Int#
+stgLiteralToJsString (Stg.MachInt64 i) = return $ Js.string (show i)
+stgLiteralToJsString (Stg.MachWord i) = return $ Js.string (show i) -- Word#
+stgLiteralToJsString (Stg.MachWord64 i) = return $ Js.string (show i)
+stgLiteralToJsString (Stg.MachFloat i) = return $ Js.string (show i) -- Float#
+stgLiteralToJsString (Stg.MachDouble i) = return $ Js.string (show i) -- Doable#
+stgLiteralToJsString (Stg.MachNullAddr) = return $ Js.null -- Addr#
+stgLiteralToJsString (Stg.MachLabel {}) = return $ Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: MachLabel"]
+stgLiteralToJsString _ = error "Unknown literal type"
 
 stgArgToJs :: Javascript js => Stg.StgArg -> Gen (Expression js)
 stgArgToJs (Stg.StgVarArg id) = Js.var <$> stgIdToJs id

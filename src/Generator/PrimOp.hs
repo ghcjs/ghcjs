@@ -76,7 +76,8 @@ primOp IntLeOp  [a, b] = PlainE $ boolOp Js.lessOrEqual a b
 
 primOp IntAddOp [a, b] = PlainE $ Js.bitOr (Js.plus a b) (Js.int (0 :: Int))
 primOp IntSubOp [a, b] = PlainE $ Js.bitOr (Js.minus a b) (Js.int (0 :: Int))
-primOp IntMulOp [a, b] = PlainE $ Js.bitOr (Js.multiply a b) (Js.int (0 :: Int))
+-- This could overflow the 53 bits
+-- primOp IntMulOp [a, b] = PlainE $ Js.bitOr (Js.multiply a b) (Js.int (0 :: Int))
 
 primOp IntNegOp [a]    = PlainE $ Js.unaryMinus a
 
