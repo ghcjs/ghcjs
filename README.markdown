@@ -41,29 +41,37 @@ Aditional Requirements
 ----------------------
 
  * GHC install capable of building GHC 7.4.1
+ * 3.5GB RAM (JavaScript linker is memory hungry)
+
+Tested On
+---------
+
+* OS X 10.7 using 32bit GHC 7.4.1 to build 32bit GHC
+* Ubuntu 12.04 64bit VM with 3.5GB of system RAM using 64bit GHC 7.4.1 to build 64bit GHC
 
 Getting The Source
 ------------------
 
 <pre>
-clone https://github.com/ghcjs/ghc
+git clone https://github.com/ghcjs/ghc
 cd ghc
+git checkout ghc-7.4
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
-./sync-all -r git@github.com:ghcjs --ghcjs get
 ./sync-all checkout ghc-7.4
+./sync-all -r https://github.com/ghcjs --ghcjs get
 </pre>
 
 (I find the gets from github often fail hence the 4 of them)
 
 <pre>
 cd libraries/Cabal
-git remote add ghcjs git@github.com:ghcjs/packages-Cabal.git
+git remote add ghcjs https://github.com/ghcjs/packages-Cabal.git
 git pull ghcjs
-git branch ghc-7.4 ghcjs/ghc-7.4
-git checkout ghc-7.4
+git branch ghcjs-7.4 ghcjs/ghc-7.4
+git checkout ghcjs-7.4
 cd ../..
 </pre>
 
@@ -77,7 +85,9 @@ Typical install goes something like this.
 cp mk/build.mk.sample mk/build.mk
 perl boot
 ./configure --prefix=/home/hamish/ghcjs
-make && make install
+make
+make install
+hash -r
 </pre>
 
 That last step takes a long time.
@@ -105,18 +115,33 @@ You need to make a version of cabal-install that uses the new Cabal package.
 So that which you run "cabal install" it will copy .js files and .jsexe directories
 to the install location.
 
-<pre>
-cd libraries/Cabal/cabal-install
-</pre>
+It is a good idea not to put this "cabal" in your default PATH as it may not
+play nice with other version of GHC (since it will pass --enable-javascript).
+You can do the following to build it and put it next to the GHCJS
+enabled version of ghc.
 
 <pre>
-cabal install --ghc-options='-XFlexibleInstances'
+export PATH=/home/hamish/ghcjs/bin:$PATH
+cd libraries/Cabal/cabal-install
+cabal install --prefix=/home/hamish/ghcjs
+hash -r
 </pre>
 
 There is a catch.  Because your old cabal install installed the dependencies
 the .js files for these libraries will not have been installed.  So you should
 unregister then so they will be installed again with the new cabal-install.
 
+You can get a list of all the packages that were installed by running
+<pre>
+ghc-pkg list --user
+</pre>
+
+The quickest way to do this delete the directory these are in
+<pre>
+rm -rf ~/ghcjs/lib/ghc-7.4.1.20120501
+</pre>
+
+or you can unregister them using ghc-pkg something like this
 <pre>
 ghc-pkg unregister HTTP
 ghc-pkg unregister network
@@ -124,6 +149,9 @@ ghc-pkg unregister parsec
 ghc-pkg unregister mtl
 ghc-pkg unregister transformers
 ghc-pkg unregister zlib
+ghc-pkg unregister random
+ghc-pkg unregister text
+ghc-pkg unregister time
 </pre>
 
  
