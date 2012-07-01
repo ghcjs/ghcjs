@@ -60,20 +60,11 @@ git checkout ghc-7.4
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
-./sync-all checkout ghc-7.4
 ./sync-all -r https://github.com/ghcjs --ghcjs get
+./sync-all checkout ghc-7.4
 </pre>
 
 (I find the gets from github often fail hence the 4 of them)
-
-<pre>
-cd libraries/Cabal
-git remote add ghcjs https://github.com/ghcjs/packages-Cabal.git
-git pull ghcjs
-git branch ghcjs-7.4 ghcjs/ghc-7.4
-git checkout ghcjs-7.4
-cd ../..
-</pre>
 
 Build
 -----
