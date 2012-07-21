@@ -22,6 +22,7 @@ import Prelude hiding (FilePath)
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy (Text)
 import Shelly
+import Shelly.Find
 import Data.Monoid (mappend)
 import Control.Monad (forM, forM_)
 import Compiler.Info
