@@ -282,40 +282,81 @@ var $hs_unsafeThawArrayzh = function (a, s) {
     return [s, a];
 };
 
-// ByteArray support
-var $hs_ptrBase = 0;
+if(WORD_SIZE_IN_BITS==32) {
+    // ByteArray support
+    var $hs_ptrBase = 0;
 
-/**
- * @param {!number} n
- * @param {Object=} s
- */
-var $hs_newByteArrayzh = function (n, s) {
-    var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
-    result[0].ptrs=[];
-    $hs_ptrBase += n;
-    return [s, result];
-};
-/**
- * @param {!number} n
- * @param {Object=} s
- */
-var $hs_newPinnedByteArrayzh = function (n, s) {
-    var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
-    result[0].ptrs=[];
-    $hs_ptrBase += n;
-    return [s, result];
-};
-/**
- * @param {!number} n
- * @param {Object=} s
- */
-var $hs_newAlignedPinnedByteArrayzh = function (n, k, s) {
-    $hs_ptrBase += $hs_ptrBase%k;
-    var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
-    result[0].ptrs=[];
-    $hs_ptrBase += n;
-    return [s, result];
-};
+    /**
+     * @param {!number} n
+     * @param {Object=} s
+     */
+    var $hs_newByteArrayzh = function (n, s) {
+        var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
+        result[0].ptrs=[];
+        $hs_ptrBase += n;
+        return [s, result];
+    };
+    /**
+     * @param {!number} n
+     * @param {Object=} s
+     */
+    var $hs_newPinnedByteArrayzh = function (n, s) {
+        var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
+        result[0].ptrs=[];
+        $hs_ptrBase += n;
+        return [s, result];
+    };
+    /**
+     * @param {!number} n
+     * @param {!number} k
+     * @param {Object=} s
+     */
+    var $hs_newAlignedPinnedByteArrayzh = function (n, k, s) {
+        $hs_ptrBase += $hs_ptrBase%k;
+        var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
+        result[0].ptrs=[];
+        $hs_ptrBase += n;
+        return [s, result];
+    };
+}
+if (WORD_SIZE_IN_BITS==64) {
+    // ByteArray support
+    var $hs_ptrBase = goog.math.Long.ZERO;
+
+    /**
+     * @param {!goog.math.Long} n
+     * @param {Object=} s
+     */
+    var $hs_newByteArrayzh = function (n, s) {
+        var result = [new ArrayBuffer(n.toInt()), 0, $hs_ptrBase];
+        result[0].ptrs=[];
+        $hs_ptrBase = $hs_ptrBase.add(n);
+        return [s, result];
+    };
+    /**
+     * @param {!goog.math.Long} n
+     * @param {Object=} s
+     */
+    var $hs_newPinnedByteArrayzh = function (n, s) {
+        var result = [new ArrayBuffer(n.toInt()), 0, $hs_ptrBase];
+        result[0].ptrs=[];
+        $hs_ptrBase = $hs_ptrBase.add(n);
+        return [s, result];
+    };
+    /**
+     * @param {!goog.math.Long} n
+     * @param {!goog.math.Long} k
+     * @param {Object=} s
+     */
+    var $hs_newAlignedPinnedByteArrayzh = function (n, k, s) {
+        $hs_ptrBase = $hs_ptrBase.add(goog.math.Long.fromInt($hs_ptrBase.toInt() % k.toInt()));
+        var result = [new ArrayBuffer(n.toNumber()), 0, $hs_ptrBase];
+        result[0].ptrs=[];
+        $hs_ptrBase = $hs_ptrBase.add(n);
+        return [s, result];
+    };
+}
+
 var $hs_byteArrayContentszh = function (a) {
     return a;
 };
