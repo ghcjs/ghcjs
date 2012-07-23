@@ -12,6 +12,10 @@ var $hs_mulIntMayOflozh = function(a, b) {
             (b.isNegative()?b.negate():b).getHighBits());
     }
 };
+var $hs_ztzh = function(a, b) {
+    // Safe 32bit multiply 64 bit multiply is done inline
+    return goog.math.Long.fromInt(a).multiply(goog.math.Long.fromInt(b)).getLowBits();
+};
 var $hs_addIntCzh = function(a, b) {
     if(WORD_SIZE_IN_BITS==32) {
         var x = a + b;
