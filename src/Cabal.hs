@@ -17,7 +17,6 @@ import System.Process (rawSystem, readProcess)
 import System.Exit (exitWith)
 
 import Shelly
-import Shelly.Find
 import Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Char8  as C8

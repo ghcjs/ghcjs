@@ -22,7 +22,6 @@ import Prelude hiding (FilePath)
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy (Text)
 import Shelly
-import Shelly.Find
 import Data.Monoid (mappend)
 import Control.Monad (forM, forM_)
 import Compiler.Info
@@ -39,7 +38,7 @@ import Network (withSocketsDo)
 import qualified Codec.Archive.Tar as Tar
 import qualified Codec.Archive.Tar.Check as Tar
 
-import Data.Conduit (($$), ($=), (=$=))
+import Data.Conduit (($$), ($=), (=$=), unwrapResumable)
 import Data.Conduit.Lazy (lazyConsume)
 import Data.Conduit.BZlib
 import Network.HTTP.Conduit
@@ -71,7 +70,7 @@ fromString = fromText . T.pack
 toString :: FilePath -> String
 toString = T.unpack . toTextIgnore
 
-ignoreExcep a = a `catchany_sh` (const (return ()))
+ignoreExcep a = a `catchany_sh` (\e -> echo $ "exception: " <> T.pack (show e))
 
 -- autoboots roll out
 -- download and configure a fresh ghc source tree
@@ -85,7 +84,8 @@ autoBoot tmp = shelly $ do
     request <- parseUrl (ghcDownloadLocation ghcVer)
     withManager $ \manager -> do
                           Response _ _ _ src <- http request manager
-                          tar <- lazyConsume (src =$= bunzip2)
+                          (src',_) <- unwrapResumable src
+                          tar <- lazyConsume (src' =$= bunzip2)
                           liftIO $ putStrLn "unpacking tar"
                           liftIO $ Tar.unpack (toString tmp)  (Tar.read $ L.fromChunks tar) -- (Tar.checkTarbomb ("ghc-" ++ ghcVer) $ Tar.read tar)
   cd (tmp </> T.pack ghcDir)
@@ -107,9 +107,11 @@ installBootPackages settings = do
       ghcjsVer <- T.strip <$> run ghcjs ["--numeric-version"]
       initPackageDB
       addWrappers ghcjs ghcjspkg
-      when (not $ skipRts settings) $
+      when (not $ skipRts settings) $ do
+           echo "Building RTS"
            run_ "make" ["all_rts","-j4"] `catchany_sh` (const (return ()))
-      forM_ corePackages $ \pkg ->
+      forM_ corePackages $ \pkg -> do
+        echo $ "Building package: " <> pkg
         run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"]
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePackages
@@ -217,17 +219,20 @@ installPkg ghcjs ghcjspkg pkg = do
                                , "NO"
                                ]
   -- now install the javascript files
-  dirs <- sub $ cd (fromString dest) >> lsRel
+  dirs <- chdir (fromString dest) (ls "")
   case filter (\x -> (pkg <> "-") `T.isPrefixOf` toTextIgnore x) dirs of
     (d:_) -> do
       echo $ "found installed version: " <> toTextIgnore d
       sub $ do
         cd ("libraries" </> pkg </> "dist-install" </> "build")
-        files <- findRel
+        -- workaround for bug in shelly (fixme this is slow)
+        -- files <- find "."
+        files <- pwd >>= \wd -> find wd >>= mapM (relativeTo wd) . filter isJsFile
         forM_ (filter isJsFile files) $ \file -> do
            echo $ "installing " <> toTextIgnore file
            cp file (dest </> d </> file)
     _ -> errorExit $ "could not find installed package " <> pkg
+  echo "done"
 
 isPathPrefix :: Text -> FilePath -> Bool
 isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file
@@ -235,17 +240,4 @@ isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file
 isJsFile :: FilePath -> Bool
 isJsFile file = ".js" `T.isSuffixOf` toTextIgnore file
 
--- relative filepaths in the current directory
-lsRel :: ShIO [FilePath]
-lsRel = mkRels $ ls "."
-
--- find files relative to the current dir
-findRel :: ShIO [FilePath]
-findRel = mkRels $ find "."
-
-mkRels :: ShIO [FilePath] -> ShIO [FilePath]
-mkRels a = do
-  files <- a
-  d <- pwd
-  return . catMaybes . map (stripPrefix (d </> empty)) $ files
 
