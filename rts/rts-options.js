@@ -6,7 +6,7 @@ var HS_DEBUG = true;
 /**
  * @define {boolean} enable weak pointers and finalizers
  */
-var HS_WEAKS = true;
+var HS_WEAKS = false;
 
 /**
  * @define {boolean} enable traceLog in the run loop
