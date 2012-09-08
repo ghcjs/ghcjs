@@ -83,6 +83,9 @@ Executable ghcjs
     else
       x-boot:     False
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
+    cpp-options:    -DGHCJS_PACKAGE_IMPORT
+    if flag(rts-only)
+      Buildable:      False
 
 
 Executable ghcjs-link

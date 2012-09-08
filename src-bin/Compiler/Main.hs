@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, ScopedTypeVariables #-}
+{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables, PackageImports #-}
 module Main where
 
 import Paths_ghcjs
@@ -18,17 +18,23 @@ import Outputable (showPpr)
 
 import System.Environment (getArgs, getEnv)
 
-import Compiler.Info
-import Compiler.Variants
-import qualified GHCJSMain
+#ifdef GHCJS_PACKAGE_IMPORT
+#define GHCJS "ghcjs"
+#else
+#define GHCJS "ghcjs"
+#endif
 
-import qualified Generator.TopLevel as Js (generate)
-import Javascript.Language (Javascript)
-import qualified Javascript.Formatted as Js
-import qualified Javascript.Trampoline as Js
+import GHCJS Compiler.Info
+import GHCJS Compiler.Variants
+import qualified GHCJS GHCJSMain
+
+import qualified GHCJS Generator.TopLevel as Js (generate)
+import GHCJS Javascript.Language (Javascript)
+import qualified GHCJS Javascript.Formatted as Js
+import qualified GHCJS Javascript.Trampoline as Js
 import MonadUtils (MonadIO(..))
-import Generator.Helpers (runGen, newGenState)
-import qualified Generator.Link as Link
+import GHCJS Generator.Helpers (runGen, newGenState)
+import qualified GHCJS Generator.Link as Link
 import System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
 import System.Directory (createDirectoryIfMissing)
 import qualified Control.Exception as Ex
