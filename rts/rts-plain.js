@@ -132,7 +132,7 @@ function $d(tag, v, info) {
     return new $DataValue(tag, v, info);
 };
 
-var $hs_force = function (a, onComplete, onException) {
+$hs_force = function (a, onComplete, onException) {
     var f = a[0];
     var args = Array.prototype.slice.call(a, 1, a.length);
     try {
@@ -143,7 +143,7 @@ var $hs_force = function (a, onComplete, onException) {
     }
 };
 
-var hs_loadBundles = function (bundles, f) {
+hs_loadBundles = function (bundles, f) {
     for(var i = 0; i !== bundles.length; i++) {
         var bundle = bundles[i];
         if($hs_loaded[bundle]===undefined) {

@@ -8,7 +8,7 @@ var $tr_currentResult = null;
  * @param {?Object}                   object Object to call the method on.
  * @param {!Array.<Object>|Arguments} args   Arguments to pass.
  */
-var $tr_Jump = function(method, object, args) {
+function $tr_Jump(method, object, args) {
     if(HS_DEBUG) {
         if(typeof method !== 'function')
             throw "Not a function!";
@@ -39,7 +39,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed in rest.
  */
-var $tr_Call = function(method, object, args, rest, live) {
+function $tr_Call(method, object, args, rest, live) {
     if(HS_DEBUG) {
         if (typeof method !== 'function')
             throw "Not a function!";
@@ -78,7 +78,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>=}          live    Lists things to keep alive.
  *      We won't finalize these as they will be needed if we catch an exception
  */
-var $tr_Catch = function(next, catcher, live) {
+function $tr_Catch(next, catcher, live) {
     if(HS_DEBUG) {
         if(next === undefined)
             throw "Next undefined!";
@@ -109,7 +109,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>=}          live    Lists things to keep alive.
  *      We won't finalize these as they will be needed if we catch an exception
  */
-var $tr_ctch = function(next, catcher, live) {
+function $tr_ctch(next, catcher, live) {
     if(HS_WEAKS) {
         $tr_currentResult = new $tr_Catch(next, catcher, live);
     }
@@ -124,7 +124,7 @@ var $tr_ctch = function(next, catcher, live) {
  * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed when we resume
  */
-var $tr_Suspend = function(resume, live) {
+function $tr_Suspend(resume, live) {
     this.resume = resume;
     if(HS_WEAKS) this.live = live;
 };
@@ -141,7 +141,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed when we resume
  */
-var $tr_suspend = function(resume, live) {
+function $tr_suspend(resume, live) {
     if(HS_WEAKS) {
         $tr_currentResult = new $tr_Suspend(resume, live);
     }
@@ -154,7 +154,7 @@ var $tr_suspend = function(resume, live) {
  * @constructor
  * @param {Object} next
  */
-var $tr_Yield = function(next) {
+function $tr_Yield(next) {
     this.next = next;
 };
 if(HS_WEAKS) {
@@ -164,7 +164,7 @@ if(HS_WEAKS) {
         }
     };
 }
-var $tr_yield = function(next) {
+function $tr_yield(next) {
     $tr_currentResult = new $tr_Yield(next);
 };
 
@@ -172,7 +172,7 @@ var $tr_yield = function(next) {
  * @constructor
  * @param {Object} result
  */
-var $tr_Result = function(result) {
+function $tr_Result(result) {
     this.value = result;
 };
 if(HS_WEAKS) {
@@ -360,19 +360,19 @@ var $tr_Scheduler = {
     }
 };
 
-var $tr_trace = function(msg) {
+function $tr_trace(msg) {
     HS_TRACE && $hs_logger.info($tr_Scheduler.currentThread.threadID + " : " + msg);
 };
 
-var $tr_traceThread = function(msg) {
+function $tr_traceThread(msg) {
     $tr_trace(msg);
 };
 
-var $tr_traceMVar = function(msg) {
+function $tr_traceMVar(msg) {
     $tr_trace(msg);
 };
 
-var $tr_traceException = function(msg) {
+function $tr_traceException(msg) {
     $tr_trace(msg);
 };
 
@@ -384,7 +384,7 @@ var $tr_counter = 0;
  * @param {function(Object)=}  onComplete
  * @param {function(!Object)=} onException
  */
-var $tr_Thread = function (next, onComplete, onException) {
+function $tr_Thread(next, onComplete, onException) {
   this.next = next;
   this.isException = false;
   this._stack = [];
@@ -595,7 +595,7 @@ if(HS_TRACE_CALLS) {
  * @this {$hs_Pap|$Func|$Thunk|$Data|$DataValue}
  * @param {...Object} var_args
  */
-var $hs_hscall = function (var_args) {
+function $hs_hscall(var_args) {
     if(HS_TRACE_CALLS) logCall(this, arguments);
     var argc = arguments.length;
     if (this.arity === argc) { // EXACT and THUNK rules
@@ -621,7 +621,7 @@ var $hs_hscall = function (var_args) {
  * @param {!Object}                   obj
  * @param {!Array.<Object>|Arguments} args
  */
-var $hs_Pap = function(obj, args) {
+function $hs_Pap(obj, args) {
     this.arity = obj.arity - args.length;
     this.object = obj;
     this.savedArguments = args;
@@ -926,7 +926,7 @@ if(HS_DEBUG) {
 }
 
 // Run haskell function
-var $hs_force = function (args, onComplete, onException) {
+function $hs_force(args, onComplete, onException) {
     var f = args[0];
     var a = Array.prototype.slice.call(args, 1, args.length);
     $tr_Scheduler.start(new $tr_Jump(f.hscall, f, a), onComplete, onException);
@@ -935,7 +935,7 @@ var $hs_force = function (args, onComplete, onException) {
 };
 
 // Schedule a haskell function to run the next time haskell runs
-var $hs_schedule = function (args, onComplete, onException) {
+function $hs_schedule(args, onComplete, onException) {
     var f = args[0];
     var a = Array.prototype.slice.call(args, 1, args.length);
     $tr_Scheduler.start(new $tr_Jump(f.hscall, f, a), onComplete, onException);
@@ -981,7 +981,7 @@ if(HS_WEAKS) {
         return [];
     };
 }
-var hs_loadBundles = function (bundles, f) {
+function hs_loadBundles(bundles, f) {
     if(bundles.length===0)
         return f();
 
@@ -1043,29 +1043,29 @@ var hs_loadBundles = function (bundles, f) {
 };
 
 // --- Threads ---
-var $hs_forkzh = function (a, s) {
+function $hs_forkzh(a, s) {
     var t = $tr_Scheduler.start(a.hscall(s));
     $tr_traceThread("fork thread " + t.threadID);
     return [s, t];
 };
-var $hs_forkOnzh = function (n, a, s) {
+function $hs_forkOnzh(n, a, s) {
     return $hs_forkzh(a,s);
 };
-var $hs_yieldzh = function (s) {
+function $hs_yieldzh(s) {
     $tr_traceThread("yield thread");
     return new $tr_Yield(new $tr_Result(s));
 };
-var $hs_myThreadIdzh = function (s) {
+function $hs_myThreadIdzh(s) {
     return [s, $tr_Scheduler.currentThread];
 };
-var $hs_isCurrentThreadBoundzh = function (s) {
+function $hs_isCurrentThreadBoundzh(s) {
     return [s, 1];
 };
-var $hs_noDuplicatezh = function (s) {
+function $hs_noDuplicatezh(s) {
     return s;
 };
 
-var $hs_atomicModifyMutVarzh = function (a, b, s) {
+function $hs_atomicModifyMutVarzh(a, b, s) {
     return new $tr_Call(b.hscall, b, [a.value], function (res) {
             a.value = res.v[0];
             return new $tr_Result([s, res.v[1]]);
@@ -1076,7 +1076,7 @@ var $hs_atomicModifyMutVarzh = function (a, b, s) {
 /**
  * @constructor MVar
  */
-var $tr_MVar = function() {
+function $tr_MVar() {
     this.value = null;
     this.waiting = [];
     if($hs_loading) this.isTopLevel = true;
@@ -1088,11 +1088,11 @@ if(HS_WEAKS) {
         }
     };
 }
-var $hs_newMVarzh = function(s) {
+function $hs_newMVarzh(s) {
     $tr_traceMVar("newMVar");
     return [s, new $tr_MVar()];
 };
-var $hs_takeMVarzh = function (a, s) {
+function $hs_takeMVarzh(a, s) {
     var takeWhenNotEmpty = function (_) {
         $tr_traceMVar("take taking");
         var result = a.value;
@@ -1112,7 +1112,7 @@ var $hs_takeMVarzh = function (a, s) {
     }
     return takeWhenNotEmpty(null);
 };
-var $hs_tryTakeMVarzh = function (a, s) {
+function $hs_tryTakeMVarzh(a, s) {
     if (a.value === null) {
         $tr_traceMVar("tryTake nothing to take");
         return new $tr_Result([s, 0, null]);
@@ -1128,7 +1128,7 @@ var $hs_tryTakeMVarzh = function (a, s) {
     }
     return new $tr_Result([s, 1, result]);
 };
-var $hs_putMVarzh = function (a, b, s) {
+function $hs_putMVarzh(a, b, s) {
     var putWhenEmpty = function (_) {
         $tr_traceMVar("put putting");
         a.value = b;
@@ -1147,25 +1147,25 @@ var $hs_putMVarzh = function (a, b, s) {
     }
     return putWhenEmpty(null);
 };
-var $hs_sameMVarzh = function (a, b, s) {
+function $hs_sameMVarzh(a, b, s) {
     return [s, a === b];
 };
-var $hs_isEmptyMVarzh = function (a, b, s) {
+function $hs_isEmptyMVarzh(a, b, s) {
     return [s, a.value === null];
 };
 
 // --- Exceptions ---
-var $hs_catchzh = function(a, b, s) {
+function $hs_catchzh(a, b, s) {
     return new $tr_Catch(
         new $tr_Jump(a.hscall, a, [s]),
         function (e) { return new $tr_Jump(b.hscall, b, [e, s]); },
         [b, s]);
 };
-var $hs_raisezh = function(a) {
+function $hs_raisezh(a) {
     $tr_traceException("raise");
     throw a;
 };
-var $hs_raiseIOzh = function(a, s) {
+function $hs_raiseIOzh(a, s) {
     $tr_traceException("raiseIO");
     throw a;
 };
@@ -1174,13 +1174,13 @@ var $hs_raiseIOzh = function(a, s) {
 //$hs_killThreadzh = function (t, e, s) {
 //    $tr_traceThread("kill thread");
 //};
-var $hs_maskAsyncExceptionszh = function (a, s) {
+function $hs_maskAsyncExceptionszh(a, s) {
     return new $tr_Jump(a.hscall, a, [s]);
 };
-var $hs_unmaskAsyncExceptionszh = function (a, s) {
+function $hs_unmaskAsyncExceptionszh(a, s) {
     return new $tr_Jump(a.hscall, a, [s]);
 };
-var $hs_getMaskingStatezh = function (s) {
+function $hs_getMaskingStatezh(s) {
     return [s, 0];
 };
 
@@ -1195,7 +1195,7 @@ if(HS_WEAKS) {
  * (via markWeaks).  This will let us know that the weak pointer is
  * still needed.
  */
-var $tr_Weak = function(key, value, finalize, realWorld) {
+function $tr_Weak(key, value, finalize, realWorld) {
     this.value = value;
     this.finalize = finalize;
     this.realWorld = realWorld;
@@ -1207,7 +1207,7 @@ var $tr_Weak = function(key, value, finalize, realWorld) {
     }
 };
 if(HS_WEAKS) {
-    var $tr_markWeaks = function(o,m) {
+    function $tr_markWeaks(o,m) {
         // If the object has weak pointers mark them as still in use
         var ws = o.weaks;
         if(ws !== undefined) {
@@ -1218,25 +1218,25 @@ if(HS_WEAKS) {
         }
     };
 }
-var $hs_mkWeakzh = function(o, b, c, s) {
+function $hs_mkWeakzh(o, b, c, s) {
     return [s, new $tr_Weak(o, b, c, s)];
 };
-var $hs_mkWeakForeignEnvzh = function(o, b, w, x, y, z, s) {
+function $hs_mkWeakForeignEnvzh(o, b, w, x, y, z, s) {
     HS_WEAKS && $hs_logger.warning("Weak Foreign Ignored");
     // return [s, new $tr_Weak(o, b, c, s)];
 };
-var $hs_deRefWeakzh = function(p, s) {
+function $hs_deRefWeakzh(p, s) {
     return [s, p.value === null ? 0 : 1, p.value];
 };
-var $hs_finalizeWeakzh = function(p, s) {
+function $hs_finalizeWeakzh(p, s) {
     return [s, p.finalize === null ? 0 : 1, p.finalize];
 };
-var $hs_touchzh = function(a, s) {
+function $hs_touchzh(a, s) {
     return s;
 };
 
 // --- Parallelism ---
-var $hs_seqzh = function(a, s) {
+function $hs_seqzh(a, s) {
     if(a.notEvaluated) {
         if(HS_WEAKS) {
             return new $tr_Call(a.hscall, a, [], function(result) {
