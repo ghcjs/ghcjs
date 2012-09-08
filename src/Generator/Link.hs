@@ -49,8 +49,8 @@ appendDeps a b = DependencyInfo
 
 link :: Variant -> String -> [FilePath] -> [FilePath] -> [ModuleName] -> [String] -> IO [String]
 link var out searchPath objFiles pageModules pageFunctions = do
-    -- Copy all the .js dependencies
-    forM_ searchPath (\dir -> installJavaScriptFiles var normal dir out)
+    -- Output a the search path that should be used for dynamic loading
+    writeFile (out </> "paths.js") $ "$hs_path = " ++ show searchPath
 
     -- Read in the dependencies stored at the start of each .js file.
     -- Read the .js files that corrispond to .o files.  We need to load them to get the ModuleName.
