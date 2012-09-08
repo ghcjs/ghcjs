@@ -19,6 +19,10 @@ source-repository head
 flag boot
   default:            False
 
+flag rts-only
+  default:            False
+  description:        Useful to install just rts files changes while developing the rts
+
 Library
     Default-Language: Haskell2010
     build-depends: base           >= 4        && < 5,
@@ -96,7 +100,8 @@ Executable ghcjs-link
                       ghcjs,
                       process,
                       containers
-
+    if flag(rts-only)
+      Buildable:      False
 
 Executable ghcjs-min
     Main-Is:          Minify.hs
@@ -107,6 +112,8 @@ Executable ghcjs-min
                       filepath,
                       process,
                       containers
+    if flag(rts-only)
+      Buildable:      False
 
 Executable ghcjs-pkg
     Main-Is:          Pkg.hs
@@ -117,6 +124,8 @@ Executable ghcjs-pkg
                       process,
                       directory,
                       filepath
+    if flag(rts-only)
+      Buildable:      False
 
 Executable ghcjs-boot
     Main-Is:          Boot.hs
@@ -135,6 +144,8 @@ Executable ghcjs-boot
                       bzlib-conduit   >= 0.2  && < 0.3,
                       conduit         >= 0.5  && < 0.6,
                       tar             >= 0.4  && < 0.5
+    if flag(rts-only)
+      Buildable:      False
 
 Executable ghcjs-cabal
     Main-Is:          Cabal.hs
@@ -154,6 +165,8 @@ Executable ghcjs-cabal
                       base16-bytestring >= 0.1 && < 0.2,
                       skein           >= 0.1  && < 0.2,
                       shelly          >= 0.14 && < 0.15
+    if flag(rts-only)
+      Buildable:      False
 
 test-suite test
     type:             exitcode-stdio-1.0
