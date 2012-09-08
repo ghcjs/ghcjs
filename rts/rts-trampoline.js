@@ -239,19 +239,29 @@ var $tr_Scheduler = {
     maxID   : 0,
     running : false,
     finalizers : [],
+    cpuSeconds : 0,
+    currentRunStart : 0,
     runWaiting : function() {
         var s = $tr_Scheduler;
         if(HS_DEBUG && s.running) throw "Already Running";
+        s.currentRunStart = new Date().getTime();
         s.running = true;
         while (s.waiting.length !== 0) {
-            while (s.waiting.length !== 0) {
-                s.currentThread = s.waiting[0];
-                s.waiting = Array.prototype.slice.call(s.waiting, 1, s.waiting.length);
-                s.currentThread._run();
-            }
-            s.scheduleFinalizers();
+          s.currentThread = s.waiting[0];
+          s.waiting = Array.prototype.slice.call(s.waiting, 1, s.waiting.length);
+          s.currentThread._run();
+          if(new Date().getTime() - s.currentRunStart > 50)
+            break;
         }
         s.running = false
+        s.cpuSeconds += new Date().getTime() - s.currentRunStart;
+        if(s.waiting.length !== 0) {
+          setTimeout(function() {s.runWaiting();}, 0);
+          return;
+        }
+        s.scheduleFinalizers();
+        if(s.waiting.length !== 0)
+          setTimeout(function() {s.runWaiting();}, 0);
     },
     schedule : function(thread) {
         $tr_Scheduler.waiting.push(thread);
@@ -447,18 +457,19 @@ $tr_Thread.prototype = {
     var r = this.next;
     var isException = this.isException;
     var traceLog = [];
+    var tickLimit = 10000;
+    var limit = tickLimit;
     while (true) {
       $tr_currentResult = null;
 
       // See if it is time to let another thread have a go
-      $tr_counter++;
-      if($tr_counter === 10000) {
-        $tr_counter = 0;
+      limit--;
+      if(limit === 0) {
         this.next = r;
         this.isException = isException;
         if(HS_WEAKS) $tr_Scheduler.scheduleFinalizers();
         $tr_Scheduler.schedule(this);
-        return;
+        break;
       }
 
       if(HS_TRACE) {
@@ -486,7 +497,7 @@ $tr_Thread.prototype = {
             this._value = r;
             this._signal();
             if(this._onException !== undefined) this._onException(r);
-            return;
+            break;
           }
         }
         if (r instanceof $tr_Jump) {
@@ -512,7 +523,7 @@ $tr_Thread.prototype = {
             this._value = r.value;
             this._signal();
             if(this._onComplete !== undefined) this._onComplete(r.value);
-            return;
+            break;
           }
         }
         else if(r instanceof $tr_Catch) {
@@ -524,13 +535,13 @@ $tr_Thread.prototype = {
             this._stack.push([r.resume, null, r.live]);
           this.next = null;
           this.isException = false;
-          return;
+          break;
         }
         else if(r instanceof $tr_Yield) {
           this.next = r.next;
           this.isException = false;
           $tr_Scheduler.schedule(this);
-          return;
+          break;
         }
         // Must be just a plain return value
         else {
@@ -545,7 +556,7 @@ $tr_Thread.prototype = {
             this._value = r;
             this._signal();
             if(this._onComplete !== undefined) this._onComplete(r);
-            return;
+            break;
           }
         }
         isException = false;
@@ -555,6 +566,7 @@ $tr_Thread.prototype = {
         r = e;
       }
     }
+    $tr_counter += (tickLimit-limit);
   },
 
   // Notify joining threads that this thread is complete.
@@ -1021,6 +1033,8 @@ function hs_loadBundles(bundles, f) {
                         }
                     }
                     $tr_Scheduler.waitingForBundle[bundle] = [];
+                    if(!$tr_Scheduler.running)
+                        $tr_Scheduler.runWaiting();
                 }
             };
 
@@ -1266,4 +1280,16 @@ var $hs_waitWritezh = function(fd, s) {
 //    var f = $hs_allFiles[fd];
 //    f.waitingToWrite.push($tr_Scheduler.currentThread);
 //    return new $tr_Suspend(function(_) { return s; }, [s]);
+};
+function getGCStats(a) {
+    var sc = $tr_Scheduler;
+    var t = new Date().getTime() - sc.currentRunStart + sc.cpuSeconds;
+    if(WORD_SIZE_IN_BITS==32) {
+        throw "Todo identify the correct offset"
+        return 0;
+    }
+    else {
+        (new Float64Array(a[0],a[1]+128))[0] = t/1000;
+        return goog.math.Long.ZERO;
+    }
 };
