@@ -11,6 +11,7 @@ Build-Type:     Custom
 Cabal-Version:  >= 1.10
 data-dir:       .
 data-files:     rts/*.js
+                rts/*.html
 
 source-repository head
   type:     git
@@ -33,6 +34,7 @@ Library
                    containers,
                    process,
                    ghcjs-closure,
+                   ghcjs-hterm,
                    monads-tf,
                    ghc-paths,
                    source-map     >= 0.1.0    && < 0.2,
@@ -140,7 +142,7 @@ Executable ghcjs-boot
                       bytestring      >= 0.9  && < 0.10,
                       system-filepath >= 0.4  && < 0.5,
                       shelly          >= 0.14 && < 0.15,
-                      http-conduit    >= 1.5  && < 1.6,
+                      http-conduit    >= 1.6  && < 1.7,
                       bzlib-conduit   >= 0.2  && < 0.3,
                       conduit         >= 0.5  && < 0.6,
                       tar             >= 0.4  && < 0.5
