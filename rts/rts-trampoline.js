@@ -236,6 +236,7 @@ function $r(result) {
 var $tr_Scheduler = {
     waiting : [],
     waitingForBundle : [],
+    waitingForIO : [],
     maxID   : 0,
     running : false,
     finalizers : [],
@@ -322,9 +323,13 @@ var $tr_Scheduler = {
     getLive : function (n) {
         var s = $tr_Scheduler;
         var result = [[s.currentThread],s.waiting];
-        for(var i = 0; i != s.waitingForBundle.length; i++)
+        var i;
+        for(i = 0; i != s.waitingForBundle.length; i++)
             if(s.waitingForBundle[i] !== undefined && s.waitingForBundle[i].length !== 0)
                 result.push(s.waitingForBundle[i]);
+        for(i = 0; i != s.waitingForIO.length; i++)
+            if(s.waitingForIO[i] !== undefined)
+              result.push([s.waitingForIO[i]]);
         return result;
     },
     mark : function() {
@@ -715,7 +720,7 @@ $Func.prototype = {
 };
 if(HS_WEAKS) {
     $Func.prototype.getLive = function() {
-        return [this.live];
+        return this.live !== undefined ? [this.live] : [];
     };
 };
 if(HS_DEBUG) {
@@ -764,6 +769,9 @@ $Thunk.prototype = {
     evaluate: function() {
         var _this = this;
         return new $tr_Call(this.evaluateOnce, this, [], function (res) {
+//            if(HS_WEAKS && _this.isTopLevel) {
+//              res.isTopLevel = true;
+//            }
             _this.result = res;
             _this.live = [];
             _this.evaluate = function () { return new $tr_Result(_this.result); };
@@ -779,7 +787,7 @@ $Thunk.prototype = {
 };
 if(HS_WEAKS) {
     $Thunk.prototype.getLive = function() {
-        return [this.live,[this.result]];
+        return this.live !== undefined ? [this.live,[this.result]] : [[this.result]];
     };
 }
 if(HS_DEBUG) {
@@ -822,6 +830,9 @@ $Data.prototype = {
             for(var n = 0; n !== res.length; n++)
                 if(res[n] === undefined)
                     throw "Undefined"
+//            if(HS_WEAKS && _this.isTopLevel) {
+//              res.isTopLevel = true;
+//            }
             _this.v = res;
             _this.notEvaluated = false;
             _this.evaluate = function () { return new $tr_Result(_this); };
@@ -1268,14 +1279,53 @@ function $hs_seqzh(a, s) {
 };
 
 // --- IO ---
-var $hs_waitReadzh = function(fd, s) {
-    var f = $hs_allFiles[fd];
-    if(f.text.length > f.fptr)
+$hs_MemFile.prototype.waitRead = function(s) {
+    if(this.text.length > this.fptr)
         return s;
-    f.waitingToRead.push($tr_Scheduler.currentThread);
+    var sc = $tr_Scheduler;
+    var thread = sc.currentThread;
+    var i;
+    if(HS_WEAKS) {
+      for(i = 0; i != sc.waitingForIO.length; i++)
+        if(sc.waitingForIO[i] === undefined)
+          break;
+      sc.waitingForIO[i] = thread;
+    }
+    this.waitingToRead.push(
+      function() {
+        if(HS_WEAKS) sc.waitingForIO[i] = undefined;
+        sc.schedule(thread);
+        if(!sc.running)
+            sc.runWaiting();
+      });
     return new $tr_Suspend(function(_) { return s; }, [s]);
 };
-var $hs_waitWritezh = function(fd, s) {
+$hs_TerminalIn.prototype.waitRead = function(s) {
+    if(this.buffer.length != 0)
+        return s;
+    var sc = $tr_Scheduler;
+    var thread = sc.currentThread;
+    var i;
+    if(HS_WEAKS) {
+      for(i = 0; i != sc.waitingForIO.length; i++)
+        if(sc.waitingForIO[i] === undefined)
+          break;
+      sc.waitingForIO[i] = thread;
+    }
+    this.waitingToRead.push(
+      function() {
+        if(HS_WEAKS) sc.waitingForIO[i] = undefined;
+        sc.schedule(thread);
+        if(!sc.running)
+            sc.runWaiting();
+      });
+    return new $tr_Suspend(function(_) { return s; }, [s]);
+};
+function $hs_waitReadzh(fd, s) {
+    var f = $hs_allFiles[fd];
+    return f.waitRead(s);
+};
+function $hs_waitWritezh(fd, s) {
     return s;
 //    var f = $hs_allFiles[fd];
 //    f.waitingToWrite.push($tr_Scheduler.currentThread);

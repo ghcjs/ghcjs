@@ -1997,15 +1997,163 @@ function $hs_getFileURL(f) {
     }
     return null;
 };
+function $hs_MemFile(text) {
+  this.isatty = false;
+  this.text = text;
+  this.fptr = 0;
+  this.waitingToRead = [];
+};
+$hs_MemFile.prototype.read = function(p, s) {
+    var n = this.text.length - this.fptr;
+    if( n <= 0 ) {
+        HS_RTS_TRACE && $hs_logger.info('read : end of file');
+        return 0;
+    }
+
+    var maxChars = s>>>2;
+    if( n > maxChars )
+        n = maxChars;
+
+    var end = this.fptr + n;
+    var dest = new Uint32Array(p[0], p[1]);
+    for(var i=this.fptr;i!=end;i++)
+        dest[i]=this.text.charCodeAt(i);
+    this.fptr=end;
+
+    HS_RTS_TRACE && $hs_logger.info('read : '+(n<<2));
+    return n<<2;
+};
+$hs_MemFile.prototype.write = function(p, s) {
+    var len = s>>>2;
+    var src = new Uint32Array(p[0], p[1]);
+    var res = "";
+    for(var i=0;i!=len;i++)
+        res=res+String.fromCharCode(src[i]);
+
+    if(this.fptr <= this.text.length)
+        this.text=this.text+res;
+    else if(this.text.length > this.fptr + len)
+        this.text=this.text.slice(0,this.fptr)+res+this.text.slice(this.fptr+len);
+    else
+        this.text=this.text.slice(0,this.fptr)+res+this.text.slice(this.fptr+len);
+
+    return s;
+};
+$hs_MemFile.prototype.ready = function() {
+  // Do not change to write !== 0 (implicit cast makes it work with goog.math.Long
+  return write != 0 || f.text.length > f.fptr;
+}
+function $hs_ConsoleOut(terminal) {
+  this.isatty = true;
+};
+$hs_ConsoleOut.prototype.read = function(p, s) {
+    return 0;
+};
+$hs_ConsoleOut.prototype.write = function(p, s) {
+  var len = s>>>2;
+  var src = new Uint32Array(p[0], p[1]);
+  var res = "";
+  for(var i=0;i!=len;i++) {
+    var c = src[i];
+    res=res+(c==10?"\r\n":String.fromCharCode(c));
+  }
+  console.log(res);
+  return s;
+};
+$hs_ConsoleOut.prototype.ready = function() {
+  // Do not change to write !== 0 (implicit cast makes it work with goog.math.Long
+  return write != 0;
+}
+function $hs_TerminalOut(terminal) {
+  this.isatty = true;
+  this.terminal = terminal;
+};
+$hs_TerminalOut.prototype.read = function(p, s) {
+  return 0;
+};
+$hs_TerminalOut.prototype.write = function(p, s) {
+  var len = s>>>2;
+  var src = new Uint32Array(p[0], p[1]);
+  var res = "";
+  for(var i=0;i!=len;i++) {
+    var c = src[i];
+    res=res+(c==10?"\r\n":String.fromCharCode(c));
+  }
+  this.terminal.io.print(res);
+  return s;
+};
+$hs_TerminalOut.prototype.ready = function() {
+  // Do not change to write !== 0 (implicit cast makes it work with goog.math.Long
+  return write != 0;
+}
+function $hs_TerminalIn(terminal) {
+  this.isatty = true;
+  this.terminal = terminal;
+  this.buffer = "";
+  this.waitingToRead = [];
+  var _this = this;
+  terminal.io.sendString = function(s) {
+    if(s=="\r") {
+       s="\n";
+       terminal.io.print("\r\n");
+    }
+    else {
+       terminal.io.print(s);
+    }
+    _this.buffer = _this.buffer + s;
+
+    // Wake any waiting threads
+    var wake = _this.waitingToRead;
+    _this.waitingToRead = [];
+
+    for(var i = 0; i != wake.length; i++)
+      wake[i]();
+  };
+  terminal.io.onVTKeystroke = terminal.io.sendString;
+};
+$hs_TerminalIn.prototype.read = function(p, s) {
+    var n = this.buffer.length;
+    if( n <= 0 ) {
+        HS_RTS_TRACE && $hs_logger.info('read : end of file');
+        return 0;
+    }
+
+    var maxChars = s>>>2;
+    if( n > maxChars )
+        n = maxChars;
+
+    var dest = new Uint32Array(p[0], p[1]);
+    for(var i=0;i!=n;i++)
+        dest[i]=this.buffer.charCodeAt(i);
+
+    this.buffer = this.buffer.substr(i);
+
+    HS_RTS_TRACE && $hs_logger.info('read : '+(n<<2));
+    return n<<2;
+};
+$hs_TerminalIn.prototype.write = function(p, s) {
+  return -1;
+};
+$hs_TerminalIn.prototype.ready = function(write) {
+  // Do not change to write === 0 (implicit cast makes it work with goog.math.Long
+  return write == 0 && this.buffer.length != 0;
+}
 var $hs_allFiles = [
-    { text:"", fptr:0 }, // stdin
-    { text:"", fptr:0 }, // stdout
-    { text:"", fptr:0 }  // stderr
+    new $hs_MemFile(""), // stdin
+    new $hs_MemFile(""), // stdout
+    new $hs_MemFile("")  // stderr
 ];
-function fdReady(fd) {
-    if (fd >= $hs_allFiles.length) return -1;
+function $hs_setTerminal(terminal) {
+  $hs_allFiles[0] = new $hs_TerminalIn(terminal);
+  $hs_allFiles[1] = new $hs_TerminalOut(terminal);
+  $hs_allFiles[2] = new $hs_TerminalOut(terminal);
+};
+function fdReady(fd, write) {
+    HS_RTS_TRACE && $hs_logger.info('fdReady');
     var f = $hs_allFiles[fd];
-    return f.text.length > f.fptr ? 1 : 0;
+    if (f === undefined || f === null)
+        return $hs_int(-1);
+    return $hs_int(f.ready(write) ? 1 : 0);
 };
 function $hs_findFile(f) {
     for(var i=0;i!==$hs_allFiles.length;i++) {
@@ -2027,7 +2175,9 @@ function __hscore_open(f,h,m) {
                 transport.send(null);
                 if (transport.status == 200 || transport.status == 0) {
                     result = $hs_allFiles.length;
-                    $hs_allFiles[result] = {text:transport.responseText, fptr:0, path:p};
+                    var newFile = new $hs_MemFile(transport.responseText);
+                    newFile.path = p;
+                    $hs_allFiles[result] = newFile;
                 }
                 else {
                    $hs_logError("Error " + transport.status + " opening file: " + p +" ( " + url + " )");
@@ -2039,7 +2189,9 @@ function __hscore_open(f,h,m) {
         else {
             if(m & __hscore_o_creat() !== 0) {
                 result = $hs_allFiles.length;
-                $hs_allFiles[result] = {text:"", fptr:0, path:p};
+                var newFile = new $hs_MemFile("");
+                newFile.path = p;
+                $hs_allFiles[result] = newFile;
             }
         }
     }
@@ -2097,53 +2249,24 @@ function unlockFile(fd) {
 };
 function isatty(fd) {
     HS_RTS_TRACE && $hs_logger.info('isatty');
-    return 0;
+    var f = $hs_allFiles[fd];
+    if (f === undefined || f === null)
+        return $hs_int(-1);
+    return $hs_int(f.isatty ? 1 : 0);
 };
 function read(fd, p, s) {
     HS_RTS_TRACE && $hs_logger.info('read');
     var f = $hs_allFiles[fd];
     if (f === undefined || f === null)
         return $hs_int(-1);
-
-    var n = f.text.length - f.fptr;
-    if( n <= 0 ) {
-        HS_RTS_TRACE && $hs_logger.info('read : end of file');
-        return 0;
-    }
-
-    var maxChars = s>>>2;
-    if( n > maxChars )
-        n = maxChars;
-
-    var end = f.fptr + n;
-    var dest = new Uint32Array(p[0], p[1]);
-    for(var i=f.fptr;i!=end;i++)
-        dest[i]=f.text.charCodeAt(i);
-    f.fptr=end;
-
-    HS_RTS_TRACE && $hs_logger.info('read : '+(n<<2));
-    return n<<2;
+    return $hs_int(f.read(p, s));
 };
 function write(fd, p, s) {
     HS_RTS_TRACE && $hs_logger.info('write');
     var f = $hs_allFiles[fd];
     if (f === undefined || f === null)
-        return -1;
-
-    var len = s>>>2;
-    var src = new Uint32Array(p[0], p[1]);
-    var res = "";
-    for(var i=0;i!=len;i++)
-        res=res+String.fromCharCode(src[i]);
-
-    if(f.fptr <= f.text.length)
-        f.text=f.text+res;
-    else if(f.text.length > f.fptr + len)
-        f.text=f.text.slice(0,f.fptr)+res+f.text.slice(f.fptr+len);
-    else
-        f.text=f.text.slice(0,f.fptr)+res+f.text.slice(f.fptr+len);
-
-    return s;
+        return $hs_int(-1);
+    return $hs_int(f.write(p, s));
 };
 function ghc_strlen(s) {
     return s.indexOf('\x00');
@@ -2288,7 +2411,9 @@ function $hs_runIO(args, onComplete, onException) {
     for (var i = 0; i < args.length; i++)
         newArguments[i] = args[i];
     newArguments[args.length] = $$GHCziPrim_realWorldzh;
-    $hs_force(newArguments, function(i){onComplete(i[1]);}, onException);
+    $hs_force(newArguments,
+      onComplete === undefined ? undefined : function(i){onComplete(i[1]);},
+      onException);
 };
 /**
  * @param {number} i
@@ -2308,7 +2433,44 @@ function $hs_init() {
     $$GHCziTypes_False = $d(1, []);
     $$GHCziTypes_True = $d(2, []);
 };
-var MD5Init = function(ctx) {
+/**
+ * @param {Array.<Object>}      args
+ * @param {function(!Object)}   onComplete
+ * @param {function(!Object)=}  onException
+ */
+function $hs_consoleInitAndRunIO(args, onComplete, onException) {
+  $hs_allFiles[1] = new $hs_ConsoleOut();
+  $hs_allFiles[2] = new $hs_ConsoleOut();
+  $hs_runIO(args, onComplete, onException);
+};
+/**
+ * @param {Array.<Object>}      args
+ * @param {function(!Object)}   onComplete
+ * @param {function(!Object)=}  onException
+ */
+function $hs_htermInitAndRunIO(args, onComplete, onException) {
+  function execHaskell() {
+    var profileName = lib.f.parseQuery(document.location.search)['profile'];
+    var terminal = new hterm.Terminal(profileName);
+    terminal.decorate(document.querySelector('#terminal'));
+
+    $hs_setTerminal(terminal);
+
+    // Useful for console debugging.
+    window.term_ = terminal;
+
+    setTimeout(function() {
+        terminal.setCursorPosition(0, 0);
+        terminal.setCursorVisible(true);
+        terminal.installKeyboard();
+        $hs_runIO(args, onComplete, onException);
+      }, 0);
+  }
+
+  // lib.ensureRuntimeDependencies();
+  hterm.init(execHaskell);
+};
+function MD5Init(ctx) {
     ctx.googCtx = new goog.crypt.Md5();
 };
 function MD5Update(ctx, dat, len) {
