@@ -102,6 +102,9 @@ User cabal packages are installed to something like
 
 Installing cabal-install with GHCJS
 -----------------------------------
+Note: If you prefer to use cabal-dev then you should probably build a new cabal-dev
+so that it knows to copy the javascript files (let us know how you get on).
+
 You need to make a version of cabal-install that uses the new Cabal package.
 So that which you run "cabal install" it will copy .js files and .jsexe directories
 to the install location.
@@ -145,7 +148,105 @@ ghc-pkg unregister text
 ghc-pkg unregister time
 </pre>
 
- 
+Installing the GHCJS package
+----------------------------
+We still need to install GHCJS as well.  This will include the stand alone compiler,
+but the integrated compiler just needs the ghcjs runtime system (rts) and the minifier
+(ghcjs-min) that are also installed.
+
+You already have a clone of ghcjs inside the ghc folder, but we need to clone some
+others to build it.
+
+Note: If you are using a 64bit GHC edit ghc/compiler/ghcjs/rts/rts-options.js and
+change WORD_SIZE_IN_BITS from 32 to a 64 before installing.
+
+<pre>
+git clone git@github.com:ghcjs/ghcjs-closure.git
+cd ghcjs-closure
+cabal install
+cd ..
+git clone git@github.com:ghcjs/ghcjs-hterm.git
+cd ghcjs-closure
+cabal install
+cd ..
+git clone git@github.com:ghcjs/source-map.git
+cd ghcjs-closure
+cabal install
+cd ..
+cd ghc/compiler/ghcjs
+cabal install
+</pre>
+
+Installing and running an application
+-------------------------------------
+First build the application as you normally would.
+
+<pre>
+cabal install hello
+</pre>
+
+Then run ghcjs-min on the .jsexe this will have installed (allong side your normal
+executable)
+
+<pre>
+ghcjs-min ~/.cabal/bin/hello.jsexe
+</pre>
+
+On OS X it will be something like this...
+<pre>
+ghcjs-min ~/Library/Haskell/ghc-7.4.1.20120701/lib/hello-1.0.0.2/bin/hello.jsexe
+</pre>
+
+Most browsers will not run JavaScript off the file system so the next step is to
+share the .jsexe file with a web server.  ALthough you don't need the rts, hterm
+and closure-library shared to run the minified version sharing those as well
+makes the source maps work and allows you to run the unminified JavaScript.
+
+I find the easiest way to do this is to use apache with the FollowSymlinks options
+(not always on by default).
+
+On Linux...
+<pre>
+cd ~/public_html
+ln -s ../.cabal/share/ghcjs-0.1.0/rts .
+ln -s ../.cabal/share/ghcjs-closure-0.1.0.0/closure-library .
+ln -s ../.cabal/share/ghcjs-hterm-0.1.0.0 hterm
+ln -s ../.cabal/bin/hello.jsexe .
+</pre>
+
+On OS X you might need something like this...
+<pre>
+cd ~/Sites
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-0.1.0/share/rts .
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-closure-0.1.0.0/share/closure-library .
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hterm-0.1.0.0/share hterm
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/hello-1.0.0.2/bin/hello.jsexe .
+</pre>
+
+ghcjs-min will set up an index.html file (if one does not already exist in the .jsexe)
+that will run the app with hterm.
+<pre>
+http://127.0.0.1/~hamish/hello.jsexe
+</pre>
+
+You can run the unminified version using hterm.html
+<pre>
+http://127.0.0.1/~hamish/hello.jsexe/hterm.html
+</pre>
+
+If you don't want the overhead of hterm then there is a version that sends stdout
+to the console (and does not currently support stdin)
+<pre>
+http://127.0.0.1/~hamish/hello.jsexe/console.html
+</pre>
+
+If you want to minify the console.html version then run (and make it the one index.html
+uses then run...
+<pre>
+ghcjs-min ~/.cabal/bin/hello.jsexe ~/.cabal/bin/hello.jsexe/console.js
+</pre>
+
+
 Stand Alone 
 ===========
 
