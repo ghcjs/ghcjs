@@ -1232,7 +1232,7 @@ function $tr_Weak(key, value, finalize, realWorld) {
     }
 };
 if(HS_WEAKS) {
-    function $tr_markWeaks(o,m) {
+    $tr_markWeaks = function(o,m) {
         // If the object has weak pointers mark them as still in use
         var ws = o.weaks;
         if(ws !== undefined) {
