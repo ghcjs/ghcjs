@@ -247,124 +247,45 @@ ghcjs-min ~/.cabal/bin/hello.jsexe ~/.cabal/bin/hello.jsexe/console.js
 </pre>
 
 
-Stand Alone 
+Stand-alone 
 ===========
 
+The stand-alone compiler is an attempt to make GHCJS easier to use and install. It does
+not require you to replace your existing GHC. GHCJS stand-alone has its own package
+database in `~/.ghcjs/` and its own programs `ghcjs-pkg` and `ghcjs-cabal` to manage
+and install packages.
 
-Aditional Requirements
-----------------------
-
- * GHC 7.4.1 (it may work with earlier versions, but it has not been tested).
- * GHC 7.4.1 source configured and used to do a build
-
-If you built the integrated version you will have the source ready to go.  If
-not, you will need to follow the steps in Building Prelude.  The unit tests
-will look for the ghc source in `../ghc` and the for the closure compiler
-in `~/closure-compiler/compiler.jar` and library in `~/closure-library`
+The stand-alone version is currently experimental, and the linker might not work yet.
+Cabal-dev is also unsupported at this point.
 
 Installing
 ----------
 
-Code builds as standard haskell package
+First install `ghcjs-closure`, `source-map` and `ghcjs-hterm` from their respective
+repositories
 
-    $ cabal install --enable-tests
+Now install GHCJS itself (assuming you use ghc 7.4.2 for building ghcjs):
 
-Testing
--------
-
-To build the test Java Script run.
-
-    $ cabal test
-
-Open test.html (for minified code) or test_raw.html for unminified code. You may
-need to open these via HTTP for them to work.
+    $ git clone https://github.com/ghcjs/ghcjs.git
+    $ cd ghcjs
+    $ cabal install
+    $ cd ..
     
-Usage
------
+Make sure that the directory containing the `ghcjs`, `ghcjs-pkg` and `ghcjs-cabal` programs is
+in your PATH before proceeding:
 
-To compile Haskell module to Javascript use `ghcjs` command.
+    $ wget http://www.haskell.org/ghc/dist/7.4.2/ghc-7.4.2-src.tar.bz2
+    $ tar -xjvf ghc-7.4.2-src.tar.bz2
+    $ cd ghc-7.4.2
+    $ ./configure
+    $ make -j4
+    $ ghcjs-boot
+    $ cd ..
 
-    $ ghcjs Test.hs
+You should now have a working `ghcjs` installation with the `base`, `ghc-prim`, `rts` and `integer-gmp`
+packages installed, check with:
 
-This command is merely equivalent to the following
-
-    $ ghc --make Test.hs
-
-but it compiles to Javascript instead of native code.
-
-Status
-------
-
-The code is in alpha stage. Feel free to experiment with it as you wish.
-
-Implementation
---------------
-
-Compiler is implemented as [GHC](http://www.haskell.org/ghc/) backend
-using GHC API. And been tested with 32bit GHC 7.4.1.
-
-Building Prelude
-----------------
-
-To play with any Haskell code you'll need Haskell standard library.
-GHC implements standard library as a "base" package.
-You'll need to compile modules from base package.
-
-  1. Download ghc source distribution for the same version of ghc that you
-     use to build ghcjs.
-
-  2. Customize build
-
-         $ cd ghc-x.xx.x
-         $ cd mk
-         $ cp build.mk.sample build.mk
-
-     Edit mk/build.mk
-
-     Set build flower to the quikest: uncomment the line:
-
-         BuildFlavour = quickest
-
-  3. Build ghc
-
-         $ ./configure
-         $ make
-
-  4. You should try to use BuildPackages.hs script. You can build ghc-prim,
-     integer-simple and base packages in
-     examples directory with the following command
-
-         $ cd examples
-         $ ./BuildPackages.hs <path-to-ghc-directory>
-
-     You can build packages manually using instructions below.
-
-=== Building ghc-prim
-
-    $ cd ghc-x.xx.x
-    $ cd libraries/ghc-prim
-    $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/Types.hs
-    $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/*
-
-=== Building base
-
-    $ cd ghc-x.xx.x
-    $ cd libraries/base
-    $ ghcjs -odir <javascript files folder>/base -hidir <javascript files folder>/base -hide-package base -package-name base -I./include -i./dist-install/build -XMagicHash -XExistentialQuantification -XRank2Types -XScopedTypeVariables -XUnboxedTuples -XForeignFunctionInterface -XUnliftedFFITypes -XDeriveDataTypeable -XGeneralizedNewtypeDeriving -XFlexibleInstances -XStandaloneDeriving -XPatternGuards -XEmptyDataDecls -XNoImplicitPrelude -XCPP Prelude.hs
-
-This last magic command line was guessed using
-
-    cabal build -v
-
-to see what options are passed to GHC.
-
-We should really use
-
-    -odir /tmp
-
-option to get read of useless object files, but it seems to be a bug in ghc
-that cause GHC to rely on odir to be the same as hidir wich is mostly the
-case in "normal" GHC usage.
+    $ ghcjs-pkg list
 
 Differences from old version
 ----------------------------
