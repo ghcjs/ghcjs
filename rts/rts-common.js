@@ -1525,7 +1525,10 @@ function _hs_text_decode_utf8(dest, doffptr, src, srcend)
 
     var codepoint = 0;
     while (s != srcend) {
-        if ($hs_decode(state, codepoint, srcarray[s++]) != $hs_UTF8_ACCEPT) {
+        var next = $hs_decode(state, codepoint, srcarray[s++]);
+        state = next[0];
+        codepoint = next[1];
+        if ( state != $hs_UTF8_ACCEPT) {
             if (state != $hs_UTF8_REJECT)
                 continue;
             break;
@@ -1546,6 +1549,40 @@ function _hs_text_decode_utf8(dest, doffptr, src, srcend)
     doffArray[0] = doff;
 
     return [src[0], s, src[2] + (s - src[1])];
+};
+function $hs_fromUtf8(src) {
+    var res = "";
+    var srcarray = new Uint8Array(src[0],0);
+    var s = src[1];
+    var state = $hs_UTF8_ACCEPT;
+
+    var codepoint = 0;
+    while (srcarray[s] != 0) {
+        var next = $hs_decode(state, codepoint, srcarray[s++]);
+        state = next[0];
+        codepoint = next[1];
+        if ( state != $hs_UTF8_ACCEPT) {
+            if (state != $hs_UTF8_REJECT)
+                continue;
+            break;
+        }
+
+        if ((codepoint >>> 0) <= 0xffff)
+            res += String.fromCharCode(codepoint);
+        else {
+            res += String.fromCharCode(0xD7C0 + (codepoint >>> 10));
+            res += String.fromCharCode(0xDC00 + (codepoint & 0x3FF));
+        }
+    }
+
+    /* Error recovery - if we're not in a valid finishing state, back up. */
+//    if (state != $hs_UTF8_ACCEPT)
+//        throw maybe ?;
+
+    return res;
+};
+function $hs_toUtf8(str) {
+    return lib.encodeUTF8(str);
 };
 function memcpy(dest, src, count) {
     if(typeof(src) === 'string') {
