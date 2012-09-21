@@ -2,7 +2,11 @@ function $hs_mkBool(b) {
     return b ? $$GHCziTypes_True:$$GHCziTypes_False;
 };
 function $hs_tagToEnumzh(t) {
-    return $d(t+1, []);
+    n = WORD_SIZE_IN_BITS==32 ? t : t.toNumber();
+    return $d(n+1, []);
+};
+function $hs_dataToTagzh(d) {
+    return $hs_int(d.g-1);
 };
 function $hs_mulIntMayOflozh(a, b) {
     if(WORD_SIZE_IN_BITS==32) {
