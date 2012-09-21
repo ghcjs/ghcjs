@@ -1308,7 +1308,7 @@ function $hs_gcd(a, b) {
         big = y;
     }
     while(!small.isZero()) {
-        var q = big.div(small);
+        var q = big.divide(small);
         var r = big.subtract(q.multiply(small));
         big = small;
         small = r;
