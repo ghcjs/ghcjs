@@ -504,11 +504,15 @@ function $hs_indexWordArrayzh(a, n) {
         return goog.math.Long.fromBits(x[0], x[1]);
     }
 };
+function $hs_checkPointer(p, n) {
+    if(!((p === null && n === 0) || p === n))
+        throw "Pointer Error";
+};
 function $hs_indexAddrArrayzh(a, n) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     var res = a[0].ptrs[n];
-    if(HS_DEBUG && res[2] !== new Uint32Array(a[0])[n])
-        throw "Array Pointer Error";
+    if(HS_DEBUG)
+      $hs_checkPointer(res, new Uint32Array(a[0])[n]);
     return res;
 };
 function $hs_indexFloatArrayzh(a, n) {
@@ -522,8 +526,8 @@ function $hs_indexDoubleArrayzh(a, n) {
 function $hs_indexStablePtrArrayzh(a, n) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     var res = a[0].ptrs[n];
-    if(HS_DEBUG && res[2] !== new Uint32Array(a[0])[n])
-        throw "Array Pointer Error";
+    if(HS_DEBUG)
+      $hs_checkPointer(res, new Uint32Array(a[0])[n]);
     return res;
 };
 function $hs_indexInt8Arrayzh(a, n) {
@@ -607,8 +611,8 @@ function $hs_readWordArrayzh(a, n, s) {
 function $hs_readAddrArrayzh(a, n, s) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     var res = a[0].ptrs[n];
-    if(HS_DEBUG && res[2] !== new Uint32Array(a[0])[n])
-        throw "Array Pointer Error";
+    if(HS_DEBUG)
+      $hs_checkPointer(res, new Uint32Array(a[0])[n]);
     return [s, res];
 };
 function $hs_readFloatArrayzh(a, n, s) {
@@ -622,8 +626,8 @@ function $hs_readDoubleArrayzh(a, n, s) {
 function $hs_readStablePtrArrayzh(a, n, s) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     var res = a[0].ptrs[n];
-    if(HS_DEBUG && res[2] !== new Uint32Array(a[0])[n])
-        throw "Array Pointer Error";
+    if(HS_DEBUG)
+      $hs_checkPointer(res, new Uint32Array(a[0])[n]);
     return [s, res];
 };
 function $hs_readInt8Arrayzh(a, n, s) {
@@ -715,7 +719,7 @@ function $hs_writeWordArrayzh(a, n, v, s) {
 function $hs_writeAddrArrayzh(a, n, v, s) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     a[0].ptrs[n] = v;
-    new Uint32Array(a[0])[n] = v[2];
+    new Uint32Array(a[0])[n] = (v === null ? 0 : v[2]);
     return s;
 };
 function $hs_writeFloatArrayzh(a, n, v, s) {
@@ -731,7 +735,7 @@ function $hs_writeDoubleArrayzh(a, n, v, s) {
 function $hs_writeStablePtrArrayzh(a, n, v, s) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     a[0].ptrs[n] = v;
-    new Uint32Array(a[0])[n] = v[2];
+    new Uint32Array(a[0])[n] = (v === null ? 0 : v[2]);
     return s;
 };
 function $hs_writeInt8Arrayzh(a, n, v, s) {
@@ -907,8 +911,8 @@ function $hs_indexWordOffAddrzh(a, n) {
 function $hs_indexAddrOffAddrzh(a, n) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     var res = a[0].ptrs[a[1]+(n<<2)];
-    if(HS_DEBUG && res[2] !== new Uint32Array(a[0],a[1]+(n<<2))[0])
-        throw "Array Pointer Error";
+    if(HS_DEBUG)
+      $hs_checkPointer(res, new Uint32Array(a[0],a[1]+(n<<2))[0]);
     return res;
 };
 function $hs_indexFloatOffAddrzh(a, n) {
@@ -922,8 +926,8 @@ function $hs_indexDoubleOffAddrzh(a, n) {
 function $hs_indexStablePtrOffAddrzh(a, n) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     var res = a[0].ptrs[a[1]+(n<<2)];
-    if(HS_DEBUG && res[2] !== new Uint32Array(a[0],a[1]+(n<<2))[0])
-        throw "Array Pointer Error";
+    if(HS_DEBUG)
+      $hs_checkPointer(res, new Uint32Array(a[0],a[1]+(n<<2))[0]);
     return res;
 };
 function $hs_indexInt8OffAddrzh(a, n) {
@@ -1015,8 +1019,8 @@ function $hs_readWordOffAddrzh(a, n, s) {
 function $hs_readAddrOffAddrzh(a, n, s) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     var res = a[0].ptrs[a[1]+(n<<2)];
-    if(HS_DEBUG && a[2] !== new Uint32Array(a[0],a[1]+(n<<2))[0])
-        throw "Array Pointer Error";
+    if(HS_DEBUG)
+      $hs_checkPointer(res, new Uint32Array(a[0],a[1]+(n<<2))[0]);
     return [s, res];
 };
 function $hs_readFloatOffAddrzh(a, n, s) {
@@ -1030,17 +1034,19 @@ function $hs_readDoubleOffAddrzh(a, n, s) {
 function $hs_readStablePtrOffAddrzh(a, n, s) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     var res = a[0].ptrs[a[1]+(n<<2)];
-    if(HS_DEBUG && a[2] !== new Uint32Array(a[0],a[1]+(n<<2))[0])
-        throw "Array Pointer Error";
+    if(HS_DEBUG)
+      $hs_checkPointer(res, new Uint32Array(a[0],a[1]+(n<<2))[0])
     return [s, res];
 };
 function $hs_readInt8OffAddrzh(a, n, s) {
-    if(WORD_SIZE_IN_BITS==32) {
-        return [s, new Int8Array(a[0],a[1]+n)[0]];
-    }
-    else {
-        return [s, goog.math.Long.fromNumber(new Int8Array(a[0],a[1]+n.toNumber())[0])];
-    }
+    n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
+    if(typeof(a) === 'string')
+        var res = n==a.length?0:a.charCodeAt(n);
+    else if(typeof(a[0]) === 'string')
+        var res = n==a[0].length?0:a[0].charCodeAt(a[1]+n);
+    else
+        var res = new Uint8Array(a[0],a[1]+n)[0];
+    return [s, WORD_SIZE_IN_BITS==32 ? res : goog.math.Long.fromBits(res)];
 };
 function $hs_readInt16OffAddrzh(a, n, s) {
     if(WORD_SIZE_IN_BITS==32) {
@@ -1128,7 +1134,7 @@ function $hs_writeWordOffAddrzh(a, n, v, s) {
 function $hs_writeAddrOffAddrzh(a, n, v, s) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     a[0].ptrs[n] = v;
-    (new Uint32Array(a[0],a[1]+(n<<2)))[0] = a[2];
+    (new Uint32Array(a[0],a[1]+(n<<2)))[0] = (v === null ? 0 : v[2]);
     return s;
 };
 function $hs_writeFloatOffAddrzh(a, n, v, s) {
@@ -1144,7 +1150,7 @@ function $hs_writeDoubleOffAddrzh(a, n, v, s) {
 function $hs_writeStablePtrOffAddrzh(a, n, v, s) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
     a[0].ptrs[n] = v;
-    (new Uint32Array(a[0],a[1]+(n<<2)))[0] = a[2];
+    (new Uint32Array(a[0],a[1]+(n<<2)))[0] = (v === null ? 0 : v[2]);
     return s;
 };
 function $hs_writeInt8OffAddrzh(a, n, v, s) {
