@@ -316,7 +316,7 @@ if(WORD_SIZE_IN_BITS==32) {
      * @param {!number} n
      * @param {Object=} s
      */
-    function $hs_newByteArrayzh(n, s) {
+    $hs_newByteArrayzh = function(n, s) {
         var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
         result[0].ptrs=[];
         $hs_ptrBase += n;
@@ -326,7 +326,7 @@ if(WORD_SIZE_IN_BITS==32) {
      * @param {!number} n
      * @param {Object=} s
      */
-    function $hs_newPinnedByteArrayzh(n, s) {
+    $hs_newPinnedByteArrayzh = function(n, s) {
         var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
         result[0].ptrs=[];
         $hs_ptrBase += n;
@@ -337,7 +337,7 @@ if(WORD_SIZE_IN_BITS==32) {
      * @param {!number} k
      * @param {Object=} s
      */
-    function $hs_newAlignedPinnedByteArrayzh(n, k, s) {
+    $hs_newAlignedPinnedByteArrayzh = function(n, k, s) {
         $hs_ptrBase += $hs_ptrBase%k;
         var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
         result[0].ptrs=[];
@@ -353,7 +353,7 @@ if (WORD_SIZE_IN_BITS==64) {
      * @param {!goog.math.Long} n
      * @param {Object=} s
      */
-    function $hs_newByteArrayzh(n, s) {
+    $hs_newByteArrayzh = function(n, s) {
         var result = [new ArrayBuffer(n.toInt()), 0, $hs_ptrBase];
         result[0].ptrs=[];
         $hs_ptrBase = $hs_ptrBase.add(n);
@@ -363,7 +363,7 @@ if (WORD_SIZE_IN_BITS==64) {
      * @param {!goog.math.Long} n
      * @param {Object=} s
      */
-    function $hs_newPinnedByteArrayzh(n, s) {
+    $hs_newPinnedByteArrayzh = function(n, s) {
         var result = [new ArrayBuffer(n.toInt()), 0, $hs_ptrBase];
         result[0].ptrs=[];
         $hs_ptrBase = $hs_ptrBase.add(n);
@@ -374,7 +374,7 @@ if (WORD_SIZE_IN_BITS==64) {
      * @param {!goog.math.Long} k
      * @param {Object=} s
      */
-    function $hs_newAlignedPinnedByteArrayzh(n, k, s) {
+    $hs_newAlignedPinnedByteArrayzh = function(n, k, s) {
         $hs_ptrBase = $hs_ptrBase.add(goog.math.Long.fromInt($hs_ptrBase.toInt() % k.toInt()));
         var result = [new ArrayBuffer(n.toNumber()), 0, $hs_ptrBase];
         result[0].ptrs=[];
@@ -1731,79 +1731,79 @@ function $hs_unsignedCompare(a,b) {
 
 if(WORD_SIZE_IN_BITS == 32) {
     // Safer 32 bit multiplication than just a * b
-    function $hs_timesIntzh(a, b) {
+    $hs_timesIntzh = function(a, b) {
        return goog.math.Long(a,0).multiply(goog.math.Long(b,0)).getLowBits(); };
 }
 
 if(WORD_SIZE_IN_BITS == 64) {
     // Int primatives for 64bit
-    function $hs_quotIntzh(a, b) {
+    $hs_quotIntzh = function(a, b) {
        return a.div(b); };
-    function $hs_remIntzh(a, b) {
+    $hs_remIntzh = function(a, b) {
        return a.modulo(b); };
-    function $hs_int2Wordzh(a) {
+    $hs_int2Wordzh = function(a) {
        return a; };
-    function $hs_int2Floatzh(a) {
+    $hs_int2Floatzh = function(a) {
        return a.toNumber(); };
-    function $hs_int2Doublezh(a) {
+    $hs_int2Doublezh = function(a) {
        return a.toNumber(); };
-    function $hs_uncheckedIShiftLzh(a, b) {
+    $hs_uncheckedIShiftLzh = function(a, b) {
        return a.shiftLeft(b.toNumber()); };
-    function $hs_uncheckedIShiftRAzh(a, b) {
+    $hs_uncheckedIShiftRAzh = function(a, b) {
        return a.shiftRight(b.toNumber()); };
-    function $hs_uncheckedIShiftRLzh(a, b) {
+    $hs_uncheckedIShiftRLzh = function(a, b) {
        return a.shiftRight(b.toNumber()); };
 
     // Word primatives for 64bit
-    function $hs_quotWordzh(a, b) {
+    $hs_quotWordzh = function(a, b) {
        return a.div(b); };   // TODO make unsigned
-    function $hs_remWordzh(a, b) {
+    $hs_remWordzh = function(a, b) {
        return a.modulo(b); }; // TODO make unsigned
-    function $hs_uncheckedShiftLzh(a, b) {
+    $hs_uncheckedShiftLzh = function(a, b) {
        return a.shiftLeft(b.toNumber()); };
-    function $hs_uncheckedShiftRLzh(a, b) {
+    $hs_uncheckedShiftRLzh = function(a, b) {
        return a.shiftRight(b.toNumber()); };
-    function $hs_word2Intzh(a) {
+    $hs_word2Intzh = function(a) {
        return a; };
-    function $hs_gtWordzh(a, b) {
+    $hs_gtWordzh = function(a, b) {
        return $hs_mkBool($hs_unsignedCompare(a, b) > 0); };
-    function $hs_geWordzh(a, b) {
+    $hs_geWordzh = function(a, b) {
        return $hs_mkBool($hs_unsignedCompare(a, b) >= 0); };
-    function $hs_eqWordzh(a, b) {
+    $hs_eqWordzh = function(a, b) {
        return $hs_mkBool(a.equals(b)); };
-    function $hs_neWordzh(a, b) {
+    $hs_neWordzh = function(a, b) {
        return $hs_mkBool(a.notEquals(b)); };
-    function $hs_ltWordzh(a, b) {
+    $hs_ltWordzh = function(a, b) {
        return $hs_mkBool($hs_unsignedCompare(a, b) < 0); };
-    function $hs_leWordzh(a, b) {
+    $hs_leWordzh = function(a, b) {
        return $hs_mkBool($hs_unsignedCompare(a, b) <= 0); };
 
-    function $hs_intToIntzh(i) {
+    $hs_intToIntzh = function(i) {
        return goog.math.Long.fromInt(i); };
-    function $hs_intzhToInt(i) {
+    $hs_intzhToInt = function(i) {
        return i.toInt(); };
-    function $hs_int64ToWordzh(i) {
+    $hs_int64ToWordzh = function(i) {
        return i; };
-    function $hs_wordToWordzh(i) {
+    $hs_wordToWordzh = function(i) {
        return goog.math.Long.fromBits(i,0); };
-    function $hs_wordzhToWord(i) {
+    $hs_wordzhToWord = function(i) {
        return i.getLowBits(); };
-    function $hs_word64ToIntzh(i) {
+    $hs_word64ToIntzh = function(i) {
        return i; };
 
-    function $hs_narrow8Intzh(i) {
+    $hs_narrow8Intzh = function(i) {
        low = i.getLowBits();
        return goog.math.Long.fromNumber((low & 0x7F) - (low & 0x80)); };
-    function $hs_narrow16Intzh(i) {
+    $hs_narrow16Intzh = function(i) {
        low = i.getLowBits();
        return goog.math.Long.fromNumber((low & 0x7FFF) - (low & 0x8000)); };
-    function $hs_narrow32Intzh(i) {
+    $hs_narrow32Intzh = function(i) {
        return goog.math.Long.fromNumber(i.getLowBits()|0); };
-    function $hs_narrow8Wordzh(i) {
+    $hs_narrow8Wordzh = function(i) {
        return goog.math.Long.fromBits(i.getLowBits() & 0xFF, 0); };
-    function $hs_narrow16Wordzh(i) {
+    $hs_narrow16Wordzh = function(i) {
        return goog.math.Long.fromBits(i.getLowBits() & 0xFFFF, 0); };
-    function $hs_narrow32Wordzh(i) {
+    $hs_narrow32Wordzh = function(i) {
        return goog.math.Long.fromBits(i.getLowBits(), 0); };
 }
 

@@ -102,6 +102,9 @@ User cabal packages are installed to something like
 
 Installing cabal-install with GHCJS
 -----------------------------------
+Note: If you prefer to use cabal-dev then you should probably build a new cabal-dev
+so that it knows to copy the javascript files (let us know how you get on).
+
 You need to make a version of cabal-install that uses the new Cabal package.
 So that which you run "cabal install" it will copy .js files and .jsexe directories
 to the install location.
@@ -145,125 +148,144 @@ ghc-pkg unregister text
 ghc-pkg unregister time
 </pre>
 
- 
-Stand Alone 
+Installing the GHCJS package
+----------------------------
+We still need to install GHCJS as well.  This will include the stand alone compiler,
+but the integrated compiler just needs the ghcjs runtime system (rts) and the minifier
+(ghcjs-min) that are also installed.
+
+You already have a clone of ghcjs inside the ghc folder, but we need to clone some
+others to build it.
+
+Note: If you are using a 64bit GHC edit ghc/compiler/ghcjs/rts/rts-options.js and
+change WORD_SIZE_IN_BITS from 32 to a 64 before installing.
+
+<pre>
+git clone git@github.com:ghcjs/ghcjs-closure.git
+cd ghcjs-closure
+cabal install
+cd ..
+git clone git@github.com:ghcjs/ghcjs-hterm.git
+cd ghcjs-closure
+cabal install
+cd ..
+git clone git@github.com:ghcjs/source-map.git
+cd ghcjs-closure
+cabal install
+cd ..
+cd ghc/compiler/ghcjs
+cabal install
+</pre>
+
+Installing and running an application
+-------------------------------------
+First build the application as you normally would.
+
+<pre>
+cabal install hello
+</pre>
+
+Then run ghcjs-min on the .jsexe this will have installed (allong side your normal
+executable)
+
+<pre>
+ghcjs-min ~/.cabal/bin/hello.jsexe
+</pre>
+
+On OS X it will be something like this...
+<pre>
+ghcjs-min ~/Library/Haskell/ghc-7.4.1.20120701/lib/hello-1.0.0.2/bin/hello.jsexe
+</pre>
+
+Most browsers will not run JavaScript off the file system so the next step is to
+share the .jsexe file with a web server.  ALthough you don't need the rts, hterm
+and closure-library shared to run the minified version sharing those as well
+makes the source maps work and allows you to run the unminified JavaScript.
+
+I find the easiest way to do this is to use apache with the FollowSymlinks options
+(not always on by default).
+
+On Linux...
+<pre>
+cd ~/public_html
+ln -s ../.cabal/share/ghcjs-0.1.0/rts .
+ln -s ../.cabal/share/ghcjs-closure-0.1.0.0/closure-library .
+ln -s ../.cabal/share/ghcjs-hterm-0.1.0.0 hterm
+ln -s ../.cabal/bin/hello.jsexe .
+</pre>
+
+On OS X you might need something like this...
+<pre>
+cd ~/Sites
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-0.1.0/share/rts .
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-closure-0.1.0.0/share/closure-library .
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hterm-0.1.0.0/share hterm
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/hello-1.0.0.2/bin/hello.jsexe .
+</pre>
+
+ghcjs-min will set up an index.html file (if one does not already exist in the .jsexe)
+that will run the app with hterm.
+<pre>
+http://127.0.0.1/~hamish/hello.jsexe
+</pre>
+
+You can run the unminified version using hterm.html
+<pre>
+http://127.0.0.1/~hamish/hello.jsexe/hterm.html
+</pre>
+
+If you don't want the overhead of hterm then there is a version that sends stdout
+to the console (and does not currently support stdin)
+<pre>
+http://127.0.0.1/~hamish/hello.jsexe/console.html
+</pre>
+
+If you want to minify the console.html version then run (and make it the one index.html
+uses then run...
+<pre>
+ghcjs-min ~/.cabal/bin/hello.jsexe ~/.cabal/bin/hello.jsexe/console.js
+</pre>
+
+
+Stand-alone 
 ===========
 
+The stand-alone compiler is an attempt to make GHCJS easier to use and install. It does
+not require you to replace your existing GHC. GHCJS stand-alone has its own package
+database in `~/.ghcjs/` and its own programs `ghcjs-pkg` and `ghcjs-cabal` to manage
+and install packages.
 
-Aditional Requirements
-----------------------
-
- * GHC 7.4.1 (it may work with earlier versions, but it has not been tested).
- * GHC 7.4.1 source configured and used to do a build
-
-If you built the integrated version you will have the source ready to go.  If
-not, you will need to follow the steps in Building Prelude.  The unit tests
-will look for the ghc source in `../ghc` and the for the closure compiler
-in `~/closure-compiler/compiler.jar` and library in `~/closure-library`
+The stand-alone version is currently experimental, and the linker might not work yet.
+Cabal-dev is also unsupported at this point.
 
 Installing
 ----------
 
-Code builds as standard haskell package
+First install `ghcjs-closure`, `source-map` and `ghcjs-hterm` from their respective
+repositories
 
-    $ cabal install --enable-tests
+Now install GHCJS itself (assuming you use ghc 7.4.2 for building ghcjs):
 
-Testing
--------
-
-To build the test Java Script run.
-
-    $ cabal test
-
-Open test.html (for minified code) or test_raw.html for unminified code. You may
-need to open these via HTTP for them to work.
+    $ git clone https://github.com/ghcjs/ghcjs.git
+    $ cd ghcjs
+    $ cabal install
+    $ cd ..
     
-Usage
------
+Make sure that the directory containing the `ghcjs`, `ghcjs-pkg` and `ghcjs-cabal` programs is
+in your PATH before proceeding:
 
-To compile Haskell module to Javascript use `ghcjs` command.
+    $ wget http://www.haskell.org/ghc/dist/7.4.2/ghc-7.4.2-src.tar.bz2
+    $ tar -xjvf ghc-7.4.2-src.tar.bz2
+    $ cd ghc-7.4.2
+    $ ./configure
+    $ make -j4
+    $ ghcjs-boot
+    $ cd ..
 
-    $ ghcjs Test.hs
+You should now have a working `ghcjs` installation with the `base`, `ghc-prim`, `rts` and `integer-gmp`
+packages installed, check with:
 
-This command is merely equivalent to the following
-
-    $ ghc --make Test.hs
-
-but it compiles to Javascript instead of native code.
-
-Status
-------
-
-The code is in alpha stage. Feel free to experiment with it as you wish.
-
-Implementation
---------------
-
-Compiler is implemented as [GHC](http://www.haskell.org/ghc/) backend
-using GHC API. And been tested with 32bit GHC 7.4.1.
-
-Building Prelude
-----------------
-
-To play with any Haskell code you'll need Haskell standard library.
-GHC implements standard library as a "base" package.
-You'll need to compile modules from base package.
-
-  1. Download ghc source distribution for the same version of ghc that you
-     use to build ghcjs.
-
-  2. Customize build
-
-         $ cd ghc-x.xx.x
-         $ cd mk
-         $ cp build.mk.sample build.mk
-
-     Edit mk/build.mk
-
-     Set build flower to the quikest: uncomment the line:
-
-         BuildFlavour = quickest
-
-  3. Build ghc
-
-         $ ./configure
-         $ make
-
-  4. You should try to use BuildPackages.hs script. You can build ghc-prim,
-     integer-simple and base packages in
-     examples directory with the following command
-
-         $ cd examples
-         $ ./BuildPackages.hs <path-to-ghc-directory>
-
-     You can build packages manually using instructions below.
-
-=== Building ghc-prim
-
-    $ cd ghc-x.xx.x
-    $ cd libraries/ghc-prim
-    $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/Types.hs
-    $ ghcjs -odir <javascript files folder>/ghc-prim -hidir <javascript files folder>/ghc-prim -cpp -fglasgow-exts -package-name ghc-prim GHC/*
-
-=== Building base
-
-    $ cd ghc-x.xx.x
-    $ cd libraries/base
-    $ ghcjs -odir <javascript files folder>/base -hidir <javascript files folder>/base -hide-package base -package-name base -I./include -i./dist-install/build -XMagicHash -XExistentialQuantification -XRank2Types -XScopedTypeVariables -XUnboxedTuples -XForeignFunctionInterface -XUnliftedFFITypes -XDeriveDataTypeable -XGeneralizedNewtypeDeriving -XFlexibleInstances -XStandaloneDeriving -XPatternGuards -XEmptyDataDecls -XNoImplicitPrelude -XCPP Prelude.hs
-
-This last magic command line was guessed using
-
-    cabal build -v
-
-to see what options are passed to GHC.
-
-We should really use
-
-    -odir /tmp
-
-option to get read of useless object files, but it seems to be a bug in ghc
-that cause GHC to rely on odir to be the same as hidir wich is mostly the
-case in "normal" GHC usage.
+    $ ghcjs-pkg list
 
 Differences from old version
 ----------------------------
