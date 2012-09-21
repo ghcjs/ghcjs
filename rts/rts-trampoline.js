@@ -155,6 +155,10 @@ function $tr_suspend(resume, live) {
  * @param {Object} next
  */
 function $tr_Yield(next) {
+    if(HS_DEBUG) {
+        if(next === undefined)
+            throw "Next function undefined!";
+    }
     this.next = next;
 };
 if(HS_WEAKS) {
@@ -173,6 +177,10 @@ function $tr_yield(next) {
  * @param {Object} result
  */
 function $tr_Result(result) {
+    if(HS_DEBUG) {
+        if(result === undefined)
+            throw "Return value undefined!";
+    }
     this.value = result;
 };
 if(HS_WEAKS) {
@@ -405,6 +413,7 @@ function $tr_Thread(next, onComplete, onException) {
   this._stack = [];
   this._stackMax = 1000000;
   this._state = "run";
+  this._traceLog = [];
   this.waitingThreads = [];
   this._onComplete = onComplete;
   this._onException = onException;
@@ -447,6 +456,12 @@ $tr_Thread.prototype = {
     while(this._stack.length !== 0 && handler === null) {
       handler = this._stack.pop()[0];
     }
+    if(HS_TRACE) {
+        // Handy for debug
+        this._traceLog.push(handler);
+        if (this._traceLog.length > 100)
+          this._traceLog = Array.prototype.slice.call(this._traceLog, 1, this._traceLog.length);
+    }
     return handler;
   },
 
@@ -455,13 +470,18 @@ $tr_Thread.prototype = {
     while(this._stack.length !== 0 && catcher === null) {
       catcher = this._stack.pop()[1];
     }
+    if(HS_TRACE) {
+        // Handy for debug
+        this._traceLog.push(catcher);
+        if (this._traceLog.length > 100)
+          this._traceLog = Array.prototype.slice.call(this._traceLog, 1, this._traceLog.length);
+    }
     return catcher;
   },
 
   _run : function() {
     var r = this.next;
     var isException = this.isException;
-    var traceLog = [];
     var tickLimit = 10000;
     var limit = tickLimit;
     while (true) {
@@ -479,9 +499,9 @@ $tr_Thread.prototype = {
 
       if(HS_TRACE) {
           // Handy for debug
-          traceLog.push(r);
-          if (traceLog.length > 100)
-            traceLog = Array.prototype.slice.call(traceLog, 1, traceLog.length);
+          this._traceLog.push(r);
+          if (this._traceLog.length > 100)
+            this._traceLog = Array.prototype.slice.call(this._traceLog, 1, this._traceLog.length);
       }
 
       try {
