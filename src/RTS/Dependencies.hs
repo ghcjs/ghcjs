@@ -27,8 +27,8 @@ rtsDefaultOptions = getDataFileName "rts/rts-options.js"
 rtsSrcs :: Variant -> [FilePath]
 rtsSrcs v =
     case variantCallingConvention v of
-      Plain      -> [ "rts-common.js", "rts-plain.js" ]
-      Trampoline -> [ "rts-common.js", "rts-trampoline.js" ]
+      Plain      -> [ "rts-common.js", "rts-webkit.js", "rts-plain.js" ]
+      Trampoline -> [ "rts-common.js", "rts-webkit.js", "rts-trampoline.js" ]
 
 closureDeps :: [FilePath]
 closureDeps =
