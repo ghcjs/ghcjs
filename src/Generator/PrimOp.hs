@@ -179,7 +179,9 @@ primOp DoubleDivOp [a, b] = PlainE $ Js.divide a b
 
 primOp DoubleNegOp [a]    = PlainE $ Js.unaryMinus a
 
+#if WORD_SIZE_IN_BITS == 32
 primOp Double2IntOp [a]   = PlainE $ Js.bitOr a (Js.int (0 :: Int))
+#endif
 
 primOp Double2FloatOp [a] = PlainE $ a
 
@@ -198,7 +200,9 @@ primOp FloatDivOp  [a, b] = PlainE $ Js.divide a b
 
 primOp FloatNegOp  [a]    = PlainE $ Js.unaryMinus a
 
+#if WORD_SIZE_IN_BITS == 32
 primOp Float2IntOp [a]    = PlainE $ Js.bitOr a (Js.int (0 :: Int))
+#endif
 
 primOp Float2DoubleOp [a] = PlainE $ a
 

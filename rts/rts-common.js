@@ -158,6 +158,12 @@ function $hs_tanhDoublezh(a) {
 function $hs_ztztzhzh(a, b) {
     return Math.pow(a,b);
 };
+function $hs_double2Intzh(f) {
+    return $hs_int(f|0);
+};
+function $hs_float2Intzh(f) {
+    return $hs_int(f|0);
+};
 function $hs_decodeDoublezu2Intzh(x) {
     if( x < 0 ) {
         var result = $hs_decodeDoublezu2Intzh(-x);
