@@ -411,7 +411,7 @@ function $tr_Thread(next, onComplete, onException) {
   this.next = next;
   this.isException = false;
   this._stack = [];
-  this._stackMax = 1000000;
+  this._stackMax = 10000000;
   this._state = "run";
   this._traceLog = [];
   this.waitingThreads = [];
