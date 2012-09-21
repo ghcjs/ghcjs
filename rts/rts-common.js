@@ -1197,12 +1197,8 @@ function $hs_writeWord64OffAddrzh(a, n, v, s) {
     x[1] = v.getHighBits();
     return s;
 };
-function $hs_alert(str) {
-    window.alert(str);
-};
 function $hs_logAny(c, str) {
-    var el = document.getElementById('log');
-    el.innerHTML = el.innerHTML + c + ": " + str + '<br/>\n';
+    console.log(c + ": " + str);
 };
 function $hs_logInfo(str) {
     $hs_logAny("INFO", str);
@@ -2523,6 +2519,19 @@ function $hs_htermInitAndRunIO(args, onComplete, onException) {
   // lib.ensureRuntimeDependencies();
   hterm.init(execHaskell);
 };
+function $hs_nodeInitAndRunIO(args, onComplete, onException) {
+  $hs_init();
+  $hs_consoleInitAndRunIO([$$$Main_main],
+    onComplete !== undefined ? onComplete : function(res) {
+      $hs_force([res], function(i) {
+          if(i.g === 1)
+          process.exit(WORD_SIZE_IN_BITS == 32 ? i.v[0] : i.v[0].toNumber());
+      });
+    },
+    onException !== undefined ? onException : function(e) {
+      console.log("Error : " + e);
+    });
+};
 function MD5Init(ctx) {
     ctx.googCtx = new goog.crypt.Md5();
 };
@@ -2568,4 +2577,30 @@ function ghc_wrapper_d1rx_getrusage(who, usage) {
         x[3] = 0;
         return goog.math.Long.ZERO;
     }
+};
+function g_object_ref(p) {
+  return p;
+};
+function g_free(p) {
+}
+function ghcjs_currentWindow() {
+  return window;
+};
+function ghcjs_currentDocument() {
+  return document;
+};
+function webkit_web_view_get_dom_document(w) {
+  return w.document;
+};
+function gtk2hs_closure_new(f) {
+  return f;
+};
+function g_type_check_instance_is_a(o, t) {
+  return $hs_int(o instanceof t ? 1 : 0);
+};
+function webkit_dom_event_target_add_event_listener_closure(obj, eventName, f, bubble) {
+  obj.addEventListener($hs_fromUtf8(eventName), function(e) {
+    $hs_runIO([f, {g:1, v:[obj]}, {g:1,v:[e]}]);
+  });
+  return $hs_int(1);
 };

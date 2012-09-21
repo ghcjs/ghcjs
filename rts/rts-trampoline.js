@@ -998,7 +998,7 @@ $Loader.prototype = {
     hscall: function() {
         var this_ = this;
         var args = arguments;
-        return hs_loadBundles(this.bundles, function() {
+        return $hs_loadBundles(this.bundles, function() {
             var newFunction = this_.get();
             return newFunction.hscall.apply(newFunction, args);
         });
@@ -1007,7 +1007,7 @@ $Loader.prototype = {
     notEvaluated: true,
     evaluate: function() {
         var this_ = this;
-        return hs_loadBundles(this.bundles, function() {
+        return $hs_loadBundles(this.bundles, function() {
             var newFunction = this_.get();
             return newFunction.evaluate();
         });
@@ -1024,7 +1024,32 @@ if(HS_WEAKS) {
         return [];
     };
 }
-function hs_loadBundles(bundles, f) {
+function $hs_evalBundle(bundle, path, evalCode) {
+    var waiting = $tr_Scheduler.waitingForBundle[bundle];
+    try {
+        // Evaluate the response
+        $hs_loading=true;
+        evalCode();
+        $hs_loading=false;
+        $hs_loaded[bundle] = true; // Don't need to load this again
+
+        // Wake all the threads waiting for this
+        for(var w = 0; w !== waiting.length; w++) {
+            $tr_Scheduler.schedule(waiting[w]);
+        }
+    } catch (e) {
+        $hs_logError("Error evaluating function set: " + path + ":\n" + e);
+        for(var w = 0; w !== waiting.length; w++) {
+            waiting[w].next = e;
+            waiting[w].isException = true;
+            $tr_Scheduler.schedule(waiting[w]);
+        }
+    }
+    $tr_Scheduler.waitingForBundle[bundle] = [];
+    if(!$tr_Scheduler.running)
+        $tr_Scheduler.runWaiting();
+};
+function $hs_loadBundles(bundles, f) {
     if(bundles.length===0)
         return f();
 
@@ -1037,53 +1062,51 @@ function hs_loadBundles(bundles, f) {
 
             var path = $hs_loadPath + "hs" + bundle + (COMPILED ? "min.js" : ".js");
 
-            var transport = new XMLHttpRequest();
+            if(typeof(XMLHttpRequest) !== 'undefined') {
+                var transport = new XMLHttpRequest();
 
-            // Set up function to handle the response
-            transport.onreadystatechange = function() {
-                if(transport.readyState === 4) {
-                    var waiting = $tr_Scheduler.waitingForBundle[bundle];
-                    try {
-                        // Evaluate the response
-                        $hs_loading=true;
-                        goog.globalEval(transport.responseText
-                            + "\n//@ sourceURL="+path);
-                        $hs_loading=false;
-                        $hs_loaded[bundle] = true; // Don't need to load this again
+                // Set up function to handle the response
+                transport.onreadystatechange = function() {
+                    if(transport.readyState === 4) {
+                      $hs_evalBundle(bundle, path, function(){
+                        goog.globalEval(transport.responseText+"\n//@ sourceURL="+path);
+                      });
+                    }
+                };
 
-                        // Wake all the threads waiting for this
+                // Send the request
+                transport.open("GET", path, false);
+                transport.send(null);
+            }
+            else {
+                require('fs').readFile(path, 'utf8', function(err, data) {
+                    if(err) {
+                        $hs_logError("Error reading : " + path + ":\n" + err);
                         for(var w = 0; w !== waiting.length; w++) {
-                            $tr_Scheduler.schedule(waiting[w]);
-                        }
-                    } catch (e) {
-                        $hs_logError("Error evaluating function set: " + path + ":\n" + e);
-                        for(var w = 0; w !== waiting.length; w++) {
-                            waiting[w].next = e;
+                            waiting[w].next = err;
                             waiting[w].isException = true;
                             $tr_Scheduler.schedule(waiting[w]);
                         }
                     }
-                    $tr_Scheduler.waitingForBundle[bundle] = [];
-                    if(!$tr_Scheduler.running)
-                        $tr_Scheduler.runWaiting();
-                }
-            };
-
-            // Send the request
-            transport.open("GET", path, false);
-            transport.send(null);
+                    else {
+                      $hs_evalBundle(bundle, path, function() {
+                        eval(data);
+                      });
+                    }
+                });
+            }
         }
         else {
             // Add this thread to the list of those waiting for the function set
             $tr_Scheduler.waitingForBundle[bundle].push($tr_Scheduler.currentThread);
         }
         return new $tr_Suspend(function(_) {
-            return hs_loadBundles(bundles, f);
+            return $hs_loadBundles(bundles, f);
         }, []);
     }
     else {
         // This one is loaded already
-        return hs_loadBundles(bundles, f);
+        return $hs_loadBundles(bundles, f);
     }
 };
 
