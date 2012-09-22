@@ -4,6 +4,6 @@ window.onload = function(){
 
   // Must be called first
   $hs_init();
-  $hs_htermInitAndRunIO([$$$Main_main]);
+  $hs_htermInitAndRunIO([$$Main_main]);
 }
 

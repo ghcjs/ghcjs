@@ -48,7 +48,7 @@ appendDeps a b = DependencyInfo
                     (functionDeps a ++ functionDeps b)
 
 link :: Variant -> String -> [FilePath] -> [FilePath] -> [ModuleName] -> [String] -> IO [String]
-link var out searchPath objFiles pageModules pageFunctions = do
+link var out searchPath objFiles pageModules _pageFunctions = do
     -- Output a the search path that should be used for dynamic loading
     writeFile (out </> "paths.js") $ "$hs_path = " ++ show searchPath
 
@@ -65,24 +65,18 @@ link var out searchPath objFiles pageModules pageFunctions = do
 
     let deps = functionDeps allDeps
 
+        -- main and anything that starts with lazyLoad_
+        isPageSymbol s = s == "$$Main_main" || "_lazzyLoadzu" `isPrefixOf` (dropWhile (/='_') s)
+        symbol (_, s, _) = s
+
+        -- Nothing needs to depend on the page functions
+        filteredDeps = map (\(x,s,others) -> (x,s,filter (not . isPageSymbol) others)) deps
+
         -- Make a graph based on the dependencies.
-        (graph, lookupEdges, lookupVertex) = G.graphFromEdges deps
+        (graph, lookupEdges, lookupVertex) = G.graphFromEdges filteredDeps
 
-        -- Make a set of all module prefix's.
-        moduleSet = S.fromList $ map (("$$"++) . zEncodeString) (map moduleNameString pageModules)
-
-        -- Make a set of the functions in their encoded form.
-        encodeFunction s = mod ++ "_" ++ (zEncodeString $ reverse rFunc)
-            where (rFunc, rMod) = span (/='.') $ reverse s
-                  mod   = "$$" ++ (zEncodeString $ reverse rMod)
-        functionSet = S.fromList $ map encodeFunction pageFunctions
-
-        -- Find all the functions that we want to make into "pages".
-        page (_, symbol, _) | (takeWhile (/='_') symbol) `S.member` moduleSet = Just symbol
-        page (_, symbol, _) | symbol `S.member` functionSet = Just symbol
-        page _ = Nothing
         pages :: [G.Vertex]
-        pages = catMaybes $ map (\dep -> page dep >>= lookupVertex) deps
+        pages = catMaybes . map lookupVertex . filter isPageSymbol $ map symbol deps
 
         -- Used by all
         primatives = catMaybes $ map lookupVertex [
@@ -127,7 +121,7 @@ link var out searchPath objFiles pageModules pageFunctions = do
         out <- openFile (out++"hs"++show n++".js") WriteMode
         hPutStrLn out . unlines $ pageSetComment $ S.toList pageSet
         let scripts = M.toList . M.fromListWith (++) $ functions
-        forM_ scripts $ copyScript out
+        forM_ scripts $ copyScript isPageSymbol out
         hPutStrLn out $ "//@ sourceURL=hs"++show n++".js"
         hClose out
         return (n, pageSet)
@@ -143,8 +137,8 @@ link var out searchPath objFiles pageModules pageFunctions = do
             map makeLoader (M.toList pageToBundles)
 
         makeLoader :: (Int, [Int]) -> String
-        makeLoader (p, bs) = concat ["var $", lookupKey p,
-            "=$L(", show bs,", function() { return ", lookupKey p, "; });"]
+        makeLoader (p, bs) = concat ["var ", lookupKey p,
+            "=$L(", show bs,", function() { return $", lookupKey p, "; });"]
 
     writeFile (out++"hsloader.js") $ unlines loader
 
@@ -239,10 +233,10 @@ readDeps file = do
 makeModule :: (String, String) -> Module
 makeModule (pkgid, modulename) = mkModule (stringToPackageId pkgid) (mkModuleName modulename)
 
-copyScript :: Handle -> (FilePath, [String]) -> IO ()
-copyScript _ (_, []) = return ()
-copyScript _ ("", _) = return ()
-copyScript out (file, symbols) = do
+copyScript :: (String -> Bool) -> Handle -> (FilePath, [String]) -> IO ()
+copyScript _ _ (_, []) = return ()
+copyScript _ _ ("", _) = return ()
+copyScript pageSymbolSet out (file, symbols) = do
     file <- openFile file ReadMode
     contents <- copyContents out False file
     hClose file
@@ -255,7 +249,9 @@ copyScript out (file, symbols) = do
                 (_, ('v':'a':'r':' ':'$':'$':_)) -> do
                     case span (\c -> isAlphaNum c || c == '$' || c == '_') (drop 4 line) of
                         (s, '=':_) | filterBySymb s -> do
-                          hPutStrLn out line
+                          if pageSymbolSet s
+                            then hPutStrLn out $ "var $" ++ drop 4 line
+                            else hPutStrLn out line
                           copyContents out True file
                         _                           -> do
                           copyContents out False file
