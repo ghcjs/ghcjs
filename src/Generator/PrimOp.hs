@@ -221,7 +221,8 @@ primOp op@MaskAsyncExceptionsOp args   = TrampolineM (Js.var ("$hs_" ++ zEncodeS
 primOp op@UnmaskAsyncExceptionsOp args = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
 primOp op@WaitReadOp args              = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
 primOp op@WaitWriteOp args             = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
-primOp op@SeqOp args             = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@SeqOp args                   = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@DelayOp args                 = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
 
 primOp op args = PlainE $ Js.nativeFunctionCall (Js.var ("$hs_" ++ zEncodeString (show op))) args
 

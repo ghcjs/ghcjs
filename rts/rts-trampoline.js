@@ -243,6 +243,7 @@ function $r(result) {
 
 var $tr_Scheduler = {
     waiting : [],
+    delayed : [],
     waitingForBundle : [],
     waitingForIO : [],
     maxID   : 0,
@@ -332,6 +333,9 @@ var $tr_Scheduler = {
         var s = $tr_Scheduler;
         var result = [[s.currentThread],s.waiting];
         var i;
+        for(i = 0; i != s.delayed.length; i++)
+            if(s.delayed[i] !== undefined)
+              result.push([s.delayed[i]]);
         for(i = 0; i != s.waitingForBundle.length; i++)
             if(s.waitingForBundle[i] !== undefined && s.waitingForBundle[i].length !== 0)
                 result.push(s.waitingForBundle[i]);
@@ -1139,6 +1143,27 @@ function $hs_atomicModifyMutVarzh(a, b, s) {
             return new $tr_Result([s, res.v[1]]);
         }, [a, s]);
 };
+
+function $hs_delayzh(t, s) {
+    var sc = $tr_Scheduler;
+    var thread = sc.currentThread;
+    var i;
+    if(HS_WEAKS) {
+      for(i = 0; i != sc.delayed.length; i++)
+        if(sc.delayed[i] === undefined)
+          break;
+      sc.delayed[i] = thread;
+    }
+    setTimeout(function() {
+        if(HS_WEAKS) sc.delayed[i] = undefined;
+        sc.schedule(thread);
+        if(!sc.running)
+            sc.runWaiting();
+      },
+      $hs_intToNumber(t)/1000);
+    return new $tr_Suspend(function(_) { return s; }, [s]);
+};
+
 
 // --- Synchronized Mutable Variables ---
 /**
