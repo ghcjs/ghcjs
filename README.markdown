@@ -9,6 +9,36 @@ Project aims to provide solution to
 
 Previous version of project is located at [vir.mskhug.ru](http://vir.mskhug.ru/).
 
+Native Only Quick Start
+=======================
+
+Installing the compiler will take a while.  If you just want to try out
+some of the examples and perhaps make your own HTML based client app
+then check out the low level WebKitGtk DOM bindings.  This should
+give you everything you need to build and run the GHCJS examples as
+native Haskell applications.
+
+<pre>
+sudo apt-get install libwebkitgtk-dev
+darcs get http://patch-tag.com/r/hamish/webkit
+cd webkit
+cabal install
+cd ..
+git clone https://github.com/ghcjs/ghcjs-dom.git
+cd ghcjs-dom
+cabal install
+cd ..
+git clone https://github.com/ghcjs/ghcjs-examples.git
+cd ghcjs-examples/webkit-sodium
+cabal install
+cd ../ghcjs-hello
+cabal install
+ghcjs-hello
+</pre>
+
+Compiling to JavaScript
+=======================
+
 This version of GHCJS can be built stand alone or integrated into GHC.
 You can install both (if you know you want both do Integrated first).
 
@@ -179,22 +209,38 @@ cabal install
 
 Installing and running an application
 -------------------------------------
-First build the application as you normally would.
+First build the application as you normally would.  Here are the instructions
+that you need do build the ghcjs-hello example (they work with a native compiler
+too).
 
 <pre>
-cabal install hello
+sudo apt-get install libwebkitgtk-dev
+darcs get http://patch-tag.com/r/hamish/webkit
+cd webkit
+cabal install
+cd ..
+git clone https://github.com/ghcjs/ghcjs-dom.git
+cd ghcjs-dom
+cabal install
+cd ..
+git clone https://github.com/ghcjs/ghcjs-examples.git
+cd ghcjs-examples/webkit-sodium
+cabal install
+cd ../ghcjs-hello
+cabal install
+ghcjs-hello
 </pre>
 
 Then run ghcjs-min on the .jsexe this will have installed (allong side your normal
 executable)
 
 <pre>
-ghcjs-min ~/.cabal/bin/hello.jsexe
+ghcjs-min ~/.cabal/bin/ghcjs-hello.jsexe
 </pre>
 
 On OS X it will be something like this...
 <pre>
-ghcjs-min ~/Library/Haskell/ghc-7.4.1.20120701/lib/hello-1.0.0.2/bin/hello.jsexe
+ghcjs-min ~/Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hello-0.0.1/bin/ghcjs-hello.jsexe
 </pre>
 
 Most browsers will not run JavaScript off the file system so the next step is to
@@ -208,46 +254,46 @@ I find the easiest way to do this is to use apache with the FollowSymlinks optio
 On Linux...
 <pre>
 cd ~/public_html
-ln -s ../.cabal/share/ghcjs-0.1.0/rts .
-ln -s ../.cabal/share/ghcjs-closure-0.1.0.0/closure-library .
-ln -s ../.cabal/share/ghcjs-hterm-0.1.0.0 hterm
-ln -s ../.cabal/bin/hello.jsexe .
+ln -s ../.cabal ghcjs
 </pre>
 
 On OS X you might need something like this...
 <pre>
 cd ~/Sites
-ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-0.1.0/share/rts .
-ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-closure-0.1.0.0/share/closure-library .
-ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hterm-0.1.0.0/share hterm
-ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/hello-1.0.0.2/bin/hello.jsexe .
+mkdir ghcjs
+mkdir ghcjs/share
+mkdir ghcjs/bin
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-0.1.0/share ghcjs/share/ghcjs-0.1.0
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-closure-0.1.0.0/share ghcjs/share/ghcjs-closure-0.1.0.0
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hterm-0.1.0.0/share ghcjs/share/ghcjs-hterm-0.1.0.0
+ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hello-0.0.1/bin/ghcjs-hello.jsexe ghcjs/bin/
 </pre>
 
 ghcjs-min will set up an index.html file (if one does not already exist in the .jsexe)
 that will run the app with hterm.
 <pre>
-http://127.0.0.1/~hamish/hello.jsexe
+http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.jsexe
 </pre>
 
 You can run the unminified version using hterm.html
 <pre>
-http://127.0.0.1/~hamish/hello.jsexe/hterm.html
+http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.jsexe/hterm.html
 </pre>
 
 If you don't want the overhead of hterm then there is a version that sends stdout
 to the console (and does not currently support stdin)
 <pre>
-http://127.0.0.1/~hamish/hello.jsexe/console.html
+http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.jsexe/console.html
 </pre>
 
 If you want to minify the console.html version then run (and make it the one index.html
-uses then run...
+uses then run)...
 <pre>
-ghcjs-min ~/.cabal/bin/hello.jsexe ~/.cabal/bin/hello.jsexe/console.js
+ghcjs-min ~/.cabal/bin/freecell.jsexe ~/.cabal/bin/freecell.jsexe/console.js
 </pre>
 
 
-Stand-alone 
+Stand-alone
 ===========
 
 The stand-alone compiler is an attempt to make GHCJS easier to use and install. It does
@@ -270,7 +316,7 @@ Now install GHCJS itself (assuming you use ghc 7.4.2 for building ghcjs):
     $ cd ghcjs
     $ cabal install
     $ cd ..
-    
+
 Make sure that the directory containing the `ghcjs`, `ghcjs-pkg` and `ghcjs-cabal` programs is
 in your PATH before proceeding:
 
@@ -297,7 +343,7 @@ previous version. The differences are the following.
 ### New features
 
  * Threading
- 
+
  * MVar
 
  * integer-gmp (using goog.math.Integer)
