@@ -2470,6 +2470,10 @@ function $hs_runIO(args, onComplete, onException) {
 function $hs_toInt(i) {
     return $d(1, [WORD_SIZE_IN_BITS == 32 ? i|0 : goog.math.Long.fromNumber(i)]);
 };
+// This function is used to convert raw int types to a number (handy for FFI)
+function $hs_intToNumber(i) {
+  return WORD_SIZE_IN_BITS == 32 ? i : i.toNumber();
+};
 function hs_nil() {
     return "";
 };
@@ -2603,4 +2607,16 @@ function webkit_dom_event_target_add_event_listener_closure(obj, eventName, f, b
     $hs_runIO([f, {g:1, v:[obj]}, {g:1,v:[e]}]);
   });
   return $hs_int(1);
+};
+function errorBelch2(f, args) {
+  try {
+    console.log("Error: " + $hs_fromUtf32(f) + " " + $hs_fromUtf32(args));
+  }
+  catch(e) {}
+};
+function debugBelch2(f, args) {
+  try {
+    console.log("Debug: " + $hs_fromUtf32(f) + " " + $hs_fromUtf32(args));
+  }
+  catch(e) {}
 };
