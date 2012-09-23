@@ -66,7 +66,7 @@ link var out searchPath objFiles pageModules _pageFunctions = do
     let deps = functionDeps allDeps
 
         -- main and anything that starts with lazyLoad_
-        isPageSymbol s = s == "$$Main_main" || "_lazzyLoadzu" `isPrefixOf` (dropWhile (/='_') s)
+        isPageSymbol s = s == "$$ZCMain_main" || "_lazzyLoadzu" `isPrefixOf` (dropWhile (/='_') s)
         symbol (_, s, _) = s
 
         -- Nothing needs to depend on the page functions

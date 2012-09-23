@@ -525,7 +525,10 @@ $tr_Thread.prototype = {
             this._state = "throw";
             this._value = r;
             this._signal();
-            if(this._onException !== undefined) this._onException(r);
+            if(this._onException !== undefined)
+              this._onException(r);
+            else
+              console.log("Unhandled Exception in thread " + this.threadIID);
             break;
           }
         }
