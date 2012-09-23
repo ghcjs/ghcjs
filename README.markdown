@@ -20,6 +20,7 @@ native Haskell applications.
 
 <pre>
 sudo apt-get install libwebkitgtk-dev
+cabal install gtk2hs-buildtools
 darcs get http://patch-tag.com/r/hamish/webkit
 cd webkit
 cabal install
