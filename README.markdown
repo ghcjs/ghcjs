@@ -197,11 +197,11 @@ cd ghcjs-closure
 cabal install
 cd ..
 git clone git@github.com:ghcjs/ghcjs-hterm.git
-cd ghcjs-closure
+cd ghcjs-hterm/chromeapps/hterm
 cabal install
-cd ..
+cd ../../..
 git clone git@github.com:ghcjs/source-map.git
-cd ghcjs-closure
+cd source-map
 cabal install
 cd ..
 cd ghc/compiler/ghcjs
