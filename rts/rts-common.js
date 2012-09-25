@@ -345,6 +345,12 @@ if(WORD_SIZE_IN_BITS==32) {
         return [s, $hs_allocate(n)];
     };
 
+    $hs_ptrKey = function(ptr) {
+      if(typeof(ptr) === 'string') return -1 >>> 0;
+      if(typeof(ptr) === 'function') return -2 >>> 0;
+      return ptr === null ? 0 : ptr[2];
+    };
+
     /**
      * @param {!number} p
      * @param {!number} n
@@ -354,8 +360,7 @@ if(WORD_SIZE_IN_BITS==32) {
       var x = p[1]+(n<<2);
       p[0].ptrs[x] = ptr;
       // Store a value in the array itself too so we can check it later
-      var key = (typeof(ptr) === 'string' ? -1 : (ptr === null ? 0 : ptr[2])) >>> 0;
-      (new Uint32Array(p[0],x))[0] = key;
+      (new Uint32Array(p[0],x))[0] = $hs_ptrKey(ptr);
     };
 
     /**
@@ -367,7 +372,7 @@ if(WORD_SIZE_IN_BITS==32) {
       var ptr = p[0].ptrs[x];
       // If this is not the right pointer throw an error
       var key = (typeof(ptr) === 'string' ? -1 : (ptr === null ? 0 : ptr[2])) >>> 0;
-      if((new Uint32Array(p[0],x))[0] !== key)
+      if((new Uint32Array(p[0],x))[0] !== $hs_ptrKey(ptr))
           throw "Pointer Error";
       return ptr;
     };
@@ -406,6 +411,12 @@ if (WORD_SIZE_IN_BITS==64) {
         return [s, $hs_allocate(n)];
     };
 
+    $hs_ptrKey = function(ptr) {
+      if(typeof(ptr) === 'string') return -1 >>> 0;
+      if(typeof(ptr) === 'function') return -2 >>> 0;
+      return ptr === null ? 0 : ptr[2].toNumber();
+    };
+
     /**
      * @param {!number} p
      * @param {!number} n
@@ -415,8 +426,7 @@ if (WORD_SIZE_IN_BITS==64) {
       var x = p[1]+(n.toNumber()<<3);
       p[0].ptrs[x] = ptr;
       // Store a value in the array itself too so we can check it later
-      var key = (typeof(ptr) === 'string' ? -1 : (ptr === null ? 0 : ptr[2].toNumber())) >>> 0;
-      (new Uint32Array(p[0],x))[0] = key;
+      (new Uint32Array(p[0],x))[0] = $hs_ptrKey(ptr);
     };
 
     /**
@@ -430,8 +440,7 @@ if (WORD_SIZE_IN_BITS==64) {
       ptr = ptr || null; // unitialized pointers as null
 
       // If this is not the right pointer throw an error
-      var key = (typeof(ptr) === 'string' ? -1 : (ptr === null ? 0 : ptr[2].toNumber())) >>> 0;
-      if((new Uint32Array(p[0],x))[0] !== key)
+      if((new Uint32Array(p[0],x))[0] !== $hs_ptrKey(ptr))
           throw "Pointer Error";
       return ptr;
     };
