@@ -1320,6 +1320,7 @@ function $hs_mkWeakzh(o, b, c, s) {
 function $hs_mkWeakForeignEnvzh(o, b, w, x, y, z, s) {
     HS_WEAKS && $hs_logger.warning("Weak Foreign Ignored");
     // return [s, new $tr_Weak(o, b, c, s)];
+    return [s, null];
 };
 function $hs_deRefWeakzh(p, s) {
     return [s, p.value === null ? 0 : 1, p.value];

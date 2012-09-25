@@ -371,7 +371,6 @@ if(WORD_SIZE_IN_BITS==32) {
       var x = p[1]+(n<<2);
       var ptr = p[0].ptrs[x];
       // If this is not the right pointer throw an error
-      var key = (typeof(ptr) === 'string' ? -1 : (ptr === null ? 0 : ptr[2])) >>> 0;
       if((new Uint32Array(p[0],x))[0] !== $hs_ptrKey(ptr))
           throw "Pointer Error";
       return ptr;
@@ -760,7 +759,7 @@ function $hs_writeWordArrayzh(a, n, v, s) {
     }
 };
 function $hs_writeAddrArrayzh(a, n, v, s) {
-    $hs_peekPtr(a, n, v);
+    $hs_pokePtr(a, n, v);
     return s;
 };
 function $hs_writeFloatArrayzh(a, n, v, s) {
@@ -774,7 +773,7 @@ function $hs_writeDoubleArrayzh(a, n, v, s) {
     return s;
 };
 function $hs_writeStablePtrArrayzh(a, n, v, s) {
-    $hs_peekPtr(a, n, v);
+    $hs_pokePtr(a, n, v);
     return s;
 };
 function $hs_writeInt8Arrayzh(a, n, v, s) {
@@ -1158,7 +1157,7 @@ function $hs_writeWordOffAddrzh(a, n, v, s) {
     }
 };
 function $hs_writeAddrOffAddrzh(a, n, v, s) {
-    $hs_peekPtr(a, n, v);
+    $hs_pokePtr(a, n, v);
     return s;
 };
 function $hs_writeFloatOffAddrzh(a, n, v, s) {
@@ -2213,6 +2212,9 @@ function fdReady(fd, write) {
         return $hs_int(-1);
     return $hs_int(f.ready(write) ? 1 : 0);
 };
+function dup(fd) {
+    return fd;
+};
 function $hs_findFile(f) {
     for(var i=0;i!==$hs_allFiles.length;i++) {
         if(f===$hs_allFiles[i].path)
@@ -2288,6 +2290,7 @@ function __hscore_select(nfds, readfds, writefds, exceptfds, timeout) {
 environ = {};
 environ['TMPDIR'] = "/tmp";
 environ['HOME'] = "/home";
+environ['TERM'] = "xterm";
 function __hscore_environ() {
     HS_RTS_TRACE && $hs_logger.info('__hscore_environ');
     return environ;
@@ -2340,6 +2343,22 @@ var $hs_loaded = [];
 var $hs_loadPath = "./";
 var $hs_loading = false;
 
+var $hs_cur_term = $hs_allocate($hs_int(8));
+var $hs_del_curterm = $hs_allocate($hs_int(8));
+function $hs_labelData(l, size) {
+    if(l === "cur_term") {
+        $hs_pokePtr($hs_cur_term, $hs_int(0), $hs_allocate($hs_int(64)));
+        return $hs_cur_term;
+    }
+    throw "Unknown Label";
+};
+function $hs_labelFunction(l, size) {
+    if(l === "del_curterm") {
+        $hs_pokePtr($hs_del_curterm, $hs_int(0), function() {});
+        return $hs_del_curterm;
+    }
+    throw "Unknown Label";
+};
 /**
  * @param {Array.<Object>}      args
  * @param {function(!string)}   onComplete
@@ -2592,6 +2611,22 @@ function ghc_wrapper_d1rx_getrusage(who, usage) {
         return goog.math.Long.ZERO;
     }
 };
+function ghc_wrapper_d1s8_getrusage(who, usage) {
+    var x = new Int32Array(usage[0], usage[1]);
+    var t = new Date().getTime();
+    if(WORD_SIZE_IN_BITS==32) {
+        x[0] = (t/1000) | 0;
+        x[1] = ((t%1000)*1000) | 0;
+        return 0;
+    }
+    else {
+        x[0] = (t/1000) | 0;
+        x[1] = 0;
+        x[2] = ((t%1000)*1000) | 0;
+        x[3] = 0;
+        return goog.math.Long.ZERO;
+    }
+};
 function g_object_ref(p) {
   return p;
 };
@@ -2636,6 +2671,9 @@ function getProgArgv(p_argc, p_argv) {
     $hs_pokePtr(argv, $hs_int(0), "application");
     $hs_pokePtr(p_argv, $hs_int(0), argv);
 };
-function shutdownHaskellAndExit(n)
-{
+function shutdownHaskellAndExit(n) {
+};
+function setupterm(term, fildes, erret) {
+    (new Int32Array(erret[0], erret[1]))[0] = 1;
+    return 0;
 };
