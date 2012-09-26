@@ -31,7 +31,7 @@ webkit_dom_xpath_result_get_string_value = (function(self)
 var webkit_dom_xpath_result_get_boolean_value;
 webkit_dom_xpath_result_get_boolean_value = (function(self)
                                              {
-                                               return $hs_int(self["booleanValue"]);
+                                               return $hs_int((self["booleanValue"] ? 1 : 0));
                                              });
 var webkit_dom_xpath_result_get_single_node_value;
 webkit_dom_xpath_result_get_single_node_value = (function(self)
@@ -41,7 +41,7 @@ webkit_dom_xpath_result_get_single_node_value = (function(self)
 var webkit_dom_xpath_result_get_invalid_iterator_state;
 webkit_dom_xpath_result_get_invalid_iterator_state = (function(self)
                                                       {
-                                                        return $hs_int(self["invalidIteratorState"]);
+                                                        return $hs_int((self["invalidIteratorState"] ? 1 : 0));
                                                       });
 var webkit_dom_xpath_result_get_snapshot_length;
 webkit_dom_xpath_result_get_snapshot_length = (function(self)
@@ -108,7 +108,7 @@ webkit_dom_xml_http_request_override_mime_type = (function(self,
 var webkit_dom_xml_http_request_dispatch_event;
 webkit_dom_xml_http_request_dispatch_event = (function(self, evt)
                                               {
-                                                return $hs_int(self["dispatchEvent"](evt));
+                                                return $hs_int((self["dispatchEvent"](evt) ? 1 : 0));
                                               });
 var webkit_dom_xml_http_request_set_onabort;
 webkit_dom_xml_http_request_set_onabort = (function(self, val)
@@ -189,23 +189,25 @@ webkit_dom_xml_http_request_get_ready_state = (function(self)
 var webkit_dom_xml_http_request_set_as_blob;
 webkit_dom_xml_http_request_set_as_blob = (function(self, val)
                                            {
-                                             self["asBlob"] = $hs_intToNumber(val);
+                                             self["asBlob"] = ($hs_intToNumber(val) != 0);
                                            });
 var webkit_dom_xml_http_request_get_as_blob;
 webkit_dom_xml_http_request_get_as_blob = (function(self)
                                            {
-                                             return $hs_int(self["asBlob"]);
+                                             return $hs_int((self["asBlob"] ? 1 : 0));
                                            });
 var webkit_dom_xml_http_request_set_with_credentials;
 webkit_dom_xml_http_request_set_with_credentials = (function(self,
                                                              val)
                                                     {
-                                                      self["withCredentials"] = $hs_intToNumber(val);
+                                                      self["withCredentials"] = ($hs_intToNumber(val)
+                                                                                 !=
+                                                                                 0);
                                                     });
 var webkit_dom_xml_http_request_get_with_credentials;
 webkit_dom_xml_http_request_get_with_credentials = (function(self)
                                                     {
-                                                      return $hs_int(self["withCredentials"]);
+                                                      return $hs_int((self["withCredentials"] ? 1 : 0));
                                                     });
 var webkit_dom_xml_http_request_get_upload;
 webkit_dom_xml_http_request_get_upload = (function(self)
@@ -276,7 +278,7 @@ webkit_dom_webkit_named_flow_get_type = (function()
 var webkit_dom_webkit_named_flow_get_overflow;
 webkit_dom_webkit_named_flow_get_overflow = (function(self)
                                              {
-                                               return $hs_int(self["overflow"]);
+                                               return $hs_int((self["overflow"] ? 1 : 0));
                                              });
 // Graphics.UI.Gtk.WebKit.DOM.Events
 webkit_dom_ui_event_get_type = (function()
@@ -288,9 +290,11 @@ webkit_dom_ui_event_init_ui_event = (function(self, type,
                                               canBubble, cancelable, view, detail)
                                      {
                                        return self["initUIEvent"]($hs_fromUtf8(type),
-                                                                  $hs_intToNumber(canBubble),
-                                                                  $hs_intToNumber(cancelable), view,
-                                                                  $hs_intToNumber(detail));
+                                                                  ($hs_intToNumber(canBubble) != 0),
+                                                                  ($hs_intToNumber(cancelable)
+                                                                   !=
+                                                                   0),
+                                                                  view, $hs_intToNumber(detail));
                                      });
 var webkit_dom_ui_event_get_view;
 webkit_dom_ui_event_get_view = (function(self)
@@ -345,47 +349,47 @@ webkit_dom_validity_state_get_type = (function()
 var webkit_dom_validity_state_get_value_missing;
 webkit_dom_validity_state_get_value_missing = (function(self)
                                                {
-                                                 return $hs_int(self["valueMissing"]);
+                                                 return $hs_int((self["valueMissing"] ? 1 : 0));
                                                });
 var webkit_dom_validity_state_get_type_mismatch;
 webkit_dom_validity_state_get_type_mismatch = (function(self)
                                                {
-                                                 return $hs_int(self["typeMismatch"]);
+                                                 return $hs_int((self["typeMismatch"] ? 1 : 0));
                                                });
 var webkit_dom_validity_state_get_pattern_mismatch;
 webkit_dom_validity_state_get_pattern_mismatch = (function(self)
                                                   {
-                                                    return $hs_int(self["patternMismatch"]);
+                                                    return $hs_int((self["patternMismatch"] ? 1 : 0));
                                                   });
 var webkit_dom_validity_state_get_too_long;
 webkit_dom_validity_state_get_too_long = (function(self)
                                           {
-                                            return $hs_int(self["tooLong"]);
+                                            return $hs_int((self["tooLong"] ? 1 : 0));
                                           });
 var webkit_dom_validity_state_get_range_underflow;
 webkit_dom_validity_state_get_range_underflow = (function(self)
                                                  {
-                                                   return $hs_int(self["rangeUnderflow"]);
+                                                   return $hs_int((self["rangeUnderflow"] ? 1 : 0));
                                                  });
 var webkit_dom_validity_state_get_range_overflow;
 webkit_dom_validity_state_get_range_overflow = (function(self)
                                                 {
-                                                  return $hs_int(self["rangeOverflow"]);
+                                                  return $hs_int((self["rangeOverflow"] ? 1 : 0));
                                                 });
 var webkit_dom_validity_state_get_step_mismatch;
 webkit_dom_validity_state_get_step_mismatch = (function(self)
                                                {
-                                                 return $hs_int(self["stepMismatch"]);
+                                                 return $hs_int((self["stepMismatch"] ? 1 : 0));
                                                });
 var webkit_dom_validity_state_get_custom_error;
 webkit_dom_validity_state_get_custom_error = (function(self)
                                               {
-                                                return $hs_int(self["customError"]);
+                                                return $hs_int((self["customError"] ? 1 : 0));
                                               });
 var webkit_dom_validity_state_get_valid;
 webkit_dom_validity_state_get_valid = (function(self)
                                        {
-                                         return $hs_int(self["valid"]);
+                                         return $hs_int((self["valid"] ? 1 : 0));
                                        });
 // Graphics.UI.Gtk.WebKit.DOM.Traversal
 webkit_dom_tree_walker_get_type = (function()
@@ -410,7 +414,7 @@ webkit_dom_tree_walker_get_filter = (function(self)
 var webkit_dom_tree_walker_get_expand_entity_references;
 webkit_dom_tree_walker_get_expand_entity_references = (function(self)
                                                        {
-                                                         return $hs_int(self["expandEntityReferences"]);
+                                                         return $hs_int((self["expandEntityReferences"] ? 1 : 0));
                                                        });
 var webkit_dom_tree_walker_set_current_node;
 webkit_dom_tree_walker_set_current_node = (function(self, val)
@@ -500,12 +504,12 @@ webkit_dom_style_sheet_get_type = (function()
 var webkit_dom_style_sheet_set_disabled;
 webkit_dom_style_sheet_set_disabled = (function(self, val)
                                        {
-                                         self["disabled"] = $hs_intToNumber(val);
+                                         self["disabled"] = ($hs_intToNumber(val) != 0);
                                        });
 var webkit_dom_style_sheet_get_disabled;
 webkit_dom_style_sheet_get_disabled = (function(self)
                                        {
-                                         return $hs_int(self["disabled"]);
+                                         return $hs_int((self["disabled"] ? 1 : 0));
                                        });
 var webkit_dom_style_sheet_get_owner_node;
 webkit_dom_style_sheet_get_owner_node = (function(self)
@@ -540,7 +544,7 @@ webkit_dom_style_media_get_type = (function()
 var webkit_dom_style_media_match_medium;
 webkit_dom_style_media_match_medium = (function(self, mediaquery)
                                        {
-                                         return $hs_int(self["matchMedium"]($hs_fromUtf8(mediaquery)));
+                                         return $hs_int((self["matchMedium"]($hs_fromUtf8(mediaquery)) ? 1 : 0));
                                        });
 // Graphics.UI.Gtk.WebKit.DOM.Window
 webkit_dom_screen_get_type = (function()
@@ -625,7 +629,7 @@ webkit_dom_range_set_end_after = (function(self, refNode)
 var webkit_dom_range_collapse;
 webkit_dom_range_collapse = (function(self, toStart)
                              {
-                               return self["collapse"]($hs_intToNumber(toStart));
+                               return self["collapse"](($hs_intToNumber(toStart) != 0));
                              });
 var webkit_dom_range_select_node;
 webkit_dom_range_select_node = (function(self, refNode)
@@ -692,7 +696,7 @@ webkit_dom_range_create_contextual_fragment = (function(self, html)
 var webkit_dom_range_intersects_node;
 webkit_dom_range_intersects_node = (function(self, refNode)
                                     {
-                                      return $hs_int(self["intersectsNode"](refNode));
+                                      return $hs_int((self["intersectsNode"](refNode) ? 1 : 0));
                                     });
 var webkit_dom_range_compare_node;
 webkit_dom_range_compare_node = (function(self, refNode)
@@ -709,8 +713,8 @@ var webkit_dom_range_is_point_in_range;
 webkit_dom_range_is_point_in_range = (function(self, refNode,
                                                offset)
                                       {
-                                        return $hs_int(self["isPointInRange"](refNode,
-                                                                              $hs_intToNumber(offset)));
+                                        return $hs_int((self["isPointInRange"](refNode,
+                                                                               $hs_intToNumber(offset)) ? 1 : 0));
                                       });
 var webkit_dom_range_expand;
 webkit_dom_range_expand = (function(self, unit)
@@ -740,7 +744,7 @@ webkit_dom_range_get_end_offset = (function(self)
 var webkit_dom_range_get_collapsed;
 webkit_dom_range_get_collapsed = (function(self)
                                   {
-                                    return $hs_int(self["collapsed"]);
+                                    return $hs_int((self["collapsed"] ? 1 : 0));
                                   });
 var webkit_dom_range_get_common_ancestor_container;
 webkit_dom_range_get_common_ancestor_container = (function(self)
@@ -835,7 +839,7 @@ webkit_dom_node_iterator_get_filter = (function(self)
 var webkit_dom_node_iterator_get_expand_entity_references;
 webkit_dom_node_iterator_get_expand_entity_references = (function(self)
                                                          {
-                                                           return $hs_int(self["expandEntityReferences"]);
+                                                           return $hs_int((self["expandEntityReferences"] ? 1 : 0));
                                                          });
 var webkit_dom_node_iterator_get_reference_node;
 webkit_dom_node_iterator_get_reference_node = (function(self)
@@ -845,7 +849,7 @@ webkit_dom_node_iterator_get_reference_node = (function(self)
 var webkit_dom_node_iterator_get_pointer_before_reference_node;
 webkit_dom_node_iterator_get_pointer_before_reference_node = (function(self)
                                                               {
-                                                                return $hs_int(self["pointerBeforeReferenceNode"]);
+                                                                return $hs_int((self["pointerBeforeReferenceNode"] ? 1 : 0));
                                                               });
 // Graphics.UI.Gtk.WebKit.DOM.Traversal
 webkit_dom_node_filter_get_type = (function()
@@ -880,12 +884,12 @@ webkit_dom_node_append_child = (function(self, newChild)
 var webkit_dom_node_has_child_nodes;
 webkit_dom_node_has_child_nodes = (function(self)
                                    {
-                                     return $hs_int(self["hasChildNodes"]());
+                                     return $hs_int((self["hasChildNodes"]() ? 1 : 0));
                                    });
 var webkit_dom_node_clone_node;
 webkit_dom_node_clone_node = (function(self, deep)
                               {
-                                return self["cloneNode"]($hs_intToNumber(deep));
+                                return self["cloneNode"](($hs_intToNumber(deep) != 0));
                               });
 var webkit_dom_node_normalize;
 webkit_dom_node_normalize = (function(self)
@@ -895,23 +899,23 @@ webkit_dom_node_normalize = (function(self)
 var webkit_dom_node_is_supported;
 webkit_dom_node_is_supported = (function(self, feature, version)
                                 {
-                                  return $hs_int(self["isSupported"]($hs_fromUtf8(feature),
-                                                                     $hs_fromUtf8(version)));
+                                  return $hs_int((self["isSupported"]($hs_fromUtf8(feature),
+                                                                      $hs_fromUtf8(version)) ? 1 : 0));
                                 });
 var webkit_dom_node_has_attributes;
 webkit_dom_node_has_attributes = (function(self)
                                   {
-                                    return $hs_int(self["hasAttributes"]());
+                                    return $hs_int((self["hasAttributes"]() ? 1 : 0));
                                   });
 var webkit_dom_node_is_same_node;
 webkit_dom_node_is_same_node = (function(self, other)
                                 {
-                                  return $hs_int(self["isSameNode"](other));
+                                  return $hs_int((self["isSameNode"](other) ? 1 : 0));
                                 });
 var webkit_dom_node_is_equal_node;
 webkit_dom_node_is_equal_node = (function(self, other)
                                  {
-                                   return $hs_int(self["isEqualNode"](other));
+                                   return $hs_int((self["isEqualNode"](other) ? 1 : 0));
                                  });
 var webkit_dom_node_lookup_prefix;
 webkit_dom_node_lookup_prefix = (function(self, namespaceURI)
@@ -922,7 +926,7 @@ var webkit_dom_node_is_default_namespace;
 webkit_dom_node_is_default_namespace = (function(self,
                                                  namespaceURI)
                                         {
-                                          return $hs_int(self["isDefaultNamespace"]($hs_fromUtf8(namespaceURI)));
+                                          return $hs_int((self["isDefaultNamespace"]($hs_fromUtf8(namespaceURI)) ? 1 : 0));
                                         });
 var webkit_dom_node_lookup_namespace_uri;
 webkit_dom_node_lookup_namespace_uri = (function(self, prefix)
@@ -937,12 +941,12 @@ webkit_dom_node_compare_document_position = (function(self, other)
 var webkit_dom_node_contains;
 webkit_dom_node_contains = (function(self, other)
                             {
-                              return $hs_int(self["contains"](other));
+                              return $hs_int((self["contains"](other) ? 1 : 0));
                             });
 var webkit_dom_node_dispatch_event;
 webkit_dom_node_dispatch_event = (function(self, event)
                                   {
-                                    return $hs_int(self["dispatchEvent"](event));
+                                    return $hs_int((self["dispatchEvent"](event) ? 1 : 0));
                                   });
 var webkit_dom_node_get_node_name;
 webkit_dom_node_get_node_name = (function(self)
@@ -1052,7 +1056,7 @@ webkit_dom_navigator_get_type = (function()
 var webkit_dom_navigator_java_enabled;
 webkit_dom_navigator_java_enabled = (function(self)
                                      {
-                                       return $hs_int(self["javaEnabled"]());
+                                       return $hs_int((self["javaEnabled"]() ? 1 : 0));
                                      });
 var webkit_dom_navigator_get_storage_updates;
 webkit_dom_navigator_get_storage_updates = (function(self)
@@ -1122,12 +1126,12 @@ webkit_dom_navigator_get_vendor_sub = (function(self)
 var webkit_dom_navigator_get_cookie_enabled;
 webkit_dom_navigator_get_cookie_enabled = (function(self)
                                            {
-                                             return $hs_int(self["cookieEnabled"]);
+                                             return $hs_int((self["cookieEnabled"] ? 1 : 0));
                                            });
 var webkit_dom_navigator_get_on_line;
 webkit_dom_navigator_get_on_line = (function(self)
                                     {
-                                      return $hs_int(self["onLine"]);
+                                      return $hs_int((self["onLine"] ? 1 : 0));
                                     });
 // Graphics.UI.Gtk.WebKit.DOM.Core
 webkit_dom_named_node_map_get_type = (function()
@@ -1189,8 +1193,12 @@ webkit_dom_mutation_event_init_mutation_event = (function(self,
                                                           prevValue, newValue, attrName, attrChange)
                                                  {
                                                    return self["initMutationEvent"]($hs_fromUtf8(type),
-                                                                                    $hs_intToNumber(canBubble),
-                                                                                    $hs_intToNumber(cancelable),
+                                                                                    ($hs_intToNumber(canBubble)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(cancelable)
+                                                                                     !=
+                                                                                     0),
                                                                                     relatedNode,
                                                                                     $hs_fromUtf8(prevValue),
                                                                                     $hs_fromUtf8(newValue),
@@ -1234,18 +1242,30 @@ webkit_dom_mouse_event_init_mouse_event = (function(self, type,
                                                     shiftKey, metaKey, button, relatedTarget)
                                            {
                                              return self["initMouseEvent"]($hs_fromUtf8(type),
-                                                                           $hs_intToNumber(canBubble),
-                                                                           $hs_intToNumber(cancelable),
+                                                                           ($hs_intToNumber(canBubble)
+                                                                            !=
+                                                                            0),
+                                                                           ($hs_intToNumber(cancelable)
+                                                                            !=
+                                                                            0),
                                                                            view,
                                                                            $hs_intToNumber(detail),
                                                                            $hs_intToNumber(screenX),
                                                                            $hs_intToNumber(screenY),
                                                                            $hs_intToNumber(clientX),
                                                                            $hs_intToNumber(clientY),
-                                                                           $hs_intToNumber(ctrlKey),
-                                                                           $hs_intToNumber(altKey),
-                                                                           $hs_intToNumber(shiftKey),
-                                                                           $hs_intToNumber(metaKey),
+                                                                           ($hs_intToNumber(ctrlKey)
+                                                                            !=
+                                                                            0),
+                                                                           ($hs_intToNumber(altKey)
+                                                                            !=
+                                                                            0),
+                                                                           ($hs_intToNumber(shiftKey)
+                                                                            !=
+                                                                            0),
+                                                                           ($hs_intToNumber(metaKey)
+                                                                            !=
+                                                                            0),
                                                                            $hs_intToNumber(button),
                                                                            relatedTarget);
                                            });
@@ -1282,22 +1302,22 @@ webkit_dom_mouse_event_get_webkit_movement_y = (function(self)
 var webkit_dom_mouse_event_get_ctrl_key;
 webkit_dom_mouse_event_get_ctrl_key = (function(self)
                                        {
-                                         return $hs_int(self["ctrlKey"]);
+                                         return $hs_int((self["ctrlKey"] ? 1 : 0));
                                        });
 var webkit_dom_mouse_event_get_shift_key;
 webkit_dom_mouse_event_get_shift_key = (function(self)
                                         {
-                                          return $hs_int(self["shiftKey"]);
+                                          return $hs_int((self["shiftKey"] ? 1 : 0));
                                         });
 var webkit_dom_mouse_event_get_alt_key;
 webkit_dom_mouse_event_get_alt_key = (function(self)
                                       {
-                                        return $hs_int(self["altKey"]);
+                                        return $hs_int((self["altKey"] ? 1 : 0));
                                       });
 var webkit_dom_mouse_event_get_meta_key;
 webkit_dom_mouse_event_get_meta_key = (function(self)
                                        {
-                                         return $hs_int(self["metaKey"]);
+                                         return $hs_int((self["metaKey"] ? 1 : 0));
                                        });
 var webkit_dom_mouse_event_get_button;
 webkit_dom_mouse_event_get_button = (function(self)
@@ -1372,7 +1392,7 @@ webkit_dom_media_query_list_get_media = (function(self)
 var webkit_dom_media_query_list_get_matches;
 webkit_dom_media_query_list_get_matches = (function(self)
                                            {
-                                             return $hs_int(self["matches"]);
+                                             return $hs_int((self["matches"] ? 1 : 0));
                                            });
 // Graphics.UI.Gtk.WebKit.DOM.Stylesheets
 webkit_dom_media_list_get_type = (function()
@@ -1428,7 +1448,7 @@ var webkit_dom_keyboard_event_get_modifier_state;
 webkit_dom_keyboard_event_get_modifier_state = (function(self,
                                                          keyIdentifierArg)
                                                 {
-                                                  return $hs_int(self["getModifierState"]($hs_fromUtf8(keyIdentifierArg)));
+                                                  return $hs_int((self["getModifierState"]($hs_fromUtf8(keyIdentifierArg)) ? 1 : 0));
                                                 });
 var webkit_dom_keyboard_event_init_keyboard_event;
 webkit_dom_keyboard_event_init_keyboard_event = (function(self,
@@ -1437,16 +1457,30 @@ webkit_dom_keyboard_event_init_keyboard_event = (function(self,
                                                           altKey, shiftKey, metaKey, altGraphKey)
                                                  {
                                                    return self["initKeyboardEvent"]($hs_fromUtf8(type),
-                                                                                    $hs_intToNumber(canBubble),
-                                                                                    $hs_intToNumber(cancelable),
+                                                                                    ($hs_intToNumber(canBubble)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(cancelable)
+                                                                                     !=
+                                                                                     0),
                                                                                     view,
                                                                                     $hs_fromUtf8(keyIdentifier),
                                                                                     $hs_intToNumber(keyLocation),
-                                                                                    $hs_intToNumber(ctrlKey),
-                                                                                    $hs_intToNumber(altKey),
-                                                                                    $hs_intToNumber(shiftKey),
-                                                                                    $hs_intToNumber(metaKey),
-                                                                                    $hs_intToNumber(altGraphKey));
+                                                                                    ($hs_intToNumber(ctrlKey)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(altKey)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(shiftKey)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(metaKey)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(altGraphKey)
+                                                                                     !=
+                                                                                     0));
                                                  });
 var webkit_dom_keyboard_event_init_keyboard_event;
 webkit_dom_keyboard_event_init_keyboard_event = (function(self,
@@ -1455,15 +1489,27 @@ webkit_dom_keyboard_event_init_keyboard_event = (function(self,
                                                           altKey, shiftKey, metaKey)
                                                  {
                                                    return self["initKeyboardEvent"]($hs_fromUtf8(type),
-                                                                                    $hs_intToNumber(canBubble),
-                                                                                    $hs_intToNumber(cancelable),
+                                                                                    ($hs_intToNumber(canBubble)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(cancelable)
+                                                                                     !=
+                                                                                     0),
                                                                                     view,
                                                                                     $hs_fromUtf8(keyIdentifier),
                                                                                     $hs_intToNumber(keyLocation),
-                                                                                    $hs_intToNumber(ctrlKey),
-                                                                                    $hs_intToNumber(altKey),
-                                                                                    $hs_intToNumber(shiftKey),
-                                                                                    $hs_intToNumber(metaKey));
+                                                                                    ($hs_intToNumber(ctrlKey)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(altKey)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(shiftKey)
+                                                                                     !=
+                                                                                     0),
+                                                                                    ($hs_intToNumber(metaKey)
+                                                                                     !=
+                                                                                     0));
                                                  });
 var webkit_dom_keyboard_event_get_key_identifier;
 webkit_dom_keyboard_event_get_key_identifier = (function(self)
@@ -1478,27 +1524,27 @@ webkit_dom_keyboard_event_get_key_location = (function(self)
 var webkit_dom_keyboard_event_get_ctrl_key;
 webkit_dom_keyboard_event_get_ctrl_key = (function(self)
                                           {
-                                            return $hs_int(self["ctrlKey"]);
+                                            return $hs_int((self["ctrlKey"] ? 1 : 0));
                                           });
 var webkit_dom_keyboard_event_get_shift_key;
 webkit_dom_keyboard_event_get_shift_key = (function(self)
                                            {
-                                             return $hs_int(self["shiftKey"]);
+                                             return $hs_int((self["shiftKey"] ? 1 : 0));
                                            });
 var webkit_dom_keyboard_event_get_alt_key;
 webkit_dom_keyboard_event_get_alt_key = (function(self)
                                          {
-                                           return $hs_int(self["altKey"]);
+                                           return $hs_int((self["altKey"] ? 1 : 0));
                                          });
 var webkit_dom_keyboard_event_get_meta_key;
 webkit_dom_keyboard_event_get_meta_key = (function(self)
                                           {
-                                            return $hs_int(self["metaKey"]);
+                                            return $hs_int((self["metaKey"] ? 1 : 0));
                                           });
 var webkit_dom_keyboard_event_get_alt_graph_key;
 webkit_dom_keyboard_event_get_alt_graph_key = (function(self)
                                                {
-                                                 return $hs_int(self["altGraphKey"]);
+                                                 return $hs_int((self["altGraphKey"] ? 1 : 0));
                                                });
 var webkit_dom_keyboard_event_get_key_code;
 webkit_dom_keyboard_event_get_key_code = (function(self)
@@ -1518,12 +1564,12 @@ webkit_dom_htmlu_list_element_get_type = (function()
 var webkit_dom_htmlu_list_element_set_compact;
 webkit_dom_htmlu_list_element_set_compact = (function(self, val)
                                              {
-                                               self["compact"] = $hs_intToNumber(val);
+                                               self["compact"] = ($hs_intToNumber(val) != 0);
                                              });
 var webkit_dom_htmlu_list_element_get_compact;
 webkit_dom_htmlu_list_element_get_compact = (function(self)
                                              {
-                                               return $hs_int(self["compact"]);
+                                               return $hs_int((self["compact"] ? 1 : 0));
                                              });
 // Graphics.UI.Gtk.WebKit.DOM.Html
 webkit_dom_html_title_element_get_type = (function()
@@ -1553,7 +1599,7 @@ webkit_dom_html_text_area_element_select = (function(self)
 var webkit_dom_html_text_area_element_check_validity;
 webkit_dom_html_text_area_element_check_validity = (function(self)
                                                     {
-                                                      return $hs_int(self["checkValidity"]());
+                                                      return $hs_int((self["checkValidity"]() ? 1 : 0));
                                                     });
 var webkit_dom_html_text_area_element_set_custom_validity;
 webkit_dom_html_text_area_element_set_custom_validity = (function(self,
@@ -1615,23 +1661,25 @@ var webkit_dom_html_text_area_element_set_disabled;
 webkit_dom_html_text_area_element_set_disabled = (function(self,
                                                            val)
                                                   {
-                                                    self["disabled"] = $hs_intToNumber(val);
+                                                    self["disabled"] = ($hs_intToNumber(val) != 0);
                                                   });
 var webkit_dom_html_text_area_element_get_disabled;
 webkit_dom_html_text_area_element_get_disabled = (function(self)
                                                   {
-                                                    return $hs_int(self["disabled"]);
+                                                    return $hs_int((self["disabled"] ? 1 : 0));
                                                   });
 var webkit_dom_html_text_area_element_set_autofocus;
 webkit_dom_html_text_area_element_set_autofocus = (function(self,
                                                             val)
                                                    {
-                                                     self["autofocus"] = $hs_intToNumber(val);
+                                                     self["autofocus"] = ($hs_intToNumber(val)
+                                                                          !=
+                                                                          0);
                                                    });
 var webkit_dom_html_text_area_element_get_autofocus;
 webkit_dom_html_text_area_element_get_autofocus = (function(self)
                                                    {
-                                                     return $hs_int(self["autofocus"]);
+                                                     return $hs_int((self["autofocus"] ? 1 : 0));
                                                    });
 var webkit_dom_html_text_area_element_set_max_length;
 webkit_dom_html_text_area_element_set_max_length = (function(self,
@@ -1669,23 +1717,23 @@ var webkit_dom_html_text_area_element_set_read_only;
 webkit_dom_html_text_area_element_set_read_only = (function(self,
                                                             val)
                                                    {
-                                                     self["readOnly"] = $hs_intToNumber(val);
+                                                     self["readOnly"] = ($hs_intToNumber(val) != 0);
                                                    });
 var webkit_dom_html_text_area_element_get_read_only;
 webkit_dom_html_text_area_element_get_read_only = (function(self)
                                                    {
-                                                     return $hs_int(self["readOnly"]);
+                                                     return $hs_int((self["readOnly"] ? 1 : 0));
                                                    });
 var webkit_dom_html_text_area_element_set_required;
 webkit_dom_html_text_area_element_set_required = (function(self,
                                                            val)
                                                   {
-                                                    self["required"] = $hs_intToNumber(val);
+                                                    self["required"] = ($hs_intToNumber(val) != 0);
                                                   });
 var webkit_dom_html_text_area_element_get_required;
 webkit_dom_html_text_area_element_get_required = (function(self)
                                                   {
-                                                    return $hs_int(self["required"]);
+                                                    return $hs_int((self["required"] ? 1 : 0));
                                                   });
 var webkit_dom_html_text_area_element_set_rows;
 webkit_dom_html_text_area_element_set_rows = (function(self, val)
@@ -1725,7 +1773,7 @@ webkit_dom_html_text_area_element_get_text_length = (function(self)
 var webkit_dom_html_text_area_element_get_will_validate;
 webkit_dom_html_text_area_element_get_will_validate = (function(self)
                                                        {
-                                                         return $hs_int(self["willValidate"]);
+                                                         return $hs_int((self["willValidate"] ? 1 : 0));
                                                        });
 var webkit_dom_html_text_area_element_get_validation_message;
 webkit_dom_html_text_area_element_get_validation_message = (function(self)
@@ -2271,12 +2319,12 @@ var webkit_dom_html_table_cell_element_set_no_wrap;
 webkit_dom_html_table_cell_element_set_no_wrap = (function(self,
                                                            val)
                                                   {
-                                                    self["noWrap"] = $hs_intToNumber(val);
+                                                    self["noWrap"] = ($hs_intToNumber(val) != 0);
                                                   });
 var webkit_dom_html_table_cell_element_get_no_wrap;
 webkit_dom_html_table_cell_element_get_no_wrap = (function(self)
                                                   {
-                                                    return $hs_int(self["noWrap"]);
+                                                    return $hs_int((self["noWrap"] ? 1 : 0));
                                                   });
 var webkit_dom_html_table_cell_element_set_row_span;
 webkit_dom_html_table_cell_element_set_row_span = (function(self,
@@ -2344,22 +2392,22 @@ webkit_dom_html_style_element_get_type = (function()
 var webkit_dom_html_style_element_set_disabled;
 webkit_dom_html_style_element_set_disabled = (function(self, val)
                                               {
-                                                self["disabled"] = $hs_intToNumber(val);
+                                                self["disabled"] = ($hs_intToNumber(val) != 0);
                                               });
 var webkit_dom_html_style_element_get_disabled;
 webkit_dom_html_style_element_get_disabled = (function(self)
                                               {
-                                                return $hs_int(self["disabled"]);
+                                                return $hs_int((self["disabled"] ? 1 : 0));
                                               });
 var webkit_dom_html_style_element_set_scoped;
 webkit_dom_html_style_element_set_scoped = (function(self, val)
                                             {
-                                              self["scoped"] = $hs_intToNumber(val);
+                                              self["scoped"] = ($hs_intToNumber(val) != 0);
                                             });
 var webkit_dom_html_style_element_get_scoped;
 webkit_dom_html_style_element_get_scoped = (function(self)
                                             {
-                                              return $hs_int(self["scoped"]);
+                                              return $hs_int((self["scoped"] ? 1 : 0));
                                             });
 var webkit_dom_html_style_element_set_media;
 webkit_dom_html_style_element_set_media = (function(self, val)
@@ -2384,7 +2432,7 @@ webkit_dom_html_select_element_get_type = (function()
 var webkit_dom_html_select_element_check_validity;
 webkit_dom_html_select_element_check_validity = (function(self)
                                                  {
-                                                   return $hs_int(self["checkValidity"]());
+                                                   return $hs_int((self["checkValidity"]() ? 1 : 0));
                                                  });
 var webkit_dom_html_select_element_set_custom_validity;
 webkit_dom_html_select_element_set_custom_validity = (function(self,
@@ -2457,7 +2505,7 @@ webkit_dom_html_select_element_get_validity = (function(self)
 var webkit_dom_html_select_element_get_will_validate;
 webkit_dom_html_select_element_get_will_validate = (function(self)
                                                     {
-                                                      return $hs_int(self["willValidate"]);
+                                                      return $hs_int((self["willValidate"] ? 1 : 0));
                                                     });
 var webkit_dom_html_select_element_get_validation_message;
 webkit_dom_html_select_element_get_validation_message = (function(self)
@@ -2472,32 +2520,32 @@ webkit_dom_html_select_element_get_options = (function(self)
 var webkit_dom_html_select_element_set_disabled;
 webkit_dom_html_select_element_set_disabled = (function(self, val)
                                                {
-                                                 self["disabled"] = $hs_intToNumber(val);
+                                                 self["disabled"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_select_element_get_disabled;
 webkit_dom_html_select_element_get_disabled = (function(self)
                                                {
-                                                 return $hs_int(self["disabled"]);
+                                                 return $hs_int((self["disabled"] ? 1 : 0));
                                                });
 var webkit_dom_html_select_element_set_autofocus;
 webkit_dom_html_select_element_set_autofocus = (function(self, val)
                                                 {
-                                                  self["autofocus"] = $hs_intToNumber(val);
+                                                  self["autofocus"] = ($hs_intToNumber(val) != 0);
                                                 });
 var webkit_dom_html_select_element_get_autofocus;
 webkit_dom_html_select_element_get_autofocus = (function(self)
                                                 {
-                                                  return $hs_int(self["autofocus"]);
+                                                  return $hs_int((self["autofocus"] ? 1 : 0));
                                                 });
 var webkit_dom_html_select_element_set_multiple;
 webkit_dom_html_select_element_set_multiple = (function(self, val)
                                                {
-                                                 self["multiple"] = $hs_intToNumber(val);
+                                                 self["multiple"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_select_element_get_multiple;
 webkit_dom_html_select_element_get_multiple = (function(self)
                                                {
-                                                 return $hs_int(self["multiple"]);
+                                                 return $hs_int((self["multiple"] ? 1 : 0));
                                                });
 var webkit_dom_html_select_element_set_name;
 webkit_dom_html_select_element_set_name = (function(self, val)
@@ -2512,12 +2560,12 @@ webkit_dom_html_select_element_get_name = (function(self)
 var webkit_dom_html_select_element_set_required;
 webkit_dom_html_select_element_set_required = (function(self, val)
                                                {
-                                                 self["required"] = $hs_intToNumber(val);
+                                                 self["required"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_select_element_get_required;
 webkit_dom_html_select_element_get_required = (function(self)
                                                {
-                                                 return $hs_int(self["required"]);
+                                                 return $hs_int((self["required"] ? 1 : 0));
                                                });
 var webkit_dom_html_select_element_set_size;
 webkit_dom_html_select_element_set_size = (function(self, val)
@@ -2582,22 +2630,22 @@ webkit_dom_html_script_element_get_charset = (function(self)
 var webkit_dom_html_script_element_set_async;
 webkit_dom_html_script_element_set_async = (function(self, val)
                                             {
-                                              self["async"] = $hs_intToNumber(val);
+                                              self["async"] = ($hs_intToNumber(val) != 0);
                                             });
 var webkit_dom_html_script_element_get_async;
 webkit_dom_html_script_element_get_async = (function(self)
                                             {
-                                              return $hs_int(self["async"]);
+                                              return $hs_int((self["async"] ? 1 : 0));
                                             });
 var webkit_dom_html_script_element_set_defer;
 webkit_dom_html_script_element_set_defer = (function(self, val)
                                             {
-                                              self["defer"] = $hs_intToNumber(val);
+                                              self["defer"] = ($hs_intToNumber(val) != 0);
                                             });
 var webkit_dom_html_script_element_get_defer;
 webkit_dom_html_script_element_get_defer = (function(self)
                                             {
-                                              return $hs_int(self["defer"]);
+                                              return $hs_int((self["defer"] ? 1 : 0));
                                             });
 var webkit_dom_html_script_element_set_src;
 webkit_dom_html_script_element_set_src = (function(self, val)
@@ -2642,12 +2690,12 @@ webkit_dom_html_pre_element_get_width = (function(self)
 var webkit_dom_html_pre_element_set_wrap;
 webkit_dom_html_pre_element_set_wrap = (function(self, val)
                                         {
-                                          self["wrap"] = $hs_intToNumber(val);
+                                          self["wrap"] = ($hs_intToNumber(val) != 0);
                                         });
 var webkit_dom_html_pre_element_get_wrap;
 webkit_dom_html_pre_element_get_wrap = (function(self)
                                         {
-                                          return $hs_int(self["wrap"]);
+                                          return $hs_int((self["wrap"] ? 1 : 0));
                                         });
 // Graphics.UI.Gtk.WebKit.DOM.Html
 webkit_dom_html_param_element_get_type = (function()
@@ -2729,12 +2777,14 @@ var webkit_dom_html_option_element_set_default_selected;
 webkit_dom_html_option_element_set_default_selected = (function(self,
                                                                 val)
                                                        {
-                                                         self["defaultSelected"] = $hs_intToNumber(val);
+                                                         self["defaultSelected"] = ($hs_intToNumber(val)
+                                                                                    !=
+                                                                                    0);
                                                        });
 var webkit_dom_html_option_element_get_default_selected;
 webkit_dom_html_option_element_get_default_selected = (function(self)
                                                        {
-                                                         return $hs_int(self["defaultSelected"]);
+                                                         return $hs_int((self["defaultSelected"] ? 1 : 0));
                                                        });
 var webkit_dom_html_option_element_get_text;
 webkit_dom_html_option_element_get_text = (function(self)
@@ -2749,12 +2799,12 @@ webkit_dom_html_option_element_get_index = (function(self)
 var webkit_dom_html_option_element_set_disabled;
 webkit_dom_html_option_element_set_disabled = (function(self, val)
                                                {
-                                                 self["disabled"] = $hs_intToNumber(val);
+                                                 self["disabled"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_option_element_get_disabled;
 webkit_dom_html_option_element_get_disabled = (function(self)
                                                {
-                                                 return $hs_int(self["disabled"]);
+                                                 return $hs_int((self["disabled"] ? 1 : 0));
                                                });
 var webkit_dom_html_option_element_set_label;
 webkit_dom_html_option_element_set_label = (function(self, val)
@@ -2769,12 +2819,12 @@ webkit_dom_html_option_element_get_label = (function(self)
 var webkit_dom_html_option_element_set_selected;
 webkit_dom_html_option_element_set_selected = (function(self, val)
                                                {
-                                                 self["selected"] = $hs_intToNumber(val);
+                                                 self["selected"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_option_element_get_selected;
 webkit_dom_html_option_element_get_selected = (function(self)
                                                {
-                                                 return $hs_int(self["selected"]);
+                                                 return $hs_int((self["selected"] ? 1 : 0));
                                                });
 var webkit_dom_html_option_element_set_value;
 webkit_dom_html_option_element_set_value = (function(self, val)
@@ -2795,12 +2845,12 @@ var webkit_dom_html_opt_group_element_set_disabled;
 webkit_dom_html_opt_group_element_set_disabled = (function(self,
                                                            val)
                                                   {
-                                                    self["disabled"] = $hs_intToNumber(val);
+                                                    self["disabled"] = ($hs_intToNumber(val) != 0);
                                                   });
 var webkit_dom_html_opt_group_element_get_disabled;
 webkit_dom_html_opt_group_element_get_disabled = (function(self)
                                                   {
-                                                    return $hs_int(self["disabled"]);
+                                                    return $hs_int((self["disabled"] ? 1 : 0));
                                                   });
 var webkit_dom_html_opt_group_element_set_label;
 webkit_dom_html_opt_group_element_set_label = (function(self, val)
@@ -2820,12 +2870,12 @@ webkit_dom_htmlo_list_element_get_type = (function()
 var webkit_dom_htmlo_list_element_set_compact;
 webkit_dom_htmlo_list_element_set_compact = (function(self, val)
                                              {
-                                               self["compact"] = $hs_intToNumber(val);
+                                               self["compact"] = ($hs_intToNumber(val) != 0);
                                              });
 var webkit_dom_htmlo_list_element_get_compact;
 webkit_dom_htmlo_list_element_get_compact = (function(self)
                                              {
-                                               return $hs_int(self["compact"]);
+                                               return $hs_int((self["compact"] ? 1 : 0));
                                              });
 var webkit_dom_htmlo_list_element_set_start;
 webkit_dom_htmlo_list_element_set_start = (function(self, val)
@@ -2840,12 +2890,12 @@ webkit_dom_htmlo_list_element_get_start = (function(self)
 var webkit_dom_htmlo_list_element_set_reversed;
 webkit_dom_htmlo_list_element_set_reversed = (function(self, val)
                                               {
-                                                self["reversed"] = $hs_intToNumber(val);
+                                                self["reversed"] = ($hs_intToNumber(val) != 0);
                                               });
 var webkit_dom_htmlo_list_element_get_reversed;
 webkit_dom_htmlo_list_element_get_reversed = (function(self)
                                               {
-                                                return $hs_int(self["reversed"]);
+                                                return $hs_int((self["reversed"] ? 1 : 0));
                                               });
 // Graphics.UI.Gtk.WebKit.DOM.Html
 webkit_dom_html_object_element_get_type = (function()
@@ -2855,7 +2905,7 @@ webkit_dom_html_object_element_get_type = (function()
 var webkit_dom_html_object_element_check_validity;
 webkit_dom_html_object_element_check_validity = (function(self)
                                                  {
-                                                   return $hs_int(self["checkValidity"]());
+                                                   return $hs_int((self["checkValidity"]() ? 1 : 0));
                                                  });
 var webkit_dom_html_object_element_set_custom_validity;
 webkit_dom_html_object_element_set_custom_validity = (function(self,
@@ -2941,12 +2991,12 @@ webkit_dom_html_object_element_get_data = (function(self)
 var webkit_dom_html_object_element_set_declare;
 webkit_dom_html_object_element_set_declare = (function(self, val)
                                               {
-                                                self["declare"] = $hs_intToNumber(val);
+                                                self["declare"] = ($hs_intToNumber(val) != 0);
                                               });
 var webkit_dom_html_object_element_get_declare;
 webkit_dom_html_object_element_get_declare = (function(self)
                                               {
-                                                return $hs_int(self["declare"]);
+                                                return $hs_int((self["declare"] ? 1 : 0));
                                               });
 var webkit_dom_html_object_element_set_height;
 webkit_dom_html_object_element_set_height = (function(self, val)
@@ -3021,7 +3071,7 @@ webkit_dom_html_object_element_get_width = (function(self)
 var webkit_dom_html_object_element_get_will_validate;
 webkit_dom_html_object_element_get_will_validate = (function(self)
                                                     {
-                                                      return $hs_int(self["willValidate"]);
+                                                      return $hs_int((self["willValidate"] ? 1 : 0));
                                                     });
 var webkit_dom_html_object_element_get_validity;
 webkit_dom_html_object_element_get_validity = (function(self)
@@ -3116,12 +3166,12 @@ webkit_dom_html_menu_element_get_type = (function()
 var webkit_dom_html_menu_element_set_compact;
 webkit_dom_html_menu_element_set_compact = (function(self, val)
                                             {
-                                              self["compact"] = $hs_intToNumber(val);
+                                              self["compact"] = ($hs_intToNumber(val) != 0);
                                             });
 var webkit_dom_html_menu_element_get_compact;
 webkit_dom_html_menu_element_get_compact = (function(self)
                                             {
-                                              return $hs_int(self["compact"]);
+                                              return $hs_int((self["compact"] ? 1 : 0));
                                             });
 // Graphics.UI.Gtk.WebKit.DOM.Html
 webkit_dom_html_map_element_get_type = (function()
@@ -3151,12 +3201,12 @@ webkit_dom_html_link_element_get_type = (function()
 var webkit_dom_html_link_element_set_disabled;
 webkit_dom_html_link_element_set_disabled = (function(self, val)
                                              {
-                                               self["disabled"] = $hs_intToNumber(val);
+                                               self["disabled"] = ($hs_intToNumber(val) != 0);
                                              });
 var webkit_dom_html_link_element_get_disabled;
 webkit_dom_html_link_element_get_disabled = (function(self)
                                              {
-                                               return $hs_int(self["disabled"]);
+                                               return $hs_int((self["disabled"] ? 1 : 0));
                                              });
 var webkit_dom_html_link_element_set_charset;
 webkit_dom_html_link_element_set_charset = (function(self, val)
@@ -3311,7 +3361,7 @@ webkit_dom_html_input_element_step_down = (function(self, n)
 var webkit_dom_html_input_element_check_validity;
 webkit_dom_html_input_element_check_validity = (function(self)
                                                 {
-                                                  return $hs_int(self["checkValidity"]());
+                                                  return $hs_int((self["checkValidity"]() ? 1 : 0));
                                                 });
 var webkit_dom_html_input_element_set_custom_validity;
 webkit_dom_html_input_element_set_custom_validity = (function(self,
@@ -3345,12 +3395,14 @@ var webkit_dom_html_input_element_set_default_checked;
 webkit_dom_html_input_element_set_default_checked = (function(self,
                                                               val)
                                                      {
-                                                       self["defaultChecked"] = $hs_intToNumber(val);
+                                                       self["defaultChecked"] = ($hs_intToNumber(val)
+                                                                                 !=
+                                                                                 0);
                                                      });
 var webkit_dom_html_input_element_get_default_checked;
 webkit_dom_html_input_element_get_default_checked = (function(self)
                                                      {
-                                                       return $hs_int(self["defaultChecked"]);
+                                                       return $hs_int((self["defaultChecked"] ? 1 : 0));
                                                      });
 var webkit_dom_html_input_element_set_dir_name;
 webkit_dom_html_input_element_set_dir_name = (function(self, val)
@@ -3404,12 +3456,14 @@ var webkit_dom_html_input_element_set_form_no_validate;
 webkit_dom_html_input_element_set_form_no_validate = (function(self,
                                                                val)
                                                       {
-                                                        self["formNoValidate"] = $hs_intToNumber(val);
+                                                        self["formNoValidate"] = ($hs_intToNumber(val)
+                                                                                  !=
+                                                                                  0);
                                                       });
 var webkit_dom_html_input_element_get_form_no_validate;
 webkit_dom_html_input_element_get_form_no_validate = (function(self)
                                                       {
-                                                        return $hs_int(self["formNoValidate"]);
+                                                        return $hs_int((self["formNoValidate"] ? 1 : 0));
                                                       });
 var webkit_dom_html_input_element_set_form_target;
 webkit_dom_html_input_element_set_form_target = (function(self,
@@ -3460,32 +3514,32 @@ webkit_dom_html_input_element_get_alt = (function(self)
 var webkit_dom_html_input_element_set_checked;
 webkit_dom_html_input_element_set_checked = (function(self, val)
                                              {
-                                               self["checked"] = $hs_intToNumber(val);
+                                               self["checked"] = ($hs_intToNumber(val) != 0);
                                              });
 var webkit_dom_html_input_element_get_checked;
 webkit_dom_html_input_element_get_checked = (function(self)
                                              {
-                                               return $hs_int(self["checked"]);
+                                               return $hs_int((self["checked"] ? 1 : 0));
                                              });
 var webkit_dom_html_input_element_set_disabled;
 webkit_dom_html_input_element_set_disabled = (function(self, val)
                                               {
-                                                self["disabled"] = $hs_intToNumber(val);
+                                                self["disabled"] = ($hs_intToNumber(val) != 0);
                                               });
 var webkit_dom_html_input_element_get_disabled;
 webkit_dom_html_input_element_get_disabled = (function(self)
                                               {
-                                                return $hs_int(self["disabled"]);
+                                                return $hs_int((self["disabled"] ? 1 : 0));
                                               });
 var webkit_dom_html_input_element_set_autofocus;
 webkit_dom_html_input_element_set_autofocus = (function(self, val)
                                                {
-                                                 self["autofocus"] = $hs_intToNumber(val);
+                                                 self["autofocus"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_input_element_get_autofocus;
 webkit_dom_html_input_element_get_autofocus = (function(self)
                                                {
-                                                 return $hs_int(self["autofocus"]);
+                                                 return $hs_int((self["autofocus"] ? 1 : 0));
                                                });
 var webkit_dom_html_input_element_set_autocomplete;
 webkit_dom_html_input_element_set_autocomplete = (function(self,
@@ -3536,23 +3590,25 @@ webkit_dom_html_input_element_get_min = (function(self)
 var webkit_dom_html_input_element_set_multiple;
 webkit_dom_html_input_element_set_multiple = (function(self, val)
                                               {
-                                                self["multiple"] = $hs_intToNumber(val);
+                                                self["multiple"] = ($hs_intToNumber(val) != 0);
                                               });
 var webkit_dom_html_input_element_get_multiple;
 webkit_dom_html_input_element_get_multiple = (function(self)
                                               {
-                                                return $hs_int(self["multiple"]);
+                                                return $hs_int((self["multiple"] ? 1 : 0));
                                               });
 var webkit_dom_html_input_element_set_webkitdirectory;
 webkit_dom_html_input_element_set_webkitdirectory = (function(self,
                                                               val)
                                                      {
-                                                       self["webkitdirectory"] = $hs_intToNumber(val);
+                                                       self["webkitdirectory"] = ($hs_intToNumber(val)
+                                                                                  !=
+                                                                                  0);
                                                      });
 var webkit_dom_html_input_element_get_webkitdirectory;
 webkit_dom_html_input_element_get_webkitdirectory = (function(self)
                                                      {
-                                                       return $hs_int(self["webkitdirectory"]);
+                                                       return $hs_int((self["webkitdirectory"] ? 1 : 0));
                                                      });
 var webkit_dom_html_input_element_set_name;
 webkit_dom_html_input_element_set_name = (function(self, val)
@@ -3588,22 +3644,22 @@ webkit_dom_html_input_element_get_placeholder = (function(self)
 var webkit_dom_html_input_element_set_read_only;
 webkit_dom_html_input_element_set_read_only = (function(self, val)
                                                {
-                                                 self["readOnly"] = $hs_intToNumber(val);
+                                                 self["readOnly"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_input_element_get_read_only;
 webkit_dom_html_input_element_get_read_only = (function(self)
                                                {
-                                                 return $hs_int(self["readOnly"]);
+                                                 return $hs_int((self["readOnly"] ? 1 : 0));
                                                });
 var webkit_dom_html_input_element_set_required;
 webkit_dom_html_input_element_set_required = (function(self, val)
                                               {
-                                                self["required"] = $hs_intToNumber(val);
+                                                self["required"] = ($hs_intToNumber(val) != 0);
                                               });
 var webkit_dom_html_input_element_get_required;
 webkit_dom_html_input_element_get_required = (function(self)
                                               {
-                                                return $hs_int(self["required"]);
+                                                return $hs_int((self["required"] ? 1 : 0));
                                               });
 var webkit_dom_html_input_element_set_size;
 webkit_dom_html_input_element_set_size = (function(self, val)
@@ -3675,17 +3731,19 @@ var webkit_dom_html_input_element_set_incremental;
 webkit_dom_html_input_element_set_incremental = (function(self,
                                                           val)
                                                  {
-                                                   self["incremental"] = $hs_intToNumber(val);
+                                                   self["incremental"] = ($hs_intToNumber(val)
+                                                                          !=
+                                                                          0);
                                                  });
 var webkit_dom_html_input_element_get_incremental;
 webkit_dom_html_input_element_get_incremental = (function(self)
                                                  {
-                                                   return $hs_int(self["incremental"]);
+                                                   return $hs_int((self["incremental"] ? 1 : 0));
                                                  });
 var webkit_dom_html_input_element_get_will_validate;
 webkit_dom_html_input_element_get_will_validate = (function(self)
                                                    {
-                                                     return $hs_int(self["willValidate"]);
+                                                     return $hs_int((self["willValidate"] ? 1 : 0));
                                                    });
 var webkit_dom_html_input_element_get_validation_message;
 webkit_dom_html_input_element_get_validation_message = (function(self)
@@ -3696,12 +3754,14 @@ var webkit_dom_html_input_element_set_indeterminate;
 webkit_dom_html_input_element_set_indeterminate = (function(self,
                                                             val)
                                                    {
-                                                     self["indeterminate"] = $hs_intToNumber(val);
+                                                     self["indeterminate"] = ($hs_intToNumber(val)
+                                                                              !=
+                                                                              0);
                                                    });
 var webkit_dom_html_input_element_get_indeterminate;
 webkit_dom_html_input_element_get_indeterminate = (function(self)
                                                    {
-                                                     return $hs_int(self["indeterminate"]);
+                                                     return $hs_int((self["indeterminate"] ? 1 : 0));
                                                    });
 var webkit_dom_html_input_element_get_files;
 webkit_dom_html_input_element_get_files = (function(self)
@@ -3717,23 +3777,27 @@ var webkit_dom_html_input_element_set_webkit_speech;
 webkit_dom_html_input_element_set_webkit_speech = (function(self,
                                                             val)
                                                    {
-                                                     self["webkitSpeech"] = $hs_intToNumber(val);
+                                                     self["webkitSpeech"] = ($hs_intToNumber(val)
+                                                                             !=
+                                                                             0);
                                                    });
 var webkit_dom_html_input_element_get_webkit_speech;
 webkit_dom_html_input_element_get_webkit_speech = (function(self)
                                                    {
-                                                     return $hs_int(self["webkitSpeech"]);
+                                                     return $hs_int((self["webkitSpeech"] ? 1 : 0));
                                                    });
 var webkit_dom_html_input_element_set_webkit_grammar;
 webkit_dom_html_input_element_set_webkit_grammar = (function(self,
                                                              val)
                                                     {
-                                                      self["webkitGrammar"] = $hs_intToNumber(val);
+                                                      self["webkitGrammar"] = ($hs_intToNumber(val)
+                                                                               !=
+                                                                               0);
                                                     });
 var webkit_dom_html_input_element_get_webkit_grammar;
 webkit_dom_html_input_element_get_webkit_grammar = (function(self)
                                                     {
-                                                      return $hs_int(self["webkitGrammar"]);
+                                                      return $hs_int((self["webkitGrammar"] ? 1 : 0));
                                                     });
 var webkit_dom_html_input_element_set_onwebkitspeechchange;
 webkit_dom_html_input_element_set_onwebkitspeechchange = (function(self,
@@ -3825,12 +3889,12 @@ webkit_dom_html_image_element_get_hspace = (function(self)
 var webkit_dom_html_image_element_set_is_map;
 webkit_dom_html_image_element_set_is_map = (function(self, val)
                                             {
-                                              self["isMap"] = $hs_intToNumber(val);
+                                              self["isMap"] = ($hs_intToNumber(val) != 0);
                                             });
 var webkit_dom_html_image_element_get_is_map;
 webkit_dom_html_image_element_get_is_map = (function(self)
                                             {
-                                              return $hs_int(self["isMap"]);
+                                              return $hs_int((self["isMap"] ? 1 : 0));
                                             });
 var webkit_dom_html_image_element_set_long_desc;
 webkit_dom_html_image_element_set_long_desc = (function(self, val)
@@ -3885,7 +3949,7 @@ webkit_dom_html_image_element_get_width = (function(self)
 var webkit_dom_html_image_element_get_complete;
 webkit_dom_html_image_element_get_complete = (function(self)
                                               {
-                                                return $hs_int(self["complete"]);
+                                                return $hs_int((self["complete"] ? 1 : 0));
                                               });
 var webkit_dom_html_image_element_set_lowsrc;
 webkit_dom_html_image_element_set_lowsrc = (function(self, val)
@@ -4088,12 +4152,12 @@ webkit_dom_htmlhr_element_get_align = (function(self)
 var webkit_dom_htmlhr_element_set_no_shade;
 webkit_dom_htmlhr_element_set_no_shade = (function(self, val)
                                           {
-                                            self["noShade"] = $hs_intToNumber(val);
+                                            self["noShade"] = ($hs_intToNumber(val) != 0);
                                           });
 var webkit_dom_htmlhr_element_get_no_shade;
 webkit_dom_htmlhr_element_get_no_shade = (function(self)
                                           {
-                                            return $hs_int(self["noShade"]);
+                                            return $hs_int((self["noShade"] ? 1 : 0));
                                           });
 var webkit_dom_htmlhr_element_set_size;
 webkit_dom_htmlhr_element_set_size = (function(self, val)
@@ -4383,12 +4447,12 @@ webkit_dom_html_frame_element_get_name = (function(self)
 var webkit_dom_html_frame_element_set_no_resize;
 webkit_dom_html_frame_element_set_no_resize = (function(self, val)
                                                {
-                                                 self["noResize"] = $hs_intToNumber(val);
+                                                 self["noResize"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_frame_element_get_no_resize;
 webkit_dom_html_frame_element_get_no_resize = (function(self)
                                                {
-                                                 return $hs_int(self["noResize"]);
+                                                 return $hs_int((self["noResize"] ? 1 : 0));
                                                });
 var webkit_dom_html_frame_element_set_scrolling;
 webkit_dom_html_frame_element_set_scrolling = (function(self, val)
@@ -4448,7 +4512,7 @@ webkit_dom_html_form_element_reset = (function(self)
 var webkit_dom_html_form_element_check_validity;
 webkit_dom_html_form_element_check_validity = (function(self)
                                                {
-                                                 return $hs_int(self["checkValidity"]());
+                                                 return $hs_int((self["checkValidity"]() ? 1 : 0));
                                                });
 var webkit_dom_html_form_element_get_elements;
 webkit_dom_html_form_element_get_elements = (function(self)
@@ -4473,12 +4537,12 @@ webkit_dom_html_form_element_get_name = (function(self)
 var webkit_dom_html_form_element_set_no_validate;
 webkit_dom_html_form_element_set_no_validate = (function(self, val)
                                                 {
-                                                  self["noValidate"] = $hs_intToNumber(val);
+                                                  self["noValidate"] = ($hs_intToNumber(val) != 0);
                                                 });
 var webkit_dom_html_form_element_get_no_validate;
 webkit_dom_html_form_element_get_no_validate = (function(self)
                                                 {
-                                                  return $hs_int(self["noValidate"]);
+                                                  return $hs_int((self["noValidate"] ? 1 : 0));
                                                 });
 var webkit_dom_html_form_element_set_accept_charset;
 webkit_dom_html_form_element_set_accept_charset = (function(self,
@@ -4595,7 +4659,7 @@ webkit_dom_html_field_set_element_get_type = (function()
 var webkit_dom_html_field_set_element_check_validity;
 webkit_dom_html_field_set_element_check_validity = (function(self)
                                                     {
-                                                      return $hs_int(self["checkValidity"]());
+                                                      return $hs_int((self["checkValidity"]() ? 1 : 0));
                                                     });
 var webkit_dom_html_field_set_element_set_custom_validity;
 webkit_dom_html_field_set_element_set_custom_validity = (function(self,
@@ -4616,7 +4680,7 @@ webkit_dom_html_field_set_element_get_validity = (function(self)
 var webkit_dom_html_field_set_element_get_will_validate;
 webkit_dom_html_field_set_element_get_will_validate = (function(self)
                                                        {
-                                                         return $hs_int(self["willValidate"]);
+                                                         return $hs_int((self["willValidate"] ? 1 : 0));
                                                        });
 var webkit_dom_html_field_set_element_get_validation_message;
 webkit_dom_html_field_set_element_get_validation_message = (function(self)
@@ -4687,12 +4751,12 @@ webkit_dom_html_element_get_lang = (function(self)
 var webkit_dom_html_element_set_translate;
 webkit_dom_html_element_set_translate = (function(self, val)
                                          {
-                                           self["translate"] = $hs_intToNumber(val);
+                                           self["translate"] = ($hs_intToNumber(val) != 0);
                                          });
 var webkit_dom_html_element_get_translate;
 webkit_dom_html_element_get_translate = (function(self)
                                          {
-                                           return $hs_int(self["translate"]);
+                                           return $hs_int((self["translate"] ? 1 : 0));
                                          });
 var webkit_dom_html_element_set_dir;
 webkit_dom_html_element_set_dir = (function(self, val)
@@ -4732,12 +4796,12 @@ webkit_dom_html_element_get_tab_index = (function(self)
 var webkit_dom_html_element_set_draggable;
 webkit_dom_html_element_set_draggable = (function(self, val)
                                          {
-                                           self["draggable"] = $hs_intToNumber(val);
+                                           self["draggable"] = ($hs_intToNumber(val) != 0);
                                          });
 var webkit_dom_html_element_get_draggable;
 webkit_dom_html_element_get_draggable = (function(self)
                                          {
-                                           return $hs_int(self["draggable"]);
+                                           return $hs_int((self["draggable"] ? 1 : 0));
                                          });
 var webkit_dom_html_element_set_webkitdropzone;
 webkit_dom_html_element_set_webkitdropzone = (function(self, val)
@@ -4752,12 +4816,12 @@ webkit_dom_html_element_get_webkitdropzone = (function(self)
 var webkit_dom_html_element_set_hidden;
 webkit_dom_html_element_set_hidden = (function(self, val)
                                       {
-                                        self["hidden"] = $hs_intToNumber(val);
+                                        self["hidden"] = ($hs_intToNumber(val) != 0);
                                       });
 var webkit_dom_html_element_get_hidden;
 webkit_dom_html_element_get_hidden = (function(self)
                                       {
-                                        return $hs_int(self["hidden"]);
+                                        return $hs_int((self["hidden"] ? 1 : 0));
                                       });
 var webkit_dom_html_element_set_access_key;
 webkit_dom_html_element_set_access_key = (function(self, val)
@@ -4827,27 +4891,27 @@ webkit_dom_html_element_get_content_editable = (function(self)
 var webkit_dom_html_element_get_is_content_editable;
 webkit_dom_html_element_get_is_content_editable = (function(self)
                                                    {
-                                                     return $hs_int(self["isContentEditable"]);
+                                                     return $hs_int((self["isContentEditable"] ? 1 : 0));
                                                    });
 var webkit_dom_html_element_set_spellcheck;
 webkit_dom_html_element_set_spellcheck = (function(self, val)
                                           {
-                                            self["spellcheck"] = $hs_intToNumber(val);
+                                            self["spellcheck"] = ($hs_intToNumber(val) != 0);
                                           });
 var webkit_dom_html_element_get_spellcheck;
 webkit_dom_html_element_get_spellcheck = (function(self)
                                           {
-                                            return $hs_int(self["spellcheck"]);
+                                            return $hs_int((self["spellcheck"] ? 1 : 0));
                                           });
 var webkit_dom_html_element_set_item_scope;
 webkit_dom_html_element_set_item_scope = (function(self, val)
                                           {
-                                            self["itemScope"] = $hs_intToNumber(val);
+                                            self["itemScope"] = ($hs_intToNumber(val) != 0);
                                           });
 var webkit_dom_html_element_get_item_scope;
 webkit_dom_html_element_get_item_scope = (function(self)
                                           {
-                                            return $hs_int(self["itemScope"]);
+                                            return $hs_int((self["itemScope"] ? 1 : 0));
                                           });
 var webkit_dom_html_element_get_item_type;
 webkit_dom_html_element_get_item_type = (function(self)
@@ -4907,7 +4971,7 @@ webkit_dom_html_document_release_events = (function(self)
 var webkit_dom_html_document_has_focus;
 webkit_dom_html_document_has_focus = (function(self)
                                       {
-                                        return $hs_int(self["hasFocus"]());
+                                        return $hs_int((self["hasFocus"]() ? 1 : 0));
                                       });
 var webkit_dom_html_document_get_embeds;
 webkit_dom_html_document_get_embeds = (function(self)
@@ -5022,12 +5086,12 @@ webkit_dom_htmld_list_element_get_type = (function()
 var webkit_dom_htmld_list_element_set_compact;
 webkit_dom_htmld_list_element_set_compact = (function(self, val)
                                              {
-                                               self["compact"] = $hs_intToNumber(val);
+                                               self["compact"] = ($hs_intToNumber(val) != 0);
                                              });
 var webkit_dom_htmld_list_element_get_compact;
 webkit_dom_htmld_list_element_get_compact = (function(self)
                                              {
-                                               return $hs_int(self["compact"]);
+                                               return $hs_int((self["compact"] ? 1 : 0));
                                              });
 // Graphics.UI.Gtk.WebKit.DOM.Html
 webkit_dom_html_div_element_get_type = (function()
@@ -5053,12 +5117,12 @@ var webkit_dom_html_directory_element_set_compact;
 webkit_dom_html_directory_element_set_compact = (function(self,
                                                           val)
                                                  {
-                                                   self["compact"] = $hs_intToNumber(val);
+                                                   self["compact"] = ($hs_intToNumber(val) != 0);
                                                  });
 var webkit_dom_html_directory_element_get_compact;
 webkit_dom_html_directory_element_get_compact = (function(self)
                                                  {
-                                                   return $hs_int(self["compact"]);
+                                                   return $hs_int((self["compact"] ? 1 : 0));
                                                  });
 // Graphics.UI.Gtk.WebKit.DOM.Html
 webkit_dom_html_collection_get_type = (function()
@@ -5083,7 +5147,7 @@ webkit_dom_html_button_element_get_type = (function()
 var webkit_dom_html_button_element_check_validity;
 webkit_dom_html_button_element_check_validity = (function(self)
                                                  {
-                                                   return $hs_int(self["checkValidity"]());
+                                                   return $hs_int((self["checkValidity"]() ? 1 : 0));
                                                  });
 var webkit_dom_html_button_element_set_custom_validity;
 webkit_dom_html_button_element_set_custom_validity = (function(self,
@@ -5133,12 +5197,14 @@ var webkit_dom_html_button_element_set_form_no_validate;
 webkit_dom_html_button_element_set_form_no_validate = (function(self,
                                                                 val)
                                                        {
-                                                         self["formNoValidate"] = $hs_intToNumber(val);
+                                                         self["formNoValidate"] = ($hs_intToNumber(val)
+                                                                                   !=
+                                                                                   0);
                                                        });
 var webkit_dom_html_button_element_get_form_no_validate;
 webkit_dom_html_button_element_get_form_no_validate = (function(self)
                                                        {
-                                                         return $hs_int(self["formNoValidate"]);
+                                                         return $hs_int((self["formNoValidate"] ? 1 : 0));
                                                        });
 var webkit_dom_html_button_element_set_form_target;
 webkit_dom_html_button_element_set_form_target = (function(self,
@@ -5159,22 +5225,22 @@ webkit_dom_html_button_element_get_validity = (function(self)
 var webkit_dom_html_button_element_set_disabled;
 webkit_dom_html_button_element_set_disabled = (function(self, val)
                                                {
-                                                 self["disabled"] = $hs_intToNumber(val);
+                                                 self["disabled"] = ($hs_intToNumber(val) != 0);
                                                });
 var webkit_dom_html_button_element_get_disabled;
 webkit_dom_html_button_element_get_disabled = (function(self)
                                                {
-                                                 return $hs_int(self["disabled"]);
+                                                 return $hs_int((self["disabled"] ? 1 : 0));
                                                });
 var webkit_dom_html_button_element_set_autofocus;
 webkit_dom_html_button_element_set_autofocus = (function(self, val)
                                                 {
-                                                  self["autofocus"] = $hs_intToNumber(val);
+                                                  self["autofocus"] = ($hs_intToNumber(val) != 0);
                                                 });
 var webkit_dom_html_button_element_get_autofocus;
 webkit_dom_html_button_element_get_autofocus = (function(self)
                                                 {
-                                                  return $hs_int(self["autofocus"]);
+                                                  return $hs_int((self["autofocus"] ? 1 : 0));
                                                 });
 var webkit_dom_html_button_element_set_name;
 webkit_dom_html_button_element_set_name = (function(self, val)
@@ -5199,7 +5265,7 @@ webkit_dom_html_button_element_get_value = (function(self)
 var webkit_dom_html_button_element_get_will_validate;
 webkit_dom_html_button_element_get_will_validate = (function(self)
                                                     {
-                                                      return $hs_int(self["willValidate"]);
+                                                      return $hs_int((self["willValidate"] ? 1 : 0));
                                                     });
 var webkit_dom_html_button_element_get_validation_message;
 webkit_dom_html_button_element_get_validation_message = (function(self)
@@ -5532,12 +5598,12 @@ webkit_dom_html_area_element_get_href = (function(self)
 var webkit_dom_html_area_element_set_no_href;
 webkit_dom_html_area_element_set_no_href = (function(self, val)
                                             {
-                                              self["noHref"] = $hs_intToNumber(val);
+                                              self["noHref"] = ($hs_intToNumber(val) != 0);
                                             });
 var webkit_dom_html_area_element_get_no_href;
 webkit_dom_html_area_element_get_no_href = (function(self)
                                             {
-                                              return $hs_int(self["noHref"]);
+                                              return $hs_int((self["noHref"] ? 1 : 0));
                                             });
 var webkit_dom_html_area_element_set_ping;
 webkit_dom_html_area_element_set_ping = (function(self, val)
@@ -5967,7 +6033,7 @@ webkit_dom_event_target_get_type = (function()
 var webkit_dom_event_target_dispatch_event;
 webkit_dom_event_target_dispatch_event = (function(self, event)
                                           {
-                                            return $hs_int(self["dispatchEvent"](event));
+                                            return $hs_int((self["dispatchEvent"](event) ? 1 : 0));
                                           });
 // Graphics.UI.Gtk.WebKit.DOM.Events
 webkit_dom_event_get_type = (function()
@@ -5989,8 +6055,8 @@ webkit_dom_event_init_event = (function(self, eventTypeArg,
                                         canBubbleArg, cancelableArg)
                                {
                                  return self["initEvent"]($hs_fromUtf8(eventTypeArg),
-                                                          $hs_intToNumber(canBubbleArg),
-                                                          $hs_intToNumber(cancelableArg));
+                                                          ($hs_intToNumber(canBubbleArg) != 0),
+                                                          ($hs_intToNumber(cancelableArg) != 0));
                                });
 var webkit_dom_event_stop_immediate_propagation;
 webkit_dom_event_stop_immediate_propagation = (function(self)
@@ -6015,12 +6081,12 @@ webkit_dom_event_get_event_phase = (function(self)
 var webkit_dom_event_get_bubbles;
 webkit_dom_event_get_bubbles = (function(self)
                                 {
-                                  return $hs_int(self["bubbles"]);
+                                  return $hs_int((self["bubbles"] ? 1 : 0));
                                 });
 var webkit_dom_event_get_cancelable;
 webkit_dom_event_get_cancelable = (function(self)
                                    {
-                                     return $hs_int(self["cancelable"]);
+                                     return $hs_int((self["cancelable"] ? 1 : 0));
                                    });
 var webkit_dom_event_get_time_stamp;
 webkit_dom_event_get_time_stamp = (function(self)
@@ -6030,7 +6096,7 @@ webkit_dom_event_get_time_stamp = (function(self)
 var webkit_dom_event_get_default_prevented;
 webkit_dom_event_get_default_prevented = (function(self)
                                           {
-                                            return $hs_int(self["defaultPrevented"]);
+                                            return $hs_int((self["defaultPrevented"] ? 1 : 0));
                                           });
 var webkit_dom_event_get_src_element;
 webkit_dom_event_get_src_element = (function(self)
@@ -6040,22 +6106,22 @@ webkit_dom_event_get_src_element = (function(self)
 var webkit_dom_event_set_return_value;
 webkit_dom_event_set_return_value = (function(self, val)
                                      {
-                                       self["returnValue"] = $hs_intToNumber(val);
+                                       self["returnValue"] = ($hs_intToNumber(val) != 0);
                                      });
 var webkit_dom_event_get_return_value;
 webkit_dom_event_get_return_value = (function(self)
                                      {
-                                       return $hs_int(self["returnValue"]);
+                                       return $hs_int((self["returnValue"] ? 1 : 0));
                                      });
 var webkit_dom_event_set_cancel_bubble;
 webkit_dom_event_set_cancel_bubble = (function(self, val)
                                       {
-                                        self["cancelBubble"] = $hs_intToNumber(val);
+                                        self["cancelBubble"] = ($hs_intToNumber(val) != 0);
                                       });
 var webkit_dom_event_get_cancel_bubble;
 webkit_dom_event_get_cancel_bubble = (function(self)
                                       {
-                                        return $hs_int(self["cancelBubble"]);
+                                        return $hs_int((self["cancelBubble"] ? 1 : 0));
                                       });
 // Graphics.UI.Gtk.WebKit.DOM.Core
 webkit_dom_entity_reference_get_type = (function()
@@ -6147,14 +6213,14 @@ webkit_dom_element_set_attribute_node_ns = (function(self, newAttr)
 var webkit_dom_element_has_attribute;
 webkit_dom_element_has_attribute = (function(self, name)
                                     {
-                                      return $hs_int(self["hasAttribute"]($hs_fromUtf8(name)));
+                                      return $hs_int((self["hasAttribute"]($hs_fromUtf8(name)) ? 1 : 0));
                                     });
 var webkit_dom_element_has_attribute_ns;
 webkit_dom_element_has_attribute_ns = (function(self, namespaceURI,
                                                 localName)
                                        {
-                                         return $hs_int(self["hasAttributeNS"]($hs_fromUtf8(namespaceURI),
-                                                                               $hs_fromUtf8(localName)));
+                                         return $hs_int((self["hasAttributeNS"]($hs_fromUtf8(namespaceURI),
+                                                                                $hs_fromUtf8(localName)) ? 1 : 0));
                                        });
 var webkit_dom_element_focus;
 webkit_dom_element_focus = (function(self)
@@ -6169,13 +6235,17 @@ webkit_dom_element_blur = (function(self)
 var webkit_dom_element_scroll_into_view;
 webkit_dom_element_scroll_into_view = (function(self, alignWithTop)
                                        {
-                                         return self["scrollIntoView"]($hs_intToNumber(alignWithTop));
+                                         return self["scrollIntoView"](($hs_intToNumber(alignWithTop)
+                                                                        !=
+                                                                        0));
                                        });
 var webkit_dom_element_scroll_into_view_if_needed;
 webkit_dom_element_scroll_into_view_if_needed = (function(self,
                                                           centerIfNeeded)
                                                  {
-                                                   return self["scrollIntoViewIfNeeded"]($hs_intToNumber(centerIfNeeded));
+                                                   return self["scrollIntoViewIfNeeded"](($hs_intToNumber(centerIfNeeded)
+                                                                                          !=
+                                                                                          0));
                                                  });
 var webkit_dom_element_scroll_by_lines;
 webkit_dom_element_scroll_by_lines = (function(self, lines)
@@ -6207,7 +6277,7 @@ var webkit_dom_element_webkit_matches_selector;
 webkit_dom_element_webkit_matches_selector = (function(self,
                                                        selectors)
                                               {
-                                                return $hs_int(self["webkitMatchesSelector"]($hs_fromUtf8(selectors)));
+                                                return $hs_int((self["webkitMatchesSelector"]($hs_fromUtf8(selectors)) ? 1 : 0));
                                               });
 var webkit_dom_element_get_tag_name;
 webkit_dom_element_get_tag_name = (function(self)
@@ -6814,7 +6884,7 @@ webkit_dom_dom_window_alert = (function(self, message)
 var webkit_dom_dom_window_confirm;
 webkit_dom_dom_window_confirm = (function(self, message)
                                  {
-                                   return $hs_int(self["confirm"]($hs_fromUtf8(message)));
+                                   return $hs_int((self["confirm"]($hs_fromUtf8(message)) ? 1 : 0));
                                  });
 var webkit_dom_dom_window_prompt;
 webkit_dom_dom_window_prompt = (function(self, message,
@@ -6827,13 +6897,15 @@ var webkit_dom_dom_window_find;
 webkit_dom_dom_window_find = (function(self, string, caseSensitive,
                                        backwards, wrap, wholeWord, searchInFrames, showDialog)
                               {
-                                return $hs_int(self["find"]($hs_fromUtf8(string),
-                                                            $hs_intToNumber(caseSensitive),
-                                                            $hs_intToNumber(backwards),
-                                                            $hs_intToNumber(wrap),
-                                                            $hs_intToNumber(wholeWord),
-                                                            $hs_intToNumber(searchInFrames),
-                                                            $hs_intToNumber(showDialog)));
+                                return $hs_int((self["find"]($hs_fromUtf8(string),
+                                                             ($hs_intToNumber(caseSensitive) != 0),
+                                                             ($hs_intToNumber(backwards) != 0),
+                                                             ($hs_intToNumber(wrap) != 0),
+                                                             ($hs_intToNumber(wholeWord) != 0),
+                                                             ($hs_intToNumber(searchInFrames) != 0),
+                                                             ($hs_intToNumber(showDialog)
+                                                              !=
+                                                              0)) ? 1 : 0));
                               });
 var webkit_dom_dom_window_scroll_by;
 webkit_dom_dom_window_scroll_by = (function(self, x, y)
@@ -6921,7 +6993,7 @@ webkit_dom_dom_window_btoa = (function(self, string)
 var webkit_dom_dom_window_dispatch_event;
 webkit_dom_dom_window_dispatch_event = (function(self, evt)
                                         {
-                                          return $hs_int(self["dispatchEvent"](evt));
+                                          return $hs_int((self["dispatchEvent"](evt) ? 1 : 0));
                                         });
 var webkit_dom_dom_window_capture_events;
 webkit_dom_dom_window_capture_events = (function(self)
@@ -6991,7 +7063,7 @@ webkit_dom_dom_window_get_frame_element = (function(self)
 var webkit_dom_dom_window_get_offscreen_buffering;
 webkit_dom_dom_window_get_offscreen_buffering = (function(self)
                                                  {
-                                                   return $hs_int(self["offscreenBuffering"]);
+                                                   return $hs_int((self["offscreenBuffering"] ? 1 : 0));
                                                  });
 var webkit_dom_dom_window_get_outer_height;
 webkit_dom_dom_window_get_outer_height = (function(self)
@@ -7056,7 +7128,7 @@ webkit_dom_dom_window_get_page_y_offset = (function(self)
 var webkit_dom_dom_window_get_closed;
 webkit_dom_dom_window_get_closed = (function(self)
                                     {
-                                      return $hs_int(self["closed"]);
+                                      return $hs_int((self["closed"] ? 1 : 0));
                                     });
 var webkit_dom_dom_window_get_length;
 webkit_dom_dom_window_get_length = (function(self)
@@ -7906,7 +7978,7 @@ webkit_dom_dom_token_list_item = (function(self, index)
 var webkit_dom_dom_token_list_contains;
 webkit_dom_dom_token_list_contains = (function(self, token)
                                       {
-                                        return $hs_int(self["contains"]($hs_fromUtf8(token)));
+                                        return $hs_int((self["contains"]($hs_fromUtf8(token)) ? 1 : 0));
                                       });
 var webkit_dom_dom_token_list_add;
 webkit_dom_dom_token_list_add = (function(self, token)
@@ -7921,7 +7993,7 @@ webkit_dom_dom_token_list_remove = (function(self, token)
 var webkit_dom_dom_token_list_toggle;
 webkit_dom_dom_token_list_toggle = (function(self, token)
                                     {
-                                      return $hs_int(self["toggle"]($hs_fromUtf8(token)));
+                                      return $hs_int((self["toggle"]($hs_fromUtf8(token)) ? 1 : 0));
                                     });
 var webkit_dom_dom_token_list_get_length;
 webkit_dom_dom_token_list_get_length = (function(self)
@@ -7972,8 +8044,10 @@ var webkit_dom_dom_selection_contains_node;
 webkit_dom_dom_selection_contains_node = (function(self, node,
                                                    allowPartial)
                                           {
-                                            return $hs_int(self["containsNode"](node,
-                                                                                $hs_intToNumber(allowPartial)));
+                                            return $hs_int((self["containsNode"](node,
+                                                                                 ($hs_intToNumber(allowPartial)
+                                                                                  !=
+                                                                                  0)) ? 1 : 0));
                                           });
 var webkit_dom_dom_selection_select_all_children;
 webkit_dom_dom_selection_select_all_children = (function(self,
@@ -8054,7 +8128,7 @@ webkit_dom_dom_selection_get_focus_offset = (function(self)
 var webkit_dom_dom_selection_get_is_collapsed;
 webkit_dom_dom_selection_get_is_collapsed = (function(self)
                                              {
-                                               return $hs_int(self["isCollapsed"]);
+                                               return $hs_int((self["isCollapsed"] ? 1 : 0));
                                              });
 var webkit_dom_dom_selection_get_range_count;
 webkit_dom_dom_selection_get_range_count = (function(self)
@@ -8099,7 +8173,7 @@ webkit_dom_dom_plugin_array_named_item = (function(self, name)
 var webkit_dom_dom_plugin_array_refresh;
 webkit_dom_dom_plugin_array_refresh = (function(self, reload)
                                        {
-                                         return self["refresh"]($hs_intToNumber(reload));
+                                         return self["refresh"](($hs_intToNumber(reload) != 0));
                                        });
 var webkit_dom_dom_plugin_array_get_length;
 webkit_dom_dom_plugin_array_get_length = (function(self)
@@ -8190,8 +8264,8 @@ var webkit_dom_dom_implementation_has_feature;
 webkit_dom_dom_implementation_has_feature = (function(self,
                                                       feature, version)
                                              {
-                                               return $hs_int(self["hasFeature"]($hs_fromUtf8(feature),
-                                                                                 $hs_fromUtf8(version)));
+                                               return $hs_int((self["hasFeature"]($hs_fromUtf8(feature),
+                                                                                  $hs_fromUtf8(version)) ? 1 : 0));
                                              });
 var webkit_dom_dom_implementation_create_document_type;
 webkit_dom_dom_implementation_create_document_type = (function(self,
@@ -8246,7 +8320,7 @@ var webkit_dom_dom_application_cache_dispatch_event;
 webkit_dom_dom_application_cache_dispatch_event = (function(self,
                                                             evt)
                                                    {
-                                                     return $hs_int(self["dispatchEvent"](evt));
+                                                     return $hs_int((self["dispatchEvent"](evt) ? 1 : 0));
                                                    });
 var webkit_dom_dom_application_cache_get_status;
 webkit_dom_dom_application_cache_get_status = (function(self)
@@ -8449,7 +8523,8 @@ var webkit_dom_document_import_node;
 webkit_dom_document_import_node = (function(self, importedNode,
                                             deep)
                                    {
-                                     return self["importNode"](importedNode, $hs_intToNumber(deep));
+                                     return self["importNode"](importedNode,
+                                                               ($hs_intToNumber(deep) != 0));
                                    });
 var webkit_dom_document_create_element_ns;
 webkit_dom_document_create_element_ns = (function(self,
@@ -8499,7 +8574,9 @@ webkit_dom_document_create_node_iterator = (function(self, root,
                                               return self["createNodeIterator"](root,
                                                                                 $hs_intToNumber(whatToShow),
                                                                                 filter,
-                                                                                $hs_intToNumber(expandEntityReferences));
+                                                                                ($hs_intToNumber(expandEntityReferences)
+                                                                                 !=
+                                                                                 0));
                                             });
 var webkit_dom_document_create_tree_walker;
 webkit_dom_document_create_tree_walker = (function(self, root,
@@ -8508,7 +8585,9 @@ webkit_dom_document_create_tree_walker = (function(self, root,
                                             return self["createTreeWalker"](root,
                                                                             $hs_intToNumber(whatToShow),
                                                                             filter,
-                                                                            $hs_intToNumber(expandEntityReferences));
+                                                                            ($hs_intToNumber(expandEntityReferences)
+                                                                             !=
+                                                                             0));
                                           });
 var webkit_dom_document_get_override_style;
 webkit_dom_document_get_override_style = (function(self, element,
@@ -8542,32 +8621,34 @@ var webkit_dom_document_exec_command;
 webkit_dom_document_exec_command = (function(self, command,
                                              userInterface, value)
                                     {
-                                      return $hs_int(self["execCommand"]($hs_fromUtf8(command),
-                                                                         $hs_intToNumber(userInterface),
-                                                                         $hs_fromUtf8(value)));
+                                      return $hs_int((self["execCommand"]($hs_fromUtf8(command),
+                                                                          ($hs_intToNumber(userInterface)
+                                                                           !=
+                                                                           0),
+                                                                          $hs_fromUtf8(value)) ? 1 : 0));
                                     });
 var webkit_dom_document_query_command_enabled;
 webkit_dom_document_query_command_enabled = (function(self,
                                                       command)
                                              {
-                                               return $hs_int(self["queryCommandEnabled"]($hs_fromUtf8(command)));
+                                               return $hs_int((self["queryCommandEnabled"]($hs_fromUtf8(command)) ? 1 : 0));
                                              });
 var webkit_dom_document_query_command_indeterm;
 webkit_dom_document_query_command_indeterm = (function(self,
                                                        command)
                                               {
-                                                return $hs_int(self["queryCommandIndeterm"]($hs_fromUtf8(command)));
+                                                return $hs_int((self["queryCommandIndeterm"]($hs_fromUtf8(command)) ? 1 : 0));
                                               });
 var webkit_dom_document_query_command_state;
 webkit_dom_document_query_command_state = (function(self, command)
                                            {
-                                             return $hs_int(self["queryCommandState"]($hs_fromUtf8(command)));
+                                             return $hs_int((self["queryCommandState"]($hs_fromUtf8(command)) ? 1 : 0));
                                            });
 var webkit_dom_document_query_command_supported;
 webkit_dom_document_query_command_supported = (function(self,
                                                         command)
                                                {
-                                                 return $hs_int(self["queryCommandSupported"]($hs_fromUtf8(command)));
+                                                 return $hs_int((self["queryCommandSupported"]($hs_fromUtf8(command)) ? 1 : 0));
                                                });
 var webkit_dom_document_query_command_value;
 webkit_dom_document_query_command_value = (function(self, command)
@@ -8656,12 +8737,12 @@ webkit_dom_document_get_xml_version = (function(self)
 var webkit_dom_document_set_xml_standalone;
 webkit_dom_document_set_xml_standalone = (function(self, val)
                                           {
-                                            self["xmlStandalone"] = $hs_intToNumber(val);
+                                            self["xmlStandalone"] = ($hs_intToNumber(val) != 0);
                                           });
 var webkit_dom_document_get_xml_standalone;
 webkit_dom_document_get_xml_standalone = (function(self)
                                           {
-                                            return $hs_int(self["xmlStandalone"]);
+                                            return $hs_int((self["xmlStandalone"] ? 1 : 0));
                                           });
 var webkit_dom_document_set_document_uri;
 webkit_dom_document_set_document_uri = (function(self, val)
@@ -9284,7 +9365,7 @@ webkit_dom_document_get_webkit_visibility_state = (function(self)
 var webkit_dom_document_get_webkit_hidden;
 webkit_dom_document_get_webkit_hidden = (function(self)
                                          {
-                                           return $hs_int(self["webkitHidden"]);
+                                           return $hs_int((self["webkitHidden"] ? 1 : 0));
                                          });
 // Graphics.UI.Gtk.WebKit.DOM.Css
 webkit_dom_css_value_get_type = (function()
@@ -9403,7 +9484,7 @@ var webkit_dom_css_style_declaration_is_property_implicit;
 webkit_dom_css_style_declaration_is_property_implicit = (function(self,
                                                                   propertyName)
                                                          {
-                                                           return $hs_int(self["isPropertyImplicit"]($hs_fromUtf8(propertyName)));
+                                                           return $hs_int((self["isPropertyImplicit"]($hs_fromUtf8(propertyName)) ? 1 : 0));
                                                          });
 var webkit_dom_css_style_declaration_set_css_text;
 webkit_dom_css_style_declaration_set_css_text = (function(self,
@@ -9568,7 +9649,7 @@ webkit_dom_bar_info_get_type = (function()
 var webkit_dom_bar_info_get_visible;
 webkit_dom_bar_info_get_visible = (function(self)
                                    {
-                                     return $hs_int(self["visible"]);
+                                     return $hs_int((self["visible"] ? 1 : 0));
                                    });
 // Graphics.UI.Gtk.WebKit.DOM.Core
 webkit_dom_attr_get_type = (function()
@@ -9583,7 +9664,7 @@ webkit_dom_attr_get_name = (function(self)
 var webkit_dom_attr_get_specified;
 webkit_dom_attr_get_specified = (function(self)
                                  {
-                                   return $hs_int(self["specified"]);
+                                   return $hs_int((self["specified"] ? 1 : 0));
                                  });
 var webkit_dom_attr_set_value;
 webkit_dom_attr_set_value = (function(self, val)
@@ -9603,5 +9684,5 @@ webkit_dom_attr_get_owner_element = (function(self)
 var webkit_dom_attr_get_is_id;
 webkit_dom_attr_get_is_id = (function(self)
                              {
-                               return $hs_int(self["isId"]);
+                               return $hs_int((self["isId"] ? 1 : 0));
                              });
