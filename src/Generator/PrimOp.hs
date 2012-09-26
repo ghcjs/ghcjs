@@ -128,7 +128,7 @@ primOp Narrow8WordOp [a] = PlainE $ Js.bitAnd a (Js.int (0xFF :: Int))
 primOp Narrow16WordOp [a] = PlainE $ Js.bitAnd a (Js.int (0xFFFF :: Int))
 primOp Narrow32WordOp [a] = PlainE $ a
 
-primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
+primOp DataToTagOp [a] = PlainE $ Js.minus (RTS.conAppTag a) (Js.int 1)
 
 #endif
 
