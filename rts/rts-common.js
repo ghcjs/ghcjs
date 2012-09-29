@@ -289,10 +289,10 @@ function $hs_writeArrayzh(a, n, b, s) {
     a[n] = b;
     return s;
 };
-function $hs_sizeofArrayzh(a, s) {
+function $hs_sizzeofArrayzh(a, s) {
     return [s, $hs_int(a.length)];
 };
-function $hs_sizeofMutableArrayzh(a, s) {
+function $hs_sizzeofMutableArrayzh(a, s) {
     return [s, $hs_int(a.length)];
 };
 function $hs_indexArrayzh(a, n) {
@@ -454,11 +454,11 @@ function $hs_sameMutableByteArrayzh(a, b) {
 function $hs_unsafeFreezzeByteArrayzh(a, s) {
     return [s, a];
 };
-function $hs_sizeofByteArrayzh(a) {
-    return new Uint8Array(a[0]).length;
+function $hs_sizzeofByteArrayzh(a) {
+    return $hs_int(new Uint8Array(a[0]).length);
 };
-function $hs_sizeofMutableByteArrayzh(a) {
-    return new Uint8Array(a[0]).length;
+function $hs_sizzeofMutableByteArrayzh(a) {
+    return $hs_int(new Uint8Array(a[0]).length);
 };
 function $hs_indexCharArrayzh(a, n) {
     return String.fromCharCode(new Uint8Array(a[0])[n]);
