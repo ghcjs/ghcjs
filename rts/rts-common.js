@@ -316,7 +316,8 @@ if(WORD_SIZE_IN_BITS==32) {
      * @param {!number} n
      */
     malloc = function(n) {
-        var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
+        var x = (n+3) & 0xFFFFFFFC;
+        var result = [new ArrayBuffer(x), 0, $hs_ptrBase];
         result[0].ptrs=[];
         $hs_ptrBase += n;
         return result;
@@ -381,7 +382,8 @@ if (WORD_SIZE_IN_BITS==64) {
     var $hs_ptrBase = goog.math.Long.ZERO;
 
     malloc = function(n) {
-        var result = [new ArrayBuffer(n.toInt()), 0, $hs_ptrBase];
+        var x = (n.toInt()+3) & 0xFFFFFFFC;
+        var result = [new ArrayBuffer(x), 0, $hs_ptrBase];
         result[0].ptrs=[];
         $hs_ptrBase = $hs_ptrBase.add(n);
         return result;
