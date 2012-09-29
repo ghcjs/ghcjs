@@ -106,17 +106,17 @@ Typical install goes something like this.
 <pre>
 cp mk/build.mk.sample mk/build.mk
 perl boot
-./configure --prefix=/home/hamish/ghcjs
+./configure --prefix=$HOME/ghcjs
 make
 make install
 hash -r
 </pre>
 
 That last step takes a long time.
-To use this compiler add /home/hamish/ghcjs to your path ahead of any other ghc.
+To use this compiler add $HOME/ghcjs/bin to your path ahead of any other ghc.
 
 <pre>
-export PATH=/home/hamish/ghcjs/bin:$PATH
+export PATH=$HOME/ghcjs/bin:$PATH
 </pre>
 
 You should be able to switch back to your main compiler at any point by simply not
@@ -146,9 +146,8 @@ You can do the following to build it and put it next to the GHCJS
 enabled version of ghc.
 
 <pre>
-export PATH=/home/hamish/ghcjs/bin:$PATH
-cd libraries/Cabal/cabal-install
-cabal install --prefix=/home/hamish/ghcjs
+export PATH=$HOME/ghcjs/bin:$PATH
+cabal install cabal-install --constraint='Cabal<=1.15' --prefix=$HOME/ghcjs
 hash -r
 </pre>
 
