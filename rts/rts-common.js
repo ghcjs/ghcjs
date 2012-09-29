@@ -315,7 +315,7 @@ if(WORD_SIZE_IN_BITS==32) {
     /**
      * @param {!number} n
      */
-    $hs_allocate = function(n) {
+    malloc = function(n) {
         var result = [new ArrayBuffer(n), 0, $hs_ptrBase];
         result[0].ptrs=[];
         $hs_ptrBase += n;
@@ -326,14 +326,14 @@ if(WORD_SIZE_IN_BITS==32) {
      * @param {Object=} s
      */
     $hs_newByteArrayzh = function(n, s) {
-        return [s, $hs_allocate(n)];
+        return [s, malloc(n)];
     };
     /**
      * @param {!number} n
      * @param {Object=} s
      */
     $hs_newPinnedByteArrayzh = function(n, s) {
-        return [s, $hs_allocate(n)];
+        return [s, malloc(n)];
     };
     /**
      * @param {!number} n
@@ -342,7 +342,7 @@ if(WORD_SIZE_IN_BITS==32) {
      */
     $hs_newAlignedPinnedByteArrayzh = function(n, k, s) {
         $hs_ptrBase += $hs_ptrBase%k;
-        return [s, $hs_allocate(n)];
+        return [s, malloc(n)];
     };
 
     $hs_ptrKey = function(ptr) {
@@ -380,7 +380,7 @@ if (WORD_SIZE_IN_BITS==64) {
     // ByteArray support
     var $hs_ptrBase = goog.math.Long.ZERO;
 
-    $hs_allocate = function(n) {
+    malloc = function(n) {
         var result = [new ArrayBuffer(n.toInt()), 0, $hs_ptrBase];
         result[0].ptrs=[];
         $hs_ptrBase = $hs_ptrBase.add(n);
@@ -391,14 +391,14 @@ if (WORD_SIZE_IN_BITS==64) {
      * @param {Object=} s
      */
     $hs_newByteArrayzh = function(n, s) {
-        return [s, $hs_allocate(n)];
+        return [s, malloc(n)];
     };
     /**
      * @param {!goog.math.Long} n
      * @param {Object=} s
      */
     $hs_newPinnedByteArrayzh = function(n, s) {
-        return [s, $hs_allocate(n)];
+        return [s, malloc(n)];
     };
     /**
      * @param {!goog.math.Long} n
@@ -407,7 +407,7 @@ if (WORD_SIZE_IN_BITS==64) {
      */
     $hs_newAlignedPinnedByteArrayzh = function(n, k, s) {
         $hs_ptrBase = $hs_ptrBase.add(goog.math.Long.fromInt($hs_ptrBase.toInt() % k.toInt()));
-        return [s, $hs_allocate(n)];
+        return [s, malloc(n)];
     };
 
     $hs_ptrKey = function(ptr) {
@@ -444,7 +444,8 @@ if (WORD_SIZE_IN_BITS==64) {
       return ptr;
     };
 }
-
+function free(p) {
+};
 function $hs_byteArrayContentszh(a) {
     return a;
 };
@@ -2667,7 +2668,7 @@ function debugBelch2(f, args) {
 };
 function getProgArgv(p_argc, p_argv) {
     (new Int32Array(p_argc[0], p_argc[1]))[0] = 1;
-    var argv = $hs_allocate($hs_int(8));
+    var argv = malloc($hs_int(8));
     $hs_pokePtr(argv, $hs_int(0), "application");
     $hs_pokePtr(p_argv, $hs_int(0), argv);
 };
