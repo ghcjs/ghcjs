@@ -2659,6 +2659,9 @@ function gettimeofday(tp, tzp) {
         return goog.math.Long.ZERO;
     }
 };
+function __hscore_gettimeofday(tp, tzp) {
+    return gettimeofday(tp, tzp);
+};
 function ghc_wrapper_d1rx_getrusage(who, usage) {
     var x = new Int32Array(usage[0], usage[1]);
     var t = new Date().getTime();
