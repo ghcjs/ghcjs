@@ -2341,6 +2341,19 @@ function write(fd, p, s) {
         return $hs_int(-1);
     return $hs_int(f.write(p, s));
 };
+function __hsunix_long_path_size() {
+    return $hs_int(1024);
+};
+function getcwd(b, size) {
+    var s = $hs_intToNumber(size);
+    var cwd = "/home";
+    memcpy(b, cwd, s < (cwd.length + 1) ? s : (cwd.length + 1));
+    return b;
+};
+function mkdir(path, mode) {
+    // TODO add something here
+    return $hs_int(0);
+};
 function ghc_strlen(s) {
     return s.indexOf('\x00');
 };
