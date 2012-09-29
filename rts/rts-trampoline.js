@@ -528,7 +528,7 @@ $tr_Thread.prototype = {
             if(this._onException !== undefined)
               this._onException(r);
             else
-              console.log("Unhandled Exception in thread " + this.threadIID);
+              console.log("Unhandled Exception in thread " + this.threadID);
             break;
           }
         }
