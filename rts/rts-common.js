@@ -869,7 +869,7 @@ function $hs_copyMutableByteArrayzh(src, soff, dest, doff, count, s) {
 };
 function $hs_plusAddrzh(a, n) {
     n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
-    if(typeof(a) === 'string')
+    if(a === null || typeof(a) === 'string')
         return [a, n, n];
     else
         return [a[0],a[1]+n,a[2]+n];
