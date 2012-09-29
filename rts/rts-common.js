@@ -1562,6 +1562,16 @@ function $hs_toStringOfBytes(src, len) {
     }
     return res;
 };
+function $hs_toStringOfWords(src, len) {
+    var res = "";
+    var srcarray = new Uint16Array(src[0],0);
+    var s = src[1];
+    var end = s + len;
+    for (var i = s; i !== end; i++) {
+      res += String.fromCharCode(srcarray[i]);
+    }
+    return res;
+};
 function $hs_fromUtf8(src) {
     var res = "";
     var srcarray = new Uint8Array(src[0],0);
@@ -2344,21 +2354,59 @@ var $hs_loaded = [];
 var $hs_loadPath = "./";
 var $hs_loading = false;
 
-var $hs_cur_term = $hs_allocate($hs_int(8));
-var $hs_del_curterm = $hs_allocate($hs_int(8));
+// Support for labels
+var $hs_exports = {}
 function $hs_labelData(l, size) {
-    if(l === "cur_term") {
-        $hs_pokePtr($hs_cur_term, $hs_int(0), $hs_allocate($hs_int(64)));
-        return $hs_cur_term;
-    }
-    throw "Unknown Label";
+    return $hs_exports[l] || null;
 };
 function $hs_labelFunction(l, size) {
-    if(l === "del_curterm") {
-        $hs_pokePtr($hs_del_curterm, $hs_int(0), function() {});
-        return $hs_del_curterm;
-    }
-    throw "Unknown Label";
+    return $hs_exports[l] || null;
+};
+function $hs_export(n, ptr) {
+  $hs_exports[n] = malloc($hs_int(8));
+  $hs_pokePtr($hs_exports[n], $hs_int(0), ptr);
+};
+/**
+ * @param {Object} ptr
+ * @param {...Object} var_args
+ */
+function $hs_dynamicCall(ptr, var_args) {
+  var f = $hs_peekPtr(ptr, $hs_int(0));
+  var remainingArguments = Array.prototype.slice.call(arguments, 1, arguments.length);
+  f.apply(f, remainingArguments);
+};
+$hs_export('cur_term', malloc($hs_int(64)));
+$hs_export('del_curterm', function() {});
+function set_curterm(t) {
+};
+var $hs_terminfo = {};
+var $hs_ESC = String.fromCharCode(27);
+$hs_terminfo["cup"] = $hs_ESC + "[%i%p1%d;%p2%dH";
+$hs_terminfo["cnorm"] = $hs_ESC + "[?12l" + $hs_ESC + "[?25h";
+$hs_terminfo["civis"] = $hs_ESC + "[?25l";
+$hs_terminfo["setaf"] = $hs_ESC + "[3%p1%dm";
+$hs_terminfo["setab"] = $hs_ESC + "[4%p1%dm";
+$hs_terminfo["sgr0"] = $hs_ESC + "(B" + $hs_ESC + "[m";
+$hs_terminfo["clear"] = $hs_ESC + "[H" + $hs_ESC + "[2J";
+function tigetstr(capname) {
+  return $hs_terminfo[$hs_fromUtf8(capname)] || null;
+};
+function tcgetattr(fd, ios) {
+  return $hs_int(0);
+};
+function tcsetattr(fd, action, ios) {
+  return $hs_int(0);
+};
+function vty_set_term_timing() {
+};
+function __hsunix_SIGWINCH() {
+  return $hs_int(28);
+};
+function vty_c_get_window_size() {
+  return $hs_int(20*0x10000 + 20);
+};
+function vty_mk_wcswidth(s, len) {
+  return $hs_int($hs_toUtf8($hs_toStringOfWords(s, len)));
 };
 /**
  * @param {Array.<Object>}      args
