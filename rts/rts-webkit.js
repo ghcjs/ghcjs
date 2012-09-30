@@ -6849,7 +6849,7 @@ webkit_dom_element_get_onwebkitfullscreenerror = (function(self)
 // Graphics.UI.Gtk.WebKit.DOM.Window
 webkit_dom_dom_window_get_type = (function()
                                   {
-                                    return DOMWindow;
+                                    return Window;
                                   });
 var webkit_dom_dom_window_get_selection;
 webkit_dom_dom_window_get_selection = (function(self)
