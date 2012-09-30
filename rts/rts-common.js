@@ -2678,6 +2678,22 @@ function ghc_wrapper_d1rx_getrusage(who, usage) {
         return goog.math.Long.ZERO;
     }
 };
+function ghc_wrapper_d1rG_getrusage(who, usage) {
+    var x = new Int32Array(usage[0], usage[1]);
+    var t = new Date().getTime();
+    if(WORD_SIZE_IN_BITS==32) {
+        x[0] = (t/1000) | 0;
+        x[1] = ((t%1000)*1000) | 0;
+        return 0;
+    }
+    else {
+        x[0] = (t/1000) | 0;
+        x[1] = 0;
+        x[2] = ((t%1000)*1000) | 0;
+        x[3] = 0;
+        return goog.math.Long.ZERO;
+    }
+};
 function ghc_wrapper_d1s8_getrusage(who, usage) {
     var x = new Int32Array(usage[0], usage[1]);
     var t = new Date().getTime();
@@ -2694,11 +2710,17 @@ function ghc_wrapper_d1s8_getrusage(who, usage) {
         return goog.math.Long.ZERO;
     }
 };
+function ghc_wrapper_d2jT_fcntl(a, b) {
+    return $hs_int(0);
+};
+function ghc_wrapper_d2jH_fcntl(a, b, c) {
+    return $hs_int(0);
+};
 function g_object_ref(p) {
   return p;
 };
 function g_free(p) {
-}
+};
 function ghcjs_currentWindow() {
   return window;
 };
