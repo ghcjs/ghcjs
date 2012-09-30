@@ -260,6 +260,7 @@ var $tr_Scheduler = {
           s.currentThread = s.waiting[0];
           s.waiting = Array.prototype.slice.call(s.waiting, 1, s.waiting.length);
           s.currentThread._run();
+          s.currentThread = null;
           if(new Date().getTime() - s.currentRunStart > 50)
             break;
         }
@@ -307,7 +308,9 @@ var $tr_Scheduler = {
                 i--;
                 if($tr_Weaks[i].keepMark !== s.finalizerMark) {
                     // Schedule finalizer and set weak pointer to null
-                    s.start($tr_Weaks[i].finalize.hscall($tr_Weaks[i].realWorld));
+                    if($tr_Weaks[i].finalize !== null) {
+                        s.start($tr_Weaks[i].finalize.hscall($tr_Weaks[i].realWorld));
+                    }
                     changed = true;
 
                     // Set these to null so that deRefWeak will return null
@@ -1292,8 +1295,18 @@ if(HS_WEAKS) {
  * still needed.
  */
 function $tr_Weak(key, value, finalize, realWorld) {
+    if(HS_DEBUG) {
+        if(key === undefined)
+            throw "Object undefined!";
+        if(value === undefined)
+            throw "Object undefined!";
+    }
     this.value = value;
-    this.finalize = finalize;
+    // Sometimes finalize will be 0
+    this.finalize = typeof finalize === 'number'
+                    || finalize instanceof goog.math.Long
+                          ? null
+                          : finalize;
     this.realWorld = realWorld;
     if(HS_WEAKS && key.isTopLevel===undefined) {
         if(key.weaks===undefined)
