@@ -2766,3 +2766,6 @@ function setupterm(term, fildes, erret) {
     (new Int32Array(erret[0], erret[1]))[0] = 1;
     return 0;
 };
+$hs_export('gtk2hs_g_object_unref_from_mainloop', function(o) {
+});
+
