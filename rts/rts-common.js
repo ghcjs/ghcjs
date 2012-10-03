@@ -560,13 +560,19 @@ function $hs_indexIntArrayzh(a, n) {
 };
 function $hs_indexWordArrayzh(a, n) {
     if(WORD_SIZE_IN_BITS==32) {
-        // fixme there should be something better than checking this manually
-        if(a instanceof goog.math.Integer) return $hs_absolute(a).getBits(n);
-        else return new Uint32Array(a[0])[n];
+        if(a instanceof goog.math.Integer) {
+            return $hs_absoluste(a).getBits(n);
+        }
+        return new Uint32Array(a[0])[n];
     }
     else {
-        var x = new Int32Array(a[0], n.toNumber()<<3);
-        return goog.math.Long.fromBits(x[0], x[1]);
+        var n2 = n.toNumber()<<1;
+        if(a instanceof goog.math.Integer) {
+            var positive = $hs_absolute(a);
+            return goog.math.Long.fromBits(positive.getBits(n2), positive.getBits(n2+1));
+        }
+        var x = new Int32Array(a[0]);
+        return goog.math.Long.fromBits(x[n2], x[n2+1]);
     }
 };
 function $hs_indexAddrArrayzh(a, n) {
