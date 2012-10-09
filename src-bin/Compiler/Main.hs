@@ -9,7 +9,7 @@ import HscMain (hscSimplify)
 import TidyPgm (tidyProgram)
 import CoreToStg (coreToStg)
 import SimplStg (stg2stg)
-import DynFlags (defaultLogAction, defaultDynFlags, supportedLanguagesAndExtensions, compilerInfo)
+import DynFlags
 import HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..))
 import CorePrep (corePrepPgm)
 import DriverPhases (HscSource (HsBootFile))
@@ -21,33 +21,24 @@ import System.Environment (getArgs, getEnv)
 import Compiler.Info
 import Compiler.Variants
 import qualified GHCJSMain
-
-import qualified Generator.TopLevel as Js (generate)
-import Javascript.Language (Javascript)
-import qualified Javascript.Formatted as Js
-import qualified Javascript.Trampoline as Js
 import MonadUtils (MonadIO(..))
-import Generator.Helpers (runGen, newGenState)
-import qualified Generator.Link as Link
 import System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
 import System.Directory (createDirectoryIfMissing)
 import qualified Control.Exception as Ex
 
 import Control.Monad (when, mplus, forM, forM_)
-import System.Exit (exitSuccess, exitFailure)
+import System.Exit (exitSuccess)
 import System.Process (rawSystem)
 import System.IO
 import Data.Monoid (mconcat, First(..))
 import Data.List (isSuffixOf, isPrefixOf, tails, partition, nub)
 import Data.Maybe (isJust, fromMaybe, catMaybes)
-import Data.Char (toLower)
 
 import Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Char8  as C8
 import Crypto.Conduit (hashFile)
 import qualified Data.Serialize as C
-import qualified Data.List as L
 
 main :: IO ()
 main =
@@ -60,7 +51,8 @@ main =
      libDir <- getGlobalPackageBase
      (argsS, _) <- parseStaticFlags $ map noLoc args1
      defaultErrorHandler
-        defaultLogAction
+        defaultFatalMessager
+        defaultFlushOut
         $ runGhc (mbMinusB `mplus` Just libDir) $
        do sdflags <- getSessionDynFlags
           let oneshot = "-c" `elem` args1
@@ -94,7 +86,7 @@ addPkgConf df = do
   db2 <- getUserPackageDB
   base <- getGlobalPackageBase
   return $ df
-             { extraPkgConfs = db1 : db2 : extraPkgConfs df
+             { extraPkgConfs = ([PkgConfFile db1, PkgConfFile db2]++)
              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
              }
 
@@ -122,7 +114,7 @@ handleCommandline args
     | otherwise             = return ()
    where
      lookupAct = getFirst . mconcat . map (First . (`lookup` acts)) $ args
-     unsupported xs = putStrLn (xs ++ " is currently unsupported") >> exitFailure
+--     unsupported xs = putStrLn (xs ++ " is currently unsupported") >> exitFailure
      acts :: [(String, IO ())]
      acts = [ ("--supported-languages", mapM_ putStrLn supportedLanguagesAndExtensions)
             , ("--numeric-version", fallbackGhc args) -- putStrLn getCompilerVersion)
@@ -148,6 +140,7 @@ handleOneShot args | fallback  = fallbackGhc args >> exitSuccess
    if GHCJS_FALLBACK_PLAIN is set, all arguments are passed through verbatim
    to the fallback ghc, including -B
 -}
+fallbackGhc :: [String] -> IO ()
 fallbackGhc args = do
   pkgargs <- pkgConfArgs
   ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
@@ -181,8 +174,9 @@ desugaredModuleFromModSummary mod =
 writeDesugaredModule :: GhcMonad m => DesugaredModule -> m ()
 writeDesugaredModule mod =
   do tidyCore <- cgGutsFromModGuts (coreModule mod)
+     env <- getSession
      versions <- liftIO $ forM variants $ \variant -> do
-          program <- liftIO $ concreteJavascriptFromCgGuts dflags tidyCore variant
+          program <- liftIO $ concreteJavascriptFromCgGuts dflags env tidyCore variant
           let outputFile = addExtension outputBase (variantExtension variant)
           putStrLn $ concat ["Writing module ", name, " (", outputFile, ")"]
           writeFile outputFile program
@@ -217,9 +211,9 @@ cgGutsFromModGuts guts =
      (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
      return cgGuts
 
-concreteJavascriptFromCgGuts :: DynFlags -> CgGuts -> Variant -> IO String
-concreteJavascriptFromCgGuts dflags core variant =
-  do core_binds <- corePrepPgm dflags (cg_binds core) (cg_tycons $ core)
+concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO String
+concreteJavascriptFromCgGuts dflags env core variant =
+  do core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons $ core)
      stg <- coreToStg dflags core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
      return $ variantRender variant stg' (cg_module core)
