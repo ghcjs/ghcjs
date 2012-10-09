@@ -3,17 +3,13 @@
 -}
 module Compiler.Variants where
 
-import qualified Generator.TopLevel as Js (generate)
-import Javascript.Language (Javascript)
-import qualified Javascript.Formatted as Js
-import qualified Javascript.Trampoline as Js
-import Generator.Helpers (runGen, newGenState)
+import qualified Gen2.Generator as Gen2
 
 import StgSyn (StgBinding)
 import Module (Module(..))
 import Id (Id)
 
-data CallingConvention = Plain | Trampoline
+data CallingConvention = Gen2
 
 data Variant = Variant
     { variantExtension         :: String
@@ -25,28 +21,11 @@ data Variant = Variant
 variantExtension' = tail . variantExtension
 
 variants :: [Variant]
-variants = [ plainVariant, trampolineVariant ]
+variants = [ gen2Variant ]
 
-plainVariant :: Variant
-plainVariant = Variant ".plain.js" Plain renderPlain
-
-trampolineVariant :: Variant
-trampolineVariant = Variant ".trampoline.js" Trampoline renderTrampoline
+gen2Variant :: Variant
+gen2Variant = Variant ".gen2.js" Gen2 Gen2.generate
 
 type StgPgm = [(StgBinding,[(Id,[Id])])]
 
-renderPlain :: StgPgm -> Module -> String
-renderPlain cg mn = show abs
-  where
-    abs :: Js.Formatted
-    abs = renderAbstract cg mn
-
-renderTrampoline :: StgPgm -> Module -> String
-renderTrampoline cg mn = show abs
-  where
-    abs :: Js.Trampoline Js.Formatted
-    abs = renderAbstract cg mn
-
-renderAbstract :: (Javascript js) => StgPgm -> Module-> js
-renderAbstract stg m = fst $ runGen (Js.generate m stg) newGenState
 

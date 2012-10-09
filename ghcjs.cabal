@@ -3,9 +3,9 @@ Version:        0.1.0
 Description:    Haskell to Javascript translator
 License:        BSD3
 License-file:   LICENSE
-Author:         Victor Nazarov
-Copyright:      Victor Nazarov
-Maintainer:     Victor Nazarov <asviraspossible@gmail.com>
+Author:         Victor Nazarov, Hamish Mackenzie, Luite Stegeman
+Copyright:      Victor Nazarov, Hamish Mackenzie, Luite Stegeman
+Maintainer:     Luite Stegeman <stegeman@gmail.com>
 Stability:      Experimental
 Build-Type:     Custom
 Cabal-Version:  >= 1.10
@@ -19,42 +19,49 @@ source-repository head
 flag boot
   default:            False
 
+flag compiler-only
+  default:            False
+
 Library
     Default-Language: Haskell2010
     build-depends: base           >= 4        && < 5,
                    Cabal,
-                   ghc            >= 7.0.3    && < 7.6,
+                   ghc            >= 7.6    && < 7.8,
                    directory,
                    filepath,
                    containers,
                    process,
                    ghcjs-closure,
-                   monads-tf,
+                   mtl,
                    ghc-paths,
+                   template-haskell,
+                   syb            >= 0.3      && < 0.4,
                    source-map     >= 0.1.0    && < 0.2,
-                   bytestring     >= 0.9.2.1  && < 0.10,
+                   bytestring     >= 0.9.2.1  && < 0.11,
                    attoparsec     >= 0.10.2.0 && < 0.11,
-                   aeson          >= 0.6.0.2  && < 0.7
+                   aeson          >= 0.6.0.2  && < 0.7,
+                   jmacro         >= 0.6.2.1  && < 0.7,
+                   text           >= 0.11     && < 0.12,
+                   wl-pprint-text >= 1.0      && < 1.2,
+                   hoopl          >= 3.8      && < 4
     exposed-modules: Compiler.Info,
                      Compiler.Variants,
-                     Generator.Core,
-                     Generator.Dependencies,
-                     Generator.FFI,
-                     Generator.Helpers,
-                     Generator.Link,
-                     Generator.Minify,
-                     Generator.PrimOp,
-                     Generator.TopLevel,
                      GHCJSMain,
-                     Javascript.Formatted,
-                     Javascript.Language,
-                     Javascript.Trampoline,
-                     Javascript.Formatted.Base,
-                     Javascript.Formatted.Expression,
-                     Javascript.Formatted.Monads,
-                     Javascript.Formatted.Statement,
-                     RTS.Dependencies,
-                     RTS.Objects
+                     Gen2.Generator,
+                     Gen2.Floater,
+                     Gen2.Prim,
+                     Gen2.Rts,
+                     Gen2.RtsApply,
+                     Gen2.RtsPrim,
+                     Gen2.RtsTypes,
+                     Gen2.RtsAlloc,
+                     Gen2.RtsSettings,
+                     Gen2.Utils,
+                     Gen2.StgAst,
+                     Gen2.Optimizer,
+                     Gen2.Debug,
+                     Gen2.GC,
+                     Gen2.Printer
     other-modules: Paths_ghcjs
     exposed: True
     buildable: True
@@ -64,19 +71,19 @@ Executable ghcjs
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src-bin
-    Build-Depends:  base               >= 4  &&  < 5,
+    Build-Depends:  base                >= 4  &&  < 5,
                     ghcjs,
-                    ghc                >= 7.0.3 && < 7.6,
+                    ghc                 >= 7.6 && < 7.8,
                     ghc-paths,
                     process,
                     directory,
                     filepath,
-                    base16-bytestring  >= 0.1 && < 0.2,
-                    bytestring         >= 0.9 && < 0.10,
-                    skein              >= 0.1 && < 0.2,
+                    base16-bytestring   >= 0.1 && < 0.2,
+                    bytestring          >= 0.9 && < 0.11,
+                    skein               >= 0.1 && < 0.2,
                     crypto-api,
-                    cereal             >= 0.3  && < 0.4,
-                    crypto-conduit     >= 0.4 && < 0.5,
+                    cereal              >= 0.3  && < 0.4,
+                    crypto-conduit      >= 0.4 && < 0.5,
                     Cabal
     if flag(boot)
       x-boot:     True
@@ -86,76 +93,87 @@ Executable ghcjs
 
 
 Executable ghcjs-link
+    if flag(compiler-only)
+      Buildable:      False
     Main-Is:          Linker/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
-    Build-Depends:    base            >= 4 && < 5,
+    Build-Depends:    base              >= 4 && < 5,
                       ghcjs,
                       process,
                       containers
 
 
 Executable ghcjs-min
+    if flag(compiler-only)
+      Buildable:      False
     Main-Is:          Minify.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
-    Build-Depends:    base            >= 4 && < 5,
+    Build-Depends:    base              >= 4 && < 5,
                       ghcjs,
                       filepath,
                       process,
                       containers
 
 Executable ghcjs-pkg
+    if flag(compiler-only)
+      Buildable:      False
     Main-Is:          Pkg.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
-    Build-Depends:    base            >= 4 && < 5,
+    Build-Depends:    base              >= 4 && < 5,
                       ghcjs,
                       process,
                       directory,
                       filepath
 
 Executable ghcjs-boot
+    if flag(compiler-only)
+      Buildable:      False
     Main-Is:          Boot.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
-    Build-Depends:    base            >= 4    && < 5,
+    Build-Depends:    base              >= 4    && < 5,
                       ghcjs,
                       directory,
                       network,
                       Cabal,
-                      text            >= 0.11 && < 0.12,
-                      bytestring      >= 0.9  && < 0.10,
-                      system-filepath >= 0.4  && < 0.5,
-                      shelly          >= 0.14 && < 0.15,
-                      http-conduit    >= 1.5  && < 1.6,
-                      bzlib-conduit   >= 0.2  && < 0.3,
-                      conduit         >= 0.5  && < 0.6,
-                      tar             >= 0.4  && < 0.5
+                      text              >= 0.11 && < 0.12,
+                      bytestring        >= 0.9  && < 0.11,
+                      system-filepath   >= 0.4  && < 0.5,
+                      shelly            >= 0.14 && < 0.15,
+                      http-conduit      >= 1.5  && < 1.7,
+                      bzlib-conduit     >= 0.2  && < 0.3,
+                      conduit           >= 0.5.2  && < 0.7,
+                      tar               >= 0.4  && < 0.5
 
 Executable ghcjs-cabal
+    if flag(compiler-only)
+      Buildable:      False
     Main-Is:          Cabal.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
-    Build-Depends:    base            >= 4    && < 5,
+    Build-Depends:    base              >= 4    && < 5,
                       containers,
                       directory,
-                      old-time,
+                      time,
                       process,
                       ghcjs,
-                      cereal          >= 0.3  && < 0.4,
-                      crypto-conduit  >= 0.4  && < 0.5,
-                      text            >= 0.11 && < 0.12,
-                      system-filepath >= 0.4  && < 0.5,
-                      bytestring      >= 0.9  && < 0.10,
+                      cereal            >= 0.3  && < 0.4,
+                      crypto-conduit    >= 0.4  && < 0.5,
+                      text              >= 0.11 && < 0.12,
+                      system-filepath   >= 0.4  && < 0.5,
+                      bytestring        >= 0.9  && < 0.11,
                       base16-bytestring >= 0.1 && < 0.2,
-                      skein           >= 0.1  && < 0.2,
-                      shelly          >= 0.14 && < 0.15
+                      skein             >= 0.1  && < 0.2,
+                      shelly            >= 0.14 && < 0.15
 
 test-suite test
     type:             exitcode-stdio-1.0
     Default-Language: Haskell2010
     hs-source-dirs:   examples
     main-is:          BuildTest.hs
-    build-depends:    base >= 4 && < 5,
+    build-depends:    base              >= 4 && < 5,
                       process
+

@@ -1,0 +1,18 @@
+RTS tests are pure Javascript tests that require Mocha and Node. They test
+RTS functionality without requiring Haskell code to be compiled.
+
+first install node and npm, then:
+
+# npm install mocha
+# export PATH=$PATH:$HOME/node_modules/.bin/
+
+To use, for example for the gc tests:
+
+# ghcjs -dump-rts -o rts.js
+# mocha gc.js
+
+Or all tests:
+
+# ghcjs -dump-rts -o rts.js
+# mocha
+

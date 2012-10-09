@@ -21,9 +21,8 @@ import Outputable ((<+>), ptext, text)
 import FastString (sLit)
 import Data.Maybe (catMaybes)
 
-import qualified Generator.Link as Js (link)
 import Compiler.Variants
-       (variants, trampolineVariant, Variant(..))
+       (variants, gen2Variant, Variant(..))
 import Control.Monad (forM_)
 
 writeJavaScriptModule :: ModSummary -> CgGuts
@@ -44,10 +43,11 @@ writeJavaScriptModule' var summary _tidyCore (stg', _ccs) =
 
 linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
 linkJavaScript dyflags o_files dep_packages pagesMods = do
-    -- TODO update the linker to handle both plain and trampoline
-    -- linkJavaScript' plainVariant dyflags o_files dep_packages pagesMods
-    linkJavaScript' trampolineVariant dyflags o_files dep_packages pagesMods
+    linkJavaScript' gen2Variant dyflags o_files dep_packages pagesMods
 
+linkJavaScript' _ _ _ _ _ = putStrLn "linking not supported yet, sorry"
+
+{-
 linkJavaScript' :: Variant -> DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
 linkJavaScript' var dyflags o_files dep_packages pagesMods = do
     let jsexe = jsexeFileName dyflags
@@ -70,6 +70,7 @@ linkJavaScript' var dyflags o_files dep_packages pagesMods = do
         if exists
             then return $ Just f
             else return Nothing
+-}
 
 -- | Find all the import paths in these and the preload packages
 getPackageImportPaths :: DynFlags -> [PackageId] -> IO [FilePath]
