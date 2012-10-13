@@ -8,7 +8,7 @@ var $tr_currentResult = null;
  * @param {?Object}                   object Object to call the method on.
  * @param {!Array.<Object>|Arguments} args   Arguments to pass.
  */
-var $tr_Jump = function(method, object, args) {
+function $tr_Jump(method, object, args) {
     if(HS_DEBUG) {
         if(typeof method !== 'function')
             throw "Not a function!";
@@ -39,7 +39,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed in rest.
  */
-var $tr_Call = function(method, object, args, rest, live) {
+function $tr_Call(method, object, args, rest, live) {
     if(HS_DEBUG) {
         if (typeof method !== 'function')
             throw "Not a function!";
@@ -78,7 +78,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>=}          live    Lists things to keep alive.
  *      We won't finalize these as they will be needed if we catch an exception
  */
-var $tr_Catch = function(next, catcher, live) {
+function $tr_Catch(next, catcher, live) {
     if(HS_DEBUG) {
         if(next === undefined)
             throw "Next undefined!";
@@ -109,7 +109,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>=}          live    Lists things to keep alive.
  *      We won't finalize these as they will be needed if we catch an exception
  */
-var $tr_ctch = function(next, catcher, live) {
+function $tr_ctch(next, catcher, live) {
     if(HS_WEAKS) {
         $tr_currentResult = new $tr_Catch(next, catcher, live);
     }
@@ -124,7 +124,7 @@ var $tr_ctch = function(next, catcher, live) {
  * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed when we resume
  */
-var $tr_Suspend = function(resume, live) {
+function $tr_Suspend(resume, live) {
     this.resume = resume;
     if(HS_WEAKS) this.live = live;
 };
@@ -141,7 +141,7 @@ if(HS_WEAKS) {
  * @param {Array.<Object>=}           live   Lists things to keep alive.
  *      We won't finalize these as they will be needed when we resume
  */
-var $tr_suspend = function(resume, live) {
+function $tr_suspend(resume, live) {
     if(HS_WEAKS) {
         $tr_currentResult = new $tr_Suspend(resume, live);
     }
@@ -154,7 +154,11 @@ var $tr_suspend = function(resume, live) {
  * @constructor
  * @param {Object} next
  */
-var $tr_Yield = function(next) {
+function $tr_Yield(next) {
+    if(HS_DEBUG) {
+        if(next === undefined)
+            throw "Next function undefined!";
+    }
     this.next = next;
 };
 if(HS_WEAKS) {
@@ -164,7 +168,7 @@ if(HS_WEAKS) {
         }
     };
 }
-var $tr_yield = function(next) {
+function $tr_yield(next) {
     $tr_currentResult = new $tr_Yield(next);
 };
 
@@ -172,7 +176,11 @@ var $tr_yield = function(next) {
  * @constructor
  * @param {Object} result
  */
-var $tr_Result = function(result) {
+function $tr_Result(result) {
+    if(HS_DEBUG) {
+        if(result === undefined)
+            throw "Return value undefined!";
+    }
     this.value = result;
 };
 if(HS_WEAKS) {
@@ -235,23 +243,36 @@ function $r(result) {
 
 var $tr_Scheduler = {
     waiting : [],
+    delayed : [],
     waitingForBundle : [],
+    waitingForIO : [],
     maxID   : 0,
     running : false,
     finalizers : [],
+    cpuSeconds : 0,
+    currentRunStart : 0,
     runWaiting : function() {
         var s = $tr_Scheduler;
         if(HS_DEBUG && s.running) throw "Already Running";
+        s.currentRunStart = new Date().getTime();
         s.running = true;
         while (s.waiting.length !== 0) {
-            while (s.waiting.length !== 0) {
-                s.currentThread = s.waiting[0];
-                s.waiting = Array.prototype.slice.call(s.waiting, 1, s.waiting.length);
-                s.currentThread._run();
-            }
-            s.scheduleFinalizers();
+          s.currentThread = s.waiting[0];
+          s.waiting = Array.prototype.slice.call(s.waiting, 1, s.waiting.length);
+          s.currentThread._run();
+          s.currentThread = null;
+          if(new Date().getTime() - s.currentRunStart > 50)
+            break;
         }
         s.running = false
+        s.cpuSeconds += new Date().getTime() - s.currentRunStart;
+        if(s.waiting.length !== 0) {
+          setTimeout(function() {s.runWaiting();}, 0);
+          return;
+        }
+        s.scheduleFinalizers();
+        if(s.waiting.length !== 0)
+          setTimeout(function() {s.runWaiting();}, 0);
     },
     schedule : function(thread) {
         $tr_Scheduler.waiting.push(thread);
@@ -287,7 +308,9 @@ var $tr_Scheduler = {
                 i--;
                 if($tr_Weaks[i].keepMark !== s.finalizerMark) {
                     // Schedule finalizer and set weak pointer to null
-                    s.start($tr_Weaks[i].finalize.hscall($tr_Weaks[i].realWorld));
+                    if($tr_Weaks[i].finalize !== null) {
+                        s.start($tr_Weaks[i].finalize.hscall($tr_Weaks[i].realWorld));
+                    }
                     changed = true;
 
                     // Set these to null so that deRefWeak will return null
@@ -312,9 +335,16 @@ var $tr_Scheduler = {
     getLive : function (n) {
         var s = $tr_Scheduler;
         var result = [[s.currentThread],s.waiting];
-        for(var i = 0; i != s.waitingForBundle.length; i++)
+        var i;
+        for(i = 0; i != s.delayed.length; i++)
+            if(s.delayed[i] !== undefined)
+              result.push([s.delayed[i]]);
+        for(i = 0; i != s.waitingForBundle.length; i++)
             if(s.waitingForBundle[i] !== undefined && s.waitingForBundle[i].length !== 0)
                 result.push(s.waitingForBundle[i]);
+        for(i = 0; i != s.waitingForIO.length; i++)
+            if(s.waitingForIO[i] !== undefined)
+              result.push([s.waitingForIO[i]]);
         return result;
     },
     mark : function() {
@@ -360,19 +390,19 @@ var $tr_Scheduler = {
     }
 };
 
-var $tr_trace = function(msg) {
+function $tr_trace(msg) {
     HS_TRACE && $hs_logger.info($tr_Scheduler.currentThread.threadID + " : " + msg);
 };
 
-var $tr_traceThread = function(msg) {
+function $tr_traceThread(msg) {
     $tr_trace(msg);
 };
 
-var $tr_traceMVar = function(msg) {
+function $tr_traceMVar(msg) {
     $tr_trace(msg);
 };
 
-var $tr_traceException = function(msg) {
+function $tr_traceException(msg) {
     $tr_trace(msg);
 };
 
@@ -384,12 +414,13 @@ var $tr_counter = 0;
  * @param {function(Object)=}  onComplete
  * @param {function(!Object)=} onException
  */
-var $tr_Thread = function (next, onComplete, onException) {
+function $tr_Thread(next, onComplete, onException) {
   this.next = next;
   this.isException = false;
   this._stack = [];
-  this._stackMax = 1000000;
+  this._stackMax = 10000000;
   this._state = "run";
+  this._traceLog = [];
   this.waitingThreads = [];
   this._onComplete = onComplete;
   this._onException = onException;
@@ -432,6 +463,12 @@ $tr_Thread.prototype = {
     while(this._stack.length !== 0 && handler === null) {
       handler = this._stack.pop()[0];
     }
+    if(HS_TRACE) {
+        // Handy for debug
+        this._traceLog.push(handler);
+        if (this._traceLog.length > 100)
+          this._traceLog = Array.prototype.slice.call(this._traceLog, 1, this._traceLog.length);
+    }
     return handler;
   },
 
@@ -440,32 +477,38 @@ $tr_Thread.prototype = {
     while(this._stack.length !== 0 && catcher === null) {
       catcher = this._stack.pop()[1];
     }
+    if(HS_TRACE) {
+        // Handy for debug
+        this._traceLog.push(catcher);
+        if (this._traceLog.length > 100)
+          this._traceLog = Array.prototype.slice.call(this._traceLog, 1, this._traceLog.length);
+    }
     return catcher;
   },
 
   _run : function() {
     var r = this.next;
     var isException = this.isException;
-    var traceLog = [];
+    var tickLimit = 10000;
+    var limit = tickLimit;
     while (true) {
       $tr_currentResult = null;
 
       // See if it is time to let another thread have a go
-      $tr_counter++;
-      if($tr_counter === 10000) {
-        $tr_counter = 0;
+      limit--;
+      if(limit === 0) {
         this.next = r;
         this.isException = isException;
         if(HS_WEAKS) $tr_Scheduler.scheduleFinalizers();
         $tr_Scheduler.schedule(this);
-        return;
+        break;
       }
 
       if(HS_TRACE) {
           // Handy for debug
-          traceLog.push(r);
-          if (traceLog.length > 100)
-            traceLog = Array.prototype.slice.call(traceLog, 1, traceLog.length);
+          this._traceLog.push(r);
+          if (this._traceLog.length > 100)
+            this._traceLog = Array.prototype.slice.call(this._traceLog, 1, this._traceLog.length);
       }
 
       try {
@@ -485,8 +528,11 @@ $tr_Thread.prototype = {
             this._state = "throw";
             this._value = r;
             this._signal();
-            if(this._onException !== undefined) this._onException(r);
-            return;
+            if(this._onException !== undefined)
+              this._onException(r);
+            else
+              console.log("Unhandled Exception in thread " + this.threadID);
+            break;
           }
         }
         if (r instanceof $tr_Jump) {
@@ -512,7 +558,7 @@ $tr_Thread.prototype = {
             this._value = r.value;
             this._signal();
             if(this._onComplete !== undefined) this._onComplete(r.value);
-            return;
+            break;
           }
         }
         else if(r instanceof $tr_Catch) {
@@ -524,13 +570,13 @@ $tr_Thread.prototype = {
             this._stack.push([r.resume, null, r.live]);
           this.next = null;
           this.isException = false;
-          return;
+          break;
         }
         else if(r instanceof $tr_Yield) {
           this.next = r.next;
           this.isException = false;
           $tr_Scheduler.schedule(this);
-          return;
+          break;
         }
         // Must be just a plain return value
         else {
@@ -545,7 +591,7 @@ $tr_Thread.prototype = {
             this._value = r;
             this._signal();
             if(this._onComplete !== undefined) this._onComplete(r);
-            return;
+            break;
           }
         }
         isException = false;
@@ -555,6 +601,7 @@ $tr_Thread.prototype = {
         r = e;
       }
     }
+    $tr_counter += (tickLimit-limit);
   },
 
   // Notify joining threads that this thread is complete.
@@ -595,7 +642,7 @@ if(HS_TRACE_CALLS) {
  * @this {$hs_Pap|$Func|$Thunk|$Data|$DataValue}
  * @param {...Object} var_args
  */
-var $hs_hscall = function (var_args) {
+function $hs_hscall(var_args) {
     if(HS_TRACE_CALLS) logCall(this, arguments);
     var argc = arguments.length;
     if (this.arity === argc) { // EXACT and THUNK rules
@@ -621,7 +668,7 @@ var $hs_hscall = function (var_args) {
  * @param {!Object}                   obj
  * @param {!Array.<Object>|Arguments} args
  */
-var $hs_Pap = function(obj, args) {
+function $hs_Pap(obj, args) {
     this.arity = obj.arity - args.length;
     this.object = obj;
     this.savedArguments = args;
@@ -703,7 +750,7 @@ $Func.prototype = {
 };
 if(HS_WEAKS) {
     $Func.prototype.getLive = function() {
-        return [this.live];
+        return this.live !== undefined ? [this.live] : [];
     };
 };
 if(HS_DEBUG) {
@@ -752,6 +799,9 @@ $Thunk.prototype = {
     evaluate: function() {
         var _this = this;
         return new $tr_Call(this.evaluateOnce, this, [], function (res) {
+//            if(HS_WEAKS && _this.isTopLevel) {
+//              res.isTopLevel = true;
+//            }
             _this.result = res;
             _this.live = [];
             _this.evaluate = function () { return new $tr_Result(_this.result); };
@@ -767,7 +817,7 @@ $Thunk.prototype = {
 };
 if(HS_WEAKS) {
     $Thunk.prototype.getLive = function() {
-        return [this.live,[this.result]];
+        return this.live !== undefined ? [this.live,[this.result]] : [[this.result]];
     };
 }
 if(HS_DEBUG) {
@@ -810,6 +860,9 @@ $Data.prototype = {
             for(var n = 0; n !== res.length; n++)
                 if(res[n] === undefined)
                     throw "Undefined"
+//            if(HS_WEAKS && _this.isTopLevel) {
+//              res.isTopLevel = true;
+//            }
             _this.v = res;
             _this.notEvaluated = false;
             _this.evaluate = function () { return new $tr_Result(_this); };
@@ -926,7 +979,7 @@ if(HS_DEBUG) {
 }
 
 // Run haskell function
-var $hs_force = function (args, onComplete, onException) {
+function $hs_force(args, onComplete, onException) {
     var f = args[0];
     var a = Array.prototype.slice.call(args, 1, args.length);
     $tr_Scheduler.start(new $tr_Jump(f.hscall, f, a), onComplete, onException);
@@ -935,7 +988,7 @@ var $hs_force = function (args, onComplete, onException) {
 };
 
 // Schedule a haskell function to run the next time haskell runs
-var $hs_schedule = function (args, onComplete, onException) {
+function $hs_schedule(args, onComplete, onException) {
     var f = args[0];
     var a = Array.prototype.slice.call(args, 1, args.length);
     $tr_Scheduler.start(new $tr_Jump(f.hscall, f, a), onComplete, onException);
@@ -955,7 +1008,7 @@ $Loader.prototype = {
     hscall: function() {
         var this_ = this;
         var args = arguments;
-        return hs_loadBundles(this.bundles, function() {
+        return $hs_loadBundles(this.bundles, function() {
             var newFunction = this_.get();
             return newFunction.hscall.apply(newFunction, args);
         });
@@ -964,7 +1017,7 @@ $Loader.prototype = {
     notEvaluated: true,
     evaluate: function() {
         var this_ = this;
-        return hs_loadBundles(this.bundles, function() {
+        return $hs_loadBundles(this.bundles, function() {
             var newFunction = this_.get();
             return newFunction.evaluate();
         });
@@ -981,7 +1034,32 @@ if(HS_WEAKS) {
         return [];
     };
 }
-var hs_loadBundles = function (bundles, f) {
+function $hs_evalBundle(bundle, path, evalCode) {
+    var waiting = $tr_Scheduler.waitingForBundle[bundle];
+    try {
+        // Evaluate the response
+        $hs_loading=true;
+        evalCode();
+        $hs_loading=false;
+        $hs_loaded[bundle] = true; // Don't need to load this again
+
+        // Wake all the threads waiting for this
+        for(var w = 0; w !== waiting.length; w++) {
+            $tr_Scheduler.schedule(waiting[w]);
+        }
+    } catch (e) {
+        $hs_logError("Error evaluating function set: " + path + ":\n" + e);
+        for(var w = 0; w !== waiting.length; w++) {
+            waiting[w].next = e;
+            waiting[w].isException = true;
+            $tr_Scheduler.schedule(waiting[w]);
+        }
+    }
+    $tr_Scheduler.waitingForBundle[bundle] = [];
+    if(!$tr_Scheduler.running)
+        $tr_Scheduler.runWaiting();
+};
+function $hs_loadBundles(bundles, f) {
     if(bundles.length===0)
         return f();
 
@@ -994,89 +1072,110 @@ var hs_loadBundles = function (bundles, f) {
 
             var path = $hs_loadPath + "hs" + bundle + (COMPILED ? "min.js" : ".js");
 
-            var transport = new XMLHttpRequest();
+            if(typeof(XMLHttpRequest) !== 'undefined') {
+                var transport = new XMLHttpRequest();
 
-            // Set up function to handle the response
-            transport.onreadystatechange = function() {
-                if(transport.readyState === 4) {
-                    var waiting = $tr_Scheduler.waitingForBundle[bundle];
-                    try {
-                        // Evaluate the response
-                        $hs_loading=true;
-                        goog.globalEval(transport.responseText
-                            + "\n//@ sourceURL="+path);
-                        $hs_loading=false;
-                        $hs_loaded[bundle] = true; // Don't need to load this again
+                // Set up function to handle the response
+                transport.onreadystatechange = function() {
+                    if(transport.readyState === 4) {
+                      $hs_evalBundle(bundle, path, function(){
+                        goog.globalEval(transport.responseText+"\n//@ sourceURL="+path);
+                      });
+                    }
+                };
 
-                        // Wake all the threads waiting for this
+                // Send the request
+                transport.open("GET", path, false);
+                transport.send(null);
+            }
+            else {
+                require('fs').readFile(path, 'utf8', function(err, data) {
+                    if(err) {
+                        $hs_logError("Error reading : " + path + ":\n" + err);
                         for(var w = 0; w !== waiting.length; w++) {
-                            $tr_Scheduler.schedule(waiting[w]);
-                        }
-                    } catch (e) {
-                        $hs_logError("Error evaluating function set: " + path + ":\n" + e);
-                        for(var w = 0; w !== waiting.length; w++) {
-                            waiting[w].next = e;
+                            waiting[w].next = err;
                             waiting[w].isException = true;
                             $tr_Scheduler.schedule(waiting[w]);
                         }
                     }
-                    $tr_Scheduler.waitingForBundle[bundle] = [];
-                }
-            };
-
-            // Send the request
-            transport.open("GET", path, false);
-            transport.send(null);
+                    else {
+                      $hs_evalBundle(bundle, path, function() {
+                        eval(data);
+                      });
+                    }
+                });
+            }
         }
         else {
             // Add this thread to the list of those waiting for the function set
             $tr_Scheduler.waitingForBundle[bundle].push($tr_Scheduler.currentThread);
         }
         return new $tr_Suspend(function(_) {
-            return hs_loadBundles(bundles, f);
+            return $hs_loadBundles(bundles, f);
         }, []);
     }
     else {
         // This one is loaded already
-        return hs_loadBundles(bundles, f);
+        return $hs_loadBundles(bundles, f);
     }
 };
 
 // --- Threads ---
-var $hs_forkzh = function (a, s) {
+function $hs_forkzh(a, s) {
     var t = $tr_Scheduler.start(a.hscall(s));
     $tr_traceThread("fork thread " + t.threadID);
     return [s, t];
 };
-var $hs_forkOnzh = function (n, a, s) {
+function $hs_forkOnzh(n, a, s) {
     return $hs_forkzh(a,s);
 };
-var $hs_yieldzh = function (s) {
+function $hs_yieldzh(s) {
     $tr_traceThread("yield thread");
     return new $tr_Yield(new $tr_Result(s));
 };
-var $hs_myThreadIdzh = function (s) {
+function $hs_myThreadIdzh(s) {
     return [s, $tr_Scheduler.currentThread];
 };
-var $hs_isCurrentThreadBoundzh = function (s) {
+function $hs_isCurrentThreadBoundzh(s) {
     return [s, 1];
 };
-var $hs_noDuplicatezh = function (s) {
+function $hs_noDuplicatezh(s) {
     return s;
 };
 
-var $hs_atomicModifyMutVarzh = function (a, b, s) {
+function $hs_atomicModifyMutVarzh(a, b, s) {
     return new $tr_Call(b.hscall, b, [a.value], function (res) {
             a.value = res.v[0];
             return new $tr_Result([s, res.v[1]]);
         }, [a, s]);
 };
 
+function $hs_delayzh(t, s) {
+    var sc = $tr_Scheduler;
+    var thread = sc.currentThread;
+    var i;
+    if(HS_WEAKS) {
+      for(i = 0; i != sc.delayed.length; i++)
+        if(sc.delayed[i] === undefined)
+          break;
+      sc.delayed[i] = thread;
+    }
+    setTimeout(function() {
+        if(HS_WEAKS) sc.delayed[i] = undefined;
+        sc.schedule(thread);
+        if(!sc.running)
+            sc.runWaiting();
+      },
+      $hs_intToNumber(t)/1000);
+    return new $tr_Suspend(function(_) { return s; }, [s]);
+};
+
+
 // --- Synchronized Mutable Variables ---
 /**
  * @constructor MVar
  */
-var $tr_MVar = function() {
+function $tr_MVar() {
     this.value = null;
     this.waiting = [];
     if($hs_loading) this.isTopLevel = true;
@@ -1088,11 +1187,11 @@ if(HS_WEAKS) {
         }
     };
 }
-var $hs_newMVarzh = function(s) {
+function $hs_newMVarzh(s) {
     $tr_traceMVar("newMVar");
     return [s, new $tr_MVar()];
 };
-var $hs_takeMVarzh = function (a, s) {
+function $hs_takeMVarzh(a, s) {
     var takeWhenNotEmpty = function (_) {
         $tr_traceMVar("take taking");
         var result = a.value;
@@ -1112,7 +1211,7 @@ var $hs_takeMVarzh = function (a, s) {
     }
     return takeWhenNotEmpty(null);
 };
-var $hs_tryTakeMVarzh = function (a, s) {
+function $hs_tryTakeMVarzh(a, s) {
     if (a.value === null) {
         $tr_traceMVar("tryTake nothing to take");
         return new $tr_Result([s, 0, null]);
@@ -1128,7 +1227,7 @@ var $hs_tryTakeMVarzh = function (a, s) {
     }
     return new $tr_Result([s, 1, result]);
 };
-var $hs_putMVarzh = function (a, b, s) {
+function $hs_putMVarzh(a, b, s) {
     var putWhenEmpty = function (_) {
         $tr_traceMVar("put putting");
         a.value = b;
@@ -1147,25 +1246,25 @@ var $hs_putMVarzh = function (a, b, s) {
     }
     return putWhenEmpty(null);
 };
-var $hs_sameMVarzh = function (a, b, s) {
+function $hs_sameMVarzh(a, b, s) {
     return [s, a === b];
 };
-var $hs_isEmptyMVarzh = function (a, b, s) {
+function $hs_isEmptyMVarzh(a, b, s) {
     return [s, a.value === null];
 };
 
 // --- Exceptions ---
-var $hs_catchzh = function(a, b, s) {
+function $hs_catchzh(a, b, s) {
     return new $tr_Catch(
         new $tr_Jump(a.hscall, a, [s]),
         function (e) { return new $tr_Jump(b.hscall, b, [e, s]); },
         [b, s]);
 };
-var $hs_raisezh = function(a) {
+function $hs_raisezh(a) {
     $tr_traceException("raise");
     throw a;
 };
-var $hs_raiseIOzh = function(a, s) {
+function $hs_raiseIOzh(a, s) {
     $tr_traceException("raiseIO");
     throw a;
 };
@@ -1174,13 +1273,13 @@ var $hs_raiseIOzh = function(a, s) {
 //$hs_killThreadzh = function (t, e, s) {
 //    $tr_traceThread("kill thread");
 //};
-var $hs_maskAsyncExceptionszh = function (a, s) {
+function $hs_maskAsyncExceptionszh(a, s) {
     return new $tr_Jump(a.hscall, a, [s]);
 };
-var $hs_unmaskAsyncExceptionszh = function (a, s) {
+function $hs_unmaskAsyncExceptionszh(a, s) {
     return new $tr_Jump(a.hscall, a, [s]);
 };
-var $hs_getMaskingStatezh = function (s) {
+function $hs_getMaskingStatezh(s) {
     return [s, 0];
 };
 
@@ -1195,9 +1294,19 @@ if(HS_WEAKS) {
  * (via markWeaks).  This will let us know that the weak pointer is
  * still needed.
  */
-var $tr_Weak = function(key, value, finalize, realWorld) {
+function $tr_Weak(key, value, finalize, realWorld) {
+    if(HS_DEBUG) {
+        if(key === undefined)
+            throw "Object undefined!";
+        if(value === undefined)
+            throw "Object undefined!";
+    }
     this.value = value;
-    this.finalize = finalize;
+    // Sometimes finalize will be 0
+    this.finalize = typeof finalize === 'number'
+                    || finalize instanceof goog.math.Long
+                          ? null
+                          : finalize;
     this.realWorld = realWorld;
     if(HS_WEAKS && key.isTopLevel===undefined) {
         if(key.weaks===undefined)
@@ -1207,7 +1316,7 @@ var $tr_Weak = function(key, value, finalize, realWorld) {
     }
 };
 if(HS_WEAKS) {
-    var $tr_markWeaks = function(o,m) {
+    $tr_markWeaks = function(o,m) {
         // If the object has weak pointers mark them as still in use
         var ws = o.weaks;
         if(ws !== undefined) {
@@ -1218,25 +1327,26 @@ if(HS_WEAKS) {
         }
     };
 }
-var $hs_mkWeakzh = function(o, b, c, s) {
+function $hs_mkWeakzh(o, b, c, s) {
     return [s, new $tr_Weak(o, b, c, s)];
 };
-var $hs_mkWeakForeignEnvzh = function(o, b, w, x, y, z, s) {
+function $hs_mkWeakForeignEnvzh(o, b, w, x, y, z, s) {
     HS_WEAKS && $hs_logger.warning("Weak Foreign Ignored");
     // return [s, new $tr_Weak(o, b, c, s)];
+    return [s, null];
 };
-var $hs_deRefWeakzh = function(p, s) {
+function $hs_deRefWeakzh(p, s) {
     return [s, p.value === null ? 0 : 1, p.value];
 };
-var $hs_finalizeWeakzh = function(p, s) {
+function $hs_finalizeWeakzh(p, s) {
     return [s, p.finalize === null ? 0 : 1, p.finalize];
 };
-var $hs_touchzh = function(a, s) {
+function $hs_touchzh(a, s) {
     return s;
 };
 
 // --- Parallelism ---
-var $hs_seqzh = function(a, s) {
+function $hs_seqzh(a, s) {
     if(a.notEvaluated) {
         if(HS_WEAKS) {
             return new $tr_Call(a.hscall, a, [], function(result) {
@@ -1254,16 +1364,67 @@ var $hs_seqzh = function(a, s) {
 };
 
 // --- IO ---
-var $hs_waitReadzh = function(fd, s) {
-    var f = $hs_allFiles[fd];
-    if(f.text.length > f.fptr)
+$hs_MemFile.prototype.waitRead = function(s) {
+    if(this.text.length > this.fptr)
         return s;
-    f.waitingToRead.push($tr_Scheduler.currentThread);
+    var sc = $tr_Scheduler;
+    var thread = sc.currentThread;
+    var i;
+    if(HS_WEAKS) {
+      for(i = 0; i != sc.waitingForIO.length; i++)
+        if(sc.waitingForIO[i] === undefined)
+          break;
+      sc.waitingForIO[i] = thread;
+    }
+    this.waitingToRead.push(
+      function() {
+        if(HS_WEAKS) sc.waitingForIO[i] = undefined;
+        sc.schedule(thread);
+        if(!sc.running)
+            sc.runWaiting();
+      });
     return new $tr_Suspend(function(_) { return s; }, [s]);
 };
-var $hs_waitWritezh = function(fd, s) {
+$hs_TerminalIn.prototype.waitRead = function(s) {
+    if(this.buffer.length != 0)
+        return s;
+    var sc = $tr_Scheduler;
+    var thread = sc.currentThread;
+    var i;
+    if(HS_WEAKS) {
+      for(i = 0; i != sc.waitingForIO.length; i++)
+        if(sc.waitingForIO[i] === undefined)
+          break;
+      sc.waitingForIO[i] = thread;
+    }
+    this.waitingToRead.push(
+      function() {
+        if(HS_WEAKS) sc.waitingForIO[i] = undefined;
+        sc.schedule(thread);
+        if(!sc.running)
+            sc.runWaiting();
+      });
+    return new $tr_Suspend(function(_) { return s; }, [s]);
+};
+function $hs_waitReadzh(fd, s) {
+    var f = $hs_allFiles[fd];
+    return f.waitRead(s);
+};
+function $hs_waitWritezh(fd, s) {
     return s;
 //    var f = $hs_allFiles[fd];
 //    f.waitingToWrite.push($tr_Scheduler.currentThread);
 //    return new $tr_Suspend(function(_) { return s; }, [s]);
+};
+function getGCStats(a) {
+    var sc = $tr_Scheduler;
+    var t = new Date().getTime() - sc.currentRunStart + sc.cpuSeconds;
+    if(WORD_SIZE_IN_BITS==32) {
+        throw "Todo identify the correct offset"
+        return 0;
+    }
+    else {
+        (new Float64Array(a[0],a[1]+128))[0] = t/1000;
+        return goog.math.Long.ZERO;
+    }
 };

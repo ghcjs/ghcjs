@@ -20,10 +20,10 @@ import Prelude hiding(catch)
 import System.FilePath ((</>), takeExtension, takeFileName)
 import System.Directory (doesDirectoryExist, getDirectoryContents, copyFile, getModificationTime)
 import Control.Applicative ((<$>))
-import Control.Monad (forM, forM_, filterM)
+import Control.Monad (unless, forM, forM_, filterM)
 import Control.Exception (catch, IOException)
 import System.IO.Error (isDoesNotExistError)
-import System.IO (openFile, hGetLine, hIsEOF, IOMode(..), Handle, hClose)
+import System.IO (openFile, hGetLine, hPutStrLn, hIsEOF, IOMode(..), Handle, hClose)
 import Encoding (zEncodeString)
 import Module (Module, ModuleName, mkModule, moduleNameString, mkModuleName, moduleName, moduleNameSlashes, stringToPackageId)
 import Outputable (showPpr)
@@ -37,7 +37,7 @@ data DependencyInfo = DependencyInfo {
     modules      :: S.Set ModuleName
   , files        :: S.Set FilePath
   , toSearch     :: [ModuleName]
-  , functionDeps :: [(FilePath, String, [String])]}
+  , functionDeps :: [((FilePath, Int), String, [String])]}
   deriving (Eq, Show)
 
 emptyDeps = DependencyInfo S.empty S.empty [] []
@@ -48,9 +48,9 @@ appendDeps a b = DependencyInfo
                     (functionDeps a ++ functionDeps b)
 
 link :: Variant -> String -> [FilePath] -> [FilePath] -> [ModuleName] -> [String] -> IO [String]
-link var out searchPath objFiles pageModules pageFunctions = do
-    -- Copy all the .js dependencies
-    forM_ searchPath (\dir -> installJavaScriptFiles var normal dir out)
+link var out searchPath objFiles pageModules _pageFunctions = do
+    -- Output a the search path that should be used for dynamic loading
+    writeFile (out </> "paths.js") $ "$hs_path = " ++ show searchPath
 
     -- Read in the dependencies stored at the start of each .js file.
     -- Read the .js files that corrispond to .o files.  We need to load them to get the ModuleName.
@@ -65,24 +65,18 @@ link var out searchPath objFiles pageModules pageFunctions = do
 
     let deps = functionDeps allDeps
 
+        -- main and anything that starts with lazyLoad_
+        isPageSymbol s = s == "$$ZCMain_main" || "_lazzyLoadzu" `isPrefixOf` (dropWhile (/='_') s)
+        symbol (_, s, _) = s
+
+        -- Nothing needs to depend on the page functions
+        filteredDeps = map (\(x,s,others) -> (x,s,filter (not . isPageSymbol) others)) deps
+
         -- Make a graph based on the dependencies.
-        (graph, lookupEdges, lookupVertex) = G.graphFromEdges deps
+        (graph, lookupEdges, lookupVertex) = G.graphFromEdges filteredDeps
 
-        -- Make a set of all module prefix's.
-        moduleSet = S.fromList $ map (("$$"++) . zEncodeString) (map moduleNameString pageModules)
-
-        -- Make a set of the functions in their encoded form.
-        encodeFunction s = mod ++ "_" ++ (zEncodeString $ reverse rFunc)
-            where (rFunc, rMod) = span (/='.') $ reverse s
-                  mod   = "$$" ++ (zEncodeString $ reverse rMod)
-        functionSet = S.fromList $ map encodeFunction pageFunctions
-
-        -- Find all the functions that we want to make into "pages".
-        page (_, symbol, _) | (takeWhile (/='_') symbol) `S.member` moduleSet = Just symbol
-        page (_, symbol, _) | symbol `S.member` functionSet = Just symbol
-        page _ = Nothing
         pages :: [G.Vertex]
-        pages = catMaybes $ map (\dep -> page dep >>= lookupVertex) deps
+        pages = catMaybes . map lookupVertex . filter isPageSymbol $ map symbol deps
 
         -- Used by all
         primatives = catMaybes $ map lookupVertex [
@@ -101,16 +95,16 @@ link var out searchPath objFiles pageModules pageFunctions = do
         lookupKey = (\(_,k,_)->k) . lookupEdges
         pageSetComment pageSet = map (\page -> '/':'/':(lookupKey page)) pageSet
 
-        fileAndKey (file, key, _) = (file, [key])
+        lengthFileAndKey ((file, len), key, _) = (len, (file, [key]))
 
-    -- Create Java Script for each page set.
-    scripts <- forM (M.toList pageSetToFunctions) $ \(pageSet, functions) -> do
-        script <- mapM makeScript . M.toList . M.fromListWith (++) $ map (fileAndKey . lookupEdges) functions
-        return (sum $ map length script, (pageSet, script))
+    -- Determing the length of each page set.
+    pageSetsWithLengths <- forM (M.toList pageSetToFunctions) $ \(pageSet, functions) -> do
+        let s = map (lengthFileAndKey . lookupEdges) functions
+        return (sum $ map fst s, (pageSet, map snd s))
 
-    -- Combine smaller page sets (based on the size of the script).
+    -- Combine smaller page sets (based on the lenth of the script).
     let compareSize (a,_) (b,_) = compare a b
-        scriptsBySize = L.sortBy compareSize scripts
+        scriptsBySize = L.sortBy compareSize pageSetsWithLengths
         -- If the smallest two sizes is less than 20k then cobine them.
         combineSmall (a@(sa,(psA,scriptA)):b@(sb,(psB,scriptB)):rest) | sa + sb < 20000 =
             let new = (sa+sb, (psA `S.union` psB, scriptA++scriptB)) in
@@ -118,10 +112,18 @@ link var out searchPath objFiles pageModules pageFunctions = do
         combineSmall x = x
         combinedScripts = map snd $ combineSmall scriptsBySize
 
-    bundles <- forM (zip [1..] combinedScripts) $ \(n, (pageSet, script)) -> do
-        writeFile (out++"hs"++show n++".js") . unlines $
-            (pageSetComment $ S.toList pageSet) ++ script ++
-            [("//@ sourceURL=hs"++show n++".js")]
+--    -- Create Java Script for each page set.
+--    scripts <- forM (M.toList pageSetToFunctions) $ \(pageSet, functions) -> do
+--        script <- mapM makeScript . M.toList . M.fromListWith (++) $ map (fileAndKey . lookupEdges) functions
+--        return (sum $ map length script, (pageSet, script))
+
+    bundles <- forM (zip [1..] combinedScripts) $ \(n, (pageSet, functions)) -> do
+        out <- openFile (out++"hs"++show n++".js") WriteMode
+        hPutStrLn out . unlines $ pageSetComment $ S.toList pageSet
+        let scripts = M.toList . M.fromListWith (++) $ functions
+        forM_ scripts $ copyScript isPageSymbol out
+        hPutStrLn out $ "//@ sourceURL=hs"++show n++".js"
+        hClose out
         return (n, pageSet)
 
     -- Work out the loader functions
@@ -135,8 +137,8 @@ link var out searchPath objFiles pageModules pageFunctions = do
             map makeLoader (M.toList pageToBundles)
 
         makeLoader :: (Int, [Int]) -> String
-        makeLoader (p, bs) = concat ["var $", lookupKey p,
-            "=$L(", show bs,", function() { return ", lookupKey p, "; });"]
+        makeLoader (p, bs) = concat ["var ", lookupKey p,
+            "=$L(", show bs,", function() { return $", lookupKey p, "; });"]
 
     writeFile (out++"hsloader.js") $ unlines loader
 
@@ -222,7 +224,7 @@ readDeps file = do
                     '/':'/':s -> loop h (readDep s x)
                     _         -> return x
     readDep s x = case reads s of
-                    (((a, b), ""):_) -> (file, a, b):x
+                    (((a, b), ""):_) -> ((file, 100), a, b):x -- TODO work out real size
                     _                -> x
     readOne s = case reads s of
                     ((x, ""):_) -> Just x
@@ -231,28 +233,33 @@ readDeps file = do
 makeModule :: (String, String) -> Module
 makeModule (pkgid, modulename) = mkModule (stringToPackageId pkgid) (mkModuleName modulename)
 
-makeScript :: (FilePath, [String]) -> IO String
-makeScript (_, []) = return ""
-makeScript ("", _) = return ""
-makeScript (file, symbols) = do
+copyScript :: (String -> Bool) -> Handle -> (FilePath, [String]) -> IO ()
+copyScript _ _ (_, []) = return ()
+copyScript _ _ ("", _) = return ()
+copyScript pageSymbolSet out (file, symbols) = do
     file <- openFile file ReadMode
-    contents <- readContents False [] file
+    contents <- copyContents out False file
     hClose file
-    return $ unlines contents
   where
-    readContents includeFunction rContents file = do
+    copyContents out includeFunction file = do
         eof <- hIsEOF file
-        if eof
-            then return (reverse rContents)
-            else do
-                line <- hGetLine file
-                case (includeFunction, line) of
-                    (_, ('v':'a':'r':' ':'$':'$':_)) -> do
-                        case span (\c -> isAlphaNum c || c == '$' || c == '_') (drop 4 line) of
-                            (s, '=':_) | filterBySymb s -> readContents True (line:rContents) file
-                            _                           -> readContents False rContents file
-                    (True, _) -> readContents True (line:rContents) file
-                    _         -> readContents False rContents file
+        unless eof $ do
+            line <- hGetLine file
+            case (includeFunction, line) of
+                (_, ('v':'a':'r':' ':'$':'$':_)) -> do
+                    case span (\c -> isAlphaNum c || c == '$' || c == '_') (drop 4 line) of
+                        (s, '=':_) | filterBySymb s -> do
+                          if pageSymbolSet s
+                            then hPutStrLn out $ "var $" ++ drop 4 line
+                            else hPutStrLn out line
+                          copyContents out True file
+                        _                           -> do
+                          copyContents out False file
+                (True, _) -> do
+                  hPutStrLn out line
+                  copyContents out True file
+                _         -> do
+                  copyContents out False file
 
     symbolSet = S.fromList symbols
 

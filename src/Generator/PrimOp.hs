@@ -127,6 +127,9 @@ primOp Narrow32IntOp [a] = PlainE $ a
 primOp Narrow8WordOp [a] = PlainE $ Js.bitAnd a (Js.int (0xFF :: Int))
 primOp Narrow16WordOp [a] = PlainE $ Js.bitAnd a (Js.int (0xFFFF :: Int))
 primOp Narrow32WordOp [a] = PlainE $ a
+
+primOp DataToTagOp [a] = PlainE $ Js.minus (RTS.conAppTag a) (Js.int 1)
+
 #endif
 
 #if WORD_SIZE_IN_BITS == 64
@@ -176,7 +179,9 @@ primOp DoubleDivOp [a, b] = PlainE $ Js.divide a b
 
 primOp DoubleNegOp [a]    = PlainE $ Js.unaryMinus a
 
+#if WORD_SIZE_IN_BITS == 32
 primOp Double2IntOp [a]   = PlainE $ Js.bitOr a (Js.int (0 :: Int))
+#endif
 
 primOp Double2FloatOp [a] = PlainE $ a
 
@@ -195,11 +200,11 @@ primOp FloatDivOp  [a, b] = PlainE $ Js.divide a b
 
 primOp FloatNegOp  [a]    = PlainE $ Js.unaryMinus a
 
+#if WORD_SIZE_IN_BITS == 32
 primOp Float2IntOp [a]    = PlainE $ Js.bitOr a (Js.int (0 :: Int))
+#endif
 
 primOp Float2DoubleOp [a] = PlainE $ a
-
-primOp DataToTagOp [a] = PlainE $ RTS.conAppTag a
 
 -- StablePtr:
 primOp MakeStablePtrOp [a, s] = PlainE $ Js.list [s, a]
@@ -216,7 +221,8 @@ primOp op@MaskAsyncExceptionsOp args   = TrampolineM (Js.var ("$hs_" ++ zEncodeS
 primOp op@UnmaskAsyncExceptionsOp args = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
 primOp op@WaitReadOp args              = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
 primOp op@WaitWriteOp args             = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
-primOp op@SeqOp args             = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@SeqOp args                   = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
+primOp op@DelayOp args                 = TrampolineM (Js.var ("$hs_" ++ zEncodeString (show op))) args
 
 primOp op args = PlainE $ Js.nativeFunctionCall (Js.var ("$hs_" ++ zEncodeString (show op))) args
 

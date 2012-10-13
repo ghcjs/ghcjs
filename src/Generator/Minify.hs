@@ -11,14 +11,15 @@ import System.Process (system)
 import System.Exit (ExitCode, ExitCode(..))
 
 import Closure.Paths
+import qualified Paths_ghcjs_hterm as HT (getDataFileName)
 import Compiler.Variants
 import RTS.Dependencies
-import System.Directory (setCurrentDirectory)
+import System.Directory (setCurrentDirectory, doesFileExist, copyFile)
 import qualified Data.ByteString.Lazy as B (readFile, writeFile)
 import Paths_ghcjs
 import Data.SourceMap
 import Data.Attoparsec.ByteString.Lazy (many1, parse, Result(..))
-import Control.Monad (forM_)
+import Control.Monad (forM_, unless)
 import Data.Aeson (json, fromJSON, Result(..), encode)
 
 data MinifyOptions = MinifyOptions {
@@ -34,6 +35,26 @@ defaultMinify = MinifyOptions {
 
 minify :: FilePath -> [FilePath] -> MinifyOptions -> [String] -> IO ExitCode
 minify jsexe mainFiles options args = do
+    closurePath <- closureLibraryPath
+    htermPath <- HT.getDataFileName "js/"
+    rtsPath <- getDataFileName "rts/"
+
+    let copyIfNotThere f = do
+          exists <- doesFileExist (jsexe </> f)
+          unless exists $ copyFile (rtsPath </> f) (jsexe </> f)
+
+    copyIfNotThere "hterm.html"
+    copyIfNotThere "hterm.js"
+
+    copyIfNotThere "console.html"
+    copyIfNotThere "console.js"
+
+    copyIfNotThere "index.html"
+
+    let mainFiles' = case mainFiles of
+                        [] -> [jsexe </> "hterm.js"]
+                        _  -> mainFiles
+
     firstLine <- head . lines <$> (readFile $ jsexe </> "hsloader.js")
     let bundleCount = case stripPrefix "// Bundle Count " firstLine of
                         Just n  -> read n
@@ -54,8 +75,8 @@ minify jsexe mainFiles options args = do
                 mod "rts" "" (length deps + 1)                     ++
                 bundleMods bundleCount                             ++
                 js (jsexe </> "hsloader.js")                       ++
-                jss mainFiles                                      ++
-                mod "main" "rts" (length mainFiles + 1)            ++
+                jss mainFiles'                                     ++
+                mod "main" "rts" (length mainFiles' + 1)           ++
                 [ "--module_output_path_prefix", jsexe ++ "/"
                 , "--compilation_level", "ADVANCED_OPTIMIZATIONS"
                 , "--create_source_map", jsexe </> "hsmin.js.allmaps"
@@ -63,11 +84,10 @@ minify jsexe mainFiles options args = do
                 ] ++ args
 
     -- Make paths in the source map relative and split it up
-    closurePath <- closureLibraryPath
-    rtsPath <- getDataFileName "rts/"
     let fixMap sm@SourceMap{sources = s} = sm {sources = map fixPath s}
-        fixPath = replacePrefix closurePath ("../closure-library"</>)
-                  . replacePrefix rtsPath ("../rts"</>)
+        fixPath =   replacePrefix closurePath  ("../closure-library"</>)
+                  . replacePrefix htermPath    ("../hterm/js"</>)
+                  . replacePrefix rtsPath      ("../rts"</>)
                   . replacePrefix (jsexe++"/") id
         replacePrefix a with p = maybe p with (stripPrefix a p)
     case ec of

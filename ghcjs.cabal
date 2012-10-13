@@ -11,6 +11,7 @@ Build-Type:     Custom
 Cabal-Version:  >= 1.10
 data-dir:       .
 data-files:     rts/*.js
+                rts/*.html
 
 source-repository head
   type:     git
@@ -22,6 +23,10 @@ flag boot
 flag compiler-only
   default:            False
 
+flag rts-only
+  default:            False
+  description:        Useful to install just rts files changes while developing the rts
+
 Library
     Default-Language: Haskell2010
     build-depends: base           >= 4        && < 5,
@@ -32,6 +37,7 @@ Library
                    containers,
                    process,
                    ghcjs-closure,
+                   ghcjs-hterm,
                    mtl,
                    ghc-paths,
                    template-haskell,
@@ -68,6 +74,9 @@ Library
     hs-source-dirs: src
 
 Executable ghcjs
+    if flag(rts-only)
+      Buildable:      False
+
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src-bin
@@ -90,10 +99,11 @@ Executable ghcjs
     else
       x-boot:     False
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
+    cpp-options:    -DGHCJS_PACKAGE_IMPORT
 
 
 Executable ghcjs-link
-    if flag(compiler-only)
+    if flag(compiler-only) || flag(rts-only)
       Buildable:      False
     Main-Is:          Linker/Main.hs
     Default-Language: Haskell2010
@@ -103,9 +113,8 @@ Executable ghcjs-link
                       process,
                       containers
 
-
 Executable ghcjs-min
-    if flag(compiler-only)
+    if flag(compiler-only) || flag(rts-only)
       Buildable:      False
     Main-Is:          Minify.hs
     Default-Language: Haskell2010
@@ -117,7 +126,7 @@ Executable ghcjs-min
                       containers
 
 Executable ghcjs-pkg
-    if flag(compiler-only)
+    if flag(compiler-only) || flag(rts-only)
       Buildable:      False
     Main-Is:          Pkg.hs
     Default-Language: Haskell2010
@@ -129,7 +138,7 @@ Executable ghcjs-pkg
                       filepath
 
 Executable ghcjs-boot
-    if flag(compiler-only)
+    if flag(compiler-only) || flag(rts-only)
       Buildable:      False
     Main-Is:          Boot.hs
     Default-Language: Haskell2010
@@ -149,7 +158,7 @@ Executable ghcjs-boot
                       tar               >= 0.4  && < 0.5
 
 Executable ghcjs-cabal
-    if flag(compiler-only)
+    if flag(compiler-only) || flag(rts-only)
       Buildable:      False
     Main-Is:          Cabal.hs
     Default-Language: Haskell2010

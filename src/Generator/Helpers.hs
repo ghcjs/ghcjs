@@ -8,6 +8,7 @@ import OccName (occNameString)
 import FastString (unpackFS)
 import Panic (panic)
 import Encoding (zEncodeString)
+import BasicTypes (FunctionOrData(..))
 
 import Module as Stg (Module, moduleName, moduleNameString)
 import StgSyn as Stg
@@ -89,8 +90,16 @@ stgLiteralToJs (Stg.MachWord64 i)
 stgLiteralToJs (Stg.MachFloat i) = return $ Js.float i -- Float#
 stgLiteralToJs (Stg.MachDouble i) = return $ Js.float i -- Doable#
 stgLiteralToJs (Stg.MachNullAddr) = return $ Js.null -- Addr#
-stgLiteralToJs (Stg.MachLabel {}) = return $ Js.nativeMethodCall RTS.root "alert" [Js.string "Unsupported literal: MachLabel"]
+stgLiteralToJs (Stg.MachLabel str mbSize t)
+  = return $ Js.nativeFunctionCall (Js.var $ labelMaker t) [
+        Js.string (unpackFS str),
+        case mbSize of
+          Nothing   -> Js.null
+          Just size -> Js.int size]
 stgLiteralToJs _ = error "Unknown literal type"
+
+labelMaker IsData     = "$hs_labelData"
+labelMaker IsFunction = "$hs_labelFunction"
 
 stgLiteralToJsString :: Javascript js => Stg.Literal -> Gen (Expression js)
 stgLiteralToJsString (Stg.MachChar c) = return $ Js.string [c] -- Char#

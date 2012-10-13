@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, ScopedTypeVariables #-}
+{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables, PackageImports #-}
 module Main where
 
 import Paths_ghcjs
@@ -18,9 +18,15 @@ import Outputable (showPpr)
 
 import System.Environment (getArgs, getEnv)
 
-import Compiler.Info
-import Compiler.Variants
-import qualified GHCJSMain
+#ifdef GHCJS_PACKAGE_IMPORT
+#define GHCJS "ghcjs"
+#else
+#define GHCJS "ghcjs"
+#endif
+
+import GHCJS Compiler.Info
+import GHCJS Compiler.Variants
+import qualified GHCJS GHCJSMain
 import MonadUtils (MonadIO(..))
 import System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
 import System.Directory (createDirectoryIfMissing)

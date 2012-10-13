@@ -33,9 +33,10 @@ showJsInt n
     | n < 0     = " -" ++ showJsInt (negate n)
     | otherwise = show . toInteger $ n
 
+-- Avoid the risk of getting "a--1" when we want "a- -1"
 showJsFrac :: (RealFrac a) => a -> String
 showJsFrac f
-    | f < 0     =  "-" ++ showJsFrac (negate f)
+    | f < 0     =  " -" ++ showJsFrac (negate f)
     | otherwise =  show df -- hopefully javascript always understands the output of this
     where
       df :: Double
