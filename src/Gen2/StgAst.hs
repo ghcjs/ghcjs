@@ -2,7 +2,7 @@
    some instances for printing the StgSyn AST in Haskell syntax.
 -}
 
-{-# LANGUAGE StandaloneDeriving, FlexibleInstances #-}
+{-# LANGUAGE CPP, StandaloneDeriving, FlexibleInstances #-}
 
 module Gen2.StgAst where
 
@@ -21,8 +21,13 @@ import CoreSyn
 import Literal
 import BasicTypes
 
+#if __GLASGOW_HASKELL__ >= 706
 showPpr' a = showPpr (defaultDynFlags undefined) a
 showSDoc' a = showSDoc (defaultDynFlags undefined) a
+#else
+showPpr' a = showPpr a
+showSDoc' a = showSDoc a
+#endif
 
 instance Show CostCentre where show _ = "CostCentre"
 instance Show CostCentreStack where show _ = "CostCentreStack"
@@ -34,15 +39,19 @@ instance Show AltType where show = showPpr'
 instance Show SRT where show _ = "SRT"
 instance Show PrimCall where show = showPpr'
 instance Show ForeignCall where show = showPpr'
+#if __GLASGOW_HASKELL__ >= 706
 instance Show DataCon where show = showPpr'
 instance Show Var where show = showPpr'
+#endif
 
 deriving instance Show UpdateFlag
 
+#if __GLASGOW_HASKELL__ >= 706
 deriving instance Show Literal
-deriving instance Show FunctionOrData
 deriving instance Show PrimOp
 deriving instance Show AltCon
+#endif
+deriving instance Show FunctionOrData
 deriving instance Show StgExpr
 deriving instance Show StgBinding
 deriving instance Show StgRhs

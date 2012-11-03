@@ -29,6 +29,7 @@ rtsSrcs v =
     case variantCallingConvention v of
       Plain      -> [ "rts-common.js", "rts-webkit.js", "rts-plain.js" ]
       Trampoline -> [ "rts-common.js", "rts-webkit.js", "rts-trampoline.js" ]
+      Gen2      -> []
 
 closureDeps :: [FilePath]
 closureDeps =

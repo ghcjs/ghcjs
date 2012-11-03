@@ -29,7 +29,6 @@ import Module (Module, ModuleName, mkModule, moduleNameString, mkModuleName, mod
 import Outputable (showPpr)
 import Distribution.Verbosity (Verbosity, normal)
 import Distribution.Simple.Utils (findFileWithExtension, info, getDirectoryContentsRecursive, installOrdinaryFiles)
-import Compiler.Variants
 
 instance Show ModuleName where show = moduleNameString
 
@@ -47,8 +46,8 @@ appendDeps a b = DependencyInfo
                     (toSearch a ++ toSearch b)
                     (functionDeps a ++ functionDeps b)
 
-link :: Variant -> String -> [FilePath] -> [FilePath] -> [ModuleName] -> [String] -> IO [String]
-link var out searchPath objFiles pageModules _pageFunctions = do
+link :: String -> String -> [FilePath] -> [FilePath] -> [ModuleName] -> IO [String]
+link jsExt out searchPath objFiles pageModules = do
     -- Output a the search path that should be used for dynamic loading
     writeFile (out </> "paths.js") $ "$hs_path = " ++ show searchPath
 
@@ -61,7 +60,7 @@ link var out searchPath objFiles pageModules _pageFunctions = do
 
     -- Search for the required modules in the packages
     let initDeps = emptyDeps{modules=S.singleton (mkModuleName "GHC.Prim"), toSearch=pageModules}
-    allDeps <- searchModules var searchPath objDeps initDeps
+    allDeps <- searchModules jsExt searchPath objDeps initDeps
 
     let deps = functionDeps allDeps
 
@@ -148,28 +147,28 @@ link var out searchPath objFiles pageModules _pageFunctions = do
                         ) bundles ++ [
                         "--js", concat [out, "hsloader.js"]]
 
--- | This installs all the java script (.js) files in a directory to a target loction
--- preserving the directory layout.  Any files in ".jsexe" directories are ignored
--- as those sube directoies are likely to be the destination.
---
--- Only files with newer modification times are copied.
---
-installJavaScriptFiles :: Variant -> Verbosity -> FilePath -> FilePath -> IO ()
-installJavaScriptFiles var verbosity srcDir destDir = do
-    info verbosity $ "Copying JavaScript From" ++ srcDir
-    srcFiles <- getDirectoryContentsRecursive srcDir >>= filterM modTimeDiffers
-    installOrdinaryFiles verbosity destDir [ (srcDir, f) | f <- srcFiles, variantExtension var `L.isSuffixOf` f ]
-  where
-    modTimeDiffers f = do
-            srcTime  <- getModificationTime $ srcDir </> f
-            destTime <- getModificationTime $ destDir </> f
-            return $ destTime < srcTime
-        `catch` \e -> if isDoesNotExistError e
-                            then return True
-                            else ioError e
+---- | This installs all the java script (.js) files in a directory to a target loction
+---- preserving the directory layout.  Any files in ".jsexe" directories are ignored
+---- as those sube directoies are likely to be the destination.
+----
+---- Only files with newer modification times are copied.
+----
+--installJavaScriptFiles :: Variant -> Verbosity -> FilePath -> FilePath -> IO ()
+--installJavaScriptFiles var verbosity srcDir destDir = do
+--    info verbosity $ "Copying JavaScript From" ++ srcDir
+--    srcFiles <- getDirectoryContentsRecursive srcDir >>= filterM modTimeDiffers
+--    installOrdinaryFiles verbosity destDir [ (srcDir, f) | f <- srcFiles, variantExtension var `L.isSuffixOf` f ]
+--  where
+--    modTimeDiffers f = do
+--            srcTime  <- getModificationTime $ srcDir </> f
+--            destTime <- getModificationTime $ destDir </> f
+--            return $ destTime < srcTime
+--        `catch` \e -> if isDoesNotExistError e
+--                            then return True
+--                            else ioError e
 
-searchModules :: Variant -> [FilePath] -> M.Map ModuleName DependencyInfo -> DependencyInfo -> IO DependencyInfo
-searchModules var searchPath objDeps = \d -> do
+searchModules :: String -> [FilePath] -> M.Map ModuleName DependencyInfo -> DependencyInfo -> IO DependencyInfo
+searchModules jsExe searchPath objDeps = \d -> do
  loop d
   where
     loop deps@DependencyInfo{toSearch=[]} = return deps -- No more modules to search
@@ -178,7 +177,7 @@ searchModules var searchPath objDeps = \d -> do
             (True, _)        -> loop deps{toSearch=mods} -- We already seearched this module
             (False, Just d)  -> loop (appendDeps deps d) -- It was in an object file
             (False, Nothing) -> do
-                mbFile <- findFileWithExtension [variantExtension' var] searchPath (moduleNameSlashes mod)
+                mbFile <- findFileWithExtension [jsExe] searchPath (moduleNameSlashes mod)
                 case mbFile of
                     Just file | not (file `S.member` (files deps)) -> do
                         fileDeps <- readDeps file

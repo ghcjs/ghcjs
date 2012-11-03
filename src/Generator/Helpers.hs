@@ -117,7 +117,9 @@ stgLiteralToJsString _ = error "Unknown literal type"
 stgArgToJs :: Javascript js => Stg.StgArg -> Gen (Expression js)
 stgArgToJs (Stg.StgVarArg id) = Js.var <$> stgIdToJs id
 stgArgToJs (Stg.StgLitArg l) = stgLiteralToJs l
+#if __GLASGOW_HASKELL__ < 706
 stgArgToJs (Stg.StgTypeArg _) = panic "Compiler bug: StgTypeArg in expression"
+#endif
 
 jsBoolToHs :: Javascript js => Expression js -> Expression js
 jsBoolToHs ex = Js.ternary ex RTS.true RTS.false

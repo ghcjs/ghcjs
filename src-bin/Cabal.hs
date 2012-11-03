@@ -1,4 +1,4 @@
-{-# LANGUAGE NoImplicitPrelude, OverloadedStrings,
+{-# LANGUAGE CPP, NoImplicitPrelude, OverloadedStrings,
              NoMonomorphismRestriction, ExtendedDefaultRules,
              ScopedTypeVariables, TupleSections
  #-}
@@ -24,7 +24,9 @@ import Data.Char (isSpace)
 import Data.Maybe (catMaybes, fromMaybe)
 import Filesystem.Path (extension, dropExtension, empty)
 import System.Directory (getModificationTime)
-import System.Time (ClockTime)
+#if MIN_VERSION_directory(1,2,0)
+import Data.Time (UTCTime)
+#endif
 import qualified Data.Map as M
 import qualified Data.Text.Lazy as L
 import qualified Data.Text as T
@@ -103,17 +105,23 @@ collectHiFiles = do
   importDirs <- allImportDirs
   fmap concat $ mapM (fmap collectLonelyHi . allFiles . fromString) importDirs
 
-allFiles :: FilePath -> IO [(FilePath, ClockTime)]
+#if MIN_VERSION_directory(1,2,0)
+allFiles :: FilePath -> IO [(FilePath, UTCTime)]
+#endif
 allFiles fp = do
   files <- shelly $ find fp
   mapM addModificationTime files
 
-addModificationTime :: FilePath -> IO (FilePath, ClockTime)
+#if MIN_VERSION_directory(1,2,0)
+addModificationTime :: FilePath -> IO (FilePath, UTCTime)
+#endif
 addModificationTime file = fmap (file,) $ getModificationTime (toString file)
 
 -- paths of .hi files without corresponding .js files (without extension)
 -- .js files older than the .hi file are counted as missing (reinstalls!)
-collectLonelyHi :: [(FilePath,ClockTime)] -> [FilePath]
+#if MIN_VERSION_directory(1,2,0)
+collectLonelyHi :: [(FilePath,UTCTime)] -> [FilePath]
+#endif
 collectLonelyHi files = map fst $ filter isLonely his
     where
       allMap = M.fromList files

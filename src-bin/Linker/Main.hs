@@ -10,13 +10,13 @@ import System.Process (system)
 
 import Generator.Link (link)
 import Compiler.Variants
+import Control.Monad (forM)
 
 -- As well as the normal closure-compiler options this function accepts
 --     --haskell_output_path_prefix (overrides --module_output_path_prefix for ghcjs-link output)
 --     --hjs Specifies directories to look in for ghcjs generated .js
 --     --hjs_file ghcjs generated .js file
 --     --pages_module Main
---     --page_function Main.main
 -- A "page" is an function that we want to be able to load quickly on demand
 --
 main :: IO ()
@@ -27,25 +27,26 @@ main = do
         dirs = getOpts "--hjs" args
         files = getOpts "--hjs_file" args
         pageModules = getOpts "--pages_module" args
-        pageFunctions = getOpts "--page_function" args
         isHaskellOpt "--hjs" = True
         isHaskellOpt "--hjs_file" = True
         isHaskellOpt "--haskell_output_path_prefix" = True
         isHaskellOpt "--pages_module" = True
-        isHaskellOpt "--page_function" = True
         isHaskellOpt _ = False
         (initArgs', remainingArgs') = span (\a -> a /= "--hjs" && a /= "--hjs_file") args
         initArgs      = filterOut isHaskellOpt initArgs'
         remainingArgs = filterOut isHaskellOpt remainingArgs'
-
-    closureArgs <- link trampolineVariant out dirs files [] pageFunctions -- fimxe pagemodules
-    checkExit . system . intercalate " " $ ["java"] ++ initArgs ++ closureArgs ++ remainingArgs
+        pagesModules' = case pagesModules of
+                            [] -> ["Main"]
+                            _  -> pagesModules
+    checkExit . forM variants $ \variant -> do
+        closureArgs <- link variant out dirs files pageModules'
+        system . intercalate " " $ ["java"] ++ initArgs ++ closureArgs ++ remainingArgs
   where
     checkExit f = do
-        result <- f
-        case result of
-            ExitSuccess -> return ()
-            _           -> exitWith result
+        results <- f
+        case filter (/= ExitSuccess) results of
+            []       -> return ()
+            result:_ -> exitWith result
 
     getOpts opt (o:v:rest) | o == opt = v:(getOpts opt rest)
     getOpts opt (_:rest) = getOpts opt rest

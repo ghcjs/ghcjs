@@ -25,8 +25,10 @@ import Name (getOccName)
 import Name (pprNameDefnLoc, getName)
 import Outputable (showSDoc)
 #endif
+import Gen2.StgAst
 import OccName (occNameString)
 import UniqSet (uniqSetToList)
+import DynFlags
 
 binding :: Javascript js => StgBinding -> Gen js
 binding (StgNonRec id rhs) = nonRecDeclAndDef id rhs
@@ -68,7 +70,7 @@ withBindings f b = mconcat <$> mapM (uncurry f) b
 debugInfo :: Js.Javascript js => Stg.Id -> Gen [Expression js]
 debugInfo x = do
 #if __GLASGOW_HASKELL__ >= 703
-    case showSDoc . pprNameDefnLoc $ getName x of
+    case showSDoc' . pprNameDefnLoc $ getName x of
         "at <no location info>" -> return [Js.string . occNameString . getOccName $ x]
         s                       -> return [Js.string s]
 #else

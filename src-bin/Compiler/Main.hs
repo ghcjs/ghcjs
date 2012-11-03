@@ -57,8 +57,12 @@ main =
      libDir <- getGlobalPackageBase
      (argsS, _) <- parseStaticFlags $ map noLoc args1
      defaultErrorHandler
+#if __GLASGOW_HASKELL__ >= 706
         defaultFatalMessager
         defaultFlushOut
+#else
+        defaultLogAction
+#endif
         $ runGhc (mbMinusB `mplus` Just libDir) $
        do sdflags <- getSessionDynFlags
           let oneshot = "-c" `elem` args1
@@ -91,8 +95,12 @@ addPkgConf df = do
   db1 <- getGlobalPackageDB
   db2 <- getUserPackageDB
   base <- getGlobalPackageBase
-  return $ df
-             { extraPkgConfs = ([PkgConfFile db1, PkgConfFile db2]++)
+  return $ df {
+#if __GLASGOW_HASKELL__ >= 706
+               extraPkgConfs = ([PkgConfFile db1, PkgConfFile db2]++)
+#else
+               extraPkgConfs = db1 : db2 : extraPkgConfs df
+#endif
              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
              }
 
@@ -219,7 +227,12 @@ cgGutsFromModGuts guts =
 
 concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO String
 concreteJavascriptFromCgGuts dflags env core variant =
-  do core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons $ core)
+  do core_binds <- corePrepPgm dflags
+#if __GLASGOW_HASKELL__ >= 706
+                               env
+#endif
+                               (cg_binds core)
+                               (cg_tycons $ core)
      stg <- coreToStg dflags core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
      return $ variantRender variant stg' (cg_module core)

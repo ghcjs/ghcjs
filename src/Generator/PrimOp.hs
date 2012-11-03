@@ -18,6 +18,7 @@ module Generator.PrimOp
 import Id as Stg
 import StgSyn as Stg
 import PrimOp
+import Gen2.StgAst
 import Javascript.Language as Js hiding(return)
 import qualified Javascript.Language as Js (return)
 

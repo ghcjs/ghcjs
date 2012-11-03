@@ -27,7 +27,9 @@ idsOfExpr (StgApp f args) = insert f $ idsOfArgs args
 idsOfExpr (StgConApp _ args) = idsOfArgs args
 idsOfExpr (StgOpApp _ args _) = idsOfArgs args
 idsOfExpr (StgLit _) = empty
+#if __GLASGOW_HASKELL__ < 706
 idsOfExpr (StgLam _ _ _) = panic "unexpected StgLam"
+#endif
 idsOfExpr (StgCase expr _ _ bndr _ _ alts) =
   insert bndr $ idsOfExpr expr `union` idsOfAlts alts
 idsOfExpr (StgLet bndn body) = idsOfBinding bndn `union` idsOfExpr body
