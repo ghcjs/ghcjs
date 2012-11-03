@@ -39,7 +39,7 @@ main = do
                             [] -> ["Main"]
                             _  -> pagesModules
     checkExit . forM variants $ \variant -> do
-        closureArgs <- link variant out dirs files pageModules'
+        closureArgs <- link variant out dirs files (mkModuleName pageModules'
         system . intercalate " " $ ["java"] ++ initArgs ++ closureArgs ++ remainingArgs
   where
     checkExit f = do
