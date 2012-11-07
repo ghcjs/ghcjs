@@ -2,24 +2,26 @@
    some instances for printing the StgSyn AST in Haskell syntax.
 -}
 
-{-# LANGUAGE CPP, StandaloneDeriving, FlexibleInstances #-}
+{-# LANGUAGE CPP                #-}
+{-# LANGUAGE FlexibleInstances  #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Gen2.StgAst where
 
-import StgSyn
-import Outputable
-import Type
-import Module
-import PrimOp
-import ForeignCall
-import UniqSet
-import DataCon
-import UniqFM
-import DynFlags
-import CostCentre
-import CoreSyn
-import Literal
-import BasicTypes
+import           BasicTypes
+import           CoreSyn
+import           CostCentre
+import           DataCon
+import           DynFlags
+import           ForeignCall
+import           Literal
+import           Module
+import           Outputable
+import           PrimOp
+import           StgSyn
+import           Type
+import           UniqFM
+import           UniqSet
 
 #if __GLASGOW_HASKELL__ >= 706
 showPpr' a = showPpr (defaultDynFlags undefined) a

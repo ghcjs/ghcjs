@@ -2,13 +2,13 @@
 
 module Gen2.GC where
 
-import Language.Javascript.JMacro
+import           Language.Javascript.JMacro
 
-import Data.Monoid
+import           Data.Monoid
 
-import Gen2.Utils
-import Gen2.RtsTypes
-import Gen2.RtsSettings
+import           Gen2.RtsSettings
+import           Gen2.RtsTypes
+import           Gen2.Utils
 
 {-
 
@@ -35,7 +35,7 @@ import Gen2.RtsSettings
   x.gtag  >   0  --> layout in gtag:   [entry, arg0, arg1, ..., argn]
 
   - gtag & 0xff                 --> size of whole object in array entries (including entry and tag)
-  - (gtag >> (8+n)) & 1 === 1   --> argument n is a pointer 
+  - (gtag >> (8+n)) & 1 === 1   --> argument n is a pointer
                                         (note: offset of argn differs depending on whether the layout is
                                          inside the object)
 -}
@@ -220,7 +220,7 @@ garbageCollector =
        var il = indirect.length;
        `assertGc (isFunction $ stack|!sp) "incomplete stack frame"`
        while(sp > 0) {
-         `traceGc $ "walking stack: " |+ sp`;
+         `traceGc $ "walking stack: " |+ sp |+ " (" |+ ((stack|!sp)|."n") |+ ")"`;
          var tag = stack[sp].gtag;
          `assertGc (notUndef tag) "garbage collector tag undefined"`;
          var c;
@@ -237,14 +237,14 @@ garbageCollector =
              `traceGc $ "fast path: " |+ bit |+ " (tag: " |+ tag |+ "), offset: " |+ offset`;
              if(tag & bit) {
                c = stack[sp-offset];
-//               if(typeof c !== "number") {
-//                  log("wrong pointer: " + sp + "-" + offset + "(" + stack[sp].i[1] + ")");
-//              } else {
+              if(typeof c !== "number") {
+                log("wrong pointer: " + sp + "-" + offset + "(" + stack[sp].i[1] + ")");
+              } else {
 //               frames += c;
                  if(c >= start0) {
                    `followPtr work start heap indirect il reachable reachable_e rl c`;
                  }
-//}
+}
              }
              offset++;
              bit = bit << 1;
@@ -276,7 +276,7 @@ garbageCollector =
        while(sp > 0) {
          var tag = stack[sp].gtag;
          `assertGc (notUndef tag) "garbage collector tag undefined"`;
-         `traceGc $ "adjusting stack object: " |+ (stack|!sp)|."i"|!!1 |+ "(" |+ (stack|!sp)|."i"|!!0 |+ ")"`;
+         `traceGc $ "adjusting stack object: " |+ (stack|!sp)|."n"`;
          if(tag !== 0) {
            var offset;
            if(tag === -1) {  // layout in object
@@ -357,8 +357,8 @@ garbageCollector =
      fun dumpStackTop stack start sp {
         for(var i=start;i<=sp;i++) {
            var s = stack[i];
-           if(s && s.i) {
-             log("stack[" + i + "] = " + s.i[1] + " (" + s.i[0] + ")");
+           if(s && s.n) {
+             log("stack[" + i + "] = " + s.n);
            } else {
              log("stack[" + i + "] = " + s);
            }
@@ -390,8 +390,8 @@ garbageCollector =
          var h = heap[i];
          if(h === undefined || h === 0) { undef++; } else { undef = 0; }
          if(undef >= 10) { break; }
-         if(h && h.i) {
-            log("heap[" + i + "] = " + h.i[1] + " (" + closureTypeName(h.t) + " " + h.i[0] + ")");
+         if(h && h.n) {
+            log("heap[" + i + "] = " + h.n + " (" + closureTypeName(h.t) + ")");
          } else {
             log("heap[" + i + "] = " + h);
          }
@@ -700,7 +700,7 @@ followPtr :: JExpr -> -- ^ work array, push newly found pointers on this, may co
              JExpr -> -- ^ the pointer to start with
              JStat
 followPtr work start heap ind ip reach reach_e rp ptr =
-  [j| 
+  [j|
       while(`ptr` !== undefined) {
         var hptr = `heap`[`ptr`];
         if(`ptr` >= `start`) {

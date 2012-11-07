@@ -1,7 +1,10 @@
-{-# LANGUAGE CPP, NoImplicitPrelude, OverloadedStrings,
-             NoMonomorphismRestriction, ExtendedDefaultRules,
-             ScopedTypeVariables, TupleSections
- #-}
+{-# LANGUAGE CPP                       #-}
+{-# LANGUAGE ExtendedDefaultRules      #-}
+{-# LANGUAGE NoImplicitPrelude         #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE OverloadedStrings         #-}
+{-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE TupleSections             #-}
 {-
   A cabal-install wrapper for GHCJS
   - invokes cabal-install with the correct arguments to build ghcjs packages
@@ -11,38 +14,40 @@
 
 module Main where
 
-import Prelude hiding (FilePath, catch)
+import           Prelude                hiding (FilePath, catch)
 
-import System.Process (rawSystem, readProcess)
-import System.Exit (exitWith)
+import           System.Exit            (exitWith)
+import           System.Process         (rawSystem, readProcess)
 
-import Shelly
-import Crypto.Skein
+import           Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Char8  as C8
-import Data.Char (isSpace)
-import Data.Maybe (catMaybes, fromMaybe)
-import Filesystem.Path (extension, dropExtension, empty)
-import System.Directory (getModificationTime)
+import           Data.Char              (isSpace)
+import           Data.Maybe             (catMaybes, fromMaybe)
+import           Filesystem.Path        (dropExtension, empty, extension)
+import           Shelly
+import           System.Directory       (getModificationTime)
 #if MIN_VERSION_directory(1,2,0)
-import Data.Time (UTCTime)
+import           Data.Time              (UTCTime)
 #endif
-import qualified Data.Map as M
-import qualified Data.Text.Lazy as L
-import qualified Data.Text as T
-import Data.List (isPrefixOf)
-import System.Environment (getArgs)
-import Data.Monoid (mappend)
-import Control.Monad (forM_)
+import           Control.Monad          (forM_)
+import           Data.List              (isPrefixOf)
+import qualified Data.Map               as M
+import           Data.Monoid            (mappend)
+import qualified Data.Text              as T
+import qualified Data.Text.Lazy         as L
+import           System.Environment     (getArgs)
 
-import Compiler.Info
-import System.Directory (getAppUserDataDirectory, removeDirectoryRecursive, createDirectoryIfMissing)
-import Control.Exception (SomeException, catch)
-import Crypto.Conduit (hashFile)
-import qualified Data.Serialize as C
+import           Compiler.Info
+import           Control.Exception      (SomeException, catch)
+import           Crypto.Conduit         (hashFile)
+import qualified Data.Serialize         as C
+import           System.Directory       (createDirectoryIfMissing,
+                                         getAppUserDataDirectory,
+                                         removeDirectoryRecursive)
 
-import Compiler.Variants
-import Compiler.Info
+import           Compiler.Info
+import           Compiler.Variants
 
 default (L.Text)
 (<>) = mappend

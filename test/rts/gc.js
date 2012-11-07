@@ -20,7 +20,7 @@ function loadRegs(regs) {
 function mkFunClosure(f, name, arity, followable) {
   f.gi   = [1];  // heap object size 1, no free vars
   f.gtag = 1;
-  f.i    = [1, name];
+  f.n    = name;
   f.a    = arity;
   f.t    = h.FUN_CLOSURE;
   f.gai  = followable;
@@ -29,7 +29,7 @@ function mkFunClosure(f, name, arity, followable) {
 function mkHeapObj(f, name, ty, size, followable) {
   f.gi   = [size].concat(followable);
   f.gtag = mkTag(size, followable);
-  f.i    = [size, name];
+  f.n    = name;
   f.t    = ty;
 }
 

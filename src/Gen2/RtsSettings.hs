@@ -5,9 +5,9 @@
 -}
 module Gen2.RtsSettings where
 
-import Language.Javascript.JMacro
-import Gen2.Utils
-import Data.Monoid
+import           Data.Monoid
+import           Gen2.Utils
+import           Language.Javascript.JMacro
 
 -- debugging settings (fixme, make these depend on cabal flags?)
 
@@ -17,11 +17,11 @@ gcDebug = False
 
 -- timing measurements for the garbage collector
 gcTiming :: Bool
-gcTiming = False
+gcTiming = True
 
 -- extra checks from the gc for consistency, usually shouldn't print, but make it a little slower
 gcChecks :: Bool
-gcChecks = False
+gcChecks = True
 
 -- extra rts assertions/checks
 rtsChecks :: Bool
@@ -131,7 +131,7 @@ stringify :: ToJExpr a => a -> JExpr
 stringify x = [je| JSON.stringify(`x`) |]
 
 clName :: JExpr -> JExpr
-clName c = [je| `c`.i[1] |]
+clName c = [je| `c`.n |]
 
 clTypeName :: JExpr -> JExpr
 clTypeName c = [je| closureTypeName(`c`.t) |]
@@ -147,7 +147,8 @@ isFunction e = [je| typeof `e` === "function" |]
 
 isArray :: ToJExpr a => a -> JExpr
 isArray e = [je| typeof(`e`.length) !== "undefined" |] -- [je| `e` instanceof Array |] -- bah jmacro doesn't support this
-
+{-
 setObjInfo :: (ToJExpr a, ToJExpr b) => a -> b -> JStat
 setObjInfo obj y = [j| _objInfo(`obj`,`y`); |]
+-}
 

@@ -7,7 +7,7 @@
 module Gen2.Generator (generate) where
 
 import StgCmmClosure
-import ClosureInfo
+import ClosureInfo hiding (ClosureInfo)
 import Outputable hiding ((<>))
 import FastString
 import DynFlags
@@ -65,7 +65,7 @@ data GenerateSettings = GenerateSettings
 -- fixme remove this hack to run main and use the settings
 generate :: StgPgm -> Module -> String
 generate s m = (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.fst) s)) ++
-               prr ( {- addDebug $ -}  rts
+               prr ( {- addDebug $ -} rts <> srts (map snd s)
                     <> res
                    ) ++ "run_init_static(); \n debugger;\n function main() { try { " ++ prr (runMainIO m) ++
                             "\n} catch(e) { log(e.stack); debugger; log('exception, r1: ' + r1); dumpStack(stack,sp+5); dh(); throw e; } }\nif(typeof($) === 'undefined') { main(); }\ndebugger;\n"
@@ -74,6 +74,11 @@ generate s m = (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.f
               in (TL.unpack . displayT . renderPretty 0.8 150 . pretty . jsSaturate Nothing $ doc') ++ "\n"
     res     = {- addDebug . -} pass2 . pass1 m $ s
 
+
+srts :: [[(Id, [Id])]] -> JStat
+srts xss = mempty -- mconcat $ map (\xs -> [j| srts = `mconcat $ map toSrt xs`; |]) xss
+  where
+    toSrt (id, ids) = istr (jsIdI id) .= map jsId ids
 
 -- collect globals and export them, to make our source a node module
 exportGlobals :: JStat -> JStat
@@ -133,19 +138,31 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable _srt [] body) =
   let f = JFunc funArgs (preamble <> updateThunk <> genBody [] body Updatable i)
   in  toplevel [j| `decl (jsEnIdI i)`;
                    `jsEnId i` = `f`;
-                   `allocThunkStatic (jsIdI i) (jsEnId i) (istr (jsIdI i))`;
+                   `ClosureInfo (jsEnId i) [] (istr (jsIdI i))
+                       (CILayoutFixed 2 []) CIThunk`;
+                   `decl (jsIdI i)`;
+                   `jsId i` = static_thunk(`jsEnId i`);
                  |]
+--                    `allocThunkStatic (jsIdI i) (jsEnId i) (istr (jsIdI i))`;
 genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) = -- genBody i body
   let f = JFunc funArgs (preamble <> genBody args body upd_flag i)
   in  toplevel [j| `decl (jsEnIdI i)`;
                    `jsEnId i` = `f`;
-                   `allocFunStatic (jsIdI i) (jsEnId i) (length args) (istr (jsIdI i)) (genArgInfo False (map idType args))`;
+                   `ClosureInfo (jsEnId i) (genArgInfo False $ map idType args) (istr (jsIdI i))
+                       (CILayoutFixed 1 []) (genEntryType args)`;
+                   `decl (jsIdI i)`;
+                   `jsId i` = static_fun(`jsEnId i`);
                  |]
+--                   `allocFunStatic (jsIdI i) (jsEnId i) (length args) (istr (jsIdI i)) (genArgInfo False (map idType args))`;
+
+
 genRhs _ _ = panic "genRhs"
 
-allocFunStatic cl f n fn gai = decl' cl [je| static_fun(`f`,`n`,`fn`, `gai`) |]
+{-
+allocFunStatic cl f n fn gai = decl' cl [je| static_fun(`f`) |]
 
-allocThunkStatic cl f fn = decl' cl [je| static_thunk(`f`,`fn`) |]
+allocThunkStatic cl f fn = decl' cl [je| static_thunk(`f) |]
+-}
 
 updateThunk :: JStat
 updateThunk =
@@ -300,17 +317,32 @@ genEntry i (StgRhsClosure _cc _bi live Updatable _str [] (StgApp fun args)) =
                    <> push (concatMap genArg as ++ pushfun)
                    <> [j| r1 = `head (genArg a1)`; return `apfun`(); |]
 -}
+-- fixme args correct here?
   in  toplevel [j| `decl (jsEntryIdI i)`;
                    `jsEntryId i` = `f`;
-                    `setObjInfo (jsEntryId i) $ genClosureInfo (showPpr' i) live [] <> "gai" .= genArgInfo True []`;
+                    `ClosureInfo (jsEntryId i) (genArgInfo True []) (showPpr' i)
+                         (fixedLayout $ map (typeVt.idType) live) (genEntryType [])`;
                 |]
+--                    `setObjInfo (jsEntryId i) $ genClosureInfo (showPpr' i) live [] <> "gai" .= genArgInfo True []`;
 genEntry i (StgRhsClosure _cc _bi live upd_flag _srt args body) =
   let f = JFunc funArgs (preamble <> loadLiveFun live <> genUpdFrame upd_flag <> genBody args body upd_flag i)
   in  toplevel [j| `decl (jsEntryIdI i)`;
                    `jsEntryId i` = `f`;
-                   `setObjInfo (jsEntryId i) $ genClosureInfo (showPpr' i) live args <> "gai" .= genArgInfo True (map idType args)`;
+                   `ClosureInfo (jsEntryId i) (genArgInfo True $ map idType args) (showPpr' i)
+                          (fixedLayout $ map (typeVt.idType) live) (genEntryType args)`;
                 |]
 
+genEntryType :: [Id] -> CIType
+genEntryType []   = CIThunk
+genEntryType args = CIFun (length $ concat args') nvoid
+  where
+     args' = map genIdArg args
+     nvoid = length $ takeWhile null (reverse args')
+-- genClosureLayout :: [Id] -> [Id] -> (CI
+
+--                   `setObjInfo (jsEntryId i) $ genClosureInfo (showPpr' i) live args <> "gai" .= genArgInfo True (map idType args)`;
+
+{-
 genClosureInfo :: String -> [Id] -> [Id] -> JObj
 genClosureInfo name live [] =
      "i" .= genFunInfo name live <>
@@ -322,40 +354,45 @@ genClosureInfo name live args =
      genGcInfo (map idType live) <>
      "t" .= Fun <>
      "a" .= genArityTagId args
+-}
 
 -- arity & 0xff = number of arguments
 -- arity >> 8   = number of trailing void arguments
-genArityTag :: [StgArg] -> Int
+{-
+genArityTag :: [StgArg] -> CIType
 genArityTag args = length (concat args') + (nvoid `shiftL` 8)
     where
       args' = map genArg args
       nvoid = length $ takeWhile null (reverse args')
 
-genArityTagId :: [Id] -> Int
+genArityTagId :: [Id] -> CIType
 genArityTagId args = length (concat args') + (nvoid `shiftL` 8)
     where
       args' = map genIdArg args
       nvoid = length $ takeWhile null (reverse args')
-
+-}
 genSetConInfo :: Id -> DataCon -> JStat
 genSetConInfo i d = [j| `decl (jsDcEntryIdI i)`;
                         `ei`     = `mkDataEntry`;
-                        `setObjInfo ei info`;
+                        `ClosureInfo ei [R1] (showPpr' d) (fixedLayout $ map typeVt fields)
+                            (CICon $ dataConTag d)`;
                       |]
     where
-      ei = jsDcEntryId i
-      info = "i"   .= genConInfo d <>
+      ei     = jsDcEntryId i
+      fields = trd4 (dataConSig d)
+{-
+           info = "i"   .= genConInfo d <>
              genGcInfo (trd4 (dataConSig d)) <>
              "t"   .= Con <>
              "a"   .= dataConTag d <>
              "gai" .= [ji 1];
-
--- info table for the arguments that are heap pointers when this function is to be called
+-}
+-- info table for the arguments that are heap pointers when this function is to be calledb
 -- cl == True means that the current closure in r1 is a heap object
-genArgInfo :: Bool -> [Type] -> JExpr
-genArgInfo cl args = toJExpr (r1 ++ tbl 2 (map typeVt args))
+genArgInfo :: Bool -> [Type] -> [StgReg]
+genArgInfo cl args = r1 <> map numReg (tbl 2 (map typeVt args))
     where
-      r1 = if cl then [1::Int] else []
+      r1 = if cl then [R1] else []
       tbl n [] = []
       tbl n (t:ts)
           | isPtr t   = n : tbl (n + varSize t) ts
@@ -366,13 +403,14 @@ mkDataEntry = ValExpr $ JFunc funArgs [j| return `Stack`[`Sp`]; |]
 
 -- generate the info table:
 -- [size, descr, a0t, a1t, a2t]
+{-
 genConInfo :: DataCon -> JExpr
 genConInfo c = ValExpr . JList $ [s, d] ++ map (toJExpr . typeVt) as
   where
     as = trd4 (dataConSig c)
     s  = toJExpr (argSize as + 1)
     d  = toJExpr (showPpr' c)
-
+-}
 trd4 (_,_,x,_) = x
 
 genFunInfo :: String -> [Id] -> JExpr
@@ -385,13 +423,6 @@ genGcInfo :: [Type] -> JObj
 genGcInfo ts = gcInfo size (ptrOffsets 0 (map typeVt ts))
     where
       size = argSize ts + 1
-
--- generates a list of pointer locations for a list of variable locations starting at start
-ptrOffsets :: Int -> [VarType] -> [Int]
-ptrOffsets start [] = []
-ptrOffsets start (t:ts)
-    | isPtr t = start : ptrOffsets (start + varSize t) ts
-    | otherwise = ptrOffsets (start + varSize t) ts
 
 
 conEntry :: DataCon -> Ident
@@ -472,9 +503,13 @@ genRet :: Id -> AltType -> [StgAlt] -> StgLiveVars -> JStat
 genRet e at as l = withIdent $ \ret -> pushRetArgs free (iex ret) <> f ret
   where
     f r    = toplevel (decl r)
-           <> toplevel [j| `iex r` = `fun`; |]
-           <> toplevel (setObjInfo (iex r) (info r))
+           <> toplevel [j| `iex r` = `fun`;
+                           `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
+                                  (fixedLayout $ map (typeVt.idType) free) (CIFun 0 0)`;
+                         |]
+--           <> toplevel (setObjInfo (iex r) (info r))
     free   = uniqSetToList l
+
     info r = "i"   .= genFunInfo (istr r) free <>
              "gai" .= genArgInfo isBoxedAlt [] <>
              genGcInfo (map idType free) <>

@@ -22,7 +22,7 @@ import Prelude hiding (FilePath)
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy (Text)
 import Shelly
-import Data.Monoid (mappend)
+import Data.Monoid
 import Control.Monad (forM, forM_)
 import Compiler.Info
 import qualified Data.ByteString.Lazy as L
@@ -45,8 +45,6 @@ import Network.HTTP.Conduit
 import System.Directory ( setPermissions, getPermissions, Permissions(..) )
 
 default (T.Text)
-
-(<>) = mappend
 
 ghcDownloadLocation :: String -> String
 ghcDownloadLocation ver =
@@ -113,6 +111,7 @@ installBootPackages settings = do
       forM_ corePackages $ \pkg -> do
         echo $ "Building package: " <> pkg
         run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"]
+
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePackages
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"

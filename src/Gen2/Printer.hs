@@ -6,13 +6,14 @@
 -}
 module Gen2.Printer where
 
-import Language.Javascript.JMacro (jsToDoc, JStat(..), JExpr(..), JVal(..), Ident)
+import qualified Data.Text.Lazy               as TL
+import           Language.Javascript.JMacro   (Ident, JExpr (..), JStat (..),
+                                               JVal (..), jsToDoc)
+import           Text.PrettyPrint.Leijen.Text (Doc, align, char, comma, empty,
+                                               fillSep, hcat, nest, parens,
+                                               punctuate, text, vcat, (<+>),
+                                               (<>))
 import qualified Text.PrettyPrint.Leijen.Text as PP
-import qualified Data.Text.Lazy as TL
-import Text.PrettyPrint.Leijen.Text
-    ((<>), (<+>), empty, text, vcat, hcat,
-         parens, char, nest, align, fillSep,
-         comma, punctuate, Doc)
 
 
 pretty :: JStat -> Doc

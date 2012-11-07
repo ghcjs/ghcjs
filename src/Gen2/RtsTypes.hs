@@ -1,22 +1,22 @@
 {-# LANGUAGE QuasiQuotes #-}
 module Gen2.RtsTypes where
 
-import Language.Javascript.JMacro
-import Language.Javascript.JMacro.Types
+import           Language.Javascript.JMacro
+import           Language.Javascript.JMacro.Types
 
-import Gen2.Utils
+import           Gen2.Utils
 
-import Data.Char (toLower)
+import           Data.Char                        (toLower)
 
-import qualified Data.List as L
-import Data.Bits
-import Data.Monoid
+import           Data.Bits
+import qualified Data.List                        as L
+import           Data.Monoid
 
-import StgSyn
-import TyCon
-import Type
+import           StgSyn
+import           TyCon
+import           Type
 
-import Gen2.RtsSettings
+import           Gen2.RtsSettings
 
 -- closure types
 data CType = Thunk | Fun | Pap | Con | Ind | Blackhole
@@ -168,7 +168,7 @@ ve = ValExpr . JVar . StrI
 -- gc info fields:
 -- .gtag -> gtag & 0xFF = size, other bits indicate  offsets of pointers, gtag === 0 means tag invalid, use list
 -- .gi   -> info list, [size, offset1, offset2, offset3, ...]
-gcInfo :: Int   -> -- ^ size of closure in array indices, including entry 
+gcInfo :: Int   -> -- ^ size of closure in array indices, including entry
          [Int]  -> -- ^ offsets from entry where pointers are found
           JObj
 gcInfo size offsets =
@@ -315,4 +315,91 @@ withRegsRE start end max fallthrough f =
       brk | fallthrough = mempty
           | otherwise   = [j| break; |]
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
+
+
+data ClosureInfo = ClosureInfo
+     { ciVar    :: JExpr    -- ^ object being infod
+     , ciRegs   :: [StgReg] -- ^ registers with pointers
+     , ciName   :: String   -- ^ friendly name for printing
+     , ciLayout :: CILayout -- ^ heap/stack layout of the object
+     , ciType   :: CIType   -- ^ type of the object, with extra info where required
+     }
+
+data CIType = CIFun { citArity :: Int  -- | number of arguments (double arguments are counted double)
+                    , citNVoid :: Int  -- | number of trailing void args
+                    }
+            | CIThunk
+            | CICon { citConstructor :: Int }
+            | CIPap { citSize :: Int } -- fixme is this ok?
+            | CIBlackhole
+
+data CILayout = CILayoutVariable -- layout stored in object itself, first position from the start
+              | CILayoutPtrs     -- size and pointer offsets known
+                  { layoutSize :: !Int
+                  , layoutPtrs :: [Int] -- offsets of pointer fields
+                  }
+              | CILayoutFixed    -- whole layout known
+                  { layoutSize :: !Int      -- closure size in array positions, including entry
+                  , layout     :: [VarType]
+                  }
+
+-- standard fixed layout: entry fun + payload
+fixedLayout :: [VarType] -> CILayout
+fixedLayout vts = CILayoutFixed (1 + sum (map varSize vts)) vts
+
+-- a gi gai i
+instance ToStat ClosureInfo where
+  toStat (ClosureInfo obj rs name layout CIThunk)       = setObjInfoL obj rs layout Thunk name 0
+  toStat (ClosureInfo obj rs name layout (CIFun arity nvoid)) = setObjInfoL obj rs layout Fun name (mkArityTag arity nvoid)
+  toStat (ClosureInfo obj rs name layout (CICon con))   = setObjInfoL obj rs layout Con name con
+  toStat (ClosureInfo obj rs name layout (CIPap size))  = setObjInfoL obj rs layout Pap name size
+  toStat (ClosureInfo obj rs name layout CIBlackhole)   = setObjInfoL obj rs layout Blackhole name 0 -- fixme do we need to keep track of register arguments of underlying thing?
+
+mkArityTag :: Int -> Int -> Int
+mkArityTag arity trailingVoid = arity .|. (trailingVoid `shiftL` 8)
+
+setObjInfoL :: JExpr     -- ^ the object
+            -> [StgReg]  -- ^ registers with pointers
+            -> CILayout  -- ^ layout of the object
+            -> CType     -- ^ closure type
+            -> String    -- ^ object name, for printing
+            -> Int       -- ^ `a' argument, depends on type (arity, conid, size)
+            -> JStat
+setObjInfoL obj rs CILayoutVariable t n a            = setObjInfo obj t n [] Nothing     a (-1) rs
+setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    = setObjInfo obj t n [] (Just size) a (mkGcTag size ptrs) rs
+setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n l' (Just size) a (mkGcTag size ptrs) rs
+  where
+    ptrs = ptrOffsets 0 layout
+    l'   = map fromEnum layout
+
+-- the tag thingie, will be 0 if info cannot be read from the tag
+mkGcTag :: Int -> [Int] -> Int
+mkGcTag objSize ptrs = ptrTag (map (+8) ptrs) .|. objSize
+
+setObjInfo :: JExpr      -- ^ the thing to modify
+           -> CType      -- ^ closure type
+           -> String     -- ^ object name, for printing
+           -> [Int]      -- ^ list of item types in the object, if known (free variables, datacon fields)
+           -> Maybe Int  -- ^ object size, if static
+           -> Int        -- ^ extra 'a' parameter, for constructor tag or arity
+           -> Int        -- ^ tag for the garbage collector
+           -> [StgReg]      -- ^ pointers in registers
+           -> JStat
+setObjInfo obj t name fields size a gctag argptrs =
+  [j| _setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `map regNum argptrs`)  |]
+
+-- generates a list of pointer locations for a list of variable locations starting at start
+ptrOffsets :: Int -> [VarType] -> [Int]
+ptrOffsets start [] = []
+ptrOffsets start (t:ts)
+    | isPtr t = start : ptrOffsets (start + varSize t) ts
+    | otherwise = ptrOffsets (start + varSize t) ts
+
+ptrTag :: [Int] -> Int
+ptrTag ptrs
+    | any (>30) ptrs = error "tag bits greater than 30 unsupported"
+    | otherwise      = L.foldl' (.|.) 0 (map (1 `shiftL`) $ filter (>=0) ptrs)
+
+shiftedPtrTag :: Int -> [Int] -> Int
+shiftedPtrTag shift = ptrTag . map (subtract shift)
 

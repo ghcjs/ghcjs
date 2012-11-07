@@ -1,4 +1,5 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes     #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 {-
   generate various apply functions for the rts
@@ -24,7 +25,7 @@
    - heap[p+1]            = original function (can be a pap?)
    - heap[p+2] ..         = arguments
 
-  to get number of remaining registers: use function info - object size: (heap[p+2].a >> 8) - 
+  to get number of remaining registers: use function info - object size: (heap[p+2].a >> 8) -
 
   -- generic applications on stack, when called, r1 is always pointer to closure
   stg_ap_X.gai = [1]      = r1 active, ptr, no other arguments
@@ -63,18 +64,18 @@
 
 module Gen2.RtsApply where
 
-import Language.Javascript.JMacro
-import Language.Javascript.JMacro.Types
+import           Language.Javascript.JMacro
+import           Language.Javascript.JMacro.Types
 
-import Gen2.Utils
-import Gen2.RtsTypes
-import Gen2.RtsAlloc
-import Gen2.RtsSettings
+import           Gen2.RtsAlloc
+import           Gen2.RtsSettings
+import           Gen2.RtsTypes
+import           Gen2.Utils
 
-import Data.Bits
-import Data.List (sort, foldl', find)
-import Data.Maybe
-import Data.Monoid
+import           Data.Bits
+import           Data.List                        (find, foldl', sort)
+import           Data.Maybe
+import           Data.Monoid
 
 rtsApply :: JStat
 rtsApply = mconcat $  map (\n -> stackApply n 0 Nothing) [1..8]
@@ -111,18 +112,12 @@ stackApply :: Int ->                   -- ^ number of registers in stack frame
               JStat
 stackApply n v mfixed = [j| `decl func`;
                             `JVar func` = `JFunc funArgs (preamble <> body)`;
-                            `setObjInfo (iex func) info`;
+                            `ClosureInfo (iex func) [R1] funcName layout (CIFun 0 0)`;
                           |]
   where
-    info = "t"   .= Fun <>
-           "a"   .= (0 :: Int) <>
-           "i"   .= [show frameSize, funcName] <>
-           myGcInfo <>
-           "gai" .= [1::Int]
-
-    myGcInfo = case mfixed of
-               Nothing           -> gcEmbedded
-               Just (_, offsets) -> gcInfo frameSize offsets
+    layout = case mfixed of
+       Nothing           -> CILayoutVariable
+       Just (_, offsets) -> CILayoutPtrs frameSize offsets
 
     funcName = case mfixed of
                  Nothing     -> "stg_ap_" ++ show n ++ vsuff
@@ -250,21 +245,13 @@ stackApply n v mfixed = [j| `decl func`;
                                      return `Stack`[`Sp`];
                                    |]
 
-ptrTag :: [Int] -> Int
-ptrTag ptrs
-    | any (>30) ptrs = error "tag bits greater than 30 unsupported"
-    | otherwise      = foldl' (.|.) 0 (map (1 `shiftL`) $ filter (>=0) ptrs)
-
-shiftedPtrTag :: Int -> [Int] -> Int
-shiftedPtrTag shift = ptrTag . map (subtract shift)
-
 vApply :: JStat
 vApply = [j| fun stg_ap_v_fast {
                `preamble`;
                var h = `Heap`[`R1`];
                switch(h.t) {
                  case `Fun`:
-                   if(h.a === 1) {
+                   if(h.a === 256) {  // 0 args, 1 trailing v
                      return h;
                    } else {
                      log("stg_ap_v_fast: PAP");
@@ -371,7 +358,7 @@ fastApply n v mspec = [j| `decl func`;
                        `R1` = `Heap`[`R1`+1];
                        continue;
                    } else {
-                       `traceRts $ (funName ++ ": ") |+ (c|."i"|!!1) |+ " (not a fun but: " |+ clTypeName c |+ ") to " |+ n |+ " args"`;
+                       `traceRts $ (funName ++ ": ") |+ (c|."n") |+ " (not a fun but: " |+ clTypeName c |+ ") to " |+ n |+ " args"`;
                      `push $ reverse (map toJExpr $ take n (enumFrom R2)) ++ mkAp n`;
                      return `c`;
                    }
@@ -381,16 +368,13 @@ fastApply n v mspec = [j| `decl func`;
 zeroApply :: JStat
 zeroApply = [j| fun stg_ap_0_fast { `enter`; }
 
-                fun stg_ap_0 { `adjSpN 1`; `enter`; }
-                `setObjInfo (jsv "stg_ap_0") $
-                   "t"   .= Fun <>
-                   "a"   .= ji 0 <>
-                   "i"   .= [ji 1, jstr "stg_ap_0"] <>
-                   gcInfo 1 [] <>
-                   "gai" .= [ji 1]
-                `;
+                fun stg_ap_0 { `preamble`; `adjSpN 1`; `enter`; }
+                `ClosureInfo (iex (StrI "stg_ap_0")) [R1] "stg_ap_0" (CILayoutFixed 1 []) (CIFun 0 0)`;
 
-                fun stg_ap_v x { `adjSpN 1`; return `R1`; }
+                fun stg_ap_v x { `preamble`; `adjSpN 1`; return `R1`; }
+                `ClosureInfo (iex (StrI "stg_ap_v")) [R1] "stg_ap_v" (CILayoutFixed 1 []) (CIFun 0 0)`;
+              |]
+{-
                 `setObjInfo (jsv "stg_ap_v") $
                    "t"   .= Fun <>
                    "a"   .= ji 0 <>
@@ -399,7 +383,7 @@ zeroApply = [j| fun stg_ap_0_fast { `enter`; }
                    "gai" .= [ji 1]
                 `;
               |]
-
+-}
 -- carefully enter a closure that might be a thunk or a function
 enter :: JStat
 enter = [j| var c = `Heap`[`R1`]; `enter' c`; |]
@@ -432,13 +416,7 @@ updates =
         `R1` = `Heap`[`R1`+1];
         return `Heap`[`R1`];
       };
-      `setObjInfo ind_entry $
-        "i"   .= [ji 2, jstr "updated frame"] <>
-        gcInfo 2 [0] <>
-        "t"   .= Ind <>
-        "a"   .= ji 0 <>
-        "gai" .= ([]::[Int])
-      `;
+      `ClosureInfo (iex $ StrI "ind_entry") [] "updated frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0)`;
 
       fun stg_upd_frame {
         `preamble`;
@@ -452,13 +430,7 @@ updates =
         }
         return `Stack`[`Sp`];
       };
-      `setObjInfo (jsv "stg_upd_frame") $
-        "i"   .= [ji 2, jstr "stg_upd_frame"] <>
-        "gai" .= [ji 1] <>
-        gcInfo 2 [0] <>
-        "a"   .= ji 0 <>
-        "t"   .= Fun
-      `;
+      `ClosureInfo (iex $ StrI "stg_upd_frame") [R1] "stg_upd_frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0)`;
   |]
 {-
 updateApply :: Int -> JStat
@@ -497,17 +469,19 @@ mkPap tgt fun values =
 pap :: Int -> JStat
 pap n = [j| `decl func`;
             `iex func` = `JFunc [] (preamble <> body)`;
-            `setObjInfo (iex func) info`;
+            `ClosureInfo (iex func) [] funcName CILayoutVariable (CIPap n)`;
           |]
   where
     funcName = "stg_pap_" ++ show n
     func     = StrI funcName
+
+{-
     info = "t"   .= Pap <>
            "a"   .= ji (-1) <>
            gcPap (n+2) <>
            "i"   .= [ji (n+2), jstr funcName] <>
            "gai" .= [ji (-1)]
-
+-}
     body = [j| var c = `Heap`[`R1`+1];
                var f = `Heap`[c];
                `assertRts (isFun f ||| isPap f) (funcName ++ ": expected function or pap")`;

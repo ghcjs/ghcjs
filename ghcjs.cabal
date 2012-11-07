@@ -21,7 +21,7 @@ flag boot
   default:            False
 
 flag compiler-only
-  default:            False
+  default:            True
 
 flag plain
   default:            False
@@ -134,7 +134,6 @@ Executable ghcjs
       x-boot:     False
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
     cpp-options:    -DGHCJS_PACKAGE_IMPORT
-
 
 Executable ghcjs-link
     if flag(compiler-only) || flag(rts-only)

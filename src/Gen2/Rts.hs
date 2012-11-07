@@ -1,24 +1,25 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes     #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Gen2.Rts where
 
-import Language.Javascript.JMacro
-import Language.Javascript.JMacro.Types
+import           Language.Javascript.JMacro
+import           Language.Javascript.JMacro.Types
 
-import Gen2.Utils
-import Gen2.RtsPrim
-import Gen2.RtsApply
-import Gen2.RtsTypes
-import Gen2.GC
-import Gen2.Debug
-import Gen2.RtsSettings
+import           Gen2.Debug
+import           Gen2.GC
+import           Gen2.RtsApply
+import           Gen2.RtsPrim
+import           Gen2.RtsSettings
+import           Gen2.RtsTypes
+import           Gen2.Utils
 
-import Data.Monoid
-import qualified Data.List as L
-import Data.Bits
-import Data.Char (toLower, toUpper)
+import           Data.Bits
+import           Data.Char                        (toLower, toUpper)
+import qualified Data.List                        as L
+import           Data.Monoid
 
-import Encoding
+import           Encoding
 
 -- fixme move somewhere else
 declRegs :: JStat
@@ -41,20 +42,20 @@ trace :: ToJExpr a => a -> JStat
 trace e = [j| log(`e`);  |]
 
 -- generate function thingie
-cheatFun :: String -> Int -> Int -> JStat
-cheatFun f tag nfree =
+cheatFun :: String -> Int -> [VarType] -> JStat
+cheatFun f tag free =
     let fe   = ValExpr . JVar . StrI $ f
-        fu   = ValExpr $ JFunc [] [j| return stack[sp]; |]
-        info = ValExpr . JList $ [toJExpr (nfree+1), toJExpr (zDecodeString f)] ++ replicate nfree (toJExpr (2::Int))
-        objInfo =
+        fu   = ValExpr $ JFunc [] [j| `preamble`; return `Stack`[`Sp`]; |]
+--        info = ValExpr . JList $ [toJExpr (nfree+1), toJExpr (zDecodeString f)] ++ replicate nfree (toJExpr (2::Int))
+{-        objInfo =
           "t" .= Con <>
           "a" .= tag <>
           "i" .= info <>
           gcInfo (nfree+1) [] <>
-          "gai" .= ([]::[Int])
+          "gai" .= ([]::[Int]) -}
     in [j| `decl (StrI f)`;
            `fe` = `fu`;
-           `setObjInfo fe objInfo`;
+           `ClosureInfo fe [] (zDecodeString f) (fixedLayout free) (CICon tag)`;
          |]
 
 closureTypes :: JStat
@@ -74,11 +75,11 @@ closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> clo
 
 -- add some basic stuff locally, to make code run without base, fixme remove this once base builds
 coreTypes :: JStat
-coreTypes = mconcat $ map (\x -> cheatFun x 1 1)
-            [ "$hs_GHCziTypesziIzh_e"
-            , "$hs_GHCziPrimziZLzhz2cUzhZR_e"
-            , "$hs_GHCziTypesziIzh_con_e"
-            , "$hs_GHCziPrimziZLzhz2cUzhZR_con_e"
+coreTypes = mconcat $ map (\(x,fr) -> cheatFun x 1 fr)
+            [ ("$hs_GHCziTypesziIzh_e", [IntV])
+            , ("$hs_GHCziPrimziZLzhz2cUzhZR_e", [])
+            , ("$hs_GHCziTypesziIzh_con_e", [IntV])
+            , ("$hs_GHCziPrimziZLzhz2cUzhZR_con_e", [])
             ]
 
 hsCall :: JExpr -> JStat
@@ -154,47 +155,20 @@ var !gcIncCurrent = gcInc;
 
 // black hole size 2, we need enough space for the ind frame
 fun blackhole { throw "<<loop>>"; return 0; }
-`setObjInfo (jsv "blackhole") $
-  "i"   .= [ji 2, jstr "blackhole"] <>
-  gcInfo 2 [] <>
-  "gai" .= ([]::[Int]) <>
-  "a"   .= ji 0 <>
-  "t"   .= Blackhole
-`;
-
+`ClosureInfo (jsv "blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole`;
 
 // really done now
 fun done o { return done; }
-`setObjInfo (jsv "done") $
-  "i"   .= [ji 1, jstr "done"] <>
-  gcInfo 1 [] <>
-  "gai" .= ([1]::[Int]) <>
-  "a"   .= ji 0 <>
-  "t"   .= Fun
-`;
+`ClosureInfo (jsv "done") [R1] "done" (CILayoutPtrs 2 []) (CIFun 0 0)`;
 
 // many primops return bool, and we can cheaply convert javascript bool to 0,1 with |0
 // so this is where we store our Bool constructors, hackily
 // note: |0 hack removed because it's slow in v8, fixed positions still useful: x?1:0
 fun false_e { return stack[sp]; }
-`setObjInfo (jsv "false_e") $
-  "i"    .= [ji 1, jstr "GHC.Types.False"] <>
-  "gtag" .= ji 1 <>
-  "gai"  .= ([]::[Int]) <>
-  "gi"   .= [ji 1] <>
-  "a"    .= ji 1 <>
-  "t"    .= Con
-`;
+`ClosureInfo (jsv "false_e") [] "GHC.Types.False" (CILayoutFixed 1 []) (CICon 1)`;
 
 fun true_e { return stack[sp]; }
-`setObjInfo (jsv "true_e") $
-  "i"    .= [ji 1, jstr "GHC.Types.False"] <>
-  "gtag" .= ji 1 <>
-  "gai"  .= ([]::[Int]) <>
-  "gi"   .= [ji 1] <>
-  "a"    .= ji 2 <>
-  "t"    .= Con
-`;
+`ClosureInfo (jsv "true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2)`;
 
 heap[0] = false_e;
 var !$hs_GHCziTypesziFalse = 0;
@@ -225,13 +199,7 @@ fun reduce {
     return `Stack`[`Sp`];
   }
 }
-`setObjInfo (jsv "reduce") $
-  "i"   .= [ji 1, jstr "reduce"] <>
-  "gai" .= [ji 1] <>  -- is this right?
-  gcInfo 1 [] <>
-  "a"   .= ji 0 <>
-  "t"   .= Fun
-`;
+`ClosureInfo (jsv "reduce") [R1] "reduce" (CILayoutFixed 1 []) (CIFun 0 0)`;
 
 fun gc_check next {
    if(hp > hpLim) {
@@ -253,13 +221,6 @@ fun static_fun f arity name gai {
   if(hpS+1 >= hpDyn) run_gc();
   var h = hpS;
   heap[hpS++] = f;
-  `setObjInfo f $
-    "a"   .= arity <>
-    "t"   .= Fun <>
-    "i"   .= [ji 1, name] <>
-    gcInfo 1 [] <>
-    "gai" .= gai
-  `;
   return h;
 }
 
@@ -279,19 +240,27 @@ fun _objInfo o o0 {
     o.gtag = o0.gtag;
 }
 
+fun _setObjInfo o typ name fields a gcinfo regs {
+  o.t    = typ;
+  o.i    = fields;
+  o.n    = name;
+  o.a    = a;
+  o.gai  = regs;        // active registers with ptrs
+  if(`isArray gcinfo`) { // info doesn't fit in int tag
+    o.gtag = 0;
+    o.gi   = gcinfo;
+  } else {
+    o.gtag = gcinfo;
+    o.gi   = [];
+  }
+}
+
 // we need two positions for static thunks, to have enough room for the update frame
 fun static_thunk f name {
   if((hpS+2) >= hpDyn) run_gc();
   var h = hpS;
   heap[hpS] = f;
   hpS += 2;
-  `setObjInfo f $
-    "t"   .= Thunk <>
-    "i"   .= [ji 2, name] <>
-     gcInfo 2 [] <>
-    "a"   .= ji 0 <>
-    "gai" .= [ji 1]
-  `;
   return h;
 }
 
@@ -316,9 +285,9 @@ fun printcl i {
       r += "unknown closure type";
       break;
   }
-  r += " :: " + cl.i[1] + " ->";
+  r += " :: " + cl.n + " ->";
   var idx = i+1;
-  for(var i=2;i<cl.i.length;i++) {
+  for(var i=0;i<cl.i.length;i++) {
     r += " ";
     switch(cl.i[i]) {
       case `PtrV`:
@@ -393,7 +362,7 @@ fun run_init_static {
 // print function to be called and first few registers
 fun logCall c {
   var f = c;
-  if(c.i) f = c.i[1];
+  if(c.n) f = c.n;
   log("trampoline calling: " + f + "    " + JSON.stringify([r1,r2,r3,r4,r5,r6,r7,r8]) + "  hp: " + hp + "(l: " + heap.length + ")");
 }
 
@@ -407,6 +376,11 @@ fun logStack {
     size = gt & 0xff;
   }
   dumpStackTop stack (sp-size+1) sp;
+  for(var i=Math.max(0,sp-size+1); i <= sp; i++) {
+    if(typeof stack[i] === 'undefined') {
+      throw "undefined on stack";
+    }
+  }
 }
 
 fun runhs t cb {
@@ -437,13 +411,7 @@ fun runio_e {
   `R1` = `Heap`[`R1`+1];
   return stg_ap_v_fast();
 }
-`setObjInfo (jsv "runio_e") $
-   "t"   .= Thunk <>
-   "i"   .= [ji 2, jstr "runio", 0] <>
-    gcInfo 1 [] <>
-   "a"   .= ji 0 <>
-   "gai" .= [ji 0]
-`;
+`ClosureInfo (jsv "runio_e") [R1] "runio" (CILayoutFixed 2 [PtrV]) CIThunk`;
 
 fun runio c {
   var h = hp;
