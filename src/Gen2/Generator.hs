@@ -396,7 +396,7 @@ genArgInfo cl args = r1 <> map numReg (tbl 2 (map typeVt args))
           | otherwise = tbl (n + varSize t) ts
 
 mkDataEntry :: JExpr
-mkDataEntry = ValExpr $ JFunc funArgs [j| return `Stack`[`Sp`]; |]
+mkDataEntry = ValExpr $ JFunc funArgs [j| `preamble`; return `Stack`[`Sp`]; |]
 
 -- generate the info table:
 -- [size, descr, a0t, a1t, a2t]

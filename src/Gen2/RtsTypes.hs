@@ -439,6 +439,7 @@ setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n l' (Ju
   where
     ptrs = ptrOffsets 0 layout
     l'   = map fromEnum layout
+-- fixme: do we need to treat pap gtags differently like we used to? why?
 
 -- the tag thingie, will be 0 if info cannot be read from the tag
 mkGcTag :: Int -> [Int] -> Int

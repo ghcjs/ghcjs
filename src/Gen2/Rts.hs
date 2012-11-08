@@ -136,7 +136,7 @@ var !hpS = 2;                   // static heap pointer (first two places reserve
 var !hp  = hpDyn;               // dynamic heap pointer
 var !hpOld = hpDyn;             // for h < hpOld, heap[h] belongs to the old generation
 var !hpForward = [];            // list closures from old generation that point to the new
-var !staticForward = [];        // static closures pointing to dynamic heap
+// var !staticForward = [];        // static closures pointing to dynamic heap
 var !initStatic = [];           // we need delayed initialization for static objects, push functions here
                                 // to be initialized just before haskell runs
 
@@ -144,13 +144,14 @@ var !sp  = 0;                   // stack pointer
 
 // gc tuning
 var !staticFree = 2000;         // when garbage collecting, try to keep this many free indices for static
-var !allocArea  = 250000;       // allocate this many indices before running minor gc
+var !allocArea  = 500000;       // allocate this many indices before running minor gc
 var !hpLim = hpDyn + allocArea; // collect garbage if we go over this limit
 var !gcInc = 10;                // run full gc after this many incrementals
 
 var !gcIncCurrent = gcInc;
 
-var !staticThunks = {};         // funcName -> heapidx map for srefs
+var !staticThunks    = {};      // funcName -> heapidx map for srefs
+var !staticThunksArr = [];      // indices of updatable thunks in static heap
 
 // stg registers
 `declRegs`;
@@ -206,16 +207,17 @@ fun reduce {
 fun gc_check next {
    if(hp > hpLim) {
       if(gcIncCurrent <= 0) {  // full collection, fixme, activate generational later
-        hp = gc(heap, hp, stack, sp, next, hpDyn, hpOld, true);
+        hp = gc(heap, hp, stack, sp, next, hpDyn, hpOld, hpForward, staticThunksArr, false);
         hpForward = [];
         gcIncCurrent = gcInc;
       } else {                 // incremental collection
-        hp = gc(heap, hp, stack, sp, next, hpDyn, hpOld, false);
+        hp = gc(heap, hp, stack, sp, next, hpDyn, hpOld, hpForward, staticThunksArr, true);
+        hpForward = [];
         gcIncCurrent--;
       }
-      hpOld = hp;
+      hpOld = hp;  // fixme do we promote everything to old gen immediately?
       hpLim = hp + allocArea;
-      for(var x=heap.length;x<hpLim+1000;i++) { heap[0] = 0; } // force alloc of heap
+//      for(var x=heap.length;x<hpLim+1000;x++) { heap[x] = 0; } // force alloc of heap
    }
 }
 
@@ -246,12 +248,16 @@ fun static_fun f arity name gai {
 
 // allocate static thunk on heap (after setting closure info)
 // we need two positions for static thunks, to have enough room for the update frame
+// third position is for storing the original fun again, to be able to revert it
 fun static_thunk f {
-  if((hpS+2) >= hpDyn) run_gc();
+  if((hpS+3) >= hpDyn) run_gc();
   var h = hpS;
   heap[hpS] = f;
-  hpS += 2;
+  heap[hpS+1] = 0;
+  heap[hpS+2] = f;
+  hpS += 3;
   staticThunks[f.n] = h;
+  staticThunksArr.push(h);
   return h;
 }
 

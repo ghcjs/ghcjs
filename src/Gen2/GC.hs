@@ -77,10 +77,11 @@ garbageCollector =
              dyn           // int      first element of dynamic heap
              old           // int      first element of new generation
              forward       // array    indices of old-gen closures that point to the new gen
-             forwardStatic // array    indices of static closures that point to dynamic (fixme?)
+             staticThunks  // array    list of updatable thunks on the static heap
              incremental   // bool     do incremental collection (only new gen)
              {
         `traceGc $ "hp: " |+ hp |+ " sp: " |+ sp`;
+        `traceGc $ "incremental: " |+ incremental |+ " start: " |+ old`;
         `checkGc $ toStat ("heapCheck" |^^ [heap, hp])`;
 
 //        dumpHeapTo heap hp;
@@ -94,17 +95,27 @@ garbageCollector =
         var reachable_e = [];  // entry functions saved in here, because overwritten
         var indirect    = [];
 
+        loadArgs next work gcStart;
+
         // load all roots >= gcStart
         walkStack stack sp heap gcStart indirect reachable reachable_e;
-
-        loadArgs next work gcStart;
+        `traceGc "stack walked"`;
 
         // add roots from older gen pointing to newer
         if(incremental) {
+          log("forward list length: " + forward.length);
+          `traceGc "forward list:"`;
+          `traceGc forward`;
           for(var i=forward.length - 1;i>=0;i--) {
             var fwi = forward[i];
             var fwic = heap[fwi];
-            `withPtrs fwi fwic heap (pushForwardPtr work gcStart)`;
+//            `traceGc $ "adding forwarding pointer at: " |+ fwi`;
+//            `traceGc $ "object: " |+ (fwic|."n")`;
+            var fwdp = heap[fwi+1];
+            if(fwdp >= gcStart) {
+              work.push(fwdp);
+            }
+//            `withPtrs fwi fwic heap (pushForwardPtr work gcStart)`;
           }
         }
         `emitTime startTime "follow stack"`;
@@ -115,7 +126,7 @@ garbageCollector =
         var rl = reachable.length;
         var il = indirect.length;
         `followPtr work gcStart heap indirect il reachable reachable_e rl c`;
-        `traceGc $  "func: "  |+ (next|."i"|!!1)
+        `traceGc $  "func: "  |+ (next|."n")
                  |+ " gai: "  |+ stringify (next|."gai")
                  |+ " regs: " |+ stringify (enumFromTo R1 R5)`;
         // fixme static heap that indirects to dynamic?
@@ -125,6 +136,11 @@ garbageCollector =
         `traceGc $ "reachable heap objects: " |+ stringify reachable`;
         `traceGc $ "heap length: " |+ (heap|."length")`;
         `emitTime startTime "sorted"`;
+        log("reachable objects: " + reachable.length);
+        // if we do a full collection, reset all unreachable static objects to thunk
+        if(!incremental) {
+          updateStatic staticThunks heap reachable reachable_e dyn;
+        }
         // now we have an array of reachable objects in order, calculate offsets
         // and store them in the entry location
         var htgt = gcStart;
@@ -193,14 +209,15 @@ garbageCollector =
 
 //        dumpHeapTo heap htgt;
 //        dumpStack stack sp;
-        `traceGc $ "func: " |+ (next|."i"|!!1) |+ " gai: " |+ stringify (next|."gai") |+ " regs: " |+ stringify (enumFromTo R1 R8)`;
+        `traceGc $ "func: " |+ (next|."n") |+ " gai: " |+ stringify (next|."gai") |+ " regs: " |+ stringify (enumFromTo R1 R8)`;
         var spent = new Date().getTime()-startTime0;
         gcTotal += spent;
         `traceGcTiming $ "sp: " |+ sp |+ "   hp: " |+ hp |+ " -> " |+ htgt |+ " (" |+ spent |+ "ms)"`;
         `traceGcTiming $ "total: " |+ gcTotal |+ "ms)"`;
 //        for(var x=htgt;x < heap.length;x++) { heap[x] = -8888888; } // debug, overwrite so problems are caught quickly
+        `traceGc "hello please"`;
         `traceGc $ "heap length: " |+ (heap|."length")`;
-        return htgt;
+         return htgt;
      }
 
      // walk a stack and follow all of its pointers to the heap
@@ -249,7 +266,7 @@ garbageCollector =
              offset++;
              bit = bit << 1;
            }
-           `traceGc $ "adjusting by tag: " |+ tag |+ " (" |+ (stack|!sp)|."i"|!!1 |+ ") - " |+ (tag |& (255::Int))`;
+           `traceGc $ "adjusting by tag: " |+ tag |+ " - " |+ (tag |& (255::Int))`;
            sp = sp - (tag & 0xff);
          } else {  // slow path, use info list
            `traceGc "warning: slow path walking stack"`;
@@ -383,6 +400,11 @@ garbageCollector =
        dumpHeapFromTo heap hpDyn max;
      }
 
+     fun updateStatic staticThunks heap reachable reachable_e dyn {
+       var staticReachable = [];
+       `collectStaticRefs staticThunks heap reachable reachable_e dyn staticReachable`;
+       `releaseStatic staticThunks heap staticReachable`;
+     }
 
      fun dumpHeapFromTo heap start stop {
        var undef = 0;
@@ -400,7 +422,7 @@ garbageCollector =
 
      // load all arguments that refer to heap objects into the work queue
      fun loadArgs next work {
-        `traceGc $ "arguments reachability " |+ (next |. "i" |!! 1) |+ " -> " |+ next |. "gai"`;
+        `traceGc $ "arguments reachability " |+ (next |. "n") |+ " -> " |+ (next |. "gai")`;
         var g = next.gai;
         for(var i=g.length - 1;i>=0;i--) {
           var c = g[i];
@@ -703,6 +725,7 @@ followPtr work start heap ind ip reach reach_e rp ptr =
   [j|
       while(`ptr` !== undefined) {
         var hptr = `heap`[`ptr`];
+//        log("following ptr: " + `ptr`);
         if(`ptr` >= `start`) {
           if(typeof hptr === "function") {
             `checkGc $ checkClosure heap ptr`;
@@ -729,6 +752,62 @@ followPtr work start heap ind ip reach reach_e rp ptr =
         }
       }
     |]
+
+-- | collect reachable static refs after scanning objects
+--   set static[i] = true for all reachable updated static entries
+--   entry points may have been overwritten so use reachable_e for those
+collectStaticRefs :: JExpr -> JExpr -> JExpr -> JExpr -> JExpr -> JExpr -> JStat
+collectStaticRefs staticThunks heap reachable reachable_e hps static =
+   [j| for(var i=`reachable`.length - 1; i >= 0; i--) {
+         var idx = `reachable`[i];
+         // we're directly referenced
+         if(idx < `hps` && `heap`[idx].t === `Ind`) {
+           `static`[idx] = true;
+         }
+         // get indirect static refs from ref table
+         var obj = `reachable_e`[i];
+         if(obj !== null) {
+           `withStaticRefs staticThunks heap addStaticRef obj`;
+         }
+       }
+     |]
+  where
+    addStaticRef ptr = [j| `static`[`ptr`] = true; |]
+
+-- | run some statement for all updatable static references in the heap object
+--   for which obj is the entry function
+--   also updates the string heap references to faster integers
+withStaticRefs :: JExpr -> JExpr -> (JExpr -> JStat) -> JExpr -> JStat
+withStaticRefs staticThunks heap f obj =
+   [j| var s = `obj`.s;
+       `traceGc $ "following static refs for: " |+ (obj|."n")`;
+       while(s !== null && typeof s === 'function') {
+         s = s.s;
+         `obj`.s = s;
+         `traceGc $ "following sref chain: " |+ (s|."n")`;
+       }
+       if(s !== null) {
+         for(var i=0;i<s.length;i++) {
+           var si = s[i];
+           if(typeof si !== 'number') { // must be a string, name ref
+             s[i] = `staticThunks`[si];
+             si = s[i];
+           }
+           `f si`;
+         }
+       }
+     |]
+
+-- | release updated static heap objects that are not referenced anymore
+releaseStatic :: JExpr -> JExpr -> JExpr -> JStat
+releaseStatic staticThunks heap staticReachable =
+    [j| for(var i=0;i<`staticThunks`.length;i++) {
+          var item = `staticThunks`[i];
+          if(`heap`[item].t === `Ind` && staticReachable[item] !== true) {
+            `heap`[item] = `heap`[item+2];
+          }
+        }
+      |]
 
 checkClosure heap ptr =
     [j| checkC `heap` `ptr`; |]

@@ -21,7 +21,7 @@ gcTiming = True
 
 -- extra checks from the gc for consistency, usually shouldn't print, but make it a little slower
 gcChecks :: Bool
-gcChecks = True
+gcChecks = False
 
 -- extra rts assertions/checks
 rtsChecks :: Bool

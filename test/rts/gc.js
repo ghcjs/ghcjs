@@ -23,6 +23,7 @@ function mkFunClosure(f, name, arity, followable) {
   f.n    = name;
   f.a    = arity;
   f.t    = h.FUN_CLOSURE;
+  f.s    = [];
   f.gai  = followable;
 }
 
