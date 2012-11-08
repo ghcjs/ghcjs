@@ -112,7 +112,7 @@ stackApply :: Int ->                   -- ^ number of registers in stack frame
               JStat
 stackApply n v mfixed = [j| `decl func`;
                             `JVar func` = `JFunc funArgs (preamble <> body)`;
-                            `ClosureInfo (iex func) [R1] funcName layout (CIFun 0 0)`;
+                            `ClosureInfo (iex func) [R1] funcName layout (CIFun 0 0) CINoStatic`;
                           |]
   where
     layout = case mfixed of
@@ -369,10 +369,10 @@ zeroApply :: JStat
 zeroApply = [j| fun stg_ap_0_fast { `enter`; }
 
                 fun stg_ap_0 { `preamble`; `adjSpN 1`; `enter`; }
-                `ClosureInfo (iex (StrI "stg_ap_0")) [R1] "stg_ap_0" (CILayoutFixed 1 []) (CIFun 0 0)`;
+                `ClosureInfo (iex (StrI "stg_ap_0")) [R1] "stg_ap_0" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
                 fun stg_ap_v x { `preamble`; `adjSpN 1`; return `R1`; }
-                `ClosureInfo (iex (StrI "stg_ap_v")) [R1] "stg_ap_v" (CILayoutFixed 1 []) (CIFun 0 0)`;
+                `ClosureInfo (iex (StrI "stg_ap_v")) [R1] "stg_ap_v" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
               |]
 {-
                 `setObjInfo (jsv "stg_ap_v") $
@@ -416,7 +416,7 @@ updates =
         `R1` = `Heap`[`R1`+1];
         return `Heap`[`R1`];
       };
-      `ClosureInfo (iex $ StrI "ind_entry") [] "updated frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0)`;
+      `ClosureInfo (iex $ StrI "ind_entry") [] "updated frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
 
       fun stg_upd_frame {
         `preamble`;
@@ -430,7 +430,7 @@ updates =
         }
         return `Stack`[`Sp`];
       };
-      `ClosureInfo (iex $ StrI "stg_upd_frame") [R1] "stg_upd_frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0)`;
+      `ClosureInfo (iex $ StrI "stg_upd_frame") [R1] "stg_upd_frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
   |]
 {-
 updateApply :: Int -> JStat
@@ -469,7 +469,7 @@ mkPap tgt fun values =
 pap :: Int -> JStat
 pap n = [j| `decl func`;
             `iex func` = `JFunc [] (preamble <> body)`;
-            `ClosureInfo (iex func) [] funcName CILayoutVariable (CIPap n)`;
+            `ClosureInfo (iex func) [] funcName CILayoutVariable (CIPap n) CINoStatic`;
           |]
   where
     funcName = "stg_pap_" ++ show n

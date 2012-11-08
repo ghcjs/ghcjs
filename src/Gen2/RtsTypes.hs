@@ -4,6 +4,7 @@ module Gen2.RtsTypes where
 import           Language.Javascript.JMacro
 import           Language.Javascript.JMacro.Types
 
+import           Gen2.StgAst
 import           Gen2.Utils
 
 import           Data.Char                        (toLower)
@@ -12,9 +13,12 @@ import           Data.Bits
 import qualified Data.List                        as L
 import           Data.Monoid
 
+import           Encoding
+import           Id
 import           StgSyn
 import           TyCon
 import           Type
+import           Unique
 
 import           Gen2.RtsSettings
 
@@ -317,12 +321,62 @@ withRegsRE start end max fallthrough f =
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
 
 
+jsIdIdent :: Id -> Maybe Int -> String -> Ident
+jsIdIdent i mn suffix = StrI . (\x -> "$hs_"++x++suffix++u) . zEncodeString . showPpr' . idName $ i
+    where
+      u  | isLocalId i = '_' : (show . getKey . getUnique $ i)
+         | otherwise   = ""
+
+jsVar :: String -> JExpr
+jsVar v = ValExpr . JVar . StrI $ v
+
+-- regular id, shortcut for bools!
+jsId :: Id -> JExpr
+jsId i | n == "GHC.Types.True"  = toJExpr (1::Int)
+       | n == "GHC.Types.False" = toJExpr (0::Int)
+       | otherwise = ValExpr (JVar $ jsIdIdent i Nothing "")
+    where
+      n = showPpr' . idName $ i
+
+-- entry id
+jsEnId :: Id -> JExpr
+jsEnId i = ValExpr (JVar $ jsEnIdI i)
+
+jsEnIdI :: Id -> Ident
+jsEnIdI i = jsIdIdent i Nothing "_e"
+
+jsEntryId :: Id -> JExpr
+jsEntryId i = ValExpr (JVar $ jsEntryIdI i)
+
+jsEntryIdI :: Id -> Ident
+jsEntryIdI i = jsIdIdent i Nothing "_e"
+
+-- datacon entry, different name than the wrapper
+jsDcEntryId :: Id -> JExpr
+jsDcEntryId i = ValExpr (JVar $ jsDcEntryIdI i)
+
+jsDcEntryIdI :: Id -> Ident
+jsDcEntryIdI i = jsIdIdent i Nothing "_con_e"
+
+jsIdV :: Id -> JVal
+jsIdV i = JVar $ jsIdIdent i Nothing ""
+
+jsIdI :: Id -> Ident
+jsIdI i = jsIdIdent i Nothing ""
+
+-- some types, Word64, Addr#, unboxed tuple have more than one javascript var
+jsIdN :: Id -> Int -> JExpr
+jsIdN i n = ValExpr (JVar $ jsIdIdent i (Just n) "")
+
+
+
 data ClosureInfo = ClosureInfo
      { ciVar    :: JExpr    -- ^ object being infod
      , ciRegs   :: [StgReg] -- ^ registers with pointers
      , ciName   :: String   -- ^ friendly name for printing
      , ciLayout :: CILayout -- ^ heap/stack layout of the object
      , ciType   :: CIType   -- ^ type of the object, with extra info where required
+     , ciStatic :: CIStatic -- ^ static references of this object
      }
 
 data CIType = CIFun { citArity :: Int  -- | number of arguments (double arguments are counted double)
@@ -332,6 +386,19 @@ data CIType = CIFun { citArity :: Int  -- | number of arguments (double argument
             | CICon { citConstructor :: Int }
             | CIPap { citSize :: Int } -- fixme is this ok?
             | CIBlackhole
+
+data CIStatic = CIStaticParent { staticParent :: Id } -- ^ static refs are stored in parent in fungroup
+              | CIStaticRefs   { staticRefs :: [Id] } -- ^ list of refs that need to be kept alive
+              | CINoStatic
+
+-- | static refs: array = references, single var = follow parent link, null = nothing to report
+instance ToJExpr CIStatic where
+  toJExpr CINoStatic         = [je| null |]
+  toJExpr (CIStaticParent p) = jsId p
+  toJExpr (CIStaticRefs [])  = [je| null |]
+  toJExpr (CIStaticRefs rs)  = toJExpr (map idStr rs)
+          where
+            idStr i = let (StrI xs) = jsIdI i in [je| `xs` |]
 
 data CILayout = CILayoutVariable -- layout stored in object itself, first position from the start
               | CILayoutPtrs     -- size and pointer offsets known
@@ -349,11 +416,11 @@ fixedLayout vts = CILayoutFixed (1 + sum (map varSize vts)) vts
 
 -- a gi gai i
 instance ToStat ClosureInfo where
-  toStat (ClosureInfo obj rs name layout CIThunk)       = setObjInfoL obj rs layout Thunk name 0
-  toStat (ClosureInfo obj rs name layout (CIFun arity nvoid)) = setObjInfoL obj rs layout Fun name (mkArityTag arity nvoid)
-  toStat (ClosureInfo obj rs name layout (CICon con))   = setObjInfoL obj rs layout Con name con
-  toStat (ClosureInfo obj rs name layout (CIPap size))  = setObjInfoL obj rs layout Pap name size
-  toStat (ClosureInfo obj rs name layout CIBlackhole)   = setObjInfoL obj rs layout Blackhole name 0 -- fixme do we need to keep track of register arguments of underlying thing?
+  toStat (ClosureInfo obj rs name layout CIThunk srefs)       = setObjInfoL obj rs layout Thunk name 0 srefs
+  toStat (ClosureInfo obj rs name layout (CIFun arity nvoid) srefs) = setObjInfoL obj rs layout Fun name (mkArityTag arity nvoid) srefs
+  toStat (ClosureInfo obj rs name layout (CICon con) srefs)   = setObjInfoL obj rs layout Con name con srefs
+  toStat (ClosureInfo obj rs name layout (CIPap size) srefs)  = setObjInfoL obj rs layout Pap name size srefs
+  toStat (ClosureInfo obj rs name layout CIBlackhole srefs)   = setObjInfoL obj rs layout Blackhole name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
 
 mkArityTag :: Int -> Int -> Int
 mkArityTag arity trailingVoid = arity .|. (trailingVoid `shiftL` 8)
@@ -364,6 +431,7 @@ setObjInfoL :: JExpr     -- ^ the object
             -> CType     -- ^ closure type
             -> String    -- ^ object name, for printing
             -> Int       -- ^ `a' argument, depends on type (arity, conid, size)
+            -> CIStatic  -- ^ static refs
             -> JStat
 setObjInfoL obj rs CILayoutVariable t n a            = setObjInfo obj t n [] Nothing     a (-1) rs
 setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    = setObjInfo obj t n [] (Just size) a (mkGcTag size ptrs) rs
@@ -384,9 +452,10 @@ setObjInfo :: JExpr      -- ^ the thing to modify
            -> Int        -- ^ extra 'a' parameter, for constructor tag or arity
            -> Int        -- ^ tag for the garbage collector
            -> [StgReg]      -- ^ pointers in registers
+           -> CIStatic   -- ^ static refs
            -> JStat
-setObjInfo obj t name fields size a gctag argptrs =
-  [j| _setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `map regNum argptrs`)  |]
+setObjInfo obj t name fields size a gctag argptrs static =
+  [j| _setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `map regNum argptrs`, `static`);  |]
 
 -- generates a list of pointer locations for a list of variable locations starting at start
 ptrOffsets :: Int -> [VarType] -> [Int]

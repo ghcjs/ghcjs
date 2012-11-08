@@ -30,7 +30,7 @@ import Id
 import Data.Char (ord)
 import Data.Bits ((.|.), shiftL)
 import Data.Monoid
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, fromMaybe)
 import Data.List (partition, intercalate, sort, find)
 import qualified Data.Text.Lazy as TL
 import Text.PrettyPrint.Leijen.Text hiding ((<>), pretty)
@@ -53,7 +53,8 @@ import qualified Gen2.Optimizer as O
 import Data.Generics.Aliases
 import Data.Generics.Schemes
 
-type StgPgm = [(StgBinding, [(Id, [Id])])]
+type StgPgm     = [(StgBinding, [(Id, [Id])])]
+type StaticRefs = [Id]
 
 data GenerateSettings = GenerateSettings
        { gsIncludeRts     :: Bool -- include the rts in the generated file
@@ -65,7 +66,7 @@ data GenerateSettings = GenerateSettings
 -- fixme remove this hack to run main and use the settings
 generate :: StgPgm -> Module -> String
 generate s m = (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.fst) s)) ++
-               prr ( {- addDebug $ -} rts <> srts (map snd s)
+               prr ( {- addDebug $ -} rts {- <> srts (map snd s) -}
                     <> res
                    ) ++ "run_init_static(); \n debugger;\n function main() { try { " ++ prr (runMainIO m) ++
                             "\n} catch(e) { log(e.stack); debugger; log('exception, r1: ' + r1); dumpStack(stack,sp+5); dh(); throw e; } }\nif(typeof($) === 'undefined') { main(); }\ndebugger;\n"
@@ -74,11 +75,12 @@ generate s m = (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.f
               in (TL.unpack . displayT . renderPretty 0.8 150 . pretty . jsSaturate Nothing $ doc') ++ "\n"
     res     = {- addDebug . -} pass2 . pass1 m $ s
 
-
+{-
 srts :: [[(Id, [Id])]] -> JStat
-srts xss = mempty -- mconcat $ map (\xs -> [j| srts = `mconcat $ map toSrt xs`; |]) xss
+srts xss = mconcat $ map (\xs -> [j| srts = `mconcat $ map toSrt xs`; |]) xss
   where
     toSrt (id, ids) = istr (jsIdI id) .= map jsId ids
+-}
 
 -- collect globals and export them, to make our source a node module
 exportGlobals :: JStat -> JStat
@@ -116,11 +118,14 @@ pass2 :: JStat  -> JStat
 pass2 = floatTop
 
 genToplevel :: (StgBinding, [(Id, [Id])]) -> JStat
-genToplevel (StgNonRec bndr rhs, _ids) = genToplevelDecl bndr rhs
-genToplevel (StgRec bs, _ids)          = mconcat $ map (uncurry genToplevelDecl) bs
+genToplevel (StgNonRec bndr rhs, srts) = genToplevelDecl bndr rhs (lookupStaticRefs bndr srts)
+genToplevel (StgRec bs, srts)          = mconcat $ map (\(bndr, rhs) -> genToplevelDecl bndr rhs (lookupStaticRefs bndr srts)) bs
 
-genToplevelDecl :: Id -> StgRhs -> JStat
-genToplevelDecl i rhs = genToplevelConEntry i rhs <> genToplevelRhs i rhs
+lookupStaticRefs :: Id -> [(Id, [Id])] -> StaticRefs
+lookupStaticRefs i xs = fromMaybe [] (lookup i xs)
+
+genToplevelDecl :: Id -> StgRhs -> StaticRefs -> JStat
+genToplevelDecl i rhs srs = genToplevelConEntry i rhs <> genToplevelRhs i rhs srs
 
 genToplevelConEntry :: Id -> StgRhs -> JStat
 genToplevelConEntry i (StgRhsCon _cc con args)
@@ -130,39 +135,31 @@ genToplevelConEntry i (StgRhsClosure _cc _bi [] upd_flag _srt args (StgConApp dc
 genToplevelConEntry _ _ = mempty
 
 
-genToplevelRhs :: Id -> StgRhs -> JStat
-genToplevelRhs i (StgRhsCon _cc con args) =
+genToplevelRhs :: Id -> StgRhs -> StaticRefs -> JStat
+genToplevelRhs i (StgRhsCon _cc con args) _srs =
     decl (jsIdI i) <>
-    genConStatic (jsId i) con (concatMap genArg args)
-genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable _srt [] body) =
-  let f = JFunc funArgs (preamble <> updateThunk <> genBody [] body Updatable i)
+    genConStatic (jsId i) con (concatMap genArg args) -- no static here?
+genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable _srt [] body) srs =
+  let f = JFunc funArgs (preamble <> updateThunk <> genBody i [] body Updatable i)
   in  toplevel [j| `decl (jsEnIdI i)`;
                    `jsEnId i` = `f`;
                    `ClosureInfo (jsEnId i) [] (istr (jsIdI i))
-                       (CILayoutFixed 2 []) CIThunk`;
+                       (CILayoutFixed 2 []) CIThunk (CIStaticRefs srs)`;
                    `decl (jsIdI i)`;
                    `jsId i` = static_thunk(`jsEnId i`);
                  |]
---                    `allocThunkStatic (jsIdI i) (jsEnId i) (istr (jsIdI i))`;
-genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) = -- genBody i body
-  let f = JFunc funArgs (preamble <> genBody args body upd_flag i)
+genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) srs = -- genBody i body
+  let f = JFunc funArgs (preamble <> genBody i args body upd_flag i)
   in  toplevel [j| `decl (jsEnIdI i)`;
                    `jsEnId i` = `f`;
                    `ClosureInfo (jsEnId i) (genArgInfo False $ map idType args) (istr (jsIdI i))
-                       (CILayoutFixed 1 []) (genEntryType args)`;
+                       (CILayoutFixed 1 []) (genEntryType args) (CIStaticRefs srs)`;
                    `decl (jsIdI i)`;
                    `jsId i` = static_fun(`jsEnId i`);
                  |]
---                   `allocFunStatic (jsIdI i) (jsEnId i) (length args) (istr (jsIdI i)) (genArgInfo False (map idType args))`;
 
 
-genRhs _ _ = panic "genRhs"
-
-{-
-allocFunStatic cl f n fn gai = decl' cl [je| static_fun(`f`) |]
-
-allocThunkStatic cl f fn = decl' cl [je| static_thunk(`f) |]
--}
+-- genRhs _ _ = panic "genRhs"
 
 updateThunk :: JStat
 updateThunk =
@@ -175,10 +172,10 @@ loadLiveFun l = -- mempty -- mconcat $ zipWith (loadFunVar currentClosure) (map 
      where
         loadLiveVar n v = decl' (jsIdI v) [je| `Heap`[`R1`+`n`] |]
 
-genBody :: [Id] -> StgExpr -> UpdateFlag -> Id -> JStat
-genBody args e upd i = loadArgs args <> b0
+genBody :: Id -> [Id] -> StgExpr -> UpdateFlag -> Id -> JStat
+genBody topid args e upd i = loadArgs args <> b0
     where
-      b0      = genExpr e
+      b0      = genExpr topid e
       resultV = iex (StrI "error_unused_variable") -- fixme do we need this for constructors?
 
 loadArgs :: [Id] -> JStat
@@ -189,25 +186,25 @@ loadArgs args = mconcat $ zipWith loadArg args' (enumFrom R2)
 
 
 -- generate code for expression, assign result to r
-genExpr :: StgExpr -> JStat
-genExpr (StgApp f args)      = genApp False True f args
-genExpr (StgLit l)           = [j| `R1` = `genSingleLit l`;
-                                   return `Stack`[`Sp`];
-                                 |] -- fixme, multi-var lits
-genExpr (StgConApp con args) = genCon con (concatMap genArg args)
-genExpr (StgOpApp (StgFCallOp f g) args t) = panic "ffiop"
-genExpr (StgOpApp (StgPrimOp op) args t) = [j| var res;
-                                               `genPrimOp [res] op args t`;
-                                               `R1` = res;
-                                               return `Stack`[`Sp`];
-                                             |]
-genExpr (StgOpApp (StgPrimCallOp c) args t) = panic "primcall"
-genExpr (StgLam{}) = panic "StgLam"
-genExpr (StgCase e _live1 liveRhs b s at alts) = genCase b e at alts liveRhs
-genExpr (StgLet b e) = genBind b <> genExpr e
-genExpr (StgLetNoEscape l1 l2 b e) = panic "stgletne" -- genLet b e -- fixme what to do with live?
-genExpr (StgSCC cc b1 b2 e) = genExpr e
-genExpr (StgTick m n e) = genExpr e
+genExpr :: Id -> StgExpr -> JStat
+genExpr top (StgApp f args)      = genApp False True f args
+genExpr top (StgLit l)           = [j| `R1` = `genSingleLit l`;
+                                       return `Stack`[`Sp`];
+                                     |] -- fixme, multi-var lits
+genExpr top (StgConApp con args) = genCon con (concatMap genArg args)
+genExpr top (StgOpApp (StgFCallOp f g) args t) = panic "ffiop"
+genExpr top (StgOpApp (StgPrimOp op) args t) = [j| var res;
+                                                   `genPrimOp [res] op args t`;
+                                                   `R1` = res;
+                                                   return `Stack`[`Sp`];
+                                                 |]
+genExpr top (StgOpApp (StgPrimCallOp c) args t) = panic "primcall"
+genExpr top (StgLam{}) = panic "StgLam"
+genExpr top (StgCase e _live1 liveRhs b s at alts) = genCase top b e at alts liveRhs
+genExpr top (StgLet b e) = genBind top b <> genExpr top e
+genExpr top (StgLetNoEscape l1 l2 b e) = panic "stgletne" -- genLet b e -- fixme what to do with live?
+genExpr top (StgSCC cc b1 b2 e) = genExpr top e
+genExpr top (StgTick m n e) = genExpr top e
 
 getId :: JExpr -> Ident
 getId (ValExpr (JVar i)) = i
@@ -293,18 +290,18 @@ pushCont as = push $ concatMap genArg as ++ [ app (length as) ]
 
 -- jem xs = [j| result = `xs`; |]
 
-genBind :: StgBinding -> JStat
-genBind bndr
+genBind :: Id -> StgBinding -> JStat
+genBind top bndr
  | (StgNonRec b r) <- bndr = assign b r <> allocCls [(b,r)]
  | (StgRec bs)     <- bndr = mconcat (map (uncurry assign) bs) <> allocCls bs
  where
    assign :: Id -> StgRhs -> JStat
-   assign b r = genEntry b r -- [j| `jsId b` = `` |]
+   assign b r = genEntry top b r -- [j| `jsId b` = `` |]
 
 -- generate the entry function for a local closure
-genEntry :: Id -> StgRhs -> JStat
-genEntry i (StgRhsCon _cc con args) = mempty -- panic "local data entry" -- mempty ??
-genEntry i (StgRhsClosure _cc _bi live Updatable _str [] (StgApp fun args)) =
+genEntry :: Id -> Id -> StgRhs -> JStat
+genEntry top i (StgRhsCon _cc con args) = mempty -- panic "local data entry" -- mempty ??
+genEntry top i (StgRhsClosure _cc _bi live Updatable _str [] (StgApp fun args)) =
 {-  let (apfun, pushfun)
           | length args == 0 = (jsv "stg_ap_0_fast", [])
           | otherwise        = let ap = jsv ("stg_ap_" ++ show (length args))
@@ -321,15 +318,15 @@ genEntry i (StgRhsClosure _cc _bi live Updatable _str [] (StgApp fun args)) =
   in  toplevel [j| `decl (jsEntryIdI i)`;
                    `jsEntryId i` = `f`;
                     `ClosureInfo (jsEntryId i) (genArgInfo True []) (showPpr' i)
-                         (fixedLayout $ map (typeVt.idType) live) (genEntryType [])`;
+                         (fixedLayout $ map (typeVt.idType) live) (genEntryType []) CINoStatic`;
                 |]
 --                    `setObjInfo (jsEntryId i) $ genClosureInfo (showPpr' i) live [] <> "gai" .= genArgInfo True []`;
-genEntry i (StgRhsClosure _cc _bi live upd_flag _srt args body) =
-  let f = JFunc funArgs (preamble <> loadLiveFun live <> genUpdFrame upd_flag <> genBody args body upd_flag i)
+genEntry top i (StgRhsClosure _cc _bi live upd_flag _srt args body) =
+  let f = JFunc funArgs (preamble <> loadLiveFun live <> genUpdFrame upd_flag <> genBody top args body upd_flag i)
   in  toplevel [j| `decl (jsEntryIdI i)`;
                    `jsEntryId i` = `f`;
                    `ClosureInfo (jsEntryId i) (genArgInfo True $ map idType args) (showPpr' i)
-                          (fixedLayout $ map (typeVt.idType) live) (genEntryType args)`;
+                          (fixedLayout $ map (typeVt.idType) live) (genEntryType args) CINoStatic`;
                 |]
 
 genEntryType :: [Id] -> CIType
@@ -375,7 +372,7 @@ genSetConInfo :: Id -> DataCon -> JStat
 genSetConInfo i d = [j| `decl (jsDcEntryIdI i)`;
                         `ei`     = `mkDataEntry`;
                         `ClosureInfo ei [R1] (showPpr' d) (fixedLayout $ map typeVt fields)
-                            (CICon $ dataConTag d)`;
+                            (CICon $ dataConTag d) CINoStatic`;
                       |]
     where
       ei     = jsDcEntryId i
@@ -450,38 +447,38 @@ allocCls xs = mconcat stat <> allocDynAll True dyn
         Right (jsIdI i, jsEntryId i, map jsId live)
 
 -- bind result of case to bnd, final result to r
-genCase :: Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> JStat
-genCase bnd (StgApp i []) at@(PrimAlt tc) alts l = decl (jsIdI bnd) <> [j| `jsId bnd` = `jsId i`; |] <> genInlinePrimCase bnd (tyConVt tc) at alts
+genCase :: Id -> Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> JStat
+genCase top bnd (StgApp i []) at@(PrimAlt tc) alts l = decl (jsIdI bnd) <> [j| `jsId bnd` = `jsId i`; |] <> genInlinePrimCase top bnd (tyConVt tc) at alts
 
 -- genCase r bnd (StgApp i []) at alts l = genForce r bnd (jsId i) at alts l
 -- genCase bnd (StgApp i xs) (PrimAlt tc) alts l = decl (jsIdI bnd) <> [j| `jsId bnd` = `jsId i`; |] <> 
 
-genCase bnd (StgApp i xs) at alts l =
-  genRet bnd at alts l {- <> push [jsId bnd] -} <> genApp True False i xs -- genApp (jsId bnd) i xs
+genCase top bnd (StgApp i xs) at alts l =
+  genRet top bnd at alts l {- <> push [jsId bnd] -} <> genApp True False i xs -- genApp (jsId bnd) i xs
 
-genCase bnd (StgOpApp (StgPrimOp p) args t) at alts l =
+genCase top bnd (StgOpApp (StgPrimOp p) args t) at alts l =
     case genPrim p [jsId bnd] (concatMap genArg args) of
-      PrimInline s -> decl (jsIdI bnd) <> s <> genInlinePrimCase bnd (typeVt t) at alts
+      PrimInline s -> decl (jsIdI bnd) <> s <> genInlinePrimCase top bnd (typeVt t) at alts
       PRPrimCall s -> [j| primcall_not_handled(); |]
 
-genCase _ x _ _ _ = [j| unhandled_gencase_format = `show x` |]
+genCase _ _ x _ _ _ = [j| unhandled_gencase_format = `show x` |]
 
 
 -- simple inline prim case, no return function needed
-genInlinePrimCase :: Id -> VarType -> AltType -> [StgAlt] -> JStat
-genInlinePrimCase bnd tc _ [(DEFAULT, bs, used, e)] = genExpr e
-genInlinePrimCase bnd tc (AlgAlt dtc) alts
-    | isBoolTy (mkTyConTy dtc) = mkSwitch [je| `jsId bnd` |] (map (mkPrimBranch tc) alts)
-    | otherwise                = mkSwitch [je| `Heap`[`jsId bnd`].a |] (map (mkPrimBranch tc) alts)
-genInlinePrimCase bnd tc (PrimAlt ptc) alts
-    | isMatchable tc    = mkSwitch (jsId bnd) (map (mkPrimBranch tc) alts)
-    | otherwise         = mkIfElse [jsId bnd] (map (mkPrimIfBranch tc) alts)
-genInlinePrimCase _ _ _ alt = [j| unhandled_primcase_format = `show alt`; |]
+genInlinePrimCase :: Id -> Id -> VarType -> AltType -> [StgAlt] -> JStat
+genInlinePrimCase top bnd tc _ [(DEFAULT, bs, used, e)] = genExpr top e
+genInlinePrimCase top bnd tc (AlgAlt dtc) alts
+    | isBoolTy (mkTyConTy dtc) = mkSwitch [je| `jsId bnd` |] (map (mkPrimBranch top tc) alts)
+    | otherwise                = mkSwitch [je| `Heap`[`jsId bnd`].a |] (map (mkPrimBranch top tc) alts)
+genInlinePrimCase top bnd tc (PrimAlt ptc) alts
+    | isMatchable tc    = mkSwitch (jsId bnd) (map (mkPrimBranch top tc) alts)
+    | otherwise         = mkIfElse [jsId bnd] (map (mkPrimIfBranch top tc) alts)
+genInlinePrimCase _ _ _ _ alt = [j| unhandled_primcase_format = `show alt`; |]
 
 
-genForce :: Id -> JExpr -> AltType -> [StgAlt] -> StgLiveVars -> JStat
-genForce bnd e at alts l = identBoth
-  (\i -> toplevel [j| `decl i`; `genRet bnd at alts l`; |])
+genForce :: Id -> Id -> JExpr -> AltType -> [StgAlt] -> StgLiveVars -> JStat
+genForce top bnd e at alts l = identBoth
+  (\i -> toplevel [j| `decl i`; `genRet top bnd at alts l`; |])
   (\i -> [j| `R1` = `e`;
              var c = _heap[`R1`];
              `push [iex i]`;
@@ -499,22 +496,17 @@ needForce PolyAlt  = True
 needForce AlgAlt{} = True
 needForce _        = False
 
-genRet :: Id -> AltType -> [StgAlt] -> StgLiveVars -> JStat
-genRet e at as l = withIdent $ \ret -> pushRetArgs free (iex ret) <> f ret
+genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> JStat
+genRet top e at as l = withIdent $ \ret -> pushRetArgs free (iex ret) <> f ret
   where
     f r    = toplevel (decl r)
            <> toplevel [j| `iex r` = `fun`;
                            `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
-                                  (fixedLayout $ map (typeVt.idType) free) (CIFun 0 0)`;
+                                  (fixedLayout $ map (typeVt.idType) free) (CIFun 0 0) (CIStaticParent top)`;
                          |]
---           <> toplevel (setObjInfo (iex r) (info r))
     free   = uniqSetToList l
 
-    info r = "i"   .= genFunInfo (istr r) free <>
-             "gai" .= genArgInfo isBoxedAlt [] <>
-             genGcInfo (map idType free) <>
-             "a"   .= ji 0 <>
-             "t"   .= Fun
+
     isBoxedAlt = case at of
                    PrimAlt {} -> False
                    _          -> True
@@ -522,11 +514,11 @@ genRet e at as l = withIdent $ \ret -> pushRetArgs free (iex ret) <> f ret
                                          `decl (jsIdI e)`;
                                          `jsId e` = `R1`;
                                          `loadRetArgs free`;
-                                         `genAlts e at as`;
+                                         `genAlts top e at as`;
                                        |]
 
 
--- push/pop args in reverse order: first arg has lowest offset (correspons with gc info)
+-- push/pop args in reverse order: first arg has lowest offset (corresponds with gc info)
 pushRetArgs :: [Id] -> JExpr -> JStat
 pushRetArgs free fun = push $ (concatMap genIdArg (reverse free) ++ [fun])
 
@@ -535,19 +527,19 @@ loadRetArgs free = popSkipI 1 ids
     where
        ids = concatMap genIdArgI (reverse free)
 
-genAlts :: Id -> AltType -> [StgAlt] -> JStat
-genAlts e PolyAlt [(_, _, _, expr)] = panic "polyalt"
-genAlts e (PrimAlt tc) [(_, bs, use, expr)] = loadParams (jsId e) bs use <> genExpr expr
+genAlts :: Id -> Id -> AltType -> [StgAlt] -> JStat
+genAlts top e PolyAlt [(_, _, _, expr)] = panic "polyalt"
+genAlts top e (PrimAlt tc) [(_, bs, use, expr)] = loadParams (jsId e) bs use <> genExpr top expr
 -- fixme: for 2-value arguments use more regs
-genAlts e (PrimAlt tc) alts = mkSwitch [je| `Heap`[`R1`] |] (map (mkPrimBranch (tyConVt tc)) alts)
+genAlts top e (PrimAlt tc) alts = mkSwitch [je| `Heap`[`R1`] |] (map (mkPrimBranch top (tyConVt tc)) alts)
 -- genAlts r e (PrimAlt tc) alts = mkSwitch [je| heap[r1] |] (map (mkPrimBranch r e) alts)
-genAlts e (UbxTupAlt n) [(_, bs, use, expr)] = loadUbxTup bs n <> genExpr expr
+genAlts top e (UbxTupAlt n) [(_, bs, use, expr)] = loadUbxTup bs n <> genExpr top expr
 --genAlts r e (AlgAlt tc) [alt] = mkSwitch [snd (mkAlgBranch r e alt)
-genAlts e (AlgAlt tc) [alt] = snd (mkAlgBranch e alt)
-genAlts e (AlgAlt tc) alts
-  | isBoolTy (idType e) = mkSwitch [je| `jsId e` |] (map (mkAlgBranch e) alts)
-  | otherwise           = mkSwitch [je| `Heap`[`(jsId e)`].a |] (map (mkAlgBranch e) alts)
-genAlts e a l = panic $ "unhandled case variant: " ++ showPpr' a ++ " (" ++ show (length l) ++ ")"
+genAlts top e (AlgAlt tc) [alt] = snd (mkAlgBranch top e alt)
+genAlts top e (AlgAlt tc) alts
+  | isBoolTy (idType e) = mkSwitch [je| `jsId e` |] (map (mkAlgBranch top e) alts)
+  | otherwise           = mkSwitch [je| `Heap`[`(jsId e)`].a |] (map (mkAlgBranch top e) alts)
+genAlts top e a l = panic $ "unhandled case variant: " ++ showPpr' a ++ " (" ++ show (length l) ++ ")"
 
 -- fixme remove heap alloc? ubx tup in regs
 loadUbxTup :: [Id] -> Int -> JStat
@@ -598,10 +590,10 @@ mkEq es1 es2
       eq  e1 e2 = [je| `e1` === `e2` |]
 
 
-mkAlgBranch :: Id -> StgAlt -> (Maybe JExpr, JStat)
-mkAlgBranch d (a,bs,use,expr) = (caseCond a, b)
+mkAlgBranch :: Id -> Id -> StgAlt -> (Maybe JExpr, JStat)
+mkAlgBranch top d (a,bs,use,expr) = (caseCond a, b)
   where
-    b = loadParams (jsId d) bs use <> genExpr expr
+    b = loadParams (jsId d) bs use <> genExpr top expr
 
 
 {-
@@ -615,14 +607,14 @@ mkAlgBranch d (a,bs,use,expr) = (caseCond a, b)
 mkPrimBranch :: JExpr -> JExpr -> StgAlt -> (Maybe JExpr, JStat)
 mkPrimBranch tgt d (a,bs,use,expr) = (caseCond a, genExpr tgt expr)
 -}
-mkPrimBranch :: VarType -> StgAlt -> (Maybe JExpr, JStat)
-mkPrimBranch vt (DEFAULT, bs, us, e) = (Nothing, genExpr e)
-mkPrimBranch vt (cond,    bs, us, e) = (caseCond cond, genExpr e)
+mkPrimBranch :: Id -> VarType -> StgAlt -> (Maybe JExpr, JStat)
+mkPrimBranch top vt (DEFAULT, bs, us, e) = (Nothing, genExpr top e)
+mkPrimBranch top vt (cond,    bs, us, e) = (caseCond cond, genExpr top e)
 
 -- possibly multi-var prim
-mkPrimIfBranch :: VarType -> StgAlt -> (Maybe [JExpr], JStat)
-mkPrimIfBranch vt (DEFAULT, bs, us, e) = (Nothing, genExpr e)
-mkPrimIfBranch vt (cond,    bs, us, e) = (ifCond cond, genExpr e)
+mkPrimIfBranch :: Id -> VarType -> StgAlt -> (Maybe [JExpr], JStat)
+mkPrimIfBranch top vt (DEFAULT, bs, us, e) = (Nothing, genExpr top e)
+mkPrimIfBranch top vt (cond,    bs, us, e) = (ifCond cond, genExpr top e)
 
 dummyRet = [je| dummyRet |]
 
@@ -785,53 +777,6 @@ selectApply fast args =
       n     = length (concat args')
       nvoid = length (takeWhile null $ reverse args')
       ptrs  = ptrTag $ ptrOffsets 0 (map argVt args)
-
-jsIdIdent :: Id -> Maybe Int -> String -> Ident
-jsIdIdent i mn suffix = StrI . (\x -> "$hs_"++x++suffix++u) . zEncodeString . showPpr' . idName $ i
-    where
-      u  | isLocalId i = '_' : (show . getKey . getUnique $ i)
-         | otherwise   = ""
-
-jsVar :: String -> JExpr
-jsVar v = ValExpr . JVar . StrI $ v
-
--- regular id, shortcut for bools!
-jsId :: Id -> JExpr
-jsId i | n == "GHC.Types.True"  = toJExpr (1::Int)
-       | n == "GHC.Types.False" = toJExpr (0::Int)
-       | otherwise = ValExpr (JVar $ jsIdIdent i Nothing "")
-    where
-      n = showPpr' . idName $ i
-
--- entry id
-jsEnId :: Id -> JExpr
-jsEnId i = ValExpr (JVar $ jsEnIdI i)
-
-jsEnIdI :: Id -> Ident
-jsEnIdI i = jsIdIdent i Nothing "_e"
-
-jsEntryId :: Id -> JExpr
-jsEntryId i = ValExpr (JVar $ jsEntryIdI i)
-
-jsEntryIdI :: Id -> Ident
-jsEntryIdI i = jsIdIdent i Nothing "_e"
-
--- datacon entry, different name than the wrapper
-jsDcEntryId :: Id -> JExpr
-jsDcEntryId i = ValExpr (JVar $ jsDcEntryIdI i)
-
-jsDcEntryIdI :: Id -> Ident
-jsDcEntryIdI i = jsIdIdent i Nothing "_con_e"
-
-jsIdV :: Id -> JVal
-jsIdV i = JVar $ jsIdIdent i Nothing ""
-
-jsIdI :: Id -> Ident
-jsIdI i = jsIdIdent i Nothing ""
-
--- some types, Word64, Addr#, unboxed tuple have more than one javascript var
-jsIdN :: Id -> Int -> JExpr
-jsIdN i n = ValExpr (JVar $ jsIdIdent i (Just n) "")
 
 -- insert a toplevel statement (by labeling it toplevel, see Floater)
 toplevel :: JStat -> JStat

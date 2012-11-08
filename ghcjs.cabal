@@ -27,7 +27,7 @@ flag plain
   default:            False
 
 flag trampoline
-  default:            True
+  default:            False
 
 flag gen2
   default:            True

@@ -55,7 +55,7 @@ cheatFun f tag free =
           "gai" .= ([]::[Int]) -}
     in [j| `decl (StrI f)`;
            `fe` = `fu`;
-           `ClosureInfo fe [] (zDecodeString f) (fixedLayout free) (CICon tag)`;
+           `ClosureInfo fe [] (zDecodeString f) (fixedLayout free) (CICon tag) CINoStatic`;
          |]
 
 closureTypes :: JStat
@@ -150,25 +150,27 @@ var !gcInc = 10;                // run full gc after this many incrementals
 
 var !gcIncCurrent = gcInc;
 
+var !staticThunks = {};         // funcName -> heapidx map for srefs
+
 // stg registers
 `declRegs`;
 
 // black hole size 2, we need enough space for the ind frame
 fun blackhole { throw "<<loop>>"; return 0; }
-`ClosureInfo (jsv "blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole`;
+`ClosureInfo (jsv "blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
 
 // really done now
 fun done o { return done; }
-`ClosureInfo (jsv "done") [R1] "done" (CILayoutPtrs 2 []) (CIFun 0 0)`;
+`ClosureInfo (jsv "done") [R1] "done" (CILayoutPtrs 2 []) (CIFun 0 0) CINoStatic`;
 
 // many primops return bool, and we can cheaply convert javascript bool to 0,1 with |0
 // so this is where we store our Bool constructors, hackily
 // note: |0 hack removed because it's slow in v8, fixed positions still useful: x?1:0
 fun false_e { return stack[sp]; }
-`ClosureInfo (jsv "false_e") [] "GHC.Types.False" (CILayoutFixed 1 []) (CICon 1)`;
+`ClosureInfo (jsv "false_e") [] "GHC.Types.False" (CILayoutFixed 1 []) (CICon 1) CINoStatic`;
 
 fun true_e { return stack[sp]; }
-`ClosureInfo (jsv "true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2)`;
+`ClosureInfo (jsv "true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2) CINoStatic`;
 
 heap[0] = false_e;
 var !$hs_GHCziTypesziFalse = 0;
@@ -199,7 +201,7 @@ fun reduce {
     return `Stack`[`Sp`];
   }
 }
-`ClosureInfo (jsv "reduce") [R1] "reduce" (CILayoutFixed 1 []) (CIFun 0 0)`;
+`ClosureInfo (jsv "reduce") [R1] "reduce" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
 fun gc_check next {
    if(hp > hpLim) {
@@ -217,35 +219,14 @@ fun gc_check next {
    }
 }
 
-fun static_fun f arity name gai {
-  if(hpS+1 >= hpDyn) run_gc();
-  var h = hpS;
-  heap[hpS++] = f;
-  return h;
-}
-
 // set heap/stack object information
-fun _objInfo o o0 {
-    `assertRts (isNumber (o0|."t"))    "object type must be a number"`;
-    `assertRts (isNumber (o0|."gtag")) "gtag must be a number"`;
-    `assertRts (isNumber (o0|."a"))    "constructor/arity tag must be a number"`;
-    `assertRts (isArray  (o0|."i"))    "object information must be an array"`;
-    `assertRts (isArray  (o0|."gi"))   "gc information list must be an array"`;
-    `assertRts (isArray  (o0|."gai"))  "argument type list must be an array"`;
-    o.i   = o0.i;
-    o.gi  = o0.gi;
-    o.gai = o0.gai;
-    o.a   = o0.a;
-    o.t   = o0.t;
-    o.gtag = o0.gtag;
-}
-
-fun _setObjInfo o typ name fields a gcinfo regs {
+fun _setObjInfo o typ name fields a gcinfo regs srefs {
   o.t    = typ;
   o.i    = fields;
   o.n    = name;
   o.a    = a;
   o.gai  = regs;        // active registers with ptrs
+  o.s    = srefs;
   if(`isArray gcinfo`) { // info doesn't fit in int tag
     o.gtag = 0;
     o.gi   = gcinfo;
@@ -255,12 +236,22 @@ fun _setObjInfo o typ name fields a gcinfo regs {
   }
 }
 
+// allocate function on heap
+fun static_fun f arity name gai {
+  if(hpS+1 >= hpDyn) run_gc();
+  var h = hpS;
+  heap[hpS++] = f;
+  return h;
+}
+
+// allocate static thunk on heap (after setting closure info)
 // we need two positions for static thunks, to have enough room for the update frame
-fun static_thunk f name {
+fun static_thunk f {
   if((hpS+2) >= hpDyn) run_gc();
   var h = hpS;
   heap[hpS] = f;
   hpS += 2;
+  staticThunks[f.n] = h;
   return h;
 }
 
@@ -411,7 +402,7 @@ fun runio_e {
   `R1` = `Heap`[`R1`+1];
   return stg_ap_v_fast();
 }
-`ClosureInfo (jsv "runio_e") [R1] "runio" (CILayoutFixed 2 [PtrV]) CIThunk`;
+`ClosureInfo (jsv "runio_e") [R1] "runio" (CILayoutFixed 2 [PtrV]) CIThunk CINoStatic`;
 
 fun runio c {
   var h = hp;
