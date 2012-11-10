@@ -16,6 +16,9 @@ import DriverPhases (HscSource (HsBootFile))
 import Packages (initPackages)
 import Outputable (showPpr)
 
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+
 import System.Environment (getArgs, getEnv)
 
 #ifdef GHCJS_PACKAGE_IMPORT
@@ -42,6 +45,8 @@ import Data.Maybe (isJust, fromMaybe, catMaybes)
 
 import Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8  as C8
 import Crypto.Conduit (hashFile)
 import qualified Data.Serialize as C
@@ -190,11 +195,14 @@ writeDesugaredModule mod =
   do tidyCore <- cgGutsFromModGuts (coreModule mod)
      env <- getSession
      versions <- liftIO $ forM variants $ \variant -> do
-          program <- liftIO $ concreteJavascriptFromCgGuts dflags env tidyCore variant
+          (program, meta) <- liftIO $ concreteJavascriptFromCgGuts dflags env tidyCore variant
           let outputFile = addExtension outputBase (variantExtension variant)
           putStrLn $ concat ["Writing module ", name, " (", outputFile, ")"]
-          writeFile outputFile program
-          return (variant, program)
+          B.writeFile outputFile program
+          case variantMetaExtension variant of
+            Nothing -> return ()
+            Just mext -> B.writeFile (addExtension outputBase mext) meta
+          return (variant, program, meta)
      liftIO $ writeCachedFiles dflags outputBase versions
   where
     summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
@@ -208,15 +216,18 @@ writeDesugaredModule mod =
      the corresponding .hi file. ghcjs-cabal picks this up to complete
      the package installation
 -}
-writeCachedFiles :: DynFlags -> FilePath -> [(Variant, String)] -> IO ()
+writeCachedFiles :: DynFlags -> FilePath -> [(Variant, ByteString, ByteString)] -> IO ()
 writeCachedFiles df jsFile variants = do
   let hiFile = (dropExtension jsFile) ++ "." ++ hiSuf df
   (hash :: Skein_512_512) <- hashFile hiFile
   cacheDir <- getGlobalCache
   let basename = C8.unpack . B16.encode . C.encode $ hash
   createDirectoryIfMissing True cacheDir
-  forM_ variants $ \(variant, program) ->
-    writeFile (cacheDir </> basename ++ variantExtension variant) program
+  forM_ variants $ \(variant, program, meta) -> do
+    B.writeFile (cacheDir </> basename ++ variantExtension variant) program
+    case variantMetaExtension variant of
+      Nothing   -> return ()
+      Just mext -> B.writeFile (cacheDir </> basename ++ mext) meta
 
 cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
 cgGutsFromModGuts guts =
@@ -225,7 +236,7 @@ cgGutsFromModGuts guts =
      (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
      return cgGuts
 
-concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO String
+concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
 concreteJavascriptFromCgGuts dflags env core variant =
   do core_binds <- corePrepPgm dflags
 #if __GLASGOW_HASKELL__ >= 706
@@ -235,7 +246,7 @@ concreteJavascriptFromCgGuts dflags env core variant =
                                (cg_tycons $ core)
      stg <- coreToStg dflags core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-     return $ variantRender variant stg' (cg_module core)
+     return (variantRender variant stg' (cg_module core))
 
 {-
   with -o x, ghcjs links all required functions into an executable

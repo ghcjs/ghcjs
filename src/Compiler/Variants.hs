@@ -4,30 +4,36 @@
 -}
 module Compiler.Variants where
 
-import qualified Generator.TopLevel as Js (generate)
-import Javascript.Language (Javascript)
-import qualified Javascript.Formatted as Js
+import           Generator.Helpers     (newGenState, runGen)
+import           Generator.Link        (link)
+import qualified Generator.TopLevel    as Js (generate)
+import qualified Javascript.Formatted  as Js
+import           Javascript.Language   (Javascript)
 import qualified Javascript.Trampoline as Js
-import Generator.Helpers (runGen, newGenState)
-import Module (ModuleName)
-import Generator.Link (link)
+import           Module                (ModuleName)
+
+import           Data.ByteString       (ByteString)
+import qualified Data.ByteString       as B
+import qualified Data.Text             as T
+import qualified Data.Text.Encoding    as T
 
 #ifdef GHCJS_GEN2
-import qualified Gen2.Generator as Gen2
+import qualified Gen2.Generator        as Gen2
+import qualified Gen2.Linker           as Gen2
 #endif
 
-import StgSyn (StgBinding)
-import Module (Module(..))
-import Id (Id)
+import           Id                    (Id)
+import           Module                (Module (..))
+import           StgSyn                (StgBinding)
 
 data CallingConvention = Gen2 | Plain | Trampoline
 
 data Variant = Variant
     { variantExtension         :: String
+    , variantMetaExtension     :: Maybe String
     , variantExeExtension      :: String
     , variantCallingConvention :: CallingConvention
--- fixme, render to Text or ByteString instead
-    , variantRender            :: StgPgm -> Module -> String
+    , variantRender            :: StgPgm -> Module -> (ByteString, ByteString)
     , variantLink              :: String -> [FilePath] -> [FilePath] -> [ModuleName] -> IO [String]
     }
 
@@ -48,26 +54,26 @@ variants =
 
 #ifdef GHCJS_GEN2
 gen2Variant :: Variant
-gen2Variant = Variant ".gen2.js" ".gen2.jsexe" Gen2 Gen2.generate
+gen2Variant = Variant ".gen2.js" (Just ".gen2.ji") ".gen2.jsexe" Gen2 Gen2.generate
     (link ".gen2.js" . (++ ".gen2.jsexe"))
 #endif
 
 plainVariant :: Variant
-plainVariant = Variant ".plain.js" ".plain.jsexe" Plain renderPlain
+plainVariant = Variant ".plain.js" Nothing ".plain.jsexe" Plain renderPlain
     (link ".plain.js" . (++ ".plain.jsexe"))
 
-renderPlain :: StgPgm -> Module -> String
-renderPlain cg mn = show abs
+renderPlain :: StgPgm -> Module -> (ByteString, ByteString)
+renderPlain cg mn = (T.encodeUtf8 . T.pack . show $ abs, B.empty)
   where
     abs :: Js.Formatted
     abs = renderAbstract cg mn
 
 trampolineVariant :: Variant
-trampolineVariant = Variant ".trampoline.js" ".trampoline.jsexe" Trampoline renderTrampoline
+trampolineVariant = Variant ".trampoline.js" Nothing ".trampoline.jsexe" Trampoline renderTrampoline
     (link ".trampoline.js" . (++ ".trampoline.jsexe"))
 
-renderTrampoline :: StgPgm -> Module -> String
-renderTrampoline cg mn = show abs
+renderTrampoline :: StgPgm -> Module -> (ByteString, ByteString)
+renderTrampoline cg mn = (T.encodeUtf8 . T.pack . show $ abs, B.empty)
   where
     abs :: Js.Trampoline Js.Formatted
     abs = renderAbstract cg mn

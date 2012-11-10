@@ -7,7 +7,7 @@ import CostCentre (CollectedCCs)
 import Module (ModuleName, PackageId)
 import HscTypes (ModSummary(..), CgGuts (..))
 import DynFlags (DynFlags(..))
-
+import qualified Data.ByteString as B
 #ifdef GHCJS_ENABLED
 import Module (ml_hi_file, moduleNameString, moduleName)
 import Distribution.Verbosity (normal)
@@ -47,12 +47,16 @@ writeJavaScriptModule summary tidyCore (stg', _ccs) = do
 writeJavaScriptModule' :: Variant -> ModSummary -> CgGuts
         -> ([(StgBinding,[(Id,[Id])])], CollectedCCs) -> IO ()
 writeJavaScriptModule' var summary _tidyCore (stg', _ccs) =
-  do let program = variantRender var stg' (ms_mod summary)
-     putStrLn $ concat ["Writing module ", name, " (to ", outputFile, ")"]
-     writeFile outputFile program
-   where ext = variantExtension var
-         outputFile = replaceExtension (ml_hi_file . ms_location $ summary) ext
-         name = moduleNameString . moduleName . ms_mod $ summary
+  do let (program, meta) = variantRender var stg' (ms_mod summary)
+     putStrLn $ concat ["Writing module ", name, " (to ", outputFile vext, ")"]
+     B.writeFile (outputFile vext) program
+     case variantMetaExtension var of
+       Nothing   -> return ()
+       Just mext -> B.writeFile (outputFile mext) meta
+   where
+      vext = variantExtension var
+      outputFile ext = replaceExtension (ml_hi_file . ms_location $ summary) ext
+      name = moduleNameString . moduleName . ms_mod $ summary
 
 linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
 linkJavaScript dyflags o_files dep_packages pagesMods = do

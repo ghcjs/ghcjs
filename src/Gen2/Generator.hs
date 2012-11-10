@@ -29,10 +29,21 @@ import Id
 
 import Data.Char (ord)
 import Data.Bits ((.|.), shiftL)
+import Data.ByteString (ByteString)
+import Data.Serialize
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
 import Data.Monoid
 import Data.Maybe (isJust, fromMaybe)
+import Data.Map (Map)
+import qualified Data.Map as M
+import Data.Set (Set)
+import qualified Data.Set as S
 import Data.List (partition, intercalate, sort, find)
+import qualified Data.List as L
 import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TL
+import qualified Data.Text as T
 import Text.PrettyPrint.Leijen.Text hiding ((<>), pretty)
 import Language.Javascript.JMacro
 
@@ -47,6 +58,7 @@ import Gen2.RtsAlloc
 import Gen2.RtsApply
 import Gen2.RtsSettings
 import Gen2.Printer
+import qualified Gen2.Linker as Linker
 
 import qualified Gen2.Optimizer as O
 
@@ -64,16 +76,21 @@ data GenerateSettings = GenerateSettings
        }
 
 -- fixme remove this hack to run main and use the settings
-generate :: StgPgm -> Module -> String
-generate s m = (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.fst) s)) ++
-               prr ( {- addDebug $ -} rts {- <> srts (map snd s) -}
-                    <> res
-                   ) ++ "run_init_static(); \n debugger;\n function main() { try { " ++ prr (runMainIO m) ++
-                            "\n} catch(e) { log(e.stack); debugger; log('exception, r1: ' + r1); dumpStack(stack,sp+5); dh(); throw e; } }\nif(typeof($) === 'undefined') { main(); }\ndebugger;\n"
+generate :: StgPgm -> Module -> (ByteString, ByteString)  -- module,metadata
+generate s m = (result, deps)
   where
     prr doc = let doc' = doc <> exportGlobals doc
-              in (TL.unpack . displayT . renderPretty 0.8 150 . pretty . jsSaturate Nothing $ doc') ++ "\n"
-    res     = {- addDebug . -} pass2 . pass1 m $ s
+              in (displayT . renderPretty 0.8 150 . pretty . jsSaturate Nothing $ doc') <> TL.pack "\n"
+    p1      = pass1 s
+    js      = pass2 m p1
+    deps    = runPut . put . genMetaData m $ p1
+
+    result  = BL.toStrict $ TL.encodeUtf8 ( dumpAst <> prr ( {- addDebug $ -} rts <> js ) <> runHack)
+
+    -- fixme remove
+    dumpAst = TL.pack (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.fst) s))
+    runHack =  TL.pack "run_init_static(); \n debugger;\n function main() { try { " <> prr (runMainIO m) <> TL.pack "\n} catch(e) { log(e.stack); debugger; log('exception, r1: ' + r1); dumpStack(stack,sp+5); dh(); throw e; } }\nif(typeof($) === 'undefined') { main(); }\ndebugger;\n"
+
 
 {-
 srts :: [[(Id, [Id])]] -> JStat
@@ -101,8 +118,9 @@ removeFunc :: JVal -> JVal
 removeFunc (JFunc {}) = JInt 0
 removeFunc x          = x
 
-modulePrefix :: Module -> String
-modulePrefix m = "$hs_" ++ (zEncodeString . moduleNameString . moduleName $ m) ++ "_id"
+-- | variable prefix for the nth block in module
+modulePrefix :: Module -> Int -> String
+modulePrefix m n = "$hs_" ++ (zEncodeString . moduleNameString . moduleName $ m) ++ "_id_" ++ show n
 
 runMainIO :: Module -> JStat
 runMainIO m = [j|
@@ -111,11 +129,32 @@ runMainIO m = [j|
     where
       main = JVar . StrI $ "$hs_" ++ (zEncodeString . moduleNameString . moduleName) m ++ "zimain"
 
-pass1 :: Module -> StgPgm -> JStat
-pass1 m s = jsSaturate (Just $ modulePrefix m) (mconcat . map genToplevel $ s)
+-- | pass1 generates unsaturated blocks and dependency info
+pass1 :: StgPgm
+      -> [(JStat, [Id], [Id])] -- | for each function block: js code, defined ids, dependencies
+pass1 ss = map generateBlock ss
+  where
+    generateBlock d@(decl,deps) =
+      let ids = map fst deps
+      in  (genToplevel d, ids, L.nub (concatMap snd deps))
 
-pass2 :: JStat  -> JStat
-pass2 = floatTop
+-- | pass2 combines and saturates the AST and runs the transformations
+pass2 :: Module -> [(JStat,[Id],[Id])] -> JStat
+pass2 m = mconcat . zipWith p2 [1..]
+  where
+    p2 n (s,ids,_) = delimitBlock ids
+                   . floatTop
+                   . jsSaturate (Just $ modulePrefix m n)
+                   $ s
+
+genMetaData :: Module -> [(a, [Id], [Id])] -> Linker.Deps
+genMetaData m p1 = Linker.Deps (M.fromList $ concatMap oneDep p1)
+  where
+    oneDep (_, symbs, deps) = map (symbDep deps) symbs
+    symbDep deps symb = (idTxt symb, S.fromList $ map idFun deps)
+    idTxt i = let (StrI xs) = jsIdI i in T.pack xs
+    idFun i = Linker.Fun (T.pack "fixme_package") (T.pack "fixme_module") (idTxt i) -- fixme
+
 
 genToplevel :: (StgBinding, [(Id, [Id])]) -> JStat
 genToplevel (StgNonRec bndr rhs, srts) = genToplevelDecl bndr rhs (lookupStaticRefs bndr srts)
@@ -778,7 +817,19 @@ selectApply fast args =
       nvoid = length (takeWhile null $ reverse args')
       ptrs  = ptrTag $ ptrOffsets 0 (map argVt args)
 
+-- jmacro hacks:
+
 -- insert a toplevel statement (by labeling it toplevel, see Floater)
 toplevel :: JStat -> JStat
 toplevel = LabelStat "toplevel"
 
+-- insert delimiters around block so linker can extract this efficiently
+-- abuses PPostStat to insert a comment!
+delimitBlock :: [Id] -> JStat -> JStat
+delimitBlock i s = PPostStat True start emptye <> s <> PPostStat True end emptye
+  where
+    idStr i = let (StrI xs) = jsIdI i in xs
+    block  = L.intercalate "," (map idStr i)
+    emptye = iex (StrI "")
+    start = T.unpack Linker.startMarker ++ block ++ ">"
+    end   = T.unpack Linker.endMarker ++ block ++ ">"
