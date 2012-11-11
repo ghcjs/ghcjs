@@ -1,5 +1,9 @@
 language: haskell
 
+before_install:
+    - sudo apt-get update -qq
+    - sudo apt-get --no-install-recommends install darcs
+
 install:
     - cabal install mega-sdist hspec cabal-meta cabal-src
     - cabal-meta install --force-reinstalls
