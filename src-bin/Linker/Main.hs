@@ -10,7 +10,7 @@ import           System.Process     (system)
 
 import           Compiler.Variants
 import           Control.Monad      (forM)
-import           Generator.Link     (link)
+import           Module (mkModuleName)
 
 -- As well as the normal closure-compiler options this function accepts
 --     --haskell_output_path_prefix (overrides --module_output_path_prefix for ghcjs-link output)
@@ -35,11 +35,11 @@ main = do
         (initArgs', remainingArgs') = span (\a -> a /= "--hjs" && a /= "--hjs_file") args
         initArgs      = filterOut isHaskellOpt initArgs'
         remainingArgs = filterOut isHaskellOpt remainingArgs'
-        pagesModules' = case pagesModules of
+        pageModules' = case pageModules of
                             [] -> ["Main"]
-                            _  -> pagesModules
+                            _  -> pageModules
     checkExit . forM variants $ \variant -> do
-        closureArgs <- link variant out dirs files (mkModuleName pageModules')
+        closureArgs <- variantLink variant out dirs files (map mkModuleName pageModules')
         system . intercalate " " $ ["java"] ++ initArgs ++ closureArgs ++ remainingArgs
   where
     checkExit f = do
