@@ -1,8 +1,7 @@
-{-# LANGUAGE NoImplicitPrelude, 
-    OverloadedStrings,
-    NoMonomorphismRestriction,
-    ExtendedDefaultRules
-  #-}
+{-# LANGUAGE ExtendedDefaultRules      #-}
+{-# LANGUAGE NoImplicitPrelude         #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE OverloadedStrings         #-}
 
 {-
    Boot program to build the GHCJS core libraries from a configured GHC source tree
@@ -18,31 +17,32 @@
 
 module Main where
 
-import Prelude hiding (FilePath)
-import qualified Data.Text.Lazy as T
-import Data.Text.Lazy (Text)
-import Shelly
-import Data.Monoid
-import Control.Monad (forM, forM_)
-import Compiler.Info
-import qualified Data.ByteString.Lazy as L
-import Filesystem.Path.CurrentOS (stripPrefix, empty)
-import Data.Maybe (catMaybes)
+import           Compiler.Info
+import           Control.Monad             (forM, forM_)
+import qualified Data.ByteString.Lazy      as L
+import           Data.Maybe                (catMaybes)
+import           Data.Monoid
+import           Data.Text.Lazy            (Text)
+import qualified Data.Text.Lazy            as T
+import           Filesystem.Path.CurrentOS (empty, stripPrefix)
+import           Prelude                   hiding (FilePath)
+import           Shelly
 
-import System.Directory
-import System.Environment
-import Distribution.Simple.Utils (withTempDirectory)
-import Distribution.Verbosity (normal)
-import Network (withSocketsDo)
+import           Distribution.Simple.Utils (withTempDirectory)
+import           Distribution.Verbosity    (normal)
+import           Network                   (withSocketsDo)
+import           System.Directory
+import           System.Environment
 
-import qualified Codec.Archive.Tar as Tar
-import qualified Codec.Archive.Tar.Check as Tar
+import qualified Codec.Archive.Tar         as Tar
+import qualified Codec.Archive.Tar.Check   as Tar
 
-import Data.Conduit (($$), ($=), (=$=), unwrapResumable)
-import Data.Conduit.Lazy (lazyConsume)
-import Data.Conduit.BZlib
-import Network.HTTP.Conduit
-import System.Directory ( setPermissions, getPermissions, Permissions(..) )
+import           Data.Conduit              (unwrapResumable, ($$), ($=), (=$=))
+import           Data.Conduit.BZlib
+import           Data.Conduit.Lazy         (lazyConsume)
+import           Network.HTTP.Conduit
+import           System.Directory          (Permissions (..), getPermissions,
+                                            setPermissions)
 
 default (T.Text)
 
@@ -50,10 +50,12 @@ ghcDownloadLocation :: String -> String
 ghcDownloadLocation ver =
     "http://www.haskell.org/ghc/dist/" ++ ver ++ "/ghc-" ++ ver ++ "-src.tar.bz2"
 
-data BootSettings = BootSettings { skipRts :: Bool } deriving (Ord, Eq)
+data BootSettings = BootSettings { skipRts :: Bool
+                                 , noBuild :: Bool
+                                 } deriving (Ord, Eq)
 
 bootSettings :: [String] -> BootSettings
-bootSettings args = BootSettings (any (=="--skip-rts") args)
+bootSettings args = BootSettings (any (=="--skip-rts") args) (any  (=="--nobuild") args)
 
 main = withSocketsDo $ do
   args <- getArgs
@@ -103,14 +105,15 @@ installBootPackages settings = do
     (Just ghcjs, Just ghcjspkg) -> do
       echo $ "Booting: " <> toTextIgnore ghcjs <> " (" <> toTextIgnore ghcjspkg <> ")"
       ghcjsVer <- T.strip <$> run ghcjs ["--numeric-version"]
+      when (not $ noBuild settings) $ do
+        addWrappers ghcjs ghcjspkg
       initPackageDB
-      addWrappers ghcjs ghcjspkg
-      when (not $ skipRts settings) $ do
+      when (not (skipRts settings || noBuild settings)) $ do
            echo "Building RTS"
            run_ "make" ["all_rts","-j4"] `catchany_sh` (const (return ()))
-      forM_ corePackages $ \pkg -> do
+      when (not $ noBuild settings) $ forM_ corePackages $ \pkg -> do
         echo $ "Building package: " <> pkg
-        run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs", "GHC_PKG_PGM=ghcjs-pkg"]
+        run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs"]
 
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePackages
@@ -192,6 +195,8 @@ initPackageDB :: ShIO ()
 initPackageDB = do
   base <- liftIO getGlobalPackageBase
   inst <- liftIO getGlobalPackageInst
+  rm_rf . fromString =<< liftIO getGlobalPackageDB
+  rm_rf . fromString =<< liftIO getUserPackageDB
   mkdir_p (fromString base)
   mkdir_p (fromString inst)
   run_ "ghcjs-pkg" ["initglobal"] `catchany_sh` const (return ())
@@ -199,7 +204,7 @@ initPackageDB = do
 
 
 installPkg :: FilePath -> FilePath -> Text -> ShIO ()
-installPkg ghcjs ghcjspkg pkg = do
+installPkg ghcjs ghcjspkg pkg = verbosely $ do
   echo $ "installing package: " <> pkg
   base <- liftIO getGlobalPackageBase
   dest <- liftIO getGlobalPackageInst
@@ -207,7 +212,7 @@ installPkg ghcjs ghcjspkg pkg = do
   run_ "inplace/bin/ghc-cabal" [ "install"
                                , toTextIgnore ghcjs
                                , toTextIgnore ghcjspkg
-                               , ":"
+                               , "strip"
                                , T.pack dest
                                , "libraries/" <> pkg
                                , "dist-install"
@@ -224,9 +229,7 @@ installPkg ghcjs ghcjspkg pkg = do
       echo $ "found installed version: " <> toTextIgnore d
       sub $ do
         cd ("libraries" </> pkg </> "dist-install" </> "build")
-        -- workaround for bug in shelly (fixme this is slow)
-        -- files <- find "."
-        files <- pwd >>= \wd -> find wd >>= mapM (relativeTo wd) . filter isJsFile
+        files <- findWhen (return.isJsFile) "."
         forM_ (filter isJsFile files) $ \file -> do
            echo $ "installing " <> toTextIgnore file
            cp file (dest </> d </> file)

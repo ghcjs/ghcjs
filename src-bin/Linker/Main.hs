@@ -1,16 +1,16 @@
 module Main(main) where
 
-import qualified Data.Set as S
+import qualified Data.Set           as S
 
-import Data.List (intercalate)
+import           Data.List          (intercalate)
 
-import System.Environment (getArgs)
-import System.Exit (exitFailure, exitWith, ExitCode(..))
-import System.Process (system)
+import           System.Environment (getArgs)
+import           System.Exit        (ExitCode (..), exitFailure, exitWith)
+import           System.Process     (system)
 
-import Generator.Link (link)
-import Compiler.Variants
-import Control.Monad (forM)
+import           Compiler.Variants
+import           Control.Monad      (forM)
+import           Generator.Link     (link)
 
 -- As well as the normal closure-compiler options this function accepts
 --     --haskell_output_path_prefix (overrides --module_output_path_prefix for ghcjs-link output)
@@ -39,7 +39,7 @@ main = do
                             [] -> ["Main"]
                             _  -> pagesModules
     checkExit . forM variants $ \variant -> do
-        closureArgs <- link variant out dirs files (mkModuleName pageModules'
+        closureArgs <- link variant out dirs files (mkModuleName pageModules')
         system . intercalate " " $ ["java"] ++ initArgs ++ closureArgs ++ remainingArgs
   where
     checkExit f = do

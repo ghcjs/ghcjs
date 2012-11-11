@@ -32,7 +32,7 @@ import GHCJS Compiler.Variants
 import qualified GHCJS GHCJSMain
 import MonadUtils (MonadIO(..))
 import System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing, getAppUserDataDirectory)
 import qualified Control.Exception as Ex
 
 import Control.Monad (when, mplus, forM, forM_)
@@ -40,7 +40,7 @@ import System.Exit (exitSuccess)
 import System.Process (rawSystem)
 import System.IO
 import Data.Monoid (mconcat, First(..))
-import Data.List (isSuffixOf, isPrefixOf, tails, partition, nub)
+import Data.List (isSuffixOf, isPrefixOf, tails, partition, nub, intercalate)
 import Data.Maybe (isJust, fromMaybe, catMaybes)
 
 import Crypto.Skein
@@ -54,6 +54,14 @@ import qualified Data.Serialize as C
 main :: IO ()
 main =
   do args0 <- getArgs
+     logCmd <- getEnvMay "GHCJS_LOG_COMMANDLINE"
+     case logCmd of
+       Just "1" -> do
+         dir <- getAppUserDataDirectory "ghcjs"
+         createDirectoryIfMissing True dir
+         appendFile (dir </> "cmd.log") (intercalate " " ("ghcjs" : args0) ++ "\n")
+       _ -> return ()
+
      let (minusB_args, args1) = partition ("-B" `isPrefixOf`) args0
          mbMinusB | null minusB_args = Nothing
                   | otherwise = Just . drop 2 . last $ minusB_args

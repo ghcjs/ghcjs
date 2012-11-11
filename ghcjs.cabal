@@ -139,8 +139,7 @@ Executable ghcjs
     cpp-options:    -DGHCJS_PACKAGE_IMPORT
 
 Executable ghcjs-link
-    if flag(compiler-only) || flag(rts-only)
-      Buildable:      False
+    Buildable:      False
     Main-Is:          Linker/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
