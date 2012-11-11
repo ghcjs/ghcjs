@@ -8,3 +8,5 @@
 /examples/main/*.js
 /package.lkshf
 /*.lkshf
+/.shelly/
+/vendor/

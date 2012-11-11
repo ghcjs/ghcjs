@@ -8,7 +8,7 @@ import System.FilePath ((</>))
 import Compiler.Variants
 import Closure.Paths
 import Paths_ghcjs
-import qualified Paths_ghcjs_hterm as HT (getDataFileName)
+import qualified GHCJS.HTerm as HT (getDataFileName)
 
 -- | the absolute filepaths of the dependencies for the RTS
 rtsDeps :: Variant -> IO [FilePath]

@@ -11,7 +11,7 @@ import System.Process (system)
 import System.Exit (ExitCode, ExitCode(..))
 
 import Closure.Paths
-import qualified Paths_ghcjs_hterm as HT (getDataFileName)
+import qualified GHCJS.HTerm as HT (getDataFileName)
 import Compiler.Variants
 import RTS.Dependencies
 import System.Directory (setCurrentDirectory, doesFileExist, copyFile)
