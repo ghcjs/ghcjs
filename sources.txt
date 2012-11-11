@@ -2,5 +2,5 @@ https://github.com/ghcjs/source-map.git
 https://github.com/ghcjs/ghcjs-hterm.git
 https://github.com/ghcjs/ghcjs-closure.git
 darcs:http://patch-tag.com/r/gershomb/jmacro
-./
+./ -f-compiler-only -fplain -ftrampoline -fgen2
 

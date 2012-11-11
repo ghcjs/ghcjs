@@ -2,14 +2,19 @@ language: haskell
 
 before_install:
     - sudo apt-get update -qq
-    - sudo apt-get --no-install-recommends install darcs
+    - sudo apt-get --no-install-recommends install darcs libgmp3-dev libgmp3c2 freeglut3 freeglut3-dev
+    - wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-i386-unknown-linux.tar.bz2
+    - tar -xjf ghc-7.6.1-i386-unknown-linux.tar.bz2
+    - cd ghc-7.6.1
+    - ./configure --prefix=$HOME/ghc-7.6.1
+    - make install
+    - export PATH=$HOME/ghc-7.6.1/bin:$PATH
+    - cd ..
 
 install:
     - cabal install mega-sdist hspec cabal-meta cabal-src
     - cabal-meta install --force-reinstalls
-
-script: cabal test
-
+ 
 notifications:
   irc:
     channels: "irc.freenode.net#ghcjs"
