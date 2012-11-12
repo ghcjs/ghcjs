@@ -29,7 +29,7 @@ rtsChecks = False
 
 -- rts tracing/debugging
 rtsDebug :: Bool
-rtsDebug = False
+rtsDebug = True
 
 -- trace calls from the trampoline
 rtsTraceCalls :: Bool
@@ -37,7 +37,7 @@ rtsTraceCalls = rtsDebug -- False -- True
 
 -- print top stack frame before each call
 rtsTraceStack :: Bool
-rtsTraceStack = False -- rtsDebug -- False -- True
+rtsTraceStack = rtsDebug -- False -- True
 
 ------------------------------------------------------------------------------
 -- end of settings

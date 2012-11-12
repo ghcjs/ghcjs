@@ -4,10 +4,11 @@
   Main generator module
 -}
 
-module Gen2.Generator (generate) where
+module Gen2.Generator (generate, genRts) where
 
 import StgCmmClosure
 import ClosureInfo hiding (ClosureInfo)
+import ForeignCall
 import Outputable hiding ((<>))
 import FastString
 import DynFlags
@@ -75,17 +76,20 @@ data GenerateSettings = GenerateSettings
        , gsNodeModule     :: Bool -- export our global variables to make a node module
        }
 
+genRts :: String
+genRts = TL.unpack . displayT . renderPretty 0.8 150 . pretty $ rts
+
 -- fixme remove this hack to run main and use the settings
 generate :: StgPgm -> Module -> (ByteString, ByteString)  -- module,metadata
 generate s m = (result, deps)
   where
-    prr doc = let doc' = doc <> exportGlobals doc
+    prr doc = let doc' = doc --  <> exportGlobals doc
               in (displayT . renderPretty 0.8 150 . pretty . jsSaturate Nothing $ doc') <> TL.pack "\n"
     p1      = pass1 s
     js      = pass2 m p1
     deps    = runPut . put . genMetaData m $ p1
 
-    result  = BL.toStrict $ TL.encodeUtf8 ( dumpAst <> prr ( {- addDebug $ -} rts <> js ) <> runHack)
+    result  = BL.toStrict $ TL.encodeUtf8 ( dumpAst <> prr ( {- addDebug $ rts <> -} js ) <> runHack )
 
     -- fixme remove
     dumpAst = TL.pack (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.fst) s))
@@ -231,17 +235,25 @@ genExpr top (StgLit l)           = [j| `R1` = `genSingleLit l`;
                                        return `Stack`[`Sp`];
                                      |] -- fixme, multi-var lits
 genExpr top (StgConApp con args) = genCon con (concatMap genArg args)
-genExpr top (StgOpApp (StgFCallOp f g) args t) = panic "ffiop"
+genExpr top (StgOpApp (StgFCallOp f _) args t) = [j| var res;
+                                                     `genForeignCall f res args`;
+                                                     `R1` = res;
+                                                     return `Stack`[`Sp`];
+                                                   |]
 genExpr top (StgOpApp (StgPrimOp op) args t) = [j| var res;
                                                    `genPrimOp [res] op args t`;
                                                    `R1` = res;
                                                    return `Stack`[`Sp`];
                                                  |]
-genExpr top (StgOpApp (StgPrimCallOp c) args t) = panic "primcall"
+genExpr top (StgOpApp (StgPrimCallOp c) args t) = [j| var res;
+                                                      `genPrimCall c res args`;
+                                                      `R1` = res;
+                                                      return `Stack`[`Sp`];
+                                                    |]
 genExpr top (StgLam{}) = panic "StgLam"
 genExpr top (StgCase e _live1 liveRhs b s at alts) = genCase top b e at alts liveRhs
 genExpr top (StgLet b e) = genBind top b <> genExpr top e
-genExpr top (StgLetNoEscape l1 l2 b e) = panic "stgletne" -- genLet b e -- fixme what to do with live?
+genExpr top (StgLetNoEscape l1 l2 b e) = genBind top b <> genExpr top e -- fixme
 genExpr top (StgSCC cc b1 b2 e) = genExpr top e
 genExpr top (StgTick m n e) = genExpr top e
 
@@ -262,6 +274,7 @@ might_be_a_function ty
 
 -- fixme if static thing is a thunk it's never a con, check can go!
 -- fixme: if we know some id has already been pattern matched, just return the stack, no check needed?
+-- fixme: idArity x for a function with implicit args doesn't report those!
 genApp :: Bool -> Bool -> Id -> [StgArg] -> JStat
 genApp force mstackTop i a
     | isPrimitiveType (idType i)
@@ -305,19 +318,37 @@ genApp force mstackTop i a
                  `R1` = `Heap`[`jsId i`+1];  // must be an ind
                  return `stackTop`;
                 |]
-    | n == 0         = r1 <> jumpTo' (jsVar "stg_ap_0_fast") (concatMap genArg a)
-    | idArity i == n = r1 <> jumpTo (jsEntryId i) (concatMap genArg a)
-    | idArity i <  n && idArity i > 0 = let (reg,over) = splitAt (idArity i) a
-                       in  pushCont over <> jumpToI (jsId i) (concatMap genArg reg) -- fixme specialized cont
+--    | n == 0         = r1 <> jumpTo' (jsVar "stg_ap_0_fast") (concatMap genArg a)
+
+    | idArity i == n && not (isLocalId i) 
+        = r1 <> jumpToII i (concatMap genArg a)
+    | idArity i <  n && idArity i > 0 =
+         let (reg,over) = splitAt (idArity i) a
+         in  pushCont over <> jumpToII i (concatMap genArg reg) -- fixme specialized cont
     | otherwise      = r1 <> jumpToFast a
   where
     stackTop = [je| `Stack`[`Sp`] |] -- fixme, use known val? fromMaybe [je| stack[sp]; |] mstackTop
     r1 = [j| `R1` = `jsId i`; |]
 --    fr1 = if hasFree then r1 else mempty
     ji = jsId i
-    n = length a
+    n = length a -- 300000 -- length (filter (not.isDictArg) a)
     b = map genArg a
 
+isDictArg :: StgArg -> Bool
+isDictArg (StgVarArg occ) = isDictId occ
+isDictArg _               = False
+
+pushCont :: [StgArg] -> JStat
+pushCont as
+  -- fixme is push order wrong?
+  | spec      = push $ reverse $ app : concatMap genArg as
+  | otherwise = push $ reverse $ app : toJExpr tag : concatMap genArg as
+     where
+       (app, spec) = selectApply False as
+       -- fixme support fallback to list
+       Just tag  = ptrTag $ ptrOffsets 0 (map argVt as)
+
+{-
 pushCont :: [StgArg] -> JStat
 pushCont as = push $ concatMap genArg as ++ [ app (length as) ]
   where
@@ -326,6 +357,7 @@ pushCont as = push $ concatMap genArg as ++ [ app (length as) ]
     app 3 = jsVar "stg_ap_3"
     app 4 = jsVar "stg_ap_4"
     app _ = [je| unhandled_generic_app() |] -- error "unhandled generic app"
+-}
 
 -- jem xs = [j| result = `xs`; |]
 
@@ -374,23 +406,6 @@ genEntryType args = CIFun (length $ concat args') nvoid
   where
      args' = map genIdArg args
      nvoid = length $ takeWhile null (reverse args')
--- genClosureLayout :: [Id] -> [Id] -> (CI
-
---                   `setObjInfo (jsEntryId i) $ genClosureInfo (showPpr' i) live args <> "gai" .= genArgInfo True (map idType args)`;
-
-{-
-genClosureInfo :: String -> [Id] -> [Id] -> JObj
-genClosureInfo name live [] =
-     "i" .= genFunInfo name live <>
-     genGcInfo (map idType live) <>
-     "t" .= Thunk <>
-     "a" .= ji 0
-genClosureInfo name live args =
-     "i" .= genFunInfo name live <>
-     genGcInfo (map idType live) <>
-     "t" .= Fun <>
-     "a" .= genArityTagId args
--}
 
 -- arity & 0xff = number of arguments
 -- arity >> 8   = number of trailing void arguments
@@ -567,7 +582,8 @@ loadRetArgs free = popSkipI 1 ids
        ids = concatMap genIdArgI (reverse free)
 
 genAlts :: Id -> Id -> AltType -> [StgAlt] -> JStat
-genAlts top e PolyAlt [(_, _, _, expr)] = panic "polyalt"
+genAlts top e PolyAlt [alt] = snd (mkAlgBranch top e alt)
+genAlts top e PolyAlt _ {- [(_, _, _, expr)] -} = panic "multiple polyalt"
 genAlts top e (PrimAlt tc) [(_, bs, use, expr)] = loadParams (jsId e) bs use <> genExpr top expr
 -- fixme: for 2-value arguments use more regs
 genAlts top e (PrimAlt tc) alts = mkSwitch [je| `Heap`[`R1`] |] (map (mkPrimBranch top (tyConVt tc)) alts)
@@ -691,10 +707,10 @@ genPrimOp rs op args t = case genPrim op rs (concatMap genArg args) of
                                PRPrimCall s -> [j| error_msg = "unsupported primcall" |]
 
 genArg :: StgArg -> [JExpr]
-genArg (StgLitArg l) = genLit l -- fixme 64 bit lits are 2 vars
+genArg (StgLitArg l) = genLit l
 genArg a@(StgVarArg i)
     | isVoid r     = []
-    | isMultiVar r = panic "genArg: multi-arg not yet supported"
+    | isMultiVar r = map (jsIdN i) [1..varSize r]
     | otherwise    = [jsId i]
    where
      r = typeVt . stgArgType $ a
@@ -702,7 +718,7 @@ genArg a@(StgVarArg i)
 genIdArg :: Id -> [JExpr]
 genIdArg i
     | isVoid r     = []
-    | isMultiVar r = panic "genIdArg: multi-arg not yet supported"
+    | isMultiVar r = map (jsIdN i) [1..varSize r]
     | otherwise    = [jsId i]
     where
       r = typeVt . idType $ i
@@ -710,7 +726,7 @@ genIdArg i
 genIdArgI :: Id -> [Ident]
 genIdArgI i
     | isVoid r     = []
-    | isMultiVar r = panic "genIdArg: multi-arg not yet supported"
+    | isMultiVar r = map (jsIdIN i) [1..varSize r]
     | otherwise    = [jsIdI i]
     where
       r = typeVt . idType $ i
@@ -722,7 +738,7 @@ r2d = realToFrac
 genLit :: Literal -> [JExpr]
 genLit (MachChar c)      = [ [je| `ord c` |] ]
 genLit (MachStr  str)    = [ [je| decodeString(`unpackFS str`) |] ]
-genLit MachNullAddr      = [ [je| null |] ] -- is this right?
+genLit MachNullAddr      = [ [je| null |], [je| 0 |] ] -- is this right?
 genLit (MachInt i)       = [ [je| `i` |] ]
 genLit (MachInt64 i)     = [ [je| `i` |] , [je| `i` |] ] -- fixme
 genLit (MachWord w)      = [ [je| 0 |] ] -- fixme
@@ -771,6 +787,7 @@ genConStatic :: JExpr -> DataCon -> [JExpr] -> JStat
 genConStatic d con args = allocConStatic d con args
 
 -- load arguments and jump to fun
+{-
 jumpTo :: JExpr -> [JExpr] -> JStat
 jumpTo fun args = mconcat ra <> [j| return `fun`; |]
   where
@@ -778,9 +795,19 @@ jumpTo fun args = mconcat ra <> [j| return `fun`; |]
       regargs = args
 
 jumpToI :: JExpr -> [JExpr] -> JStat
-jumpToI funIdx args = mconcat ra <> enter' [je| `Heap`[`funIdx`] |]
+jumpToI funIdx args = mconcat ra <> [j| return `Heap`[`funIdx`]; |] -- enter' [je| `Heap`[`funIdx`] |]
   where
       ra = zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) args
+-}
+
+-- avoid one indirection for global ids
+jumpToII :: Id -> [JExpr] -> JStat
+jumpToII i args
+  | isLocalId i = mconcat ra <> [j| return `Heap`[`jsId i`]; |]
+  | otherwise   = mconcat ra <> [j| return `jsEntryId i`;    |]
+  where
+    ra = zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) args
+
 
 -- load arguments and jump to fun directly (not going through trampoline)
 jumpTo' :: JExpr -> [JExpr] -> JStat
@@ -797,7 +824,8 @@ jumpToFast as | spec      = mconcat ra <> [j| return `fun`(); |]
       regs  = concatMap genArg as
       nargs = length as
       -- our tag is the bitmap of registers that contain pointers
-      tag  = ptrTag $ ptrOffsets 0 (map argVt as)
+      -- fixme support fallback to list?
+      Just tag  = ptrTag $ ptrOffsets 0 (map argVt as)
 
 -- find a specialized application path if there is one
 selectApply :: Bool     -> -- ^ true for fast apply, false for stack apply
@@ -833,3 +861,20 @@ delimitBlock i s = PPostStat True start emptye <> s <> PPostStat True end emptye
     emptye = iex (StrI "")
     start = T.unpack Linker.startMarker ++ block ++ ">"
     end   = T.unpack Linker.endMarker ++ block ++ ">"
+
+-- fixme: multi-value return in special vars
+genPrimCall :: PrimCall -> JExpr -> [StgArg] -> JStat
+genPrimCall (PrimCall lbl _) res args = [j| `res` = `fcall`; |]
+  where
+    f = iex $ StrI (unpackFS lbl)
+    fcall = ApplExpr f $ concatMap genArg args
+
+-- fixme: multi-value return in special vars
+-- fixme: deal with safety and calling conventions
+genForeignCall :: ForeignCall -> JExpr -> [StgArg] -> JStat
+genForeignCall (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) tgt args =
+   [j| `tgt` = `fcall`; |]
+      where
+        f     = iex $ StrI (unpackFS clbl)
+        fcall = ApplExpr f $ concatMap genArg args
+genForeignCall _ _ _ = panic "unsupported foreign call"

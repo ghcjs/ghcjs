@@ -26,11 +26,18 @@ import qualified Data.Text.Encoding       as T
 import qualified Data.Text.Encoding.Error as T
 import qualified Data.Text.IO             as T
 
+import           Module                   (ModuleName)
+
 startMarker :: Text
 startMarker = "// GHCJS_BLOCK_START<"
 
 endMarker :: Text
 endMarker = "// GHCJS_BLOCK_END<"
+
+link :: String -> [FilePath] -> [FilePath] -> [ModuleName] -> IO [String]
+link out searchPath objFiles pageModules = do
+  putStrLn "Gen2 linking not supported yet"
+  return []
 
 -- | dependencies for a single module
 data Deps = Deps { depsDeps :: Map Text (Set Fun)

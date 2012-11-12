@@ -4,6 +4,8 @@ module Gen2.RtsTypes where
 import           Language.Javascript.JMacro
 import           Language.Javascript.JMacro.Types
 
+import           Control.Applicative
+
 import           Gen2.StgAst
 import           Gen2.Utils
 
@@ -11,6 +13,7 @@ import           Data.Char                        (toLower)
 
 import           Data.Bits
 import qualified Data.List                        as L
+import           Data.Maybe                       (fromMaybe)
 import           Data.Monoid
 
 import           Encoding
@@ -113,10 +116,16 @@ data StgReg = R1  | R2  | R3  | R4  | R5  | R6  | R7  | R8
             | R9  | R10 | R11 | R12 | R13 | R14 | R15 | R16
             | R17 | R18 | R19 | R20 | R21 | R22 | R23 | R24
             | R25 | R26 | R27 | R28 | R29 | R30 | R31 | R32
+            | R33 | R34 | R35 | R36 | R37 | R38 | R39 | R40
+            | R41 | R42 | R43 | R44 | R45 | R46 | R47 | R48
+            | R49 | R50 | R51 | R52 | R53 | R54 | R55 | R56
+            | R57 | R58 | R59 | R60 | R61 | R62 | R63 | R64
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 instance ToJExpr StgReg where
-  toJExpr = ve . {- ("r."++) . -} map toLower . show
+  toJExpr r
+    | fromEnum r <= 32 = ve . {- ("r."++) . -} map toLower . show $ r
+    | otherwise   = [je| regs[`fromEnum r-32`] |]
 
 regName :: StgReg -> String
 regName = map toLower . show
@@ -286,9 +295,10 @@ papArity tgt p = [j| `tgt` = 0;
                      `tgt` += `Heap`[cur].a;
                    |]
 
--- number of stored args in pap
+-- number of stored args in pap (fixme?)
 papArgs :: JExpr -> JExpr
-papArgs p = [je| (-3) - `Heap`[`p`].gtag |]
+-- papArgs p = [je| (`Heap`[`p`].gtag & 0xff) - 1 |] -- [je| (-3) - `Heap`[`p`].gtag |]
+papArgs p = [je| `Heap`[`p`].a |]
 
 funTag :: JExpr -> JExpr
 funTag c = [je| `c`.gtag |]
@@ -365,6 +375,9 @@ jsIdI :: Id -> Ident
 jsIdI i = jsIdIdent i Nothing ""
 
 -- some types, Word64, Addr#, unboxed tuple have more than one javascript var
+jsIdIN :: Id -> Int -> Ident
+jsIdIN i n = jsIdIdent i (Just n) ""
+
 jsIdN :: Id -> Int -> JExpr
 jsIdN i n = ValExpr (JVar $ jsIdIdent i (Just n) "")
 
@@ -419,8 +432,12 @@ instance ToStat ClosureInfo where
   toStat (ClosureInfo obj rs name layout CIThunk srefs)       = setObjInfoL obj rs layout Thunk name 0 srefs
   toStat (ClosureInfo obj rs name layout (CIFun arity nvoid) srefs) = setObjInfoL obj rs layout Fun name (mkArityTag arity nvoid) srefs
   toStat (ClosureInfo obj rs name layout (CICon con) srefs)   = setObjInfoL obj rs layout Con name con srefs
-  toStat (ClosureInfo obj rs name layout (CIPap size) srefs)  = setObjInfoL obj rs layout Pap name size srefs
   toStat (ClosureInfo obj rs name layout CIBlackhole srefs)   = setObjInfoL obj rs layout Blackhole name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
+  -- pap have a special gtag for faster gc ident (only need to access gtag field)
+  toStat (ClosureInfo obj rs name layout (CIPap size) srefs)  =
+    setObjInfo obj Pap name [] size (toJExpr $ -3-size) rs srefs
+-- setObjInfo obj rs layout Pap name size srefs
+
 
 mkArityTag :: Int -> Int -> Int
 mkArityTag arity trailingVoid = arity .|. (trailingVoid `shiftL` 8)
@@ -433,29 +450,31 @@ setObjInfoL :: JExpr     -- ^ the object
             -> Int       -- ^ `a' argument, depends on type (arity, conid, size)
             -> CIStatic  -- ^ static refs
             -> JStat
-setObjInfoL obj rs CILayoutVariable t n a            = setObjInfo obj t n [] Nothing     a (-1) rs
-setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    = setObjInfo obj t n [] (Just size) a (mkGcTag size ptrs) rs
-setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n l' (Just size) a (mkGcTag size ptrs) rs
+setObjInfoL obj rs CILayoutVariable t n a            = setObjInfo obj t n [] a (toJExpr (-1 :: Int)) rs
+setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    = setObjInfo obj t n [] a (mkGcTag size ptrs) rs
+setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n l' a (mkGcTag size ptrs) rs
   where
     ptrs = ptrOffsets 0 layout
     l'   = map fromEnum layout
--- fixme: do we need to treat pap gtags differently like we used to? why?
 
 -- the tag thingie, will be 0 if info cannot be read from the tag
-mkGcTag :: Int -> [Int] -> Int
-mkGcTag objSize ptrs = ptrTag (map (+8) ptrs) .|. objSize
+mkGcTag :: Int -> [Int] -> JExpr
+mkGcTag objSize ptrs = fromMaybe fallback $
+                       toJExpr . (.|. objSize) <$> ptrTag (map (+8) ptrs)
+  where
+    -- if tag bits don't fit in an integer, use a list
+    fallback = toJExpr (objSize : ptrs)
 
 setObjInfo :: JExpr      -- ^ the thing to modify
            -> CType      -- ^ closure type
            -> String     -- ^ object name, for printing
            -> [Int]      -- ^ list of item types in the object, if known (free variables, datacon fields)
-           -> Maybe Int  -- ^ object size, if static
            -> Int        -- ^ extra 'a' parameter, for constructor tag or arity
-           -> Int        -- ^ tag for the garbage collector
-           -> [StgReg]      -- ^ pointers in registers
+           -> JExpr      -- ^ tag for the garbage collector
+           -> [StgReg]   -- ^ pointers in registers
            -> CIStatic   -- ^ static refs
            -> JStat
-setObjInfo obj t name fields size a gctag argptrs static =
+setObjInfo obj t name fields a gctag argptrs static =
   [j| _setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `map regNum argptrs`, `static`);  |]
 
 -- generates a list of pointer locations for a list of variable locations starting at start
@@ -465,11 +484,11 @@ ptrOffsets start (t:ts)
     | isPtr t = start : ptrOffsets (start + varSize t) ts
     | otherwise = ptrOffsets (start + varSize t) ts
 
-ptrTag :: [Int] -> Int
+ptrTag :: [Int] -> Maybe Int
 ptrTag ptrs
-    | any (>30) ptrs = error "tag bits greater than 30 unsupported"
-    | otherwise      = L.foldl' (.|.) 0 (map (1 `shiftL`) $ filter (>=0) ptrs)
+    | any (>30) ptrs = Nothing -- error "tag bits greater than 30 unsupported"
+    | otherwise      = Just $ L.foldl' (.|.) 0 (map (1 `shiftL`) $ filter (>=0) ptrs)
 
-shiftedPtrTag :: Int -> [Int] -> Int
+shiftedPtrTag :: Int -> [Int] -> Maybe Int
 shiftedPtrTag shift = ptrTag . map (subtract shift)
 

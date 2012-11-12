@@ -51,6 +51,10 @@ import qualified Data.ByteString.Char8  as C8
 import Crypto.Conduit (hashFile)
 import qualified Data.Serialize as C
 
+#ifdef GHCJS_GEN2
+import qualified Gen2.Generator as Gen2
+#endif
+
 main :: IO ()
 main =
   do args0 <- getArgs
@@ -149,6 +153,7 @@ handleCommandline args
             , ("--print-libdir", putStrLn =<< getLibDir)
             , ("--abi-hash", fallbackGhc args)
             , ("-M", fallbackGhc args)
+            , ("--print-rts", printRts)
             ]
 
 handleOneShot :: [String] -> IO ()
@@ -284,4 +289,11 @@ collectDeps :: [ModuleInfo] -> [PackageId]
 collectDeps mis = nub $ concatMap pkgs mis
     where
       pkgs mi = maybe [] (map fst . dep_pkgs . mi_deps) $ modInfoIface mi
+
+printRts :: IO ()
+#ifdef GHCJS_GEN2
+printRts = putStrLn Gen2.genRts >> exitSuccess
+#else
+printRts = return () >> exitSuccess
+#endif
 

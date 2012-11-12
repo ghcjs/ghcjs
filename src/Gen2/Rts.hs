@@ -33,8 +33,8 @@ declRegs = [j|
     where
       initReg r = AssignStat (SelExpr (jsv "this") (StrI $ regName r)) [je| 0 |]
 -}
-
-declRegs = mconcat (map declReg (enumFrom R1))
+-- fixme prevent holes
+declRegs = [j| var !regs = []; |] <> mconcat (map declReg (enumFromTo R1 R32))
     where
       declReg r = (decl . StrI . map toLower . show) r <> [j| `r` = 0; |]
 
@@ -360,7 +360,16 @@ fun run_init_static {
 fun logCall c {
   var f = c;
   if(c.n) f = c.n;
-  log("trampoline calling: " + f + "    " + JSON.stringify([r1,r2,r3,r4,r5,r6,r7,r8]) + "  hp: " + hp + "(l: " + heap.length + ")");
+//  log("trampoline calling: " + f + "    " + JSON.stringify([r1,r2,r3,r4,r5,r6,r7,r8]) + "  hp: " + hp + "(l: " + heap.length + ")");
+  log("trampoline calling: " + f + "    " + JSON.stringify([printReg r1, printReg r2, printReg r3, printReg r4, printReg r5]) + "  hp: " + hp + "(l: " + heap.length + ")");
+}
+
+fun printReg r {
+  if(r > 0 && r <= hp && heap[r].n) {
+    return (r + ":" + heap[r].n);
+  } else {
+    return r;
+  }
 }
 
 // print top stack frame

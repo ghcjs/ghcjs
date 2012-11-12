@@ -112,7 +112,8 @@ Library
 Executable ghcjs
     if flag(rts-only)
       Buildable:      False
-
+    if flag(gen2) && impl(ghc >= 7.6)
+      CPP-Options: -DGHCJS_GEN2
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src-bin

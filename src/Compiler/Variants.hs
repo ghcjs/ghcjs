@@ -4,12 +4,15 @@
 -}
 module Compiler.Variants where
 
+#if defined(GHCJS_PLAIN) || defined(GHCJS_TRAMPOLINE)
 import           Generator.Helpers     (newGenState, runGen)
 import           Generator.Link        (link)
 import qualified Generator.TopLevel    as Js (generate)
 import qualified Javascript.Formatted  as Js
 import           Javascript.Language   (Javascript)
 import qualified Javascript.Trampoline as Js
+#endif
+
 import           Module                (ModuleName)
 
 import           Data.ByteString       (ByteString)
@@ -55,9 +58,10 @@ variants =
 #ifdef GHCJS_GEN2
 gen2Variant :: Variant
 gen2Variant = Variant ".gen2.js" (Just ".gen2.ji") ".gen2.jsexe" Gen2 Gen2.generate
-    (link ".gen2.js" . (++ ".gen2.jsexe"))
+    Gen2.link
 #endif
 
+#ifdef GHCJS_PLAIN
 plainVariant :: Variant
 plainVariant = Variant ".plain.js" Nothing ".plain.jsexe" Plain renderPlain
     (link ".plain.js" . (++ ".plain.jsexe"))
@@ -67,7 +71,9 @@ renderPlain cg mn = (T.encodeUtf8 . T.pack . show $ abs, B.empty)
   where
     abs :: Js.Formatted
     abs = renderAbstract cg mn
+#endif
 
+#ifdef GHCJS_TRAMPOLINE
 trampolineVariant :: Variant
 trampolineVariant = Variant ".trampoline.js" Nothing ".trampoline.jsexe" Trampoline renderTrampoline
     (link ".trampoline.js" . (++ ".trampoline.jsexe"))
@@ -80,6 +86,7 @@ renderTrampoline cg mn = (T.encodeUtf8 . T.pack . show $ abs, B.empty)
 
 renderAbstract :: (Javascript js) => StgPgm -> Module-> js
 renderAbstract stg m = fst $ runGen (Js.generate m stg) newGenState
+#endif
 
 type StgPgm = [(StgBinding,[(Id,[Id])])]
 

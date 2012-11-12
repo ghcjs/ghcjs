@@ -135,14 +135,19 @@ stackApply n v mfixed = [j| `decl func`;
     func = StrI funcName
     body = [j| do {
                  var c = `Heap`[`R1`];
+                 `traceRts $ funcName |+ " " |+ (c|."n") |+ " sp: " |+ Sp`;
                  switch(c.t) {
                    case `Thunk`:
+                     `traceRts $ funcName |+ ": thunk"`;
                      return c;
                    case `Fun`:
+                     `traceRts $ funcName |+ ": fun"`;
                      `funCase c`;
                    case `Pap`:
+                     `traceRts $ funcName |+ ": pap"`;
                      `papCase c`;
                    case `Ind`:
+                     `traceRts $ funcName |+ ": ind"`;
                      `R1` = `Heap`[`R1`+1];
                      continue;
                    default:
@@ -151,7 +156,7 @@ stackApply n v mfixed = [j| `decl func`;
                } while(true);
            |]
 
-    funExact c = popSkip 1 (take n (map toJExpr $ enumFrom R2))
+    funExact c = popSkip (1+offset) (take n (map toJExpr $ enumFrom R2))
     stackArgs = map (\x -> [je| `Stack`[`Sp`-`x+offset`] |]) [1..n]
 
     overSat :: JExpr -> JExpr -> JStat
@@ -174,7 +179,8 @@ stackApply n v mfixed = [j| `decl func`;
           newTag :: Int -> JExpr
           newTag m = case mfixed of
                        Nothing        -> [je| (`Heap`[`R1`+1] >> `8+n-m` << 8) | `m+2` |]
-                       Just (_, ptrs) -> let nt = (shiftedPtrTag (n-m) ptrs `shiftL` 8) .|. (m+2)
+                       -- fixme: proper support for big tags/objs?
+                       Just (_, ptrs) -> let nt = (fromJust (shiftedPtrTag (n-m) ptrs) `shiftL` 8) .|. (m+2)
                                          in  toJExpr nt
 
           oversatCase' :: Int -> (JExpr, JStat)
@@ -200,14 +206,17 @@ stackApply n v mfixed = [j| `decl func`;
                     var arity2 = arity & 0xff;
                     `traceRts $ (funcName ++ ": found pap, arity: ") |+ arity`;
                     if(`n` === arity2) {
+                      `traceRts $ funcName ++ ": exact"`;
                       `funExact c`;
                       return `c`;
                     } else if(`n` < arity2 || (`n` === arity2 && (arity >> 8) < `v`)) {
+                      `traceRts $ funcName ++ ": undersat"`;
                       `mkPap pap (toJExpr R1) stackArgs`; // fixme do we want double pap?
                       `R1` = `iex pap`;
                       `adjSpN (n+1)`;
                       return `Stack`[`Sp`];
                     } else {
+                      `traceRts $ funcName ++ ": oversat"`;
                       `overSat c arity2`;
                     }
                   |]
@@ -216,17 +225,20 @@ stackApply n v mfixed = [j| `decl func`;
                 in  SwitchStat [je|`funArity c` & 0xff |] alts funUnder
                    where
                      funExact0 = withIdent $ \pap ->
-                                 [j| var voidArgs = `funArity c` >> 8;
+                                 [j| `traceRts "exact0"`;
+                                     var voidArgs = `funArity c` >> 8;
                                      if(voidArgs === `v`) {  // exact
+                                       `traceRts "exact1"`;
                                        `funExact c`;
-                                       return c;
+                                       return `c`;
                                      } else if(`v` < voidArgs) { // oversat
+                                       `traceRts "oversat"`;
                                        `funExact c`;
                                        for(var i=voidArgs;i<`v`;i++) {
                                          `adjSp 1`;
                                          `Stack`[`Sp`] = stg_ap_v;
                                        }
-                                       return c;
+                                       return `c`;
                                      } else {
                                        // missing void args, fixme we can't store how many in pap!
                                        `mkPap pap (toJExpr R1) stackArgs`;
@@ -237,6 +249,7 @@ stackApply n v mfixed = [j| `decl func`;
                                    |]
                      funOver m = snd $ oversatCase c m
                      funUnder  = withIdent $ \pap -> [j|
+                                     `traceRts $ "undersat (" |+ funArity c |+ ")"`;
                                      var arity = `funArity c`;
                                      var tag = `funTag (toJExpr R1)`;
                                      `mkPap pap (toJExpr R1) stackArgs`;
@@ -331,7 +344,8 @@ fastApply n v mspec = [j| `decl func`;
                    where
                      newTag = case mspec of
                                 Nothing        -> [je| tag >> `n-m` |]
-                                Just (_, ptrs) -> toJExpr (shiftedPtrTag (n-m) ptrs)
+                                -- fixme proper support for big objects
+                                Just (_, ptrs) -> toJExpr (fromJust $ shiftedPtrTag (n-m) ptrs)
                      tagged = [ newTag
                               , jsv $ "stg_ap_" ++ show m ++ vsuff
                               ]
@@ -365,8 +379,10 @@ fastApply n v mspec = [j| `decl func`;
                  } while(true);
                |]
 
+
+
 zeroApply :: JStat
-zeroApply = [j| fun stg_ap_0_fast { `enter`; }
+zeroApply = [j| fun stg_ap_0_fast { `preamble`; `enter`; }
 
                 fun stg_ap_0 { `preamble`; `adjSpN 1`; `enter`; }
                 `ClosureInfo (iex (StrI "stg_ap_0")) [R1] "stg_ap_0" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
@@ -461,6 +477,7 @@ mkPap :: Ident   -- ^ id of the pap object
       -> [JExpr] -- ^ values for the supplied arguments
       -> JStat
 mkPap tgt fun values =
+    traceRts ("making pap with: " ++ show (length values) ++ " items") <>
     allocDynamic True tgt (iex entry) (fun:map toJExpr values)
         where
           entry = StrI $ "stg_pap_" ++ show (length values)
@@ -475,13 +492,6 @@ pap n = [j| `decl func`;
     funcName = "stg_pap_" ++ show n
     func     = StrI funcName
 
-{-
-    info = "t"   .= Pap <>
-           "a"   .= ji (-1) <>
-           gcPap (n+2) <>
-           "i"   .= [ji (n+2), jstr funcName] <>
-           "gai" .= [ji (-1)]
--}
     body = [j| var c = `Heap`[`R1`+1];
                var f = `Heap`[c];
                `assertRts (isFun f ||| isPap f) (funcName ++ ": expected function or pap")`;
