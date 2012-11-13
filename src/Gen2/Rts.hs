@@ -19,6 +19,10 @@ import           Data.Char                        (toLower, toUpper)
 import qualified Data.List                        as L
 import           Data.Monoid
 
+import qualified Data.Text.Lazy                   as TL
+import           Gen2.Printer
+import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
+
 import           Encoding
 
 -- fixme move somewhere else
@@ -98,6 +102,8 @@ logStack = [j| logStack(); |]
 rts = jsSaturate (Just "RTS") rts'
 rtsDebug = renderJs (addDebug $ jsSaturate (Just "RTS") rts')
 
+rtsStr :: String
+rtsStr = TL.unpack . displayT . renderPretty 0.8 150 . pretty $ rts
 
 rts' :: JStat
 rts' = [j|

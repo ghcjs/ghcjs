@@ -53,6 +53,7 @@ import qualified Data.Serialize as C
 
 #ifdef GHCJS_GEN2
 import qualified Gen2.Generator as Gen2
+import qualified Gen2.Rts       as Gen2
 #endif
 
 main :: IO ()
@@ -292,7 +293,7 @@ collectDeps mis = nub $ concatMap pkgs mis
 
 printRts :: IO ()
 #ifdef GHCJS_GEN2
-printRts = putStrLn Gen2.genRts >> exitSuccess
+printRts = putStrLn Gen2.rtsStr >> exitSuccess
 #else
 printRts = return () >> exitSuccess
 #endif

@@ -4,7 +4,7 @@
   Main generator module
 -}
 
-module Gen2.Generator (generate, genRts) where
+module Gen2.Generator (generate) where
 
 import StgCmmClosure
 import ClosureInfo hiding (ClosureInfo)
@@ -45,6 +45,7 @@ import qualified Data.List as L
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL
 import qualified Data.Text as T
+import Data.Text (Text)
 import Text.PrettyPrint.Leijen.Text hiding ((<>), pretty)
 import Language.Javascript.JMacro
 
@@ -75,9 +76,6 @@ data GenerateSettings = GenerateSettings
        , gsTraceFunctions :: Bool -- trace all function calls (not just trampoline)
        , gsNodeModule     :: Bool -- export our global variables to make a node module
        }
-
-genRts :: String
-genRts = TL.unpack . displayT . renderPretty 0.8 150 . pretty $ rts
 
 -- fixme remove this hack to run main and use the settings
 generate :: StgPgm -> Module -> (ByteString, ByteString)  -- module,metadata
@@ -152,12 +150,21 @@ pass2 m = mconcat . zipWith p2 [1..]
                    $ s
 
 genMetaData :: Module -> [(a, [Id], [Id])] -> Linker.Deps
-genMetaData m p1 = Linker.Deps (M.fromList $ concatMap oneDep p1)
+genMetaData m p1 = Linker.Deps (modulePackageText m) (moduleNameText m) 
+                               (M.fromList $ concatMap oneDep p1)
   where
     oneDep (_, symbs, deps) = map (symbDep deps) symbs
     symbDep deps symb = (idTxt symb, S.fromList $ map idFun deps)
     idTxt i = let (StrI xs) = jsIdI i in T.pack xs
-    idFun i = Linker.Fun (T.pack "fixme_package") (T.pack "fixme_module") (idTxt i) -- fixme
+    idFun i = 
+      let mod = fromMaybe m $ nameModule_maybe (getName i)
+      in  Linker.Fun (modulePackageText mod) (moduleNameText mod) (idTxt i)
+
+moduleNameText :: Module -> Text
+moduleNameText = T.pack . moduleNameString . moduleName
+
+modulePackageText :: Module -> Text
+modulePackageText = T.pack . packageIdString . modulePackageId
 
 
 genToplevel :: (StgBinding, [(Id, [Id])]) -> JStat
