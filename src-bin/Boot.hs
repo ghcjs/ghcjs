@@ -229,8 +229,8 @@ installPkg ghcjs ghcjspkg pkg = verbosely $ do
       echo $ "found installed version: " <> toTextIgnore d
       sub $ do
         cd ("libraries" </> pkg </> "dist-install" </> "build")
-        files <- findWhen (return.isJsFile) "."
-        forM_ (filter isJsFile files) $ \file -> do
+        files <- findWhen (return . isGhcjsFile) "."
+        forM_ files $ \file -> do
            echo $ "installing " <> toTextIgnore file
            cp file (dest </> d </> file)
     _ -> errorExit $ "could not find installed package " <> pkg
@@ -239,7 +239,7 @@ installPkg ghcjs ghcjspkg pkg = verbosely $ do
 isPathPrefix :: Text -> FilePath -> Bool
 isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file
 
-isJsFile :: FilePath -> Bool
-isJsFile file = ".js" `T.isSuffixOf` toTextIgnore file
+isGhcjsFile :: FilePath -> Bool
+isGhcjsFile file = any (`T.isSuffixOf` toTextIgnore file) [".js", ".ji"]
 
 
