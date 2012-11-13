@@ -39,6 +39,7 @@ import Data.Maybe (isJust, fromMaybe)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
+import Data.Foldable (fold)
 import qualified Data.Set as S
 import Data.List (partition, intercalate, sort, find)
 import qualified Data.List as L
@@ -137,8 +138,22 @@ pass1 :: StgPgm
 pass1 ss = map generateBlock ss
   where
     generateBlock d@(decl,deps) =
-      let ids = map fst deps
-      in  (genToplevel d, ids, L.nub (concatMap snd deps))
+      let ids = map fst deps 
+           -- fixme snd deps doesn't list all deps, is this the right way?
+          allDeps = L.nub $ concatMap snd deps ++ collectGlobalIds decl
+      in  (genToplevel d, ids, allDeps)
+
+
+collectGlobalIds :: StgBinding -> [Id]
+collectGlobalIds b = filter acceptId $ S.toList (bindingRefs b)
+  where
+    acceptId i = all ($ i) [isGlobalId, not.isForbidden]
+    -- the GHC.Prim module has no js source file
+    isForbidden i
+      | Just m <- nameModule_maybe (getName i) =
+                    moduleNameText m    == T.pack "GHC.Prim" &&
+                    modulePackageText m == T.pack "ghc-prim"
+      | otherwise = False
 
 -- | pass2 combines and saturates the AST and runs the transformations
 pass2 :: Module -> [(JStat,[Id],[Id])] -> JStat
@@ -808,6 +823,7 @@ jumpToI funIdx args = mconcat ra <> [j| return `Heap`[`funIdx`]; |] -- enter' [j
 -}
 
 -- avoid one indirection for global ids
+-- fixme in many cases we can also jump directly to the entry for local?
 jumpToII :: Id -> [JExpr] -> JStat
 jumpToII i args
   | isLocalId i = mconcat ra <> [j| return `Heap`[`jsId i`]; |]

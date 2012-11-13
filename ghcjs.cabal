@@ -82,7 +82,8 @@ Library
                    text           >= 0.11     && < 0.12,
                    wl-pprint-text >= 1.0      && < 1.2,
                    hoopl          >= 3.8      && < 4,
-                   cereal         >= 0.3      && < 0.4
+                   cereal         >= 0.3      && < 0.4,
+                   lens           >= 3.2      && < 4
     exposed-modules: Compiler.Info,
                      Compiler.Variants,
                      GHCJSMain,
