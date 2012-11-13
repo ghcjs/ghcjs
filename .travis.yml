@@ -10,10 +10,12 @@ before_install:
     - make install
     - export PATH=$HOME/ghc-7.6.1/bin:$PATH
     - cd ..
+    - rm -rf ghc-7.6.1
+    - rm ghc-7.6.1-i386-unknown-linux.tar.bz2
 
 install:
     - cabal install mega-sdist hspec cabal-meta cabal-src
-    - cabal-meta install --force-reinstalls
+    - cabal-meta install --force-reinstalls || sudo dmesg
  
 notifications:
   irc:
