@@ -15,7 +15,7 @@ before_install:
 
 install:
     - cabal install mega-sdist hspec cabal-meta cabal-src
-    - cabal-meta install --force-reinstalls || sudo dmesg
+    - cabal-meta install --force-reinstalls
  
 notifications:
   irc:

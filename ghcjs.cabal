@@ -138,7 +138,6 @@ Executable ghcjs
       x-boot:     False
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
     cpp-options:    -DGHCJS_PACKAGE_IMPORT
-    ld-options:     -Wl,--verbose=9
 
 Executable ghcjs-link
     Buildable:      False
