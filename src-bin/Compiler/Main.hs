@@ -53,6 +53,7 @@ import qualified Data.Serialize as C
 
 #ifdef GHCJS_GEN2
 import qualified Gen2.Generator as Gen2
+import qualified Gen2.Linker    as Gen2
 import qualified Gen2.Rts       as Gen2
 #endif
 
@@ -155,6 +156,7 @@ handleCommandline args
             , ("--abi-hash", fallbackGhc args)
             , ("-M", fallbackGhc args)
             , ("--print-rts", printRts)
+            , ("--print-ji", printJi args)
             ]
 
 handleOneShot :: [String] -> IO ()
@@ -296,5 +298,13 @@ printRts :: IO ()
 printRts = putStrLn Gen2.rtsStr >> exitSuccess
 #else
 printRts = return () >> exitSuccess
+#endif
+
+printJi :: [String] -> IO ()
+#ifdef GHCJS_GEN2
+printJi ["--print-ji", file] = Gen2.readDeps file >>= putStrLn . Gen2.dumpDeps
+printJi _                    = putStrLn "usage: ghcjs --print-ji jifile"
+#else
+printJi _ = return ()
 #endif
 

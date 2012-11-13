@@ -193,3 +193,11 @@ readDeps :: FilePath -> IO Deps
 readDeps file = do
   either error id . runGet get <$> B.readFile file
 
+dumpDeps :: Deps -> String
+dumpDeps (Deps p m d) = T.unpack $
+  "package: " <> p <> "\n" <>
+  "module: " <> m <> "\n" <>
+  "deps:\n" <> T.unlines (map (uncurry dumpDep) (M.toList d))
+  where
+    dumpDep s ds = s <> " -> \n" <>
+      F.foldMap (\(Fun fp fm fs) -> "   " <> fp <> ":" <> fm <> "." <> fs <> "\n") ds
