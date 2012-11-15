@@ -16,7 +16,23 @@ before_install:
 install:
     - cabal install mega-sdist hspec cabal-meta cabal-src
     - cabal-meta install --force-reinstalls
- 
+    - rm -rf dist vendor
+
+script:
+   - wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-src.tar.bz2
+   - tar -xjf ghc-7.6.1-src.tar.bz2 
+   - rm ghc-7.6.1-src.tar.bz2
+   - cd ghc-7.6.1
+   - cp mk/build.mk.sample mk/build.mk
+   - perl boot
+   - ./configure --prefix=$HOME/ghc-7.6.1
+   - cd ghc
+   - make stage=1
+   - cd ../libraries
+   - make
+   - cd ..
+   - ghcjs-boot
+
 notifications:
   irc:
     channels: "irc.freenode.net#ghcjs"
