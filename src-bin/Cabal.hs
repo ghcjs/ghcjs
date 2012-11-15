@@ -57,6 +57,7 @@ extraArgs = do
   return [ "--with-compiler=ghcjs"
          , "--with-hc-pkg=ghcjs-pkg"
          , "--with-hsc2hs=hsc2hs"
+         , "--disable-documentation"
          , "--prefix=" <> prefix <> "/" <> getGhcjsCompilerVersion
          , "--bindir=" <> prefix <> "/" <> "bin"
          ]
