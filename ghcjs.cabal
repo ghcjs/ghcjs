@@ -106,6 +106,8 @@ Library
                          Javascript.Formatted.Monads,
                          Javascript.Formatted.Statement,
                          RTS.Objects
+    if (flag(plain) || flag(trampoline)) && !(flag(gen2) && impl(ghc >= 7.6))
+        exposed-modules: Gen2.StgAst
     exposed: True
     buildable: True
     hs-source-dirs: src

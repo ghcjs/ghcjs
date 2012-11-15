@@ -117,7 +117,7 @@ link jsExt out searchPath objFiles pageModules = do
 --        return (sum $ map length script, (pageSet, script))
 
     bundles <- forM (zip [1..] combinedScripts) $ \(n, (pageSet, functions)) -> do
-        out <- openFile (out++"hs"++show n++".js") WriteMode
+        out <- openFile (out</>"hs"++show n++".js") WriteMode
         hPutStrLn out . unlines $ pageSetComment $ S.toList pageSet
         let scripts = M.toList . M.fromListWith (++) $ functions
         forM_ scripts $ copyScript isPageSymbol out

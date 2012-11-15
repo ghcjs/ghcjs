@@ -64,7 +64,7 @@ gen2Variant = Variant ".gen2.js" (Just ".gen2.ji") ".gen2.jsexe" Gen2 Gen2.gener
 #ifdef GHCJS_PLAIN
 plainVariant :: Variant
 plainVariant = Variant ".plain.js" Nothing ".plain.jsexe" Plain renderPlain
-    (link ".plain.js" . (++ ".plain.jsexe"))
+    (link ".plain.js")
 
 renderPlain :: StgPgm -> Module -> (ByteString, ByteString)
 renderPlain cg mn = (T.encodeUtf8 . T.pack . show $ abs, B.empty)
@@ -76,7 +76,7 @@ renderPlain cg mn = (T.encodeUtf8 . T.pack . show $ abs, B.empty)
 #ifdef GHCJS_TRAMPOLINE
 trampolineVariant :: Variant
 trampolineVariant = Variant ".trampoline.js" Nothing ".trampoline.jsexe" Trampoline renderTrampoline
-    (link ".trampoline.js" . (++ ".trampoline.jsexe"))
+    (link ".trampoline.js")
 
 renderTrampoline :: StgPgm -> Module -> (ByteString, ByteString)
 renderTrampoline cg mn = (T.encodeUtf8 . T.pack . show $ abs, B.empty)
