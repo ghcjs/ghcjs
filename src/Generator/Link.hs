@@ -139,7 +139,7 @@ link jsExt out searchPath objFiles pageModules = do
         makeLoader (p, bs) = concat ["var ", lookupKey p,
             "=$L(", show bs,", function() { return $", lookupKey p, "; });"]
 
-    writeFile (out++"hsloader.js") $ unlines loader
+    writeFile (out</>"hsloader.js") $ unlines loader
 
     return $ concatMap (\(n, _) -> [
                         "--js", concat [out, "hs", show n, ".js"],
