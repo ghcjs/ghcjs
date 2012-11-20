@@ -42,10 +42,14 @@ declRegs = [j| var !regs = []; |] <> mconcat (map declReg (enumFromTo R1 R32))
     where
       declReg r = (decl . StrI . map toLower . show) r <> [j| `r` = 0; |]
 
+declRets :: JStat
+declRets = mconcat $ map (decl . StrI . map toLower . show) (enumFrom Ret1)
+
 trace :: ToJExpr a => a -> JStat
 trace e = [j| log(`e`);  |]
 
 -- generate function thingie
+{-
 cheatFun :: String -> Int -> [VarType] -> JStat
 cheatFun f tag free =
     let fe   = ValExpr . JVar . StrI $ f
@@ -61,6 +65,7 @@ cheatFun f tag free =
            `fe` = `fu`;
            `ClosureInfo fe [] (zDecodeString f) (fixedLayout free) (CICon tag) CINoStatic`;
          |]
+-}
 
 closureTypes :: JStat
 closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> closureTypeName
@@ -78,6 +83,7 @@ closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> clo
     ifCT arg ct = [j| if(`arg` === `ct`) { return `show ct`; } |]
 
 -- add some basic stuff locally, to make code run without base, fixme remove this once base builds
+{-
 coreTypes :: JStat
 coreTypes = mconcat $ map (\(x,fr) -> cheatFun x 1 fr)
             [ ("$hs_GHCziTypesziIzh_e", [IntV])
@@ -85,6 +91,7 @@ coreTypes = mconcat $ map (\(x,fr) -> cheatFun x 1 fr)
             , ("$hs_GHCziTypesziIzh_con_e", [IntV])
             , ("$hs_GHCziPrimziZLzhz2cUzhZR_con_e", [])
             ]
+-}
 
 hsCall :: JExpr -> JStat
 hsCall c = [j| `jstatIf rtsTraceCalls $ logCall c`;
@@ -161,6 +168,13 @@ var !staticThunksArr = [];      // indices of updatable thunks in static heap
 
 // stg registers
 `declRegs`;
+`declRets`;
+
+// mutable variables are just datacon-like things that contain one ptr
+fun mutvar { `R1` = heap[r1+1]; return stack[sp]; }
+`ClosureInfo (jsv "mutvar") [] "mutable cell" (CILayoutPtrs 2 [0]) (CIFun 0 0) CINoStatic`;
+
+// ptr arrays are regular js arrays
 
 // black hole size 2, we need enough space for the ind frame
 fun blackhole { throw "<<loop>>"; return 0; }
@@ -184,6 +198,33 @@ var !$hs_GHCziTypesziFalse = 0;
 
 heap[1] = true_e;
 var !$hs_GHCziTypesziTrue = 1;
+
+fun stg_catch {
+  `preamble`;
+  `adjSpN 2`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "stg_catch") [] "exception handler" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
+
+
+// throw an exception: walk the thread's stack until you find a handler
+fun stg_throw e {
+  while(sp > 0) {
+    var f = stack[sp];
+    if(f === stg_catch) break;
+    var size = f.gtag & 0xff;
+    sp = sp - size;
+  }
+  if(`sp` > 0) {
+    var handler = `sp`-1;
+    `R1` = handler;
+    `R2` = e;
+    `adjSpN 2`;
+    return stg_ap_p_fast();
+  } else {
+    throw "unhandled exception in haskell thread";
+  }
+}
 
 // reduce result if it's a thunk, follow if it's an ind
 // add this to the stack if you want the outermost result
@@ -312,10 +353,12 @@ fun printcl i {
         r += "(" + heap[idx] + "," + heap[idx+1] + " :: long)";
         idx+=2;
         break;
-      case `ArrV`:
+      case `AddrV`:
         r += "(" + heap[idx].length + "," + heap[idx+1] + " :: ptr)";
         idx+=2;
         break;
+      default:
+        r += "unknown field: " + cl.i[i];
     }
   }
   log(r);
@@ -365,9 +408,91 @@ fun run_init_static {
 // print function to be called and first few registers
 fun logCall c {
   var f = c;
-  if(c.n) f = c.n;
+  if(c && c.n) f = c.n;
 //  log("trampoline calling: " + f + "    " + JSON.stringify([r1,r2,r3,r4,r5,r6,r7,r8]) + "  hp: " + hp + "(l: " + heap.length + ")");
   log("trampoline calling: " + f + "    " + JSON.stringify([printReg r1, printReg r2, printReg r3, printReg r4, printReg r5]) + "  hp: " + hp + "(l: " + heap.length + ")");
+  checkDynHeap();
+  checkStack();
+}
+
+// check that all pointers on the dyn heap indeed refer to some valid pointer target
+fun checkDynHeap {
+  var idx = hpDyn;
+  while(idx < hp) {
+    if(typeof(heap[idx]) === 'function') {
+      // updated objects are probably not the same size anymore
+      while(heap[idx].t === `Blackhole` || heap[idx].t === `Ind`) {
+        while(++idx < hp) {
+          if(typeof(heap[idx]) === 'function') {
+            break;
+          }
+        }
+        if(idx >= hp) return;
+      }
+      var g = heap[idx].gtag;
+      var offset = 1;
+      if(g < 0) {
+        if(heap[idx].t === `Pap`) { // skip pap objects for now
+          g = 0 - (g+1); // ignore object, just size
+          log("pap size: " + g);
+        } else {
+          g = heap[idx+1];
+          offset = 2;
+        }
+      }
+      var size = g & 0xff;
+      var ptrs = g >> 8;
+      while(ptrs) {
+        if(ptrs&1) {
+          var ptr = heap[idx+offset];
+          if(typeof heap[ptr] !== 'function') {
+            dh();
+            throw("expected pointer at: " + (idx+offset) + " inspecting: " + heap[idx].n);
+          }
+        }
+        ptrs = ptrs >> 1;
+        offset++;
+      }
+      idx += size;
+    } else {
+      dh();
+      throw("invalid heap object at: " + idx);
+    }
+  }
+}
+
+fun checkStack {
+  var idx = sp;
+  while(idx >= 0) {
+    var f = stack[idx];
+    if(typeof(f) === 'function') {
+      var tag = stack[idx].gtag;
+      var offset = 1;
+      if(tag <= 0) {
+        tag = stack[idx-1];
+        offset = 2;
+      }
+      var size = tag & 0xff;
+      var ptrs = tag >> 8;
+      while(ptrs) {
+        if(ptrs&1) {
+          var ptr = stack[idx-offset];
+          if(typeof heap[ptr] !== 'function') {
+            dumpStack stack sp;
+            dh();
+            throw("expected pointer at: stack[" + (idx-offset) + "] inspecting " + stack[idx].n);
+          }
+        }
+        ptrs = ptrs >> 1;
+        offset++;
+      }
+      idx = idx - size;
+    } else {
+      dumpStack stack sp;
+      dh();
+      throw("invalid stack object at: " + idx);
+    }
+  }
 }
 
 fun printReg r {
@@ -380,6 +505,10 @@ fun printReg r {
 
 // print top stack frame
 fun logStack {
+  if(typeof stack[sp] === 'undefined') {
+    log("warning: invalid stack frame");
+    return;
+  }
   var size = 0;
   var gt = stack[sp].gtag;
   if(gt === -1) {
@@ -387,7 +516,8 @@ fun logStack {
   } else {
     size = gt & 0xff;
   }
-  dumpStackTop stack (sp-size+1) sp;
+//  dumpStackTop stack (sp-size+1) sp;
+  dumpStackTop stack (sp-size - 2) sp;
   for(var i=Math.max(0,sp-size+1); i <= sp; i++) {
     if(typeof stack[i] === 'undefined') {
       throw "undefined on stack";
@@ -416,12 +546,12 @@ fun runhs t cb {
 `rtsPrim`;
 `closureTypes`;
 `garbageCollector`;
-`coreTypes`;
 
 fun runio_e {
   `preamble`;
   `R1` = `Heap`[`R1`+1];
-  return stg_ap_v_fast();
+  stack[++sp] = stg_ap_v;
+  return stg_ap_v;
 }
 `ClosureInfo (jsv "runio_e") [R1] "runio" (CILayoutFixed 2 [PtrV]) CIThunk CINoStatic`;
 
@@ -439,6 +569,28 @@ fun dumpRes cl {
    var end = new Date();
    log("elapsed time: " + (end.getTime()-start.getTime()) + "ms");
 }
+
+// fixme move somewhere else
+
+fun ascii s {
+    var res = [];
+    for(var i=0;i<s.length;i++) {
+      res.push(s.charCodeAt(i));
+    }
+    res.push(0);
+    return res;
+}
+
+fun localeEncoding {
+   ret1 = 0; // offset 0
+   return encodeUtf8("UTF-8");
+}
+
+fun u_towupper {
+  return 0;
+}
+
+
 
 |]
 

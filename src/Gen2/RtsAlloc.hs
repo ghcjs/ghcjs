@@ -2,12 +2,12 @@
 
 module Gen2.RtsAlloc where
 
-import Language.Javascript.JMacro
-import Data.Monoid
+import           Data.Monoid
+import           Language.Javascript.JMacro
 
-import Gen2.Utils
-import Gen2.RtsTypes
-import Gen2.RtsSettings
+import           Gen2.RtsSettings
+import           Gen2.RtsTypes
+import           Gen2.Utils
 
 -- allocate multiple, possible mutually recursive, closures
 -- fixme make sure that all thunk objects have at least size 2
@@ -19,7 +19,7 @@ allocDynAll haveDecl cls = assignPtrs <> loadVars <> incHp
       loadVars          = mconcat $ zipWith (\(_,e,fr) o -> loadOff o e fr) cls offsets
       loadOff o e fr    = mconcat $ zipWith (\off v -> [j| `heapOff off` = `v` |]) [o..] (e:fr)
       loadVar o v       = [j| `heapOff o` = `v` |]
-      clSize (_,_,free) = 1+length free
+      clSize (_,_,free) = max 2 (1+length free) -- all closures at least 2
       offsets           = scanl (+) 0 (map clSize cls)
       heapOff 0         = [je| `Heap`[`Hp`]     |]
       heapOff n         = [je| `Heap`[`Hp`+`n`] |]

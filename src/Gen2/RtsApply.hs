@@ -97,6 +97,9 @@ fixedApply = [ ( "p",      1, 0, [0]         )
              , ( "pp",     2, 0, [0,1]       )
              , ( "pv",     1, 1, [0]         )
              , ( "nv",     1, 1, []          )
+             , ( "nnv",    2, 1, []          )
+             , ( "pnv",    2, 1, [0]         )
+             , ( "npv",    2, 1, [1]         )
              , ( "ppv",    2, 1, [0,1]       )
              , ( "ppp",    3, 0, [0,1,2]     )
              , ( "pppv",   3, 1, [0,1,2]     )
@@ -270,7 +273,8 @@ vApply = [j| fun stg_ap_v_fast {
                      log("stg_ap_v_fast: PAP");
                    }
                  default:
-                   `adjSpN 1`;
+//                   `adjSp 1`;
+                   `push [iex $ StrI "stg_ap_v"]`; // fixme not necessary
                    return stg_ap_v;
                }
              }
@@ -362,7 +366,8 @@ fastApply n v mspec = [j| `decl func`;
                            return `c`;
                         |])
 
-      body = [j| var c = `Heap`[`R1`];
+      body = [j|
+                 var c = `Heap`[`R1`];
                  do {
                    if(c.t === `Fun`) {
                        `traceRts $ (funName ++ ": ") |+ clName c |+ " (arity: " |+ (c |. "a") |+ ")"`;
@@ -387,8 +392,11 @@ zeroApply = [j| fun stg_ap_0_fast { `preamble`; `enter`; }
                 fun stg_ap_0 { `preamble`; `adjSpN 1`; `enter`; }
                 `ClosureInfo (iex (StrI "stg_ap_0")) [R1] "stg_ap_0" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
-                fun stg_ap_v x { `preamble`; `adjSpN 1`; return `R1`; }
+                fun stg_ap_v x { `preamble`; `adjSpN 1`; return `Heap`[`R1`]; }
                 `ClosureInfo (iex (StrI "stg_ap_v")) [R1] "stg_ap_v" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+                var !stg_ap_0_v_fast = stg_ap_v_fast;
+                var !stg_ap_0_v = stg_ap_v;
+
               |]
 {-
                 `setObjInfo (jsv "stg_ap_v") $
@@ -409,6 +417,7 @@ enter' c = [j| do {
                  switch(`c`.t) {
                    case `Ind`:
                      `R1` = `Heap`[`R1`+1];
+                     `c` = `Heap`[`R1`];
                      continue;
                    case `Con`:
                      `(mempty :: JStat)`;
@@ -432,7 +441,7 @@ updates =
         `R1` = `Heap`[`R1`+1];
         return `Heap`[`R1`];
       };
-      `ClosureInfo (iex $ StrI "ind_entry") [] "updated frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
+      `ClosureInfo (iex $ StrI "ind_entry") [] "updated frame" (CILayoutFixed 2 [PtrV]) CIInd CINoStatic`;
 
       fun stg_upd_frame {
         `preamble`;

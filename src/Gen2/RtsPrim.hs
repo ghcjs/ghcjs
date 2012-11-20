@@ -1,4 +1,5 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes     #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-
 
   RTS implementation for primops
@@ -6,10 +7,10 @@
 -}
 module Gen2.RtsPrim where
 
-import Language.Javascript.JMacro
-import Language.Javascript.JMacro.Types
+import           Language.Javascript.JMacro
+import           Language.Javascript.JMacro.Types
 
-import Gen2.Utils
+import           Gen2.Utils
 
 rtsPrim :: JStat
 rtsPrim = [j|

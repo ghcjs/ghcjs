@@ -1,16 +1,25 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE QuasiQuotes                #-}
+{-# LANGUAGE TemplateHaskell            #-}
 
 module Gen2.Utils where
 
-import Language.Javascript.JMacro
-import Language.Haskell.TH.Quote
+import           Language.Haskell.TH.Quote
+import           Language.Javascript.JMacro
 
-import Control.Monad.State.Strict
-import Data.Monoid
+import           Control.Monad.State.Strict
+import           Data.Monoid
 
-import Data.Char (isSpace)
-import Data.List (isPrefixOf)
-import Data.Map (Map, singleton)
+import           Data.Char                  (isSpace)
+import           Data.List                  (isPrefixOf)
+import           Data.Map                   (Map, singleton)
+
+-- missing instances, todo: add to jmacro
+instance ToJExpr Ident where
+  toJExpr i = ValExpr (JVar i)
+
+-- instance ToJExpr JVal where
+--   toJExpr v = ValExpr v
 
 -- easier building of javascript object literals
 newtype JObj = JObj (Map String JExpr) deriving (Monoid, Show, Eq)
@@ -116,4 +125,7 @@ showIndent x = unlines . runIndent 0 . map trim . lines . replaceParens . show $
                          | all isSpace x    = runIndent n xs
                          | otherwise = indent n x : runIndent n xs
       runIndent n [] = []
-      trim = let f = dropWhile isSpace . reverse in f . f
+
+trim :: String -> String
+trim = let f = dropWhile isSpace . reverse in f . f
+

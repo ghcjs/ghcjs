@@ -25,7 +25,7 @@ gcChecks = False
 
 -- extra rts assertions/checks
 rtsChecks :: Bool
-rtsChecks = False
+rtsChecks = rtsDebug
 
 -- rts tracing/debugging
 rtsDebug :: Bool
@@ -37,7 +37,7 @@ rtsTraceCalls = rtsDebug -- False -- True
 
 -- print top stack frame before each call
 rtsTraceStack :: Bool
-rtsTraceStack = rtsDebug -- False -- True
+rtsTraceStack = False -- True
 
 ------------------------------------------------------------------------------
 -- end of settings
@@ -88,6 +88,9 @@ infixl 2 |!!
 
 (|&&) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
 (|&&) a b = [je| `a` && `b` |]
+
+(|===) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|===) a b = [je| `a` === `b` |]
 
 -- trace a gc-related messages if gc debug is enabled
 traceGc :: ToJExpr a => a -> JStat

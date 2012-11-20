@@ -63,6 +63,13 @@ sort marked array
 
 -}
 
+{-
+  fixme, missing functionality:
+   - proper collection of static heap
+   - collect register arguments for blackhole ( heap[r+2] contains the orig function )
+   - increase static heap size when necessary
+-}
+
 garbageCollector :: JStat
 garbageCollector =
   [j|

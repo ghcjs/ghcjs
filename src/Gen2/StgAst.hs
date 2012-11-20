@@ -92,8 +92,8 @@ exprRefs (StgOpApp _ args _) = l argRefs args
 exprRefs (StgLit {}) = mempty
 exprRefs (StgLam {}) = mempty
 exprRefs (StgCase expr _ _ _ _ _ alts) = exprRefs expr <> alts^.folded._4.to exprRefs
-exprRefs (StgLet _ expr) = exprRefs expr
-exprRefs (StgLetNoEscape _ _ _ expr) = exprRefs expr
+exprRefs (StgLet bnd expr) = bindingRefs bnd <> exprRefs expr
+exprRefs (StgLetNoEscape _ _ bnd expr) = bindingRefs bnd <> exprRefs expr
 exprRefs (StgSCC _ _ _ expr) = exprRefs expr
 exprRefs (StgTick _ _ expr) = exprRefs expr
 

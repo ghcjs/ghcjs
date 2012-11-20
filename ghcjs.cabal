@@ -1,7 +1,7 @@
 Name:           ghcjs
 Version:        0.1.0
 Description:    Haskell to Javascript translator
-License:        BSD3
+License:        MIT
 License-file:   LICENSE
 Author:         Victor Nazarov, Hamish Mackenzie, Luite Stegeman
 Copyright:      Victor Nazarov, Hamish Mackenzie, Luite Stegeman
