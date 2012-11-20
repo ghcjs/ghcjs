@@ -68,6 +68,9 @@ htermDeps =
    , "lib_preference_manager.js"
    , "lib_test_manager.js"
    , "lib_utf8.js"
+   , "lib_storage.js"
+   , "lib_storage_chrome.js"
+   , "lib_storage_local.js"
    , "hterm_frame.js"
    , "hterm.js"
    , "hterm_keyboard.js"
@@ -82,4 +85,6 @@ htermDeps =
    , "hterm_text_attributes.js"
    , "hterm_vt_character_map.js"
    , "hterm_vt.js"
+   , "hterm_preference_manager.js"
+   , "hterm_preferences_editor.js"
    ]

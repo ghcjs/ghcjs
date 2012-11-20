@@ -18,7 +18,6 @@ module Generator.PrimOp
 import Id as Stg
 import StgSyn as Stg
 import PrimOp
-import Gen2.StgAst
 import Javascript.Language as Js hiding(return)
 import qualified Javascript.Language as Js (return)
 
@@ -26,6 +25,12 @@ import qualified RTS.Objects as RTS
 import Generator.Helpers
 import Data.Monoid (Monoid(..))
 import Encoding (zEncodeString)
+import OccName (occNameFS)
+
+#if __GLASGOW_HASKELL__ >= 706
+instance Show PrimOp where
+    show = show . occNameFS . primOpOcc
+#endif
 
 data Javascript js => PrimOpExp js =
     PlainE (Expression js)
