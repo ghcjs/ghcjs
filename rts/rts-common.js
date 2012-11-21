@@ -1302,6 +1302,28 @@ function integer_cmm_divModIntegerzh(sa, abits, sb, bbits) {
     }
     return $hs_googToGMP(d).concat($hs_googToGMP(m));
 };
+function integer_cmm_divIntegerzh(sa, abits, sb, bbits) {
+    var a = $hs_gmpToGoog(sa, abits);
+    var b = $hs_gmpToGoog(sb, bbits);
+    var d = a.divide(b);
+    var m = a.subtract(d.multiply(b));
+    if(a.isNegative()!==b.isNegative() && !m.isZero()) {
+        // Take one off d and add b onto m
+        d = d.add(goog.math.Integer.fromInt(-1));
+    }
+    return $hs_googToGMP(d);
+};
+function integer_cmm_modIntegerzh(sa, abits, sb, bbits) {
+    var a = $hs_gmpToGoog(sa, abits);
+    var b = $hs_gmpToGoog(sb, bbits);
+    var d = a.divide(b);
+    var m = a.subtract(d.multiply(b));
+    if(a.isNegative()!==b.isNegative() && !m.isZero()) {
+        // Take one off d and add b onto m
+        m = m.add(b);
+    }
+    return $hs_googToGMP(m);
+};
 function integer_cmm_divExactIntegerzh(sa, abits, sb, bbits) {
     return $hs_googToGMP($hs_gmpToGoog(sa, abits).divide($hs_gmpToGoog(sb, bbits)));
 };
@@ -1764,6 +1786,8 @@ function $hs_unsignedCompare(a,b) {
 
 
 if(WORD_SIZE_IN_BITS == 32) {
+    $hs_quotRemIntzh = function(a, b) {
+       return [(a / b) | 0, (a % b) | 0]; };
     // Safer 32 bit multiplication than just a * b
     $hs_timesIntzh = function(a, b) {
        return goog.math.Long(a,0).multiply(goog.math.Long(b,0)).getLowBits(); };
@@ -1775,6 +1799,8 @@ if(WORD_SIZE_IN_BITS == 64) {
        return a.div(b); };
     $hs_remIntzh = function(a, b) {
        return a.modulo(b); };
+    $hs_quotRemIntzh = function(a, b) {
+       return [a.div(b), a.modulo(b)]; };
     $hs_int2Wordzh = function(a) {
        return a; };
     $hs_int2Floatzh = function(a) {
@@ -1840,7 +1866,6 @@ if(WORD_SIZE_IN_BITS == 64) {
     $hs_narrow32Wordzh = function(i) {
        return goog.math.Long.fromBits(i.getLowBits(), 0); };
 }
-
 function hs_gtWord64(a, b) {
    return $hs_unsignedCompare(a, b) > 0 ? 1 : 0; };
 function hs_geWord64(a, b) {
@@ -2342,12 +2367,18 @@ function read(fd, p, s) {
         return $hs_int(-1);
     return $hs_int(f.read(p, s));
 };
+function ghc_wrapper_d2fd_read(fd, p, s) {
+    return read(fd, p, s);
+};
 function write(fd, p, s) {
     HS_RTS_TRACE && $hs_logger.info('write');
     var f = $hs_allFiles[fd];
     if (f === undefined || f === null)
         return $hs_int(-1);
     return $hs_int(f.write(p, s));
+};
+function ghc_wrapper_d2eq_write(fd, p, s) {
+    return write(fd, p, s);
 };
 function __hsunix_long_path_size() {
     return $hs_int(1024);
@@ -2701,6 +2732,22 @@ function ghc_wrapper_d1rG_getrusage(who, usage) {
     }
 };
 function ghc_wrapper_d1s8_getrusage(who, usage) {
+    var x = new Int32Array(usage[0], usage[1]);
+    var t = new Date().getTime();
+    if(WORD_SIZE_IN_BITS==32) {
+        x[0] = (t/1000) | 0;
+        x[1] = ((t%1000)*1000) | 0;
+        return 0;
+    }
+    else {
+        x[0] = (t/1000) | 0;
+        x[1] = 0;
+        x[2] = ((t%1000)*1000) | 0;
+        x[3] = 0;
+        return goog.math.Long.ZERO;
+    }
+};
+function ghc_wrapper_d1nl_getrusage(who, usage) {
     var x = new Int32Array(usage[0], usage[1]);
     var t = new Date().getTime();
     if(WORD_SIZE_IN_BITS==32) {

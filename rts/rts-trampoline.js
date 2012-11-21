@@ -1330,6 +1330,9 @@ if(HS_WEAKS) {
 function $hs_mkWeakzh(o, b, c, s) {
     return [s, new $tr_Weak(o, b, c, s)];
 };
+function $hs_mkWeakNoFinalizzerzh(o, b, s) {
+    return [s, new $tr_Weak(o, b, null, s)];
+};
 function $hs_mkWeakForeignEnvzh(o, b, w, x, y, z, s) {
     HS_WEAKS && $hs_logger.warning("Weak Foreign Ignored");
     // return [s, new $tr_Weak(o, b, c, s)];

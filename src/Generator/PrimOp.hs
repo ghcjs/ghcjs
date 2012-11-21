@@ -26,10 +26,11 @@ import Generator.Helpers
 import Data.Monoid (Monoid(..))
 import Encoding (zEncodeString)
 import OccName (occNameFS)
+import FastString (unpackFS)
 
 #if __GLASGOW_HASKELL__ >= 706
 instance Show PrimOp where
-    show = show . occNameFS . primOpOcc
+    show = unpackFS . occNameFS . primOpOcc
 #endif
 
 data Javascript js => PrimOpExp js =
