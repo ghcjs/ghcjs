@@ -216,11 +216,12 @@ fun stg_throw e {
     sp = sp - size;
   }
   if(`sp` > 0) {
-    var handler = `sp`-1;
+    log("### catching exception at frame: " + `sp` + ": " + heap[e].n);
+    var handler = `sp` - 1;
     `R1` = handler;
     `R2` = e;
     `adjSpN 2`;
-    return stg_ap_p_fast();
+    return stg_ap_pv_fast();
   } else {
     throw "unhandled exception in haskell thread";
   }
@@ -441,6 +442,9 @@ fun checkDynHeap {
         }
       }
       var size = g & 0xff;
+      // if(heap[idx].t === `Thunk`) { // thunks on the dynheap are at least size 2
+        size = Math.max(size, 2);
+      // }
       var ptrs = g >> 8;
       while(ptrs) {
         if(ptrs&1) {

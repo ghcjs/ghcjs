@@ -138,7 +138,7 @@ stackApply n v mfixed = [j| `decl func`;
     func = StrI funcName
     body = [j| do {
                  var c = `Heap`[`R1`];
-                 `traceRts $ funcName |+ " " |+ (c|."n") |+ " sp: " |+ Sp`;
+                 `traceRts $ funcName |+ " " |+ (c|."n") |+ " sp: " |+ Sp |+ " a: " |+ (c|."a")`;
                  switch(c.t) {
                    case `Thunk`:
                      `traceRts $ funcName |+ ": thunk"`;
@@ -159,7 +159,7 @@ stackApply n v mfixed = [j| `decl func`;
                } while(true);
            |]
 
-    funExact c = popSkip (1+offset) (take n (map toJExpr $ enumFrom R2))
+    funExact c = popSkip (1+offset) (reverse $ take n (map toJExpr $ enumFrom R2))
     stackArgs = map (\x -> [je| `Stack`[`Sp`-`x+offset`] |]) [1..n]
 
     overSat :: JExpr -> JExpr -> JStat
@@ -188,18 +188,18 @@ stackApply n v mfixed = [j| `decl func`;
 
           oversatCase' :: Int -> (JExpr, JStat)
           oversatCase' m | oFixed    = (toJExpr m, [j| `loadArgs`;
-                                                      `adjSpN $ frameSize + m + 1`;
+                                                      `adjSpN $ n-m`;
                                                       `Stack`[`Sp`] = `jsv oFun`;
                                                       return `c`;
                                                     |])
                         | otherwise = (toJExpr m, [j| `loadArgs`;
-                                                      `adjSpN $ frameSize + m + 2`;
+                                                      `adjSpN $ n-m`;
                                                       `Stack`[`Sp` - 1] = `newTag m`;
                                                       `Stack`[`Sp`] = `jsv oFun`;
                                                       return `c`;
                                                     |])
                where
-                 loadArgs = loadSkip 1 (take (n-m) (map toJExpr $ enumFrom R2))
+                 loadArgs = loadSkip 1 (reverse $ take (n-m) (map toJExpr $ enumFrom R2))
                  (oFun, oFixed) = oversatFun m
 
     papCase :: JExpr -> JStat
@@ -234,7 +234,7 @@ stackApply n v mfixed = [j| `decl func`;
                                        `traceRts "exact1"`;
                                        `funExact c`;
                                        return `c`;
-                                     } else if(`v` < voidArgs) { // oversat
+                                     } else if(`v` > voidArgs) { // oversat
                                        `traceRts "oversat"`;
                                        `funExact c`;
                                        for(var i=voidArgs;i<`v`;i++) {
@@ -250,7 +250,7 @@ stackApply n v mfixed = [j| `decl func`;
                                        return `Stack`[`Sp`];
                                      }
                                    |]
-                     funOver m = snd $ oversatCase c m
+                     funOver m = snd $ oversatCase c (n-m)
                      funUnder  = withIdent $ \pap -> [j|
                                      `traceRts $ "undersat (" |+ funArity c |+ ")"`;
                                      var arity = `funArity c`;
@@ -319,7 +319,7 @@ fastApply n v mspec = [j| `decl func`;
                                  [j| var vexp = `c`.a >> 8;
                                      if(`v` == vexp) {        // exactly right
                                        return `c`;
-                                     } else if(`v` < vexp) {  // oversat, push v apply
+                                     } else if(`v` > vexp) {  // oversat, push v apply
                                        `adjSp 1`;
                                        `Stack`[`Sp`] = stg_ap_v; // fixme only one v supported
                                        return `c`;
@@ -392,22 +392,23 @@ zeroApply = [j| fun stg_ap_0_fast { `preamble`; `enter`; }
                 fun stg_ap_0 { `preamble`; `adjSpN 1`; `enter`; }
                 `ClosureInfo (iex (StrI "stg_ap_0")) [R1] "stg_ap_0" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
-                fun stg_ap_v x { `preamble`; `adjSpN 1`; return `Heap`[`R1`]; }
+                fun stg_ap_v x {
+                  `preamble`;
+                  var c = `Heap`[`R1`];
+                  `traceRts $ "stg_ap_v: " |+ (c|."n") |+ " :a " |+ (c|."a") |+ " (" |+ (clTypeName c) |+ ")"`;
+                  if(c.t === `Thunk`) {
+                    return c;
+                  } else {
+                    `adjSpN 1`;
+                    return c;
+                  }
+                }
                 `ClosureInfo (iex (StrI "stg_ap_v")) [R1] "stg_ap_v" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
                 var !stg_ap_0_v_fast = stg_ap_v_fast;
                 var !stg_ap_0_v = stg_ap_v;
 
               |]
-{-
-                `setObjInfo (jsv "stg_ap_v") $
-                   "t"   .= Fun <>
-                   "a"   .= ji 0 <>
-                   "i"   .= [ji 1, jstr "stg_ap_v"] <>
-                   gcInfo 1 [] <>
-                   "gai" .= [ji 1]
-                `;
-              |]
--}
+
 -- carefully enter a closure that might be a thunk or a function
 enter :: JStat
 enter = [j| var c = `Heap`[`R1`]; `enter' c`; |]

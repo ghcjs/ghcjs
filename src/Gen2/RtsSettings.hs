@@ -37,7 +37,7 @@ rtsTraceCalls = rtsDebug -- False -- True
 
 -- print top stack frame before each call
 rtsTraceStack :: Bool
-rtsTraceStack = False -- True
+rtsTraceStack = rtsDebug -- False -- True
 
 ------------------------------------------------------------------------------
 -- end of settings

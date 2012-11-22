@@ -57,6 +57,7 @@ data VarType = PtrV     -- pointer = heap index, one field (gc follows this)
              | AddrV    -- a pointer not to the heap: two fields, array + index
              | ObjV     -- some js object, does not contain heap pointers
              | JSArrV   -- array of followable values
+--             | UbxTupV [VarType]
                deriving (Eq, Ord, Show, Enum, Bounded)
 
 varSize :: VarType -> Int
@@ -64,6 +65,9 @@ varSize VoidV = 0
 varSize LongV = 2 -- hi, low
 varSize AddrV = 2 -- obj/array, offset
 varSize _     = 1
+
+typeSize :: Type -> Int
+typeSize = sum . map varSize . typeVt
 
 isVoid :: VarType -> Bool
 isVoid VoidV = True
@@ -85,60 +89,58 @@ isMatchable DoubleV = True
 isMatchable IntV    = True
 isMatchable _       = False
 
-{- fixme don't use this, this loses information
-vtFromCgr :: CgRep -> VarType
-vtFromCgr VoidArg   = VoidV
-vtFromCgr PtrArg    = PtrV
-vtFromCgr NonPtrArg = ArrV
-vtFromCgr LongArg   = LongV
-vtFromCgr FloatArg  = DoubleV
-vtFromCgr DoubleArg = DoubleV
--}
-
 -- go through PrimRep, not CgRep to make Int -> IntV instead of LongV
 tyConVt :: TyCon -> VarType
 tyConVt = primRepVt . tyConPrimRep
 
-typeVt :: Type -> VarType
-typeVt t
-  | isPrimitiveType t = primTypeVt t
-  | otherwise         = primRepVt . typePrimRep $ t
+typeVt :: Type -> [VarType]
+typeVt t = case repType t of
+             UbxTupleRep uts   -> concatMap typeVt uts
+             UnaryRep ut       -> [uTypeVt ut]
+
+-- only use if you know it's not an unboxed tuple
+uTypeVt :: UnaryType -> VarType
+uTypeVt ut
+  | isPrimitiveType ut = primTypeVt ut
+  | otherwise          = primRepVt . typePrimRep $ ut
 
 primTypeVt :: Type -> VarType
 primTypeVt t
-  | st == "GHC.Prim.Addr#" = AddrV
-  | st == "GHC.Prim.Int#"  = IntV
-  | st == "GHC.Prim.Char#" = IntV
-  | st == "GHC.Prim.Word#" = IntV
-  | st == "GHC.Prim.Double#" = DoubleV
-  | st == "GHC.Prim.Float#" = DoubleV
+  | st  == "GHC.Prim.Addr#" = AddrV
+  | st  == "GHC.Prim.Int#"  = IntV
+  | st  == "GHC.Prim.Int64#" = LongV
+  | st  == "GHC.Prim.Char#" = IntV
+  | st  == "GHC.Prim.Word#" = IntV
+  | st  == "GHC.Prim.Word64#" = LongV
+  | st  == "GHC.Prim.Double#" = DoubleV
+  | st  == "GHC.Prim.Float#" = DoubleV
   | st' == "GHC.Prim.Array#" = JSArrV
   | st' == "GHC.Prim.MutableArray#" = JSArrV
-  | st == "GHC.Prim.ByteArray#" = ObjV
+  | st  == "GHC.Prim.ByteArray#" = ObjV
   | st' == "GHC.Prim.MutableByteArray#" = ObjV
-  | st == "GHC.Prim.ArrayArray#" = JSArrV
+  | st  == "GHC.Prim.ArrayArray#" = JSArrV
   | st' == "GHC.Prim.MutableArrayArray#" = JSArrV
   | st' == "GHC.Prim.MutVar#" = JSArrV -- one scannable thing
   | st' == "GHC.Prim.TVar#" = JSArrV -- one scannable thing, can be null
   | st' == "GHC.Prim.MVar#" = JSArrV -- one scannable thing, can be null
   | st' == "GHC.Prim.State#" = VoidV
-  | st == "GHC.Prim.RealWorld" = VoidV
-  | st == "GHC.Prim.ThreadId#" = IntV
+  | st  == "GHC.Prim.RealWorld" = VoidV
+  | st  == "GHC.Prim.ThreadId#" = IntV
   | st' == "GHC.Prim.Weak#" = JSArrV
   | st' == "GHC.Prim.StablePtr#" = JSArrV
   | st' == "GHC.Prim.StableName#" = JSArrV
   | st' == "GHC.Prim.MutVar#" = JSArrV
-  | st == "GHC.Prim.BCO#" = ObjV -- fixme what do we need here?
+  | st  == "GHC.Prim.BCO#" = ObjV -- fixme what do we need here?
   | st' == "(GHC.Prim.~#)" = ObjV -- ???
   | st' == "GHC.Prim.Any" = PtrV
-  | st == "Data.Dynamic.Obj" = PtrV -- ?
+  | st  == "Data.Dynamic.Obj" = PtrV -- ?
   | otherwise = panic ("unrecognized primitive type: " ++ st)
    where
     st = showPpr' t
     st' = trim $ takeWhile (/=' ') st
 
 argVt :: StgArg -> VarType
-argVt = typeVt . stgArgType
+argVt = uTypeVt . stgArgType
 
 primRepVt :: PrimRep -> VarType
 primRepVt VoidRep   = VoidV
@@ -584,7 +586,7 @@ genIds i
   | otherwise = map (jsIdN i) [1..s]
   where
     s  = varSize vt
-    vt = typeVt . idType $ i
+    vt = uTypeVt . idType $ i
 
 -- | get all idents for an id
 genIdsI :: Id -> [Ident]
@@ -592,7 +594,7 @@ genIdsI i
   | s == 1    = [jsIdI i]
   | otherwise = map (jsIdIN i) [1..s]
         where
-          s = varSize . typeVt . idType $ i
+          s = varSize . uTypeVt . idType $ i
 
 -- | declare all js vars for the id
 declIds :: Id -> JStat
@@ -602,4 +604,4 @@ declIds  i
   | otherwise = mconcat $ map (\n -> decl (jsIdIN i n)) [1..s]
   where
     s  = varSize vt
-    vt = typeVt . idType $ i
+    vt = uTypeVt . idType $ i

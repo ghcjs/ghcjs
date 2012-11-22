@@ -179,7 +179,7 @@ genPrim Float2DoubleOp    [r] [x]   = PrimInline [j| `r` = `x` |]
 -- genPrim FloatDecode_IntOp
 
 genPrim NewArrayOp          [r] [l,e]   =
-  PrimInline [j| `newArray l r`;
+  PrimInline [j| `newArray r l`;
                  for(var i=`l` - 1; i>=0;i--) {
                    `r`[i] = `e`;
                  }
@@ -200,7 +200,7 @@ genPrim CopyArrayOp         [] [a,o1,ma,o2,n] =
                |]
 genPrim CopyMutableArrayOp  [] [a1,o1,a2,o2,n] = genPrim CopyArrayOp [] [a1,o1,a2,o2,n]
 genPrim CloneArrayOp        [r] [a,start,n] =
-  PrimInline [j| `newArray n r`;
+  PrimInline [j| `newArray r n`;
                  for(var i=`n` - 1; i >= 0; i--) {
                    `r`[i] = `a`[i+`start`];
                  }
@@ -280,7 +280,7 @@ genPrim WriteByteArrayOp_Int64 [] [a,i,e1,e2] =
                  `a`.setInt32(`i`<<3+4, `e2`);
                |]
 genPrim WriteByteArrayOp_Word8 [] [a,i,e]     = PrimInline [j| `a`.setUint8(`i`, `e`); |]
-genPrim WriteByteArrayOp_Word16 [] [a,i,e]     = PrimInline [j| `a`.setUint32(`i`<<1, `e`); |]
+genPrim WriteByteArrayOp_Word16 [] [a,i,e]     = PrimInline [j| `a`.setUint16(`i`<<1, `e`); |]
 genPrim WriteByteArrayOp_Word32 [] [a,i,e]     = PrimInline [j| `a`.setUint32(`i`<<2, `e`); |]
 genPrim WriteByteArrayOp_Word64 [] [a,i,e1,e2] =
   PrimInline [j| `a`.setUint32(`i`<<3, `e1`);
@@ -404,14 +404,15 @@ genPrim SameMutVarOp      [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0
 -- actual exception handling: push catch handling stack frame
 -- [stg_catch, handler]
 -- raise: unwind stack until first stg_catch
-genPrim CatchOp [r] [a,handler] = PrimInline
+genPrim CatchOp [r] [a,handler] = PRPrimCall
   [j| `adjSp 2`;
-      `Stack`[`Sp`-1] = `handler`;
+      `Stack`[`Sp` - 1] = `handler`;
       `Stack`[`Sp`]   = stg_catch;
-      `r` = `a`;
+      `R1` = `a`;
+      return stg_ap_v_fast();
     |]
-genPrim RaiseOp         [b] [a] = PrimInline [j| return stg_throw(`a`); |]
-genPrim RaiseIOOp       [b] [a] = PrimInline [j| return stg_throw(`a`); |]
+genPrim RaiseOp         [b] [a] = PRPrimCall [j| return stg_throw(`a`); |]
+genPrim RaiseIOOp       [b] [a] = PRPrimCall [j| return stg_throw(`a`); |]
 
 genPrim MaskAsyncExceptionsOp [r] [a] = PrimInline [j| `r` = `a`; |] -- fixme
 -- MaskUninterruptibleOp
