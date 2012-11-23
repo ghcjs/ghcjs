@@ -21,6 +21,7 @@ import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
 
+import Data.Char (isDigit)
 import qualified Data.Foldable            as F
 import           Data.Serialize
 import           Data.Text                (Text)
@@ -35,6 +36,8 @@ import           Module                   (ModuleName, moduleNameString)
 
 import           Gen2.StgAst
 import           Gen2.Rts (rtsStr)
+import Gen2.Shim
+import Compiler.Info
 
 startMarker :: Text
 startMarker = "// GHCJS_BLOCK_START<"
@@ -51,10 +54,11 @@ link out searchPath objFiles pageModules = do
   metas <- mapM (readDeps . metaFile) objFiles
   let roots = filter ((`elem` mods) . depsModule) metas
   T.putStrLn ("linking: " <> T.intercalate ", " (map depsModule roots))
-  src <- collectDeps (lookup metas) (S.fromList $ concatMap modFuns roots)
+  (allDeps, src) <- collectDeps (lookup metas) (S.fromList $ concatMap modFuns roots)
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (BL.fromChunks src)
   writeFile (out </> "rts.js") rtsStr
+  getShims allDeps (out </> "lib.js")
   return []
   where
     mods = map (T.pack . moduleNameString) pageModules
@@ -66,12 +70,22 @@ link out searchPath objFiles pageModules = do
     -- | lookup fun in known packages first, then object files specified on command
     --   line, otherwise files in the current dir
     lookup metas ext fun
-      | Just path <- M.lookup (funPackage fun) pkgLookup = return (path </> modPath)
-      | Just path <- M.lookup (funPackage fun) pkgLookupNoVer = return (path </> modPath)
+      | Just path <- M.lookup (funPkgTxt      fun) pkgLookup = return (path </> modPath)
+      | Just path <- M.lookup (funPkgTxtNoVer fun) pkgLookupNoVer = return (path </> modPath)
       | otherwise = return $ maybe ("." </> modPath) (<.> ext)
                              (M.lookup (funModule fun) (localLookup metas))
       where
         modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> "gen2" <.> ext
+
+getShims :: Set Fun -> FilePath -> IO ()
+getShims deps file = do
+  base <- (</> "shims") <$> getGlobalPackageBase
+  t <- collectShims base pkgDeps
+  T.writeFile file t
+    where
+      pkgDeps = map (\(Package n v) -> (n, fromMaybe [] $ parseVersion v))
+                  (S.toList $ S.map funPackage deps)
+
 
 -- get the ji file for a js file
 metaFile :: FilePath -> FilePath
@@ -81,15 +95,20 @@ metaFile = (<.> "ji") . dropExtension
 -- fixme this is probably a bit wrong but should only be necessary
 -- for wired-in packages base, ghc-prim, integer-gmp, main, rts
 dropVersion :: Text -> Text
-dropVersion t
-  | T.null rdrop = t
-  | otherwise    = T.reverse (T.tail rdrop )
+dropVersion = fst . splitVersion
+
+splitVersion :: Text -> (Text, Text)
+splitVersion t
+  | T.null ver || T.any (`notElem` "1234567890.") ver 
+      = (t, mempty)
+  | T.null name = (mempty, mempty)
+  | otherwise   = (T.reverse (T.tail name), T.reverse ver)
   where
-    rdrop = T.dropWhile (/='-') (T.reverse t)
+    (ver, name) = T.break (=='-') (T.reverse t)
 
 
 -- | dependencies for a single module
-data Deps = Deps { depsPackage :: !Text
+data Deps = Deps { depsPackage :: !Package
                  , depsModule  :: !Text
                  , depsDeps    :: Map Text (Set Fun)
                  }
@@ -98,27 +117,35 @@ data Deps = Deps { depsPackage :: !Text
 modFuns :: Deps -> [Fun]
 modFuns (Deps p m d) = map (Fun p m . fst) (M.toList d)
 
-data Fun = Fun { funPackage :: !Text
+data Package = Package { packageName :: !Text
+                       , packageVersion :: !Text
+                       } deriving (Eq, Ord, Show)
+
+instance Serialize Package where
+  get = Package <$> getText <*> getText
+  put (Package n v) = mapM_ putText [n,v]
+
+data Fun = Fun { funPackage :: !Package
                , funModule  :: !Text
                , funSymbol  :: !Text
                } deriving (Eq, Ord, Show)
 
 instance Serialize Deps where
-  get = Deps <$> getText
+  get = Deps <$> get
              <*> getText
              <*> getMapOf getText (getSetOf get)
-  put (Deps p m d) = putText p >> putText m >> putMapOf putText (putSetOf put) d
+  put (Deps p m d) = put p >> putText m >> putMapOf putText (putSetOf put) d
 
 
 instance Serialize Fun where
-  get             = Fun <$> getText <*> getText <*> getText
-  put (Fun p m s) = mapM_ putText [p,m,s]
+  get             = Fun <$> get <*> getText <*> getText
+  put (Fun p m s) = put p >> mapM_ putText [m,s]
 
 -- | get all dependencies for a given set of roots
 getDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun)
 getDeps lookup fun = go S.empty M.empty (S.toList fun)
   where
-    go :: Set Fun -> Map (Text,Text) Deps -> [Fun] -> IO (Set Fun)
+    go :: Set Fun -> Map (Package,Text) Deps -> [Fun] -> IO (Set Fun)
     go result _    []         = return result
     go result deps ffs@(f:fs) =
       let key = (funPackage f, funModule f)
@@ -129,20 +156,20 @@ getDeps lookup fun = go S.empty M.empty (S.toList fun)
                                            (maybe [] S.toList $ M.lookup (funSymbol f) d)
                               in  go (S.insert f result) deps (ds++fs)
 
-
 -- | get all modules used by the roots and deps
-getDepsSources :: (String -> Fun -> IO FilePath) -> Set Fun -> IO [(FilePath, Set Fun)]
+getDepsSources :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun, [(FilePath, Set Fun)])
 getDepsSources lookup funs = do
   allDeps <- getDeps lookup funs
   allPaths <- mapM (\x -> (,S.singleton x) <$> lookup "js" x) (S.toList allDeps)
-  return $ M.toList (M.fromListWith S.union allPaths)
+  return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
 
 -- | collect source snippets
-collectDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO [ByteString]
+collectDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun, [ByteString])
 collectDeps lookup roots = do
-  srcs <- getDepsSources lookup roots
-  mapM (uncurry extractDeps) srcs
-
+  (allDeps, srcs) <- getDepsSources lookup roots
+  srcs' <- mapM (uncurry extractDeps) srcs
+  return (allDeps, srcs')
+  
 extractDeps :: FilePath -> Set Fun -> IO ByteString
 extractDeps file funs = do
   blocks <- collectBlocks <$> T.readFile file
@@ -195,9 +222,23 @@ readDeps file = do
 
 dumpDeps :: Deps -> String
 dumpDeps (Deps p m d) = T.unpack $
-  "package: " <> p <> "\n" <>
+  "package: " <> showPkg p <> "\n" <>
   "module: " <> m <> "\n" <>
   "deps:\n" <> T.unlines (map (uncurry dumpDep) (M.toList d))
   where
     dumpDep s ds = s <> " -> \n" <>
-      F.foldMap (\(Fun fp fm fs) -> "   " <> fp <> ":" <> fm <> "." <> fs <> "\n") ds
+      F.foldMap (\(Fun fp fm fs) -> "   " 
+        <> showPkg fp <> ":" <> fm <> "." <> fs <> "\n") ds
+
+showPkg :: Package -> Text
+showPkg (Package name ver)
+  | T.null ver = name
+  | otherwise  = name <> "-" <> ver
+
+-- Fun -> packagename-packagever
+funPkgTxt :: Fun -> Text
+funPkgTxt = showPkg . funPackage
+
+-- Fun -> packagename
+funPkgTxtNoVer :: Fun -> Text
+funPkgTxtNoVer = packageName . funPackage

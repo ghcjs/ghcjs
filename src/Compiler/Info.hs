@@ -1,19 +1,19 @@
 module Compiler.Info where
 
-import Data.Version as Version
-import Paths_ghcjs
+import           Data.Version     as Version
+import           Paths_ghcjs
 
-import System.Directory (getAppUserDataDirectory)
-import System.Info
+import           System.Directory (getAppUserDataDirectory)
+import           System.Info
 
-import System.FilePath ((</>))
-import Data.Function (on)
-import Data.List (nubBy)
+import           Data.Function    (on)
+import           Data.List        (nubBy)
+import           System.FilePath  ((</>))
 
+import           Config           (cProjectVersion)
+import           DynFlags         (compilerInfo)
+import           GHC
 import qualified GHC.Paths
-import GHC
-import Config (cProjectVersion)
-import DynFlags (compilerInfo)
 
 getCompilerInfo = do
       glbDb <- getGlobalPackageDB

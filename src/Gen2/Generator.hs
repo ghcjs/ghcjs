@@ -140,8 +140,7 @@ pass1 :: StgPgm
 pass1 ss = map generateBlock ss
   where
     generateBlock d@(decl,deps) =
-      let ids = map fst deps 
-           -- fixme snd deps doesn't list all deps, is this the right way?
+      let ids = map fst deps
           allDeps = L.nub $ concatMap snd deps ++ collectGlobalIds decl
       in  (genToplevel d, ids, allDeps)
 
@@ -154,7 +153,7 @@ collectGlobalIds b = filter acceptId $ S.toList (bindingRefs b)
     isForbidden i
       | Just m <- nameModule_maybe (getName i) =
                     moduleNameText m    == T.pack "GHC.Prim" &&
-                    modulePackageText m == T.pack "ghc-prim"
+                    Linker.packageName (modulePackageText m) == T.pack "ghc-prim"
       | otherwise = False
 
 -- | pass2 combines and saturates the AST and runs the transformations
@@ -180,8 +179,10 @@ genMetaData m p1 = Linker.Deps (modulePackageText m) (moduleNameText m)
 moduleNameText :: Module -> Text
 moduleNameText = T.pack . moduleNameString . moduleName
 
-modulePackageText :: Module -> Text
-modulePackageText = T.pack . packageIdString . modulePackageId
+modulePackageText :: Module -> Linker.Package
+modulePackageText m = Linker.Package n v
+  where
+    (n,v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
 
 
 genToplevel :: (StgBinding, [(Id, [Id])]) -> JStat
