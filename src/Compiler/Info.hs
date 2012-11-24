@@ -12,8 +12,8 @@ import           System.FilePath  ((</>))
 
 import           Config           (cProjectVersion)
 import           DynFlags         (compilerInfo)
-import           GHC
 #ifndef GHCJS_INTEGRATED
+import           GHC
 import qualified GHC.Paths
 import           Paths_ghcjs
 #endif
