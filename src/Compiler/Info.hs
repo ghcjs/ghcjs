@@ -1,7 +1,7 @@
+{-# LANGUAGE CPP #-}
 module Compiler.Info where
 
 import           Data.Version     as Version
-import           Paths_ghcjs
 
 import           System.Directory (getAppUserDataDirectory)
 import           System.Info
@@ -13,8 +13,12 @@ import           System.FilePath  ((</>))
 import           Config           (cProjectVersion)
 import           DynFlags         (compilerInfo)
 import           GHC
+#ifndef GHCJS_INTEGRATED
 import qualified GHC.Paths
+import           Paths_ghcjs
+#endif
 
+#ifndef GHCJS_INTEGRATED
 getCompilerInfo = do
       glbDb <- getGlobalPackageDB
       df <- runGhc (Just GHC.Paths.libdir) getSessionDynFlags
@@ -23,6 +27,7 @@ getCompilerInfo = do
            , ("Global Package DB", glbDb)
            , ("Project version", getCompilerVersion)
            ] ++ compilerInfo df
+#endif
 
 getGlobalPackageBase = do
   appdir <- getAppUserDataDirectory "ghcjs"
@@ -43,6 +48,7 @@ getGlobalCache = fmap (</> "cache") getGlobalPackageBase
 -- Just the GHC version
 getGhcCompilerVersion = cProjectVersion
 
+#ifndef GHCJS_INTEGRATED
 -- Just the GHCJS version
 getGhcjsCompilerVersion = Version.showVersion version
 
@@ -50,4 +56,9 @@ getGhcjsCompilerVersion = Version.showVersion version
 getCompilerVersion = cProjectVersion ++ "-" ++ Version.showVersion version
 
 getCompilerSubdir = "ghcjs-" ++ getCompilerVersion
+#else
+
+getCompilerVersion = cProjectVersion ++ "-0"
+
+#endif
 
