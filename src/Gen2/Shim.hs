@@ -84,24 +84,26 @@ collectShims :: FilePath          -- ^ the base path
              -> [(Text, Version)] -- ^ packages being linked
              -> IO Text           -- ^ collected shims
 collectShims base pkgs = do
-  putStrLn "collecting shims for:"
-  print pkgs
-  files <- S.unions <$> mapM (collectShim base) pkgs
-  files' <- mapM (canonicalizePath . (base </>)) (S.toList files)
-  T.unlines <$> mapM tryReadFile (map head . L.group . L.sort $ files')
+  files <- mapM (collectShim base) pkgs
+  files' <- mapM (canonicalizePath . (base </>)) (concat files)
+  T.unlines <$> mapM tryReadFile (uniq files')
+    where
+      uniq xs = let go (x:xs) s
+                      | x `S.notMember` s = x : go xs (S.insert x s)
+                      | otherwise         = go xs s
+                    go [] _ = []
+                in go xs mempty
 
 tryReadFile :: FilePath -> IO Text
 tryReadFile file = T.readFile file `catch` \(_::SomeException) -> do
                      putStrLn ("warning: could not read file: " <> file)
                      return mempty
 
-collectShim :: FilePath -> (Pkg, Version) -> IO (Set FilePath)
+collectShim :: FilePath -> (Pkg, Version) -> IO [FilePath]
 collectShim base (pkgName, pkgVer) = do
   let configFile = base </> T.unpack pkgName <.> "yaml"
-  putStrLn ("config file: " ++ configFile)
   e <- doesFileExist configFile
   if e then do
-         putStrLn "it exists!"
          cfg <- B.readFile  configFile
          case Yaml.decodeEither cfg of
            Left err -> do
@@ -110,11 +112,10 @@ collectShim base (pkgName, pkgVer) = do
            Right shim -> return (foldShim pkgName pkgVer shim)
        else return mempty
 
-foldShim :: Pkg -> Version -> Shim -> Set FilePath
+foldShim :: Pkg -> Version -> Shim -> [FilePath]
 foldShim pkg ver sh
-  | inRange ver sh = S.unions $ S.fromList (dependencies sh) : 
-                       map (foldShim pkg ver) (subs sh)
-  | otherwise = S.empty
+  | inRange ver sh = dependencies sh ++ concatMap (foldShim pkg ver) (subs sh)
+  | otherwise      = []
 
 parseVersion :: Text -> Maybe Version
 parseVersion tv = either (const Nothing) Just $ parse version "" (T.strip tv)
