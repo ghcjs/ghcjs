@@ -199,25 +199,33 @@ var !$hs_GHCziTypesziFalse = 0;
 heap[1] = true_e;
 var !$hs_GHCziTypesziTrue = 1;
 
-fun stg_catch {
+fun stg_catch a handler {
+  `preamble`;
+  `adjSp 2`;
+  `Stack`[`Sp` - 1] = handler;
+  `Stack`[`Sp`] = stg_catch_e;
+  `R1` = a;
+  return stg_ap_v_fast();
+}
+
+fun stg_catch_e {
   `preamble`;
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "stg_catch") [] "exception handler" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo (jsv "stg_catch_e") [] "exception handler" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
 
 
 // throw an exception: walk the thread's stack until you find a handler
 fun stg_throw e {
   while(sp > 0) {
     var f = stack[sp];
-    if(f === stg_catch) break;
+    if(f === stg_catch_e) break;
     var size = f.gtag & 0xff;
     sp = sp - size;
   }
-  if(`sp` > 0) {
-    log("### catching exception at frame: " + `sp` + ": " + heap[e].n);
-    var handler = `sp` - 1;
+  if(sp > 0) {
+    var handler = stack[sp - 1];
     `R1` = handler;
     `R2` = e;
     `adjSpN 2`;

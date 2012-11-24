@@ -367,13 +367,13 @@ fastApply n v mspec = [j| `decl func`;
                         |])
 
       body = [j|
-                 var c = `Heap`[`R1`];
                  do {
+                   var c = `Heap`[`R1`];
                    if(c.t === `Fun`) {
                        `traceRts $ (funName ++ ": ") |+ clName c |+ " (arity: " |+ (c |. "a") |+ ")"`;
                        `fastSwitch c`;
                    } else if(c.t === `Ind`) {
-                       `traceRts $ funName ++ ": following ind"`;
+                       `traceRts $ funName ++ ": following ind: " |+ R1`;
                        `R1` = `Heap`[`R1`+1];
                        continue;
                    } else {

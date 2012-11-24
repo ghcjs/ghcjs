@@ -376,7 +376,7 @@ genPrim ReadOffAddrOp_Word64 [c1,c2] [a,o,i] =
 -- genPrim WriteOffAddrOp_Char [] [a,o,i,v]     = PrimInline [j| `a`.set
 -- WriteOffAddrOp_WideChar
 genPrim WriteOffAddrOp_Int [] [a,o,i,v]     = PrimInline [j| `a`.setInt32(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Word [] [a,o,i,v]    = PrimInline [j| `a`.setUInt32(`o`+`i`, `v`); |]
+genPrim WriteOffAddrOp_Word [] [a,o,i,v]    = PrimInline [j| `a`.setUint32(`o`+`i`, `v`); |]
 -- WriteOffAddrOp_Addr -- fixme what to do here? write an addr? need to fake this
 genPrim WriteOffAddrOp_Float [] [a,o,i,v]   = PrimInline [j| `a`.setFloat32(`o`+`i`, `v`); |]
 genPrim WriteOffAddrOp_Double [] [a,o,i,v]  = PrimInline [j| `a`.setFloat64(`o`+`i`,`v`); |]
@@ -387,11 +387,11 @@ genPrim WriteOffAddrOp_Int32 [] [a,o,i,v]   = PrimInline [j| `a`.setInt32(`o`+`i
 genPrim WriteOffAddrOp_Int64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.setInt32(`o`+`i`, `v1`);
                                                                `a`.setInt32(`o`+`i`+4, `v2`);
                                                              |]
-genPrim WriteOffAddrOp_Word8 [] [a,o,i,v]   = PrimInline [j| `a`.setUInt8(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Word16 [] [a,o,i,v]  = PrimInline [j| `a`.setUInt16(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Word32 [] [a,o,i,v]  = PrimInline [j| `a`.setUInt32(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Word64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.setUInt32(`o`+`i`, `v1`);
-                                                                 `a`.setUInt32(`o`+`i`+4, `v2`);
+genPrim WriteOffAddrOp_Word8 [] [a,o,i,v]   = PrimInline [j| `a`.setUint8(`o`+`i`, `v`); |]
+genPrim WriteOffAddrOp_Word16 [] [a,o,i,v]  = PrimInline [j| `a`.setUint16(`o`+`i`, `v`); |]
+genPrim WriteOffAddrOp_Word32 [] [a,o,i,v]  = PrimInline [j| `a`.setUint32(`o`+`i`, `v`); |]
+genPrim WriteOffAddrOp_Word64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.setUint32(`o`+`i`, `v1`);
+                                                                 `a`.setUint32(`o`+`i`+4, `v2`);
                                                                |]
 -- fixme add GC writebars
 genPrim NewMutVarOp       [r] [x]   = PrimInline [j| `r` = [`x`];  |]
@@ -405,12 +405,7 @@ genPrim SameMutVarOp      [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0
 -- [stg_catch, handler]
 -- raise: unwind stack until first stg_catch
 genPrim CatchOp [r] [a,handler] = PRPrimCall
-  [j| `adjSp 2`;
-      `Stack`[`Sp` - 1] = `handler`;
-      `Stack`[`Sp`]   = stg_catch;
-      `R1` = `a`;
-      return stg_ap_v_fast();
-    |]
+  [j| return stg_catch(`a`, `handler`); |]
 genPrim RaiseOp         [b] [a] = PRPrimCall [j| return stg_throw(`a`); |]
 genPrim RaiseIOOp       [b] [a] = PRPrimCall [j| return stg_throw(`a`); |]
 
