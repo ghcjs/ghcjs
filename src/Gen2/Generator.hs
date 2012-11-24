@@ -305,6 +305,7 @@ genApp force mstackTop i a
           = r1 <> [j| return `Stack`[`Sp`]; |]
     | n == 0 && isBoolTy (idType i) -- simple bool tagging: remove one indirection
           = r1 <> [j| if(`R1` < 2) { return `Stack`[`Sp`]; } else { return `Heap`[`R1`]; } |]
+
     | idArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) -- (not hasFree || not (isLocalId i))
           =  [j| var x = `Heap`[`jsId i`];
                  var t = x.t;

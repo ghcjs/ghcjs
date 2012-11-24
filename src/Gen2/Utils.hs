@@ -59,7 +59,7 @@ insertAt _ _ _ = error "insertAt"
 
 -- hack for missing unary negation in jmacro
 jneg :: JExpr -> JExpr
-jneg e = PPostExpr False "-" e
+jneg e = PPostExpr True "-" e
 
 jnull :: JExpr
 jnull = ValExpr (JVar $ StrI "null")

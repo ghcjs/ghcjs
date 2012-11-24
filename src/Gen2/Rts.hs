@@ -154,6 +154,7 @@ var !initStatic = [];           // we need delayed initialization for static obj
                                 // to be initialized just before haskell runs
 
 var !sp  = 0;                   // stack pointer
+var !mask = 0;                  // mask async exceptions
 
 // gc tuning
 var !staticFree = 2000;         // when garbage collecting, try to keep this many free indices for static

@@ -54,10 +54,12 @@ genPrim IntAddOp          [r] [x,y] = PrimInline [j| `r` = `x` + `y` |]
 genPrim IntSubOp          [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
 genPrim IntMulOp          [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]
 genPrim IntMulMayOfloOp   [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]  -- fixme loss of precision
-genPrim IntQuotOp         [r] [x,y] = PrimInline [j| `r` = (`x`/`y`)|0 |] -- fixme |0
+genPrim IntQuotOp         [r] [x,y] = PrimInline [j| `r` = (`x`/`y`)|0; |]
 genPrim IntRemOp          [r] [x,y] = PrimInline [j| `r` = `x` % `y` |]
--- genPrim IntQuotRemOp  [r1,r2] [x,y] = PrimInline [j| `r1` = (`x`/`y`); `r` = (`x`%`y`); |]
-genPrim IntNegOp          [r] [x]   = PrimInline [j| `r` = 0 - `x` |] -- fixme?
+genPrim IntQuotRemOp    [q,r] [x,y] = PrimInline [j| `q` = (`x`/`y`)|0;
+                                                     `r` = `x`-`y`*`q`;
+                                                   |]
+genPrim IntNegOp          [r] [x]   = PrimInline [j| `r` = `jneg x`; |]
 genPrim IntAddCOp         [r] [x,c] = PrimInline [j| `r` = `x`+`c` |]
 genPrim IntSubCOp         [r] [x,c] = PrimInline [j| `r` = `x`-`c` |]
 genPrim IntGtOp           [r] [x,y] = PrimInline [j| `r` = (`x` > `y`)|0 |]
@@ -73,15 +75,42 @@ genPrim Int2DoubleOp      [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim ISllOp            [r] [x,y] = PrimInline [j| `r` = `x` << `y` |]
 genPrim ISraOp            [r] [x,y] = PrimInline [j| `r` = `x` >> `y` |]  -- fixme check: arith shift r
 genPrim ISrlOp            [r] [x,y] = PrimInline [j| `r` = `x` >>> `y` |] -- fixme check: logical shift r
-genPrim WordAddOp         [r] [x,y] = PrimInline [j| `r` = `x` + `y` |]
--- genPrim WordAdd2Op          [x,y] = PrimInline [je| `x`+2 |] -- ?
+genPrim WordAddOp         [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0; |]
+genPrim WordAdd2Op      [h,l] [x,y] = PrimInline [j| `l` = (`x` + `y`)|0;
+                                                     `h` = (`x` >>> 32) + (`y` >>> 32);
+                                                   |]
 genPrim WordSubOp         [r] [x,y] = PrimInline [j| `r` = `x` - `y` |]
-genPrim WordMulOp         [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]
---genPrim WordMul2Op          [x]   = PrimInline [je| `x` * 2 |]
--- genPrim WordQuotOp          [x,y] = PrimInline [je| (`x`/`y`)|0 |]
+genPrim WordMulOp         [r] [x,y] =
+  PrimInline [j| if(`x` < `two_24` && `y` < `two_24`) {
+                   `r` = `x`*`y`;
+                 } else {
+                   var xs = `x` >>> 16;
+                   var ys = `y` >>> 16;
+                   var xl = `x` & 0xFFFF;
+                   var yl = `y` & 0xFFFF;
+                   `r` = (xl*xl) + (((xs * yl) << 16)|0) + (((ys * xl) << 16)|0);
+                 }
+               |]
+genPrim WordMul2Op      [h,l] [x,y] =
+  PrimInline [j| if(x0 < `two_24` && y0 < `two_24`) {
+                   `h` = 0;
+                   `l` = x0*y0;
+                 } else {
+                    var xs  = `x` >>> 16;
+                    var ys  = `y` >>> 16;
+                    var xl  = `x` & 0xFFFF;
+                    var yl  = `y` & 0xFFFF;
+                    `l` = xl*yl;
+                    var t = ((`l`>>>16) & 0xFFFF) + ((xs*yl)|0)+((ys*xl)|0);
+                    `l` = (`l` & 0xFFFF) | ((t & 0xFFFF) << 16);
+                    `h` = xs * ys + ((t >> 16) & 0xFFFF);
+                 }
+               |]
+genPrim WordQuotOp        [r] [x,y] = PrimInline [j| `r` = (`x`/`y`)|0; |]
 genPrim WordRemOp         [r] [x,y] = PrimInline [j| `r`= `x` % `y` |]
--- genPrim WordQuotRemOp    [x,y] = PrimInline [je|
-
+genPrim WordQuotRemOp   [q,r] [x,y] = PrimInline [j| `q` = (`x`/`y`)|0;
+                                                     `r` = `x` - `q`*`y`;
+                                                  |]
 genPrim AndOp             [r] [x,y] = PrimInline [j| `r` = `x` & `y` |]
 genPrim OrOp              [r] [x,y] = PrimInline [j| `r` = `x` | `y` |]
 genPrim XorOp             [r] [x,y] = PrimInline [j| `r` = `x` ^ `y` |]
@@ -134,7 +163,7 @@ genPrim DoubleSubOp       [r] [x,y] = PrimInline [j| `r` = `x` - `y` |]
 genPrim DoubleMulOp       [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]
 genPrim DoubleDivOp       [r] [x,y] = PrimInline [j| `r` = `x` / `y` |]
 genPrim DoubleNegOp       [r] [x]   = PrimInline [j| `r` = `jneg x` |] -- fixme negate
--- genPrim Double2IntOp        [x]   = PrimInline [je| `x`|0 |]
+genPrim Double2IntOp      [r] [x]   = PrimInline [j| `r` = `x`|0; |]
 genPrim Double2FloatOp    [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim DoubleExpOp       [r] [x]   = PrimInline [j| `r` = Math.exp(`x`) |]
 genPrim DoubleLogOp       [r] [x]   = PrimInline [j| `r` = Math.ln(`x`) |]
@@ -238,10 +267,8 @@ genPrim IndexByteArrayOp_Word64 [r1,r2] [a,i] =
   PrimInline [j| `r1` = `a`.getUint32(`i`<<3);
                  `r2` = `a`.getUint32((`i`<<3)+4);
                |]
-{-
-genPrim ReadByteArrayOp_Char
-genPrim ReadByteArrayOp_WideChar
--}
+genPrim ReadByteArrayOp_Char [r] [a,i] = PrimInline [j| `r` = `a`.getUint8(`i`); |]
+genPrim ReadByteArrayOp_WideChar [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
 genPrim ReadByteArrayOp_Int [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`); |]
 genPrim ReadByteArrayOp_Word [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
 -- genPrim ReadByteArrayOp_Addr
@@ -260,12 +287,10 @@ genPrim ReadByteArrayOp_Word16 [r] [a,i] = PrimInline [j| `r` = `a`.getUint16(`i
 genPrim ReadByteArrayOp_Word32 [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
 genPrim ReadByteArrayOp_Word64 [r1,r2] [a,i] =
   PrimInline [j| `r1` = `a`.getUint32(`i`);
-                 `r2` = `a`.getUint32(`i`);
+                 `r2` = `a`.getUint32(`i`+4);
                |]
-{-
-genPrim WriteByteArrayOp_Char
-genPrim WriteByteArrayOp_WideChar
--}
+genPrim WriteByteArrayOp_Char [] [a,i,e] = PrimInline [j| `a`.setUint8(`i`, `e`); |]
+genPrim WriteByteArrayOp_WideChar [] [a,i,e] = PrimInline [j| `a`.setUint32(`i`<<3,`e`); |]
 genPrim WriteByteArrayOp_Int [] [a,i,e] = PrimInline [j| `a`.setInt32(`i`<<2, `e`); |]
 genPrim WriteByteArrayOp_Word [] [a,i,e] = PrimInline [j| `a`.setUint32(`i`<<2, `e`); |]
 -- genPrim WriteByteArrayOp_Addr
@@ -286,7 +311,7 @@ genPrim WriteByteArrayOp_Word64 [] [a,i,e1,e2] =
   PrimInline [j| `a`.setUint32(`i`<<3, `e1`);
                  `a`.setUint32(`i`<<3+4, `e2`);
                |]
--- fixme we can do faster by copying 32 bit ints
+-- fixme we can do faster by copying 32 bit ints or doubles
 genPrim CopyByteArrayOp [] [a1,o1,a2,o2,n] =
   PrimInline [j| for(var i=`n` - 1; i >= 0; i--) {
                    `a2`.setUint8(i+`o2`, `a1`.getUint8(i+`o1`));
@@ -353,10 +378,10 @@ genPrim IndexOffAddrOp_Word64 [c1,c2] [a,o,i] =
    PrimInline [j| `c1` = `a`.getUint32(`o`+(`i`<<3));
                   `c2` = `a`.getUint32(`o`+(`i`<<3)+4);
                 |]
-{-
-ReadOffAddrOp_Char
-ReadOffAddrOp_WideChar
--}
+genPrim ReadOffAddrOp_Char [c] [a,o,i] =
+   PrimInline [j| `c` = `a`.getUint8(`o`+`i`); |]
+genPrim ReadOffAddrOp_WideChar [c] [a,o,i] =
+   PrimInline [j| `c` = `a`.getUint32(`o`+`i`); |]
 genPrim ReadOffAddrOp_Int [c] [a,o,i] = PrimInline [j| `c` = `a`.getInt32(`o`+`i`); |]
 genPrim ReadOffAddrOp_Word [c] [a,o,i] = PrimInline [j| `c` = `a`.getUint32(`o`+`i`); |]
 -- ReadOffAddrOp_Addr -- fixme
@@ -409,10 +434,13 @@ genPrim CatchOp [r] [a,handler] = PRPrimCall
 genPrim RaiseOp         [b] [a] = PRPrimCall [j| return stg_throw(`a`); |]
 genPrim RaiseIOOp       [b] [a] = PRPrimCall [j| return stg_throw(`a`); |]
 
-genPrim MaskAsyncExceptionsOp [r] [a] = PrimInline [j| `r` = `a`; |] -- fixme
+genPrim MaskAsyncExceptionsOp [r] [a] =
+  PRPrimCall [j| mask = 1; `R1` = `a`; return stg_ap_v_fast(); |]
 -- MaskUninterruptibleOp
-genPrim UnmaskAsyncExceptionsOp [r] [a] = PrimInline [j| `r` = `a`; |] -- fixme
-genPrim MaskStatus [r] [] = PrimInline [j| `r` = 0; |] -- fixme
+genPrim UnmaskAsyncExceptionsOp [r] [a] =
+  PRPrimCall [j| mask = 0; `R1` = `a`; return stg_ap_v_fast(); |]
+
+genPrim MaskStatus [r] [] = PrimInline [j| `r` = mask; |]
 {-
 AtomicallyOp
 RetryOp
@@ -537,3 +565,5 @@ newByteArray tgt len = [j| `tgt` = new DataView(new ArrayBuffer(`len`)); |]
 newArray :: JExpr -> JExpr -> JStat
 newArray tgt len = [j| `tgt` = new Int32Array(new ArrayBuffer(4*`len`)); |]
 
+two_24 :: Int
+two_24 = 2^24

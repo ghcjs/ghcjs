@@ -384,8 +384,12 @@ garbageCollector =
            if(s && s.n) {
              log("stack[" + i + "] = " + s.n);
            } else {
-             log("stack[" + i + "] = " + s);
-           }
+             if(typeof heap[s] === 'function') {
+               log("stack[" + i + "] = " + s + " -> " + heap[s].n + " (" + closureTypeName(heap[s].t) + ", a: " + heap[s].a + ")");
+             } else {
+               log("stack[" + i + "] = " + s);
+             }
+          }
         }
      }
 
