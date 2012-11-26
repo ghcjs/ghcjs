@@ -403,7 +403,7 @@ jsIdIdent i mn suffix = StrI . (\x -> "$hs_"++prefix++x++mns++suffix++u) . zEnco
       mns = maybe "" (('_':).show) mn
       (prefix,u)
         | isExportedId i, Just x <- (nameModule_maybe . getName) i = ("","")
-        | otherwise = ("", '_' : (show . getKey . getUnique $ i))
+        | otherwise = ("INTERNAL_", '_' : (show . getKey . getUnique $ i))
 
 {-
         | isExportedId i = "_" ++ (show . isInternalName . getName $ i ) ++ "_"

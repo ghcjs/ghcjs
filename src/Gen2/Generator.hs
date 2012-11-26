@@ -161,6 +161,7 @@ pass2 :: Module -> [(JStat,[Id],[Id])] -> JStat
 pass2 m = mconcat . zipWith p2 [1..]
   where
     p2 n (s,ids,_) = delimitBlock ids
+                   . rewriteInternalIds m
                    . floatTop
                    . jsSaturate (Just $ modulePrefix m n)
                    $ s
@@ -175,6 +176,18 @@ genMetaData m p1 = Linker.Deps (modulePackageText m) (moduleNameText m)
     idFun i = 
       let mod = fromMaybe m $ nameModule_maybe (getName i)
       in  Linker.Fun (modulePackageText mod) (moduleNameText mod) (idTxt i)
+
+-- internal ids are named $hs_INTERNAL_xxx, rewrite them to include the module
+rewriteInternalIds :: Module -> JStat -> JStat
+rewriteInternalIds m = everywhere (mkT rewriteInternalId)
+  where
+    internalPrefix = "$hs_INTERNAL"
+    modName        = zEncodeString . moduleNameString . moduleName $ m
+
+    rewriteInternalId :: Ident -> Ident
+    rewriteInternalId (StrI i) | internalPrefix `L.isPrefixOf` i =
+      StrI $ "$hs__" ++ modName ++ (drop (length internalPrefix) i)
+    rewriteInternalId x = x
 
 moduleNameText :: Module -> Text
 moduleNameText = T.pack . moduleNameString . moduleName
@@ -350,7 +363,7 @@ genApp force mstackTop i a
         = r1 <> jumpToII i (concatMap genArg a)
     | idArity i <  n && idArity i > 0 =
          let (reg,over) = splitAt (idArity i) a
-         in  pushCont over <> jumpToII i (concatMap genArg reg) -- fixme specialized cont
+         in  pushCont over <> jumpToII i (concatMap genArg reg)
     | otherwise      = r1 <> jumpToFast a
   where
     stackTop = [je| `Stack`[`Sp`] |] -- fixme, use known val? fromMaybe [je| stack[sp]; |] mstackTop
@@ -912,7 +925,10 @@ jumpToFast as | spec      = mconcat ra <> [j| return `fun`(); |]
 selectApply :: Bool     -> -- ^ true for fast apply, false for stack apply
                [StgArg] -> -- ^ arguments
               (JExpr,Bool) -- ^ the function to call, true if specialized path
-selectApply fast args =
+selectApply fast args
+  | n == 0 && nvoid == 0 = (jsv $ "stg_ap_0" ++ suff, True) -- fixme is this ok?
+  | n == 0 && nvoid == 1 = (jsv $ "stg_ap_v" ++ suff, True)
+  | otherwise =
     case find (\(_,n',v',p) -> (n',v',ptrTag p) == (n,nvoid,ptrs)) fixedApply of
       Nothing           -> (jsv $ "stg_ap_" ++ show n ++ vsuff ++ suff, False) -- fixme check overflow for many-ary functions
       Just (n, _, _, _) -> (jsv $ "stg_ap_" ++ n ++ suff, True)
