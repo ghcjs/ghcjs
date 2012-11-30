@@ -276,9 +276,10 @@ loadArgs args = mconcat $ zipWith loadArg args' (enumFrom R2)
 -- generate code for expression, assign result to r
 genExpr :: Id -> StgExpr -> JStat
 genExpr top (StgApp f args)      = genApp False True f args
-genExpr top (StgLit l)           = [j| `R1` = `genSingleLit l`;
+genExpr top (StgLit l)           = [j| `zipWith assign (enumFrom R1) (genLit l)`;
                                        return `Stack`[`Sp`];
-                                     |] -- fixme, multi-var lits
+                                     |]
+  where assign r v = [j| `r` = `v`; |]
 genExpr top (StgConApp con args) = genCon con (concatMap genArg args)
 genExpr top (StgOpApp (StgFCallOp f _) args t) = genForeignCall f args t
 genExpr top (StgOpApp (StgPrimOp op) args t) = genPrimOp op args t
