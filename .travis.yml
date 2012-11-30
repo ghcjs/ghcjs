@@ -4,6 +4,10 @@ before_install:
     - sudo apt-get update -qq
     - sudo apt-get --no-install-recommends install darcs libgmp3-dev libgmp3c2 freeglut3 freeglut3-dev
     - sudo apt-get build-dep ghc
+    - echo Removing Java to free up more space
+    - apt-cache search java | awk '{print($1)}' | grep -E -e '^(ia32-)?(sun|oracle)-java' -e '^openjdk-' -e '^icedtea' -e '^(default|gcj)-j(re|dk)' -e '^gcj-(.*)-j(re|dk)' -e 'java-common' | xargs sudo apt-get -y remove
+    - sudo apt-get -y autoremove
+    - dpkg -l | grep ^rc | awk '{print($2)}' | xargs sudo apt-get -y purge
     - sudo apt-get clean
     - wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-i386-unknown-linux.tar.bz2
     - tar -xjf ghc-7.6.1-i386-unknown-linux.tar.bz2
