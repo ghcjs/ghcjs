@@ -3,6 +3,8 @@ language: haskell
 before_install:
     - sudo apt-get update -qq
     - sudo apt-get --no-install-recommends install darcs libgmp3-dev libgmp3c2 freeglut3 freeglut3-dev
+    - sudo apt-get build-dep ghc
+    - sudo apt-get clean
     - wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-i386-unknown-linux.tar.bz2
     - tar -xjf ghc-7.6.1-i386-unknown-linux.tar.bz2
     - cd ghc-7.6.1
@@ -17,21 +19,18 @@ install:
     - cabal install mega-sdist hspec cabal-meta cabal-src
     - cabal-meta install --force-reinstalls
     - rm -rf dist vendor
+    - wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-src.tar.bz2
+    - tar -xjf ghc-7.6.1-src.tar.bz2 
+    - rm ghc-7.6.1-src.tar.bz2
+    - cd ghc-7.6.1
+    - cp mk/build.mk.sample mk/build.mk
+    - echo "HADDOCK_DOCS = NO" >> mk/build.mk
+    - perl boot
+    - ./configure --prefix=$HOME/ghc-7.6.1
+    - make -j2
 
 script:
-   - wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-src.tar.bz2
-   - tar -xjf ghc-7.6.1-src.tar.bz2 
-   - rm ghc-7.6.1-src.tar.bz2
-   - cd ghc-7.6.1
-   - cp mk/build.mk.sample mk/build.mk
-   - perl boot
-   - ./configure --prefix=$HOME/ghc-7.6.1
-   - cd ghc
-   - make stage=1
-   - cd ../libraries
-   - make
-   - cd ..
-   - ghcjs-boot
+    - ghcjs-boot
 
 notifications:
   irc:
