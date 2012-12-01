@@ -134,9 +134,10 @@ primTypeVt t
   | st' == "(GHC.Prim.~#)" = ObjV -- ???
   | st' == "GHC.Prim.Any" = PtrV
   | st  == "Data.Dynamic.Obj" = PtrV -- ?
-  | otherwise = panic ("unrecognized primitive type: " ++ st)
+  | otherwise = panic ("primTypeVt: unrecognized primitive type: " ++ st)
    where
-    st = showPpr' t
+    st | UnaryRep ut <- repType t = showPpr' ut
+       | otherwise                = panic "primTypeVt: non-unary type found"
     st' = trim $ takeWhile (/=' ') st
 
 argVt :: StgArg -> VarType
