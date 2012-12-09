@@ -347,9 +347,13 @@ if(WORD_SIZE_IN_BITS==32) {
     };
 
     $hs_ptrKey = function(ptr) {
-      if(typeof(ptr) === 'string') return -1 >>> 0;
-      if(typeof(ptr) === 'function') return -2 >>> 0;
-      return ptr === null ? 0 : ptr[2];
+      if(ptr === null) return 0 >>> 0;
+      if(ptr === undefined) return -1 >>> 0;
+      if(typeof(ptr) === 'string') return -2 >>> 0;
+      if(typeof(ptr) === 'function') return -3 >>> 0;
+      if(typeof(ptr) === 'number') return -4 >>> 0;
+      if(typeof(ptr) === 'boolean') return -5 >>> 0;
+      return ptr[2];
     };
 
     /**
@@ -359,7 +363,7 @@ if(WORD_SIZE_IN_BITS==32) {
      */
     $hs_pokePtr = function (p, n, ptr) {
       var x = p[1]+(n<<2);
-      p[0].ptrs[x] = ptr;
+      p[0].ptrs[x>>2] = ptr;
       // Store a value in the array itself too so we can check it later
       (new Uint32Array(p[0],x))[0] = $hs_ptrKey(ptr);
     };
@@ -370,7 +374,8 @@ if(WORD_SIZE_IN_BITS==32) {
      */
     $hs_peekPtr = function (p, n) {
       var x = p[1]+(n<<2);
-      var ptr = p[0].ptrs[x];
+      var ptr = p[0].ptrs[x>>2];
+      if(ptr === undefined && (new Uint32Array(p[0],x))[0] === 0) ptr = null;
       // If this is not the right pointer throw an error
       if((new Uint32Array(p[0],x))[0] !== $hs_ptrKey(ptr))
           throw "Pointer Error";
@@ -413,9 +418,13 @@ if (WORD_SIZE_IN_BITS==64) {
     };
 
     $hs_ptrKey = function(ptr) {
-      if(typeof(ptr) === 'string') return -1 >>> 0;
-      if(typeof(ptr) === 'function') return -2 >>> 0;
-      return ptr === null ? 0 : ptr[2].toNumber();
+      if(ptr === null) return 0 >>> 0;
+      if(ptr === undefined) return -1 >>> 0;
+      if(typeof(ptr) === 'string') return -2 >>> 0;
+      if(typeof(ptr) === 'function') return -3 >>> 0;
+      if(typeof(ptr) === 'number') return -4 >>> 0;
+      if(typeof(ptr) === 'boolean') return -5 >>> 0;
+      return ptr[2];
     };
 
     /**
@@ -425,7 +434,7 @@ if (WORD_SIZE_IN_BITS==64) {
      */
     $hs_pokePtr = function (p, n, ptr) {
       var x = p[1]+(n.toNumber()<<3);
-      p[0].ptrs[x] = ptr;
+      p[0].ptrs[x>>3] = ptr;
       // Store a value in the array itself too so we can check it later
       (new Uint32Array(p[0],x))[0] = $hs_ptrKey(ptr);
     };
@@ -436,11 +445,9 @@ if (WORD_SIZE_IN_BITS==64) {
      */
     $hs_peekPtr = function (p, n) {
       var x = p[1]+(n.toNumber()<<3);
-      var ptr = p[0].ptrs[x];
-
-      ptr = ptr || null; // unitialized pointers as null
-
+      var ptr = p[0].ptrs[x>>3];
       // If this is not the right pointer throw an error
+      if(ptr === undefined && (new Uint32Array(p[0],x))[0] === 0) ptr = null;
       if((new Uint32Array(p[0],x))[0] !== $hs_ptrKey(ptr))
           throw "Pointer Error";
       return ptr;
@@ -1111,12 +1118,14 @@ function $hs_readWord8OffAddrzh(a, n, s) {
     return [s, WORD_SIZE_IN_BITS==32 ? res : goog.math.Long.fromBits(res)];
 };
 function $hs_readWord16OffAddrzh(a, n, s) {
-    if(WORD_SIZE_IN_BITS==32) {
-        return [s, new Uint16Array(a[0],a[1]+(n<<1))[0]];
-    }
-    else {
-        return [s, goog.math.Long.fromBits(new Uint16Array(a[0],a[1]+(n.toNumber()<<1))[0], 0)];
-    }
+    n = WORD_SIZE_IN_BITS==32 ? n : n.toNumber();
+    if(typeof(a) === 'string')
+        var res = n==a.length?0:a.charCodeAt(n);
+    else if(typeof(a[0]) === 'string')
+        var res = n==a[0].length?0:a[0].charCodeAt((a[1]>>>1)+n);
+    else
+        var res = new Uint16Array(a[0],a[1]+n<<1)[0];
+    return [s, WORD_SIZE_IN_BITS==32 ? res : goog.math.Long.fromBits(res)];
 };
 function $hs_readWord32OffAddrzh(a, n, s) {
     if(WORD_SIZE_IN_BITS==32) {
@@ -2370,6 +2379,9 @@ function read(fd, p, s) {
 function ghc_wrapper_d2fd_read(fd, p, s) {
     return read(fd, p, s);
 };
+function ghc_wrapper_d2e8_read(fd, p, s) {
+    return read(fd, p, s);
+};
 function write(fd, p, s) {
     HS_RTS_TRACE && $hs_logger.info('write');
     var f = $hs_allFiles[fd];
@@ -2378,6 +2390,9 @@ function write(fd, p, s) {
     return $hs_int(f.write(p, s));
 };
 function ghc_wrapper_d2eq_write(fd, p, s) {
+    return write(fd, p, s);
+};
+function ghc_wrapper_d2dl_write(fd, p, s) {
     return write(fd, p, s);
 };
 function __hsunix_long_path_size() {
@@ -2783,6 +2798,148 @@ function ghcjs_currentDocument() {
 function webkit_web_view_get_dom_document(w) {
   return w.document;
 };
+function webkit_web_view_get_main_frame(w) {
+  return w;
+};
+function webkit_web_frame_get_global_context(f) {
+  return f;
+};
+function JSContextGetGlobalObject(ctx) {
+    return ctx;
+};
+function JSObjectGetProperty(ctx, this_, name, pexception) {
+    try {
+        return this_[name];
+    }
+    catch(e) {
+        $hs_pokePtr(pexception, $hs_int(0), e);
+    }
+};
+function JSObjectSetProperty(ctx, this_, name, value, attrs, pexception) {
+    try {
+        this_[name] = value;
+    }
+    catch(e) {
+        $hs_pokePtr(pexception, $hs_int(0), e);
+    }
+};
+function JSObjectMakeFunctionWithCallback(ctx, name, callback) {
+    var f = function() {
+        var argv = malloc($hs_int(8*arguments.length));
+        var pexception = malloc($hs_int(8));
+        for(var i = 0; i != arguments.length; ++i)
+            $hs_pokePtr(argv, $hs_int(i), arguments[i]);
+        $hs_runIO([
+            callback,
+            $d(1, [ctx]),
+            $d(1, [f]),
+            $d(1, [this]),
+            $d(1, [$hs_int(arguments.length)]),
+            $d(1, [argv]),
+            $d(1, [pexception])]);
+        var e = $hs_peekPtr(pexception, $hs_int(0))
+        if(e !== null) throw e;
+    }
+
+    return f;
+};
+function JSObjectCallAsFunction(ctx, f, this_, argc, argv, pexception) {
+    try {
+        return f.apply(this_, argv[0].ptrs.slice(0, $hs_intToNumber(argc)));
+    }
+    catch(e) {
+        $hs_pokePtr(pexception, $hs_int(0), e);
+    }
+};
+function JSValueGetType(ctx, v) {
+  if(v === undefined)        return $hs_int(0);
+  if(v === null)             return $hs_int(1);
+  if(typeof v === "boolean") return $hs_int(2);
+  if(typeof v === "number")  return $hs_int(3);
+  if(typeof v === "string")  return $hs_int(4);
+  if(typeof v === "object")  return $hs_int(5);
+};
+function JSStringCreateWithCharacters(p, len) {
+    return $hs_toStringOfWords(p, $hs_intToNumber(len));
+};
+function JSStringCreateWithUTF8CString(p) {
+  return $hs_fromUtf8(p);
+};
+function JSValueMakeBoolean(ctx, b) {
+  return b != 0; // != not !== so that goog.math.Long works
+};
+function JSValueMakeFromJSONString(ctx, string) {
+  try {
+    return ctx.JSON.parse(string);
+  }
+  catch(e) {
+    return null;
+  }
+};
+function JSValueMakeNull(ctx) {
+  return null;
+};
+function JSValueMakeNumber(ctx, n) {
+  return n;
+};
+function JSValueMakeString(ctx, s) {
+  return s;
+};
+function JSValueMakeUndefined(ctx) {
+  return undefined;
+};
+function JSValueProtect(ctx, v) {
+};
+function JSValueUnprotect(ctx, v) {
+};
+function JSValueToBoolean(ctx, v) {
+  return $hs_int(v?1:0);
+};
+function JSValueToBoolean(ctx, v) {
+  return $hs_int(v?1:0);
+};
+function JSValueToNumber(ctx, v, e) {
+  return Number(v);
+};
+function JSValueToObject(ctx, v, e) {
+  return v;
+};
+function JSValueToStringCopy(ctx, v, e) {
+  return v.toString();
+};
+function JSStringIsEqual(a, b) {
+  return $hs_int(a == b?1:0);
+};
+function JSStringIsStrictEqual(a, b) {
+  return $hs_int(a === b?1:0);
+};
+function JSStringGetLength(s) {
+    return $hs_int(s.length);
+};
+function JSStringGetCharactersPtr(s) {
+    return s;
+};
+function JSEvaluateScript(ctx, script, thisObject, sourceURL, startingLineNumber, exception) {
+  return eval(script);
+};
+function JSValueIsUndefined(ctx, v) {
+  return $hs_int(v === undefined?1:0);
+};
+function JSValueIsNull(ctx, v) {
+  return $hs_int(v === null?1:0);
+};
+function JSValueIsBoolean(ctx, v) {
+  return $hs_int(typeof v === "boolean"?1:0)
+};
+function JSValueIsNumber(ctx, v) {
+  return $hs_int(typeof v === "number"?1:0)
+};
+function JSValueIsString(ctx, v) {
+  return $hs_int(typeof v === "string"?1:0)
+};
+function JSValueIsObject(ctx, v) {
+  return $hs_int(typeof v === "object"?1:0)
+};
 function gtk2hs_closure_new(f) {
   return f;
 };
@@ -2821,4 +2978,7 @@ function setupterm(term, fildes, erret) {
 };
 $hs_export('gtk2hs_g_object_unref_from_mainloop', function(o) {
 });
+function createAdjustor(cconv, hptr, wptr, type) {
+    return hptr;
+};
 

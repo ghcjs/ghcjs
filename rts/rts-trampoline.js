@@ -14,9 +14,6 @@ function $tr_Jump(method, object, args) {
             throw "Not a function!";
         if(object === undefined)
             throw "Object undefined!";
-        for(var i = 0; i !== args.length; i++)
-            if(args[i] === undefined)
-                throw "Undefined args!"
     }
     this.method = method;
     this.object = object;
@@ -45,9 +42,6 @@ function $tr_Call(method, object, args, rest, live) {
             throw "Not a function!";
         if(object === undefined)
             throw "Object undefined!";
-        for(var i = 0; i !== args.length; i++)
-            if(args[i] === undefined)
-                throw "Undefined args!"
         if (typeof rest !== 'function')
             throw "Not a function!";
         if(HS_WEAKS) {
@@ -935,9 +929,6 @@ function $d(tag, v, info) {
     if(HS_DEBUG) {
         if (!(v instanceof Array))
             throw "Not an array!";
-        for(var n = 0; n !== v.length; n++)
-            if(v[n] === undefined)
-                throw "Undefined";
         return new $DataValue(tag, v, info);
     }
     return new $DataValue(tag, v);

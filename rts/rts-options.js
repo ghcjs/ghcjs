@@ -36,5 +36,5 @@ var HS_TRAMPOLINE = true;
 /**
  * @define {number} size of Word and Int. If 64 we use goog.math.Long.
  */
-var WORD_SIZE_IN_BITS = 32;
+var WORD_SIZE_IN_BITS = 64;
 
