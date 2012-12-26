@@ -798,6 +798,7 @@ $Thunk.prototype = {
 //            }
             _this.result = res;
             _this.live = [];
+            _this.evaluateOnce = null;
             _this.evaluate = function () { return new $tr_Result(_this.result); };
             return new $tr_Result(_this.result);
         }, []);
@@ -859,6 +860,7 @@ $Data.prototype = {
 //            }
             _this.v = res;
             _this.notEvaluated = false;
+            _this.evaluateOnce = null;
             _this.evaluate = function () { return new $tr_Result(_this); };
             return new $tr_Result(_this);
         }, []);
