@@ -353,7 +353,7 @@ if(WORD_SIZE_IN_BITS==32) {
       if(typeof(ptr) === 'function') return -3 >>> 0;
       if(typeof(ptr) === 'number') return -4 >>> 0;
       if(typeof(ptr) === 'boolean') return -5 >>> 0;
-      return ptr[2];
+      return -6 >>> 0;
     };
 
     /**
@@ -424,7 +424,7 @@ if (WORD_SIZE_IN_BITS==64) {
       if(typeof(ptr) === 'function') return -3 >>> 0;
       if(typeof(ptr) === 'number') return -4 >>> 0;
       if(typeof(ptr) === 'boolean') return -5 >>> 0;
-      return ptr[2];
+      return -6 >>> 0;
     };
 
     /**
@@ -2815,9 +2815,25 @@ function JSObjectGetProperty(ctx, this_, name, pexception) {
         $hs_pokePtr(pexception, $hs_int(0), e);
     }
 };
+function JSObjectGetPropertyAtIndex(ctx, this_, n, pexception) {
+    try {
+        return this_[n];
+    }
+    catch(e) {
+        $hs_pokePtr(pexception, $hs_int(0), e);
+    }
+};
 function JSObjectSetProperty(ctx, this_, name, value, attrs, pexception) {
     try {
         this_[name] = value;
+    }
+    catch(e) {
+        $hs_pokePtr(pexception, $hs_int(0), e);
+    }
+};
+function JSObjectSetPropertyAtIndex(ctx, this_, n, value, attrs, pexception) {
+    try {
+        this_[n] = value;
     }
     catch(e) {
         $hs_pokePtr(pexception, $hs_int(0), e);
@@ -2846,6 +2862,41 @@ function JSObjectMakeFunctionWithCallback(ctx, name, callback) {
 function JSObjectCallAsFunction(ctx, f, this_, argc, argv, pexception) {
     try {
         return f.apply(this_, argv[0].ptrs.slice(0, $hs_intToNumber(argc)));
+    }
+    catch(e) {
+        $hs_pokePtr(pexception, $hs_int(0), e);
+    }
+};
+function JSObjectCallAsConstructor(ctx, f, argc, argv, pexception) {
+    try {
+        var n = $hs_intToNumber(argc);
+        var a = argv[0].ptrs;
+        switch(n) {
+            case 0 : return new f();
+            case 1 : return new f(a[0]);
+            case 2 : return new f(a[0],a[1]);
+            case 3 : return new f(a[0],a[1],a[2]);
+            case 4 : return new f(a[0],a[1],a[2],a[3]);
+            case 5 : return new f(a[0],a[1],a[2],a[3],a[4]);
+            case 6 : return new f(a[0],a[1],a[2],a[3],a[4],a[5]);
+            case 6 : return new f(a[0],a[1],a[2],a[3],a[4],a[5],a[6]);
+            default:
+                var ret;
+                var temp = function() {
+                    ret = f.apply(this, a.slice(0, n));
+                };
+                temp.prototype = f.prototype;
+                var instance = new temp();
+                return ret instanceof Object ? ret : instance;
+        }
+    }
+    catch(e) {
+        $hs_pokePtr(pexception, $hs_int(0), e);
+    }
+};
+function JSObjectMakeArray(ctx, l, p, pexception) {
+    try {
+        return p[0].ptrs.slice(0, $hs_intToNumber(l));
     }
     catch(e) {
         $hs_pokePtr(pexception, $hs_int(0), e);
