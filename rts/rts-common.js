@@ -1354,18 +1354,19 @@ function $hs_gcd(a, b) {
         big = small;
         small = r;
     }
-    return $hs_googToGMP(big);
+    return big;
 };
 function integer_cmm_gcdIntegerzh(sa, abits, sb, bbits) {
-    return $hs_gcd($hs_gmpToGoog(sa, abits), $hs_gmpToGoog(sb, bbits));
+    return $hs_googToGMP($hs_gcd($hs_gmpToGoog(sa, abits), $hs_gmpToGoog(sb, bbits)));
 };
 function integer_cmm_gcdIntegerIntzh(sa, abits, b) {
     if(WORD_SIZE_IN_BITS==32) {
-        return $hs_gcd($hs_gmpToGoog(sa, abits), goog.math.Integer.fromInt(b));
+        return $hs_gcd($hs_gmpToGoog(sa, abits), goog.math.Integer.fromInt(b)).getBits(0);
     }
     else {
-        return $hs_gcd($hs_gmpToGoog(sa, abits),
+        var a = $hs_gcd($hs_gmpToGoog(sa, abits),
             goog.math.Integer.fromBits([b.getLowBits(), b.getHighBits()]));
+        return goog.math.Long.fromBits(a.getBits(0), a.getBits(1));
     }
 };
 function integer_cmm_gcdIntzh(a, b) {
@@ -2124,6 +2125,9 @@ function $hs_getFileURL(f) {
     }
     return null;
 };
+/**
+ * @constructor
+ */
 function $hs_MemFile(text) {
   this.isatty = false;
   this.text = lib.encodeUTF8(text);
@@ -2165,6 +2169,9 @@ $hs_MemFile.prototype.ready = function() {
   // Do not change to write !== 0 (implicit cast makes it work with goog.math.Long
   return write != 0 || f.text.length > f.fptr;
 }
+/**
+ * @constructor
+ */
 function $hs_ConsoleOut(terminal) {
   this.isatty = true;
 };
@@ -2180,6 +2187,9 @@ $hs_ConsoleOut.prototype.ready = function() {
   // Do not change to write !== 0 (implicit cast makes it work with goog.math.Long
   return write != 0;
 }
+/**
+ * @constructor
+ */
 function $hs_TerminalOut(terminal) {
   this.isatty = true;
   this.terminal = terminal;
@@ -2196,6 +2206,9 @@ $hs_TerminalOut.prototype.ready = function() {
   // Do not change to write !== 0 (implicit cast makes it work with goog.math.Long
   return write != 0;
 }
+/**
+ * @constructor
+ */
 function $hs_TerminalIn(terminal) {
   this.isatty = true;
   this.terminal = terminal;
