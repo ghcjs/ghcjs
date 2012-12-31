@@ -1,72 +1,61 @@
-New code generator
-==================
-
-This is an experimental branch, providing a higher performance
-code generator for GHCJS. More information will follow.
-
-
-OLD Instructions....
-
-
 Haskell to Javascript translator
 ================================
 
-Project aims to provide solution to
+This project aims to make Haskell applications work online by compiling
+them to JavaScript.
 
- * compile modern Haskell libraries to Javascript files and use
-   them in Ajax applications or
- * develop entire Ajax application in Haskell
+Applications that use the following libraries should compile with GHCJS
+and run in a modern web browser and interface with DOM and JavaScript
+in the browser.
+ * [webkit](https://patch-tag.com/r/hamish/webkit) - Bindings for WebKitGTK+ that provide a low level DOM interface.
+ * [webkit-javascriptcore](https://github.com/ghcjs/webkit-javascriptcore) - Low level bindings for JavaScriptCore
+ * [jsc](https://github.com/ghcjs/jsc) - Higher level inteface for JavaScriptCore
+
+You can use these libraries without GHCJS to build a native version of
+your application (it will use WebKitGTK+ to run without a browser).
+If you want to find out more about making GHCJS compatible Haskell
+applications check out the [GHCJS Examples](https://github.com/ghcjs/ghcjs-examples/)
 
 Previous version of project is located at [vir.mskhug.ru](http://vir.mskhug.ru/).
 
-Native Only Quick Start
-=======================
+Code Generators
+===============
 
-Installing the compiler will take a while.  If you just want to try out
-some of the examples and perhaps make your own HTML based client app
-then check out the low level WebKitGtk DOM bindings.  This should
-give you everything you need to build and run the GHCJS examples as
-native Haskell applications.
+We currently have three code generators.
 
-<pre>
-sudo apt-get install libwebkitgtk-dev
-cabal install gtk2hs-buildtools
-darcs get http://patch-tag.com/r/hamish/webkit
-cd webkit
-cabal install
-cd ..
-git clone https://github.com/ghcjs/ghcjs-dom.git
-cd ghcjs-dom
-cabal install
-cd ..
-git clone https://github.com/ghcjs/ghcjs-examples.git
-cd ghcjs-examples/webkit-sodium
-cabal install
-cd ../ghcjs-hello
-cabal install
-ghcjs-hello
-</pre>
+ * *plain* - simple but tail calls will blow the stack
+ * *trampoline* - most complete, but slow
+ * *gen2* - faster, but still work in progress
 
-Compiling to JavaScript
-=======================
+Unless you are interested in helping on gen2, we suggest you stick to
+he trampoline code generator for now.
+
+
+Installing GHCJS
+================
 
 This version of GHCJS can be built stand alone or integrated into GHC.
 You can install both (if you know you want both do Integrated first).
 
 Integrated
- * A full GHC that also outputs .js files and .jsexe directories when you build.
+ * A full GHC that also outputs .[plain | trampoline | gen2].js files and
+   .[plain | trampoline | gen2].jsexe directories when you build.
  * A patched Cabal that installs the .js files along with the .hi ones.
  * Takes a while to install (mostly just follow the regular GHC build instructions).
 
 Stand Alone
  * Uses GHC API to make a ghcjs executable.
- * Quicker to install (because you don't have actually build 7.4).
+ * Quicker to install (because you don't have actually build ghc).
  * Good for trying out changes in the code generator itself.
  * Still requires some messing with GHC source.
 
 
 Common Requirements
 ===================
+
+Linux.  We have no one developing on OS X or Windows at present
+and if you really want GHCJS on those platforms you are bound to
+have problems that we have not even seen.
 
  * Google Closure Compiler https://developers.google.com/closure/compiler/
  * Google Closure Library https://developers.google.com/closure/library/
@@ -75,20 +64,20 @@ Common Requirements
 For the best JavaScript performance you should probably use a 32bit version of
 of ghc.  If you use the 64bit build it will use goog.math.Long for Int and Word.
 
+
 Integrated
 ==========
 
 Aditional Requirements
 ----------------------
 
- * GHC install capable of building GHC 7.4.1
+ * GHC install capable of building GHC 7.6.1
  * 3.5GB RAM (JavaScript linker is memory hungry)
 
 Tested On
 ---------
 
-* OS X 10.7 using 32bit GHC 7.4.1 to build 32bit GHC
-* Ubuntu 12.04 64bit VM with 3.5GB of system RAM using 64bit GHC 7.4.1 to build 64bit GHC
+ * Ubuntu 12.04 64bit VM with 3.5GB of system RAM using 64bit GHC 7.6.1 to build 64bit GHC
 
 Getting The Source
 ------------------
@@ -96,33 +85,41 @@ Getting The Source
 <pre>
 git clone https://github.com/ghcjs/ghc
 cd ghc
-git checkout ghc-7.4
+git checkout ghc-7.6
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghc get
 ./sync-all -r https://github.com/ghcjs --ghcjs get
-./sync-all checkout ghc-7.4
+./sync-all checkout ghc-7.6
+cabal update
+./unpack.sh
 </pre>
 
 (I find the gets from github often fail hence the 4 of them)
 
+Set WORD_SIZE_IN_BITS to match GHC
+----------------------------------
+If you are using a 64bit GHC edit ghc/libraries/ghcjs/rts/rts-options.js and
+change WORD_SIZE_IN_BITS from 32 to a 64 before installing.
+
 Build
 -----
+We have prepared a script to do the rest.
 
-Build GHC as per the normal instructions (remember you can use this GHC to build binaries too).
-
-Typical install goes something like this.
 <pre>
-cp mk/build.mk.sample mk/build.mk
-perl boot
-./configure --prefix=$HOME/ghcjs
-make
-make install
-hash -r
+./ghcjs-build.sh
 </pre>
 
-That last step takes a long time.
+This script will install the following to your $HOME/ghcjs/bin
+ * ghc - integrated GHCJS compiler
+ * cabal and cabal-meta - versions that will install .js files and .jsexe directories
+ * ghcjs-min - run this on your jsexe's to minify them
+
+As a bonus it will also build the stand alone compiler and install it in the same directory
+ * ghcjs - the stand alone GHCJS built with the integrated one
+ * ghcjs-cabal - cabal-install for use with the stand alone compiler
+
 To use this compiler add $HOME/ghcjs/bin to your path ahead of any other ghc.
 
 <pre>
@@ -134,123 +131,30 @@ including this in you path.
 
 The global packages (including JavaScript) will be installed to something like
 
- * ~/ghcjs/lib/ghc-7.4.1.20120501
+ * ~/ghcjs/lib/ghc-7.6.1.20121201
 
 User cabal packages are installed to something like
 
- * ~/.ghc/i386-darwin-7.4.1.20120501
- * ~/.cabal/lib/*/ghc-7.4.1.20120501
-
-Installing cabal-install with GHCJS
------------------------------------
-Note: If you prefer to use cabal-dev then you should probably build a new cabal-dev
-so that it knows to copy the javascript files (let us know how you get on).
-
-You need to make a version of cabal-install that uses the new Cabal package.
-So that which you run "cabal install" it will copy .js files and .jsexe directories
-to the install location.
-
-It is a good idea not to put this "cabal" in your default PATH as it may not
-play nice with other version of GHC (since it will pass --enable-javascript).
-You can do the following to build it and put it next to the GHCJS
-enabled version of ghc.
-
-<pre>
-export PATH=$HOME/ghcjs/bin:$PATH
-cabal install cabal-install --constraint='Cabal<=1.15' --prefix=$HOME/ghcjs
-hash -r
-</pre>
-
-There is a catch.  Because your old cabal install installed the dependencies
-the .js files for these libraries will not have been installed.  So you should
-unregister then so they will be installed again with the new cabal-install.
-
-You can get a list of all the packages that were installed by running
-<pre>
-ghc-pkg list --user
-</pre>
-
-The quickest way to do this delete the directory these are in
-<pre>
-rm -rf ~/ghcjs/lib/ghc-7.4.1.20120501
-</pre>
-
-or you can unregister them using ghc-pkg something like this
-<pre>
-ghc-pkg unregister HTTP
-ghc-pkg unregister network
-ghc-pkg unregister parsec
-ghc-pkg unregister mtl
-ghc-pkg unregister transformers
-ghc-pkg unregister zlib
-ghc-pkg unregister random
-ghc-pkg unregister text
-ghc-pkg unregister time
-</pre>
-
-Installing the GHCJS package
-----------------------------
-We still need to install GHCJS as well.  This will include the stand alone compiler,
-but the integrated compiler just needs the ghcjs runtime system (rts) and the minifier
-(ghcjs-min) that are also installed.
-
-You already have a clone of ghcjs inside the ghc folder, but we need to clone some
-others to build it.
-
-Note: If you are using a 64bit GHC edit ghc/compiler/ghcjs/rts/rts-options.js and
-change WORD_SIZE_IN_BITS from 32 to a 64 before installing.
-
-<pre>
-git clone git@github.com:ghcjs/ghcjs-closure.git
-cd ghcjs-closure
-cabal install
-cd ..
-git clone git@github.com:ghcjs/ghcjs-hterm.git
-cd ghcjs-hterm/chromeapps/hterm
-cabal install
-cd ../../..
-git clone git@github.com:ghcjs/source-map.git
-cd source-map
-cabal install
-cd ..
-cd ghc/compiler/ghcjs
-cabal install
-</pre>
+ * ~/.ghc/i386-darwin-7.6.1.20121201
+ * ~/.cabal/lib/*/ghc-7.6.1.20121201
 
 Installing and running an application
 -------------------------------------
-First build the application as you normally would.  Here are the instructions
-that you need do build the ghcjs-hello example (they work with a native compiler
-too).
-
-<pre>
-sudo apt-get install libwebkitgtk-dev
-darcs get http://patch-tag.com/r/hamish/webkit
-cd webkit
-cabal install
-cd ..
-git clone https://github.com/ghcjs/ghcjs-dom.git
-cd ghcjs-dom
-cabal install
-cd ..
-git clone https://github.com/ghcjs/ghcjs-examples.git
-cd ghcjs-examples/webkit-sodium
-cabal install
-cd ../ghcjs-hello
-cabal install
-ghcjs-hello
-</pre>
+With $HOME/ghcjs/bin in your PATH the follow the steps to build 
+[GHCJS Examples](https://github.com/ghcjs/ghcjs-examples/) 
+except "cabal install cabal-meta cabal-src" (as you don't want another
+ghcjs enabled cabal-meta installed).
 
 Then run ghcjs-min on the .jsexe this will have installed (allong side your normal
 executable)
 
 <pre>
-ghcjs-min ~/.cabal/bin/ghcjs-hello.jsexe
+ghcjs-min ~/.cabal/bin/ghcjs-hello
 </pre>
 
 On OS X it will be something like this...
 <pre>
-ghcjs-min ~/Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hello-0.0.1/bin/ghcjs-hello.jsexe
+ghcjs-min ~/Library/Haskell/ghc-7.6.1.20120701/lib/ghcjs-hello-0.0.1/bin/ghcjs-hello
 </pre>
 
 Most browsers will not run JavaScript off the file system so the next step is to
@@ -273,38 +177,42 @@ cd ~/Sites
 mkdir ghcjs
 mkdir ghcjs/share
 mkdir ghcjs/bin
-ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-0.1.0/share ghcjs/share/ghcjs-0.1.0
-ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-closure-0.1.0.0/share ghcjs/share/ghcjs-closure-0.1.0.0
-ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hterm-0.1.0.0/share ghcjs/share/ghcjs-hterm-0.1.0.0
-ln -s ../Library/Haskell/ghc-7.4.1.20120701/lib/ghcjs-hello-0.0.1/bin/ghcjs-hello.jsexe ghcjs/bin/
+ln -s ../Library/Haskell/ghc-7.6.1.20121201/lib/ghcjs-0.1.0/share ghcjs/share/ghcjs-0.1.0
+ln -s ../Library/Haskell/ghc-7.6.1.20121201/lib/ghcjs-closure-0.1.0.0/share ghcjs/share/ghcjs-closure-0.1.0.0
+ln -s ../Library/Haskell/ghc-7.6.1.20121201/lib/ghcjs-hterm-0.1.0.0/share ghcjs/share/ghcjs-hterm-0.1.0.0
+ln -s ../Library/Haskell/ghc-7.6.1.20121201/lib/ghcjs-hello-0.0.1/bin/ghcjs-hello.trampoline.jsexe ghcjs/bin/
 </pre>
 
 ghcjs-min will set up an index.html file (if one does not already exist in the .jsexe)
 that will run the app with hterm.
 <pre>
-http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.jsexe
+http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.trampoline.jsexe
 </pre>
 
 You can run the unminified version using hterm.html
 <pre>
-http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.jsexe/hterm.html
+http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.trampoline.jsexe/hterm.html
 </pre>
 
 If you don't want the overhead of hterm then there is a version that sends stdout
 to the console (and does not currently support stdin)
 <pre>
-http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.jsexe/console.html
+http://127.0.0.1/~hamish/ghcjs/bin/ghcjs-hello.trampoline.jsexe/console.html
 </pre>
 
 If you want to minify the console.html version then run (and make it the one index.html
 uses then run)...
 <pre>
-ghcjs-min ~/.cabal/bin/freecell.jsexe ~/.cabal/bin/freecell.jsexe/console.js
+ghcjs-min ~/.cabal/bin/freecell.trampoline.jsexe ~/.cabal/bin/freecell.trampoline.jsexe/console.js
 </pre>
 
 
 Stand-alone
 ===========
+
+These are out of date.
+
+TODO : Update the stand alone instructions.
 
 The stand-alone compiler is an attempt to make GHCJS easier to use and install. It does
 not require you to replace your existing GHC. GHCJS stand-alone has its own package
@@ -320,7 +228,7 @@ Installing
 First install `ghcjs-closure`, `source-map` and `ghcjs-hterm` from their respective
 repositories
 
-Now install GHCJS itself (assuming you use ghc 7.4.2 for building ghcjs):
+Now install GHCJS itself (assuming you use ghc 7.6.1 for building ghcjs):
 
     $ git clone https://github.com/ghcjs/ghcjs.git
     $ cd ghcjs
@@ -330,9 +238,9 @@ Now install GHCJS itself (assuming you use ghc 7.4.2 for building ghcjs):
 Make sure that the directory containing the `ghcjs`, `ghcjs-pkg` and `ghcjs-cabal` programs is
 in your PATH before proceeding:
 
-    $ wget http://www.haskell.org/ghc/dist/7.4.2/ghc-7.4.2-src.tar.bz2
-    $ tar -xjvf ghc-7.4.2-src.tar.bz2
-    $ cd ghc-7.4.2
+    $ wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-src.tar.bz2
+    $ tar -xjvf ghc-7.6.1-src.tar.bz2
+    $ cd ghc-7.6.1
     $ ./configure
     $ make -j4
     $ ghcjs-boot
