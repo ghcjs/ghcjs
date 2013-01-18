@@ -14,7 +14,7 @@ import Distribution.Verbosity (normal)
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
 import Module (mkModuleName)
 import System.FilePath
-       (takeBaseName, replaceExtension, dropExtension, (</>), (<.>))
+       (takeBaseName, takeExtension, replaceExtension, dropExtension, (</>), (<.>))
 import System.Directory (doesFileExist)
 import Packages (getPreloadPackagesAnd, PackageConfig, importDirs)
 import Data.List (nub)
@@ -70,8 +70,8 @@ linkJavaScript' var dyflags o_files dep_packages pagesMods = do
     debugTraceMsg dyflags 1 (ptext (sLit "JavaScript Linking") <+> text jsexe
                              <+> text "...")
     createDirectoryIfMissingVerbose normal False jsexe
-    mbJsFiles <- mapM (mbFile . (flip replaceExtension ext)) o_files
-    let jsFiles = catMaybes mbJsFiles
+    mbJsFiles <- mapM (mbFile . (flip replaceExtension ext)) (filter ((/=".js").takeExtension) o_files)
+    let jsFiles = catMaybes mbJsFiles ++ filter ((==".js").takeExtension) o_files
         pagesMods' = case pagesMods of
                         [] | any ((=="JSMain") . takeBaseName) jsFiles -> [mkModuleName "JSMain"]
                         []                                             -> [mkModuleName "Main"]

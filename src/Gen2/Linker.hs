@@ -23,6 +23,7 @@ import qualified Data.Set                 as S
 
 import Data.Char (isDigit)
 import qualified Data.Foldable            as F
+import Data.List (partition, isSuffixOf)
 import           Data.Serialize
 import           Data.Text                (Text)
 import qualified Data.Text                as T
@@ -51,14 +52,16 @@ link :: String       -- ^ output file/directory
      -> [ModuleName] -- ^ modules to use as roots (include all their functions and deps)
      -> IO [String]  -- ^ arguments for the closure compiler to minify our result
 link out searchPath objFiles pageModules = do
-  metas <- mapM (readDeps . metaFile) objFiles
+  let (objFiles', extraFiles) = partition (".gen2.js" `isSuffixOf`) objFiles
+  metas <- mapM (readDeps . metaFile) objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
-  T.putStrLn ("linking: " <> T.intercalate ", " (map depsModule roots))
+  T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
   (allDeps, src) <- collectDeps (lookup metas) (S.fromList $ concatMap modFuns roots)
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (BL.fromChunks src)
   writeFile (out </> "rts.js") rtsStr
-  getShims allDeps (out </> "lib.js")
+  getShims extraFiles allDeps (out </> "lib.js")
+  combineFiles out
   return []
   where
     mods = map (T.pack . moduleNameString) pageModules
@@ -77,15 +80,25 @@ link out searchPath objFiles pageModules = do
       where
         modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> "gen2" <.> ext
 
-getShims :: Set Fun -> FilePath -> IO ()
-getShims deps file = do
+getShims :: [FilePath] -> Set Fun -> FilePath -> IO ()
+getShims extraFiles deps file = do
   base <- (</> "shims") <$> getGlobalPackageBase
   t <- collectShims base pkgDeps
-  T.writeFile file t
+  t' <- mapM T.readFile extraFiles
+  T.writeFile file (T.unlines $ t : t')
     where
       pkgDeps = map (\(Package n v) -> (n, fromMaybe [] $ parseVersion v))
                   (S.toList $ S.map funPackage deps)
 
+-- convenience: combine lib.js, rts.js, out.js to all.js that can be run
+-- directly with node or spidermonkey
+combineFiles :: FilePath -> IO ()
+combineFiles fp = do
+  files <- mapM (T.readFile.(fp</>)) ["lib.js", "rts.js", "out.js"]
+  T.writeFile (fp</>"all.js") (mconcat (files ++ [runMain]))
+
+runMain :: Text
+runMain = "\nrunhs(runio($hs_mainZCMainzimain), function(r) { runhs(runio($hs_flushStdout), function(r) {}); });\n"
 
 -- get the ji file for a js file
 metaFile :: FilePath -> FilePath
