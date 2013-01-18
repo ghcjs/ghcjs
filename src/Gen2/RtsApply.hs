@@ -379,10 +379,12 @@ fastApply n v mspec = [j| `decl func`;
                    } else {
                        `traceRts $ (funName ++ ": ") |+ (c|."n") |+ " (not a fun but: " |+ clTypeName c |+ ") to " |+ n |+ " args"`;
                      `push $ reverse (map toJExpr $ take n (enumFrom R2)) ++ mkAp n`;
-                     return `c`;
+                     return `Stack`[`Sp`];
                    }
                  } while(true);
                |]
+-- fixme if we have a thunk, we need to enter it, does stg_ap do that for us?   
+--                     return `c`;
 
 
 
@@ -505,7 +507,13 @@ pap n = [j| `decl func`;
     body = [j| var c = `Heap`[`R1`+1];
                var f = `Heap`[c];
                `assertRts (isFun f ||| isPap f) (funcName ++ ": expected function or pap")`;
-               var extra = (f.a & 0xff) - `n`;
+               var extra;
+               if(`isFun f`) {
+                 extra = (f.a & 0xff) - `n`;
+               } else {
+                 `papArity extra c`;
+                 extra = extra - `n`;
+               }
                `moveBy extra`;
                `loadOwnArgs`;
                `R1` = c;
