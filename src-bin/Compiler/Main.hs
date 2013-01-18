@@ -1,25 +1,26 @@
 {-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables, PackageImports #-}
 module Main where
 
-import Paths_ghcjs
+import           Paths_ghcjs
 
 import qualified GHC.Paths
-import GHC
-import HscMain (hscSimplify)
-import TidyPgm (tidyProgram)
-import CoreToStg (coreToStg)
-import SimplStg (stg2stg)
-import DynFlags
-import HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..))
-import CorePrep (corePrepPgm)
-import DriverPhases (HscSource (HsBootFile))
-import Packages (initPackages)
-import Outputable (showPpr)
+import           GHC
+import           HscMain (hscSimplify)
+import           TidyPgm (tidyProgram)
+import           CoreToStg (coreToStg)
+import           SimplStg (stg2stg)
+import           DynFlags
+import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..))
+import           CorePrep (corePrepPgm)
+import           DriverPhases (HscSource (HsBootFile))
+import           Packages (initPackages)
+import           Outputable (showPpr)
 
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 
-import System.Environment (getArgs, getEnv)
+import           System.Environment (getArgs, getEnv)
+import           System.Exit(ExitCode(..), exitWith)
 
 #ifdef GHCJS_PACKAGE_IMPORT
 #define GHCJS "ghcjs"
@@ -27,28 +28,28 @@ import System.Environment (getArgs, getEnv)
 #define GHCJS "ghcjs"
 #endif
 
-import GHCJS Compiler.Info
-import GHCJS Compiler.Variants
+import           GHCJS Compiler.Info
+import           GHCJS Compiler.Variants
 import qualified GHCJS GHCJSMain
-import MonadUtils (MonadIO(..))
-import System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
-import System.Directory (createDirectoryIfMissing, getAppUserDataDirectory)
+import           MonadUtils (MonadIO(..))
+import           System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
+import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory)
 import qualified Control.Exception as Ex
 
-import Control.Monad (when, mplus, forM, forM_)
-import System.Exit (exitSuccess)
-import System.Process (rawSystem)
-import System.IO
-import Data.Monoid (mconcat, First(..))
-import Data.List (isSuffixOf, isPrefixOf, tails, partition, nub, intercalate)
-import Data.Maybe (isJust, fromMaybe, catMaybes)
+import           Control.Monad (when, mplus, forM, forM_)
+import           System.Exit (exitSuccess)
+import           System.Process (rawSystem)
+import           System.IO
+import           Data.Monoid (mconcat, First(..))
+import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub, intercalate, foldl')
+import           Data.Maybe (isJust, fromMaybe, catMaybes)
 
-import Crypto.Skein
+import           Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
-import Data.ByteString (ByteString)
+import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8  as C8
-import Crypto.Conduit (hashFile)
+import           Crypto.Conduit (hashFile)
 import qualified Data.Serialize as C
 
 #ifdef GHCJS_GEN2
@@ -86,28 +87,39 @@ main =
        do sdflags <- getSessionDynFlags
           let oneshot = "-c" `elem` args1
               sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
-                                 , ghcLink = if oneshot then NoLink  else ghcLink sdflags
+                                 , ghcLink = NoLink
                                  }
           (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
           (dflags2, _) <- liftIO $ initPackages dflags1
-          _ <- setSessionDynFlags dflags2
-          let fileargs = map unLoc fileargs'
+          _ <- setSessionDynFlags $ addPlatformDefines $
+                dflags2 { ghcLink = NoLink
+                        , objectSuf = "ghcjs_o"
+                        }
+          let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
+--          liftIO $ putStrLn $ "js targets: " ++ show jsArgs
           -- if guessing targets results in an exception, there were non-haskell files: fallback
           mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
           case mtargets of
             Nothing      -> liftIO (fallbackGhc args1)
             Just targets -> do
+                          liftIO $ putStrLn ("outName: " ++ hscOutName sdflags ++ "outfile: " ++ show (outputFile sdflags))
+                          -- fixme find more reliable way to detect that we're not building an executable?
+                          when (ghcLink sdflags /= LinkBinary) (liftIO generateNative) -- build native code as well, for TH
                           setTargets targets
                           _ <- load LoadAllTargets
                           mgraph <- depanal [] False
                           mapM_ compileModSummary mgraph
-                          case (ghcLink dflags2) of
-                            LinkBinary -> when (not oneshot) $ buildExecutable dflags2
-                            LinkDynLib -> liftIO (fallbackGhc args1) -- use GHC to build the native version of the lib
+                          dflags3 <- getSessionDynFlags
+                          case ghcLink sdflags of
+                            LinkBinary -> when (not oneshot) $ buildExecutable dflags3 jsArgs
+                            LinkDynLib -> return ()
                             _          -> return ()
 
 catchMaybe a = (fmap Just a) `gcatch` \(_::Ex.SomeException) -> return Nothing
+
+isJsFile :: FilePath -> Bool
+isJsFile = (==".js") . takeExtension
 
 addPkgConf :: DynFlags -> IO DynFlags
 addPkgConf df = do
@@ -181,8 +193,10 @@ fallbackGhc args = do
   ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
   plain <- getEnvMay "GHCJS_FALLBACK_PLAIN"
   case plain of
-    Just _  -> getArgs >>= rawSystem ghc
-    Nothing -> rawSystem ghc $ pkgargs ++ args
+    Just _  -> do
+       as <- getArgs
+       rawSystem ghc as --  (as ++ ["-hisuf", "native_hi"])
+    Nothing -> rawSystem ghc $ pkgargs ++ args -- ++ ["-hisuf", "native_hi"]
   return ()
 
 getEnvMay :: String -> IO (Maybe String)
@@ -266,24 +280,24 @@ concreteJavascriptFromCgGuts dflags env core variant =
 
 {-
   with -o x, ghcjs links all required functions into an executable
-  bundle, which is a directory x.jsbundle, rather than a filename
+  bundle, which is a directory x.jsexe, rather than a filename
 
   if the executable is built with cabal, it also writes
   the file, and the executable bundle to the cache, so that
   cabaljs can install the executable
 -}
 
-buildExecutable :: GhcMonad m => DynFlags -> m ()
-buildExecutable df = do
-  case outputFile df of
-    Just file -> liftIO $ writeFile file "ghcjs generated executable"
-    Nothing   -> return ()
+buildExecutable :: GhcMonad m => DynFlags -> [FilePath] -> m ()
+buildExecutable df linkedFiles = do
+--  case outputFile df of
+--    Just file -> liftIO $ writeFile file "ghcjs generated executable"
+--    Nothing   -> return ()
   graph <- fmap hsc_mod_graph $ getSession
   ifaces <- fmap catMaybes $ mapM modsumToInfo graph
   let ofiles = map (ml_obj_file . ms_location) graph
   -- TODO find a suitable way to get a list of Modules to use
-  -- passing [] now defaults to JSMain (or failing tha Main)
-  liftIO $ GHCJSMain.linkJavaScript df ofiles (collectDeps ifaces) []
+  -- passing [] now defaults to JSMain (or failing that Main)
+  liftIO $ GHCJSMain.linkJavaScript df (linkedFiles++ofiles) (collectDeps ifaces) []
 
 modsumToInfo :: GhcMonad m => ModSummary -> m (Maybe ModuleInfo)
 modsumToInfo ms = getModuleInfo (ms_mod ms)
@@ -308,3 +322,52 @@ printJi _                    = putStrLn "usage: ghcjs --print-ji jifile"
 printJi _ = return ()
 #endif
 
+-- ghcjs builds for a strange platform: like 32 bit
+-- instead of letting autoconf doing the defines, we override them here
+addPlatformDefines :: DynFlags -> DynFlags
+addPlatformDefines df = df { settings = settings1 }
+  where
+    settings0 = settings df
+    settings1 = settings0 { sOpt_P = map ("-D"++) defs ++ sOpt_P settings0 }
+    defs = [ "__GHCAUTOCONF_H__=1"
+           , "SIZEOF_CHAR=1"
+           , "ALIGNMENT_CHAR=1"
+           , "SIZEOF_UNSIGNED_CHAR=1"
+           , "ALIGNMENT_UNSIGNED_CHAR=1"
+           , "SIZEOF_SHORT=2"
+           , "ALIGNMENT_SHORT=2"
+           , "SIZEOF_UNSIGNED_SHORT=2"
+           , "ALIGNMENT_UNSIGNED_SHORT=2"
+           , "SIZEOF_INT=4"
+           , "ALIGNMENT_INT=4"
+           , "SIZEOF_UNSIGNED_INT=4"
+           , "ALIGNMENT_UNSIGNED_INT=4"
+           , "SIZEOF_LONG=4"
+           , "ALIGNMENT_LONG=4"
+           , "SIZEOF_UNSIGNED_LONG=4"
+           , "ALIGNMENT_UNSIGNED_LONG=4"
+           , "HAVE_LONG_LONG=1"
+           , "SIZEOF_LONG_LONG=8"
+           , "ALIGNMENT_LONG_LONG=8"
+           , "SIZEOF_UNSIGNED_LONG_LONG=8"
+           , "ALIGNMENT_UNSIGNED_LONG_LONG=8"
+           , "SIZEOF_VOID_P=4"
+           , "ALIGNMENT_VOID_P=4"
+           , "SIZEOF_DOUBLE=8"
+           , "ALIGNMENT_DOUBLE=8"
+           , "SIZEOF_FLOAT=4"
+           , "ALIGNMENT_FLOAT=4"
+           , "GHCJS=1"
+           , "__GHCJS__=1"
+           ]
+
+-- also generate native code, compile with regular GHC, but make sure
+-- that generated files don't clash with ours
+generateNative :: IO ()
+generateNative = do
+--  putStrLn "generating native code"
+  args <- getArgs
+  ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
+  pkgargs <- pkgConfArgs
+  ec <- rawSystem ghc $ pkgargs ++ args -- ++ ["-hisuf", "native_hi"]
+  when (ec /= ExitSuccess) (exitWith ec)
