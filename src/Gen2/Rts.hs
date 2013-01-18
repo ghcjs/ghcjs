@@ -158,7 +158,7 @@ var !mask = 0;                  // mask async exceptions
 
 // gc tuning
 var !staticFree = 2000;         // when garbage collecting, try to keep this many free indices for static
-var !allocArea  = 500000;       // allocate this many indices before running minor gc
+var !allocArea  = 5000000;      // allocate this many indices before running minor gc
 var !hpLim = hpDyn + allocArea; // collect garbage if we go over this limit
 var !gcInc = 10;                // run full gc after this many incrementals
 
@@ -195,10 +195,12 @@ fun true_e { return stack[sp]; }
 `ClosureInfo (jsv "true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2) CINoStatic`;
 
 heap[0] = false_e;
-var !$hs_GHCziTypesziFalse = 0;
+var !$hs_ghczmprimZCGHCziTypesziFalse = 0;
+var !$hs_ghczmprimZCGHCziTypesziFalse_con_e = false_e;
 
 heap[1] = true_e;
-var !$hs_GHCziTypesziTrue = 1;
+var !$hs_ghczmprimZCGHCziTypesziTrue = 1;
+var !$hs_ghczmprimZCGHCziTypesziTrue_con_e = true_e;
 
 fun stg_catch a handler {
   `preamble`;
@@ -475,6 +477,7 @@ fun checkDynHeap {
 }
 
 fun checkStack {
+  return 0; // fixme
   var idx = sp;
   while(idx >= 0) {
     var f = stack[idx];
@@ -482,10 +485,11 @@ fun checkStack {
       var tag = stack[idx].gtag;
       var offset = 1;
       if(tag <= 0) {
-        tag = stack[idx-1];
+        tag = stack[idx - 1];
         offset = 2;
       }
       var size = tag & 0xff;
+      if(size < 1) throw("invalid stack frame size at: stack[" + idx + "], frame: " + stack[idx].n);
       var ptrs = tag >> 8;
       while(ptrs) {
         if(ptrs&1) {
@@ -510,9 +514,14 @@ fun checkStack {
 
 fun printReg r {
   if(r > 0 && r <= hp && heap[r].n) {
-    return (r + ":" + heap[r].n);
+    return (r + ":" + heap[r].n + " (" + closureTypeName(heap[r].t) + ", " + heap[r].a + ")");
   } else {
-    return r;
+    var xs = new String(r) + "";
+    if(xs.length > 40) {
+      return xs.substr(0,40)+"...";
+    } else {
+      return xs;
+    }
   }
 }
 
@@ -525,7 +534,7 @@ fun logStack {
   var size = 0;
   var gt = stack[sp].gtag;
   if(gt === -1) {
-    size = stack[sp-1] & 0xff;
+    size = stack[sp - 1] & 0xff;
   } else {
     size = gt & 0xff;
   }
@@ -539,7 +548,7 @@ fun logStack {
 }
 
 fun runhs t cb {
-  `trace "runhs"`;
+//  `trace "runhs"`;
   run_init_static();
   stack[0] = done;
   stack[1] = reduce;
@@ -576,6 +585,14 @@ fun runio c {
   return h;
 }
 
+fun $hs_flushStdout_e {
+  `R1` = $hs_baseZCGHCziIOziHandlezihFlush;
+  `R2` = $hs_baseZCGHCziIOziHandleziFDzistdout;
+  return stg_ap_p_fast();
+}
+`ClosureInfo (jsv "$hs_flushStdout_e") [] "flushStdout" (CILayoutFixed 1 []) CIThunk CINoStatic`;
+var !$hs_flushStdout = static_thunk($hs_flushStdout_e);
+
 var start = new Date();
 fun dumpRes cl {
    printcl cl;
@@ -593,17 +610,6 @@ fun ascii s {
     res.push(0);
     return res;
 }
-
-fun localeEncoding {
-   ret1 = 0; // offset 0
-   return encodeUtf8("UTF-8");
-}
-
-fun u_towupper {
-  return 0;
-}
-
-
 
 |]
 
