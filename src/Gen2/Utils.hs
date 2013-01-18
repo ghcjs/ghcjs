@@ -4,15 +4,16 @@
 
 module Gen2.Utils where
 
-import           Language.Haskell.TH.Quote
-import           Language.Javascript.JMacro
+import Language.Haskell.TH.Quote
+import Language.Javascript.JMacro
 
-import           Control.Monad.State.Strict
-import           Data.Monoid
+import Control.Applicative
+import Control.Monad.State.Strict
+import Data.Monoid
 
-import           Data.Char                  (isSpace)
-import           Data.List                  (isPrefixOf)
-import           Data.Map                   (Map, singleton)
+import Data.Char                  (isSpace)
+import Data.List                  (isPrefixOf)
+import Data.Map                   (Map, singleton)
 
 -- missing instances, todo: add to jmacro
 instance ToJExpr Ident where
@@ -34,7 +35,7 @@ instance ToJExpr JObj where
 -- jmacro wrappers for slightly less noisy macros, `c` instead of `(c)`
 j  = wrapQuoter replaceBackquotes jmacro
 je = wrapQuoter replaceBackquotes jmacroE
-
+-- jm = <$>
 
 replaceBackquotes :: String -> String
 replaceBackquotes xs = go False xs
@@ -94,6 +95,14 @@ identBoth s1 s2 = UnsatBlock . IS $ do
 withIdent :: (Ident -> JStat) -> JStat
 withIdent s = UnsatBlock . IS $ newIdent >>= return . s
 
+{-
+withIdentM :: Monad m => (Ident -> m JStat) -> m JStat
+withIdentM s = do
+  x <- newIdent
+--   mr <- s x
+  (s x >>= return . UnsatBlock . IS)
+-}
+
 -- declare a new var and use it in statement
 withVar :: (JExpr -> JStat) -> JStat
 withVar s = withIdent (\i -> decl i <> s (ValExpr . JVar $ i))
@@ -129,3 +138,8 @@ showIndent x = unlines . runIndent 0 . map trim . lines . replaceParens . show $
 trim :: String -> String
 trim = let f = dropWhile isSpace . reverse in f . f
 
+ve :: String -> JExpr
+ve = ValExpr . JVar . StrI
+
+concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
+concatMapM f xs = mapM f xs >>= return . mconcat

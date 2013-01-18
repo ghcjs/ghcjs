@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, TupleSections #-}
 module Gen2.RtsTypes where
 
 import           Language.Javascript.JMacro
@@ -10,11 +10,17 @@ import           Gen2.StgAst
 import           Gen2.Utils
 
 import           Data.Char                        (toLower)
-
+import Control.Lens
 import           Data.Bits
 import qualified Data.List                        as L
 import           Data.Maybe                       (fromMaybe)
 import           Data.Monoid
+
+import qualified Data.Set as S
+import Data.Set (Set)
+import qualified Data.Map as M
+import Data.Map (Map)
+import Control.Monad.State
 
 import           Encoding
 import           Id
@@ -28,8 +34,6 @@ import Panic
 import           Gen2.RtsSettings
 
 import           System.IO.Unsafe
-
-
 
 -- closure types
 data CType = Thunk | Fun | Pap | Con | Ind | Blackhole
@@ -187,6 +191,7 @@ instance ToJExpr StgReg where
     | fromEnum r <= 32 = ve . {- ("r."++) . -} map toLower . show $ r
     | otherwise   = [je| regs[`fromEnum r-32`] |]
 
+
 instance ToJExpr StgRet where
   toJExpr = ve . map toLower . show
 
@@ -204,6 +209,60 @@ minReg = regNum minBound
 
 maxReg :: Int
 maxReg = regNum maxBound
+
+-- | the current code generator state
+data GenState = GenState
+  { _gsModule   :: Module    -- | the module we're compiling, used for generating names
+  , _gsToplevel :: Maybe Id  -- | the top-level function group we're generating
+  , _gsScope    :: GenScope  -- | the current lexical environment
+  , _gsId       :: Int       -- | integer for the id generator
+  }
+
+-- | where can we find all Ids
+data GenScope = GenScope
+  { _stableScope :: Map Id IdScope  -- | how to access an id 
+  , _localScope  :: Set Id          -- | set of ids that have a local var binding
+  } -- deriving (Eq, Monoid)
+
+emptyScope :: GenScope
+emptyScope = GenScope mempty mempty
+
+initState :: Module -> GenState
+initState m = GenState m Nothing emptyScope 1
+
+runGen :: Module -> G a -> a
+runGen m = flip evalState (initState m)
+
+{-
+-- | run an action in the initial state, useful for making one-off 
+runInit :: Module -> G a -> a
+runInit
+-}
+
+type C   = State GenState JStat
+type G a = State GenState a
+
+instance Monoid C where
+  mappend = liftM2 (<>)
+  mempty  = return mempty
+
+-- | where can we find a single Id
+data IdScope = Register !StgReg
+             | HeapPtr Id !Int    -- | it's in the heap object for Id, offset Int
+--              | StackOffset !Int
+             | StackFrame !Int    -- | current stack frame, offset
+             | NoEscape Id !Int   -- | no-escape stack frame allocated by id
+                                         -- fixme: why not a direct stack-offset?
+
+makeLenses ''GenState
+makeLenses ''GenScope
+
+currentModule :: G String
+currentModule = moduleNameString . moduleName <$> use gsModule
+
+currentModulePkg :: G String
+currentModulePkg = showPpr' <$> use gsModule
+
 
 -- arguments that the trampoline calls our funcs with
 funArgs :: [Ident]
@@ -235,8 +294,6 @@ adjSpN e = [j| sp = sp  - `e`; |] -- [j| _sp = _sp - `e`; sp = _sp; |]
 preamble :: JStat
 preamble = mempty -- [j| var !_stack = stack; var !_heap = heap; var !_sp = sp; |] -- var !_heap = heap; |] -- var !_sp = sp; |]
 -- [j| var th = `jsv "('x',eval)"`('this'); var !_stack = th.stack; var !_heap = th.heap; var !_sp = th.sp; |]
-ve :: String -> JExpr
-ve = ValExpr . JVar . StrI
 
 -- setClosureInfo -- fixme
 
@@ -397,15 +454,27 @@ withRegsRE start end max fallthrough f =
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
 
 
--- fixme package disambig, some exported ids have no module/pkg?
-jsIdIdent :: Id -> Maybe Int -> String -> Ident
-jsIdIdent i mn suffix = StrI . (\x -> "$hs_"++prefix++x++mns++suffix++u) . zEncodeString . showPpr' . idName $ i
+rewriteInternalId :: Module -> Ident -> Ident
+rewriteInternalId m ii@(StrI i)
+  | internalPrefix `L.isPrefixOf` i =
+    StrI $ "$hs__" ++ modName ++ (drop (length internalPrefix) i)
+  | otherwise = ii
+  where
+    modName        = zEncodeString . moduleNameString . moduleName $ m    
+    internalPrefix = "$hs_INTERNAL"
+
+jsIdIdent :: Id -> Maybe Int -> String -> G Ident
+jsIdIdent i mn suffix = do
+  (prefix, u) <- mkPrefixU
+  return $ StrI . (\x -> "$hs_"++prefix++x++mns++suffix++u) . zEncodeString $ name
     where
       mns = maybe "" (('_':).show) mn
-      (prefix,u)
-        | isExportedId i, Just x <- (nameModule_maybe . getName) i = ("","")
-        | otherwise = ("INTERNAL_", '_' : (show . getKey . getUnique $ i))
-
+--      (prefix,u)
+      name = ('.':) . showPpr' . localiseName . getName $ i
+      mkPrefixU
+        | isExportedId i, Just x <- (nameModule_maybe . getName) i = return (zEncodeString (showPpr' x), "")
+        | otherwise = (,('_':) . show . getKey . getUnique $ i) . ('_':) . zEncodeString
+                        <$> currentModulePkg
 {-
         | isExportedId i = "_" ++ (show . isInternalName . getName $ i ) ++ "_"
                                ++ (show . isSystemName . getName $ i ) ++ "_"
@@ -423,46 +492,51 @@ jsIdIdent i mn suffix = StrI . (\x -> "$hs_"++prefix++x++mns++suffix++u) . zEnco
 jsVar :: String -> JExpr
 jsVar v = ValExpr . JVar . StrI $ v
 
+isBoolId :: Id -> Bool
+isBoolId i = n == "GHC.Types.True" || n == "GHC.Types.False"
+         where
+           n = showPpr' . idName $ i
+
 -- regular id, shortcut for bools!
-jsId :: Id -> JExpr
-jsId i | n == "GHC.Types.True"  = toJExpr (1::Int)
-       | n == "GHC.Types.False" = toJExpr (0::Int)
-       | otherwise = ValExpr (JVar $ jsIdIdent i Nothing "")
+jsId :: Id -> G JExpr
+jsId i | n == "GHC.Types.True"  = return $ toJExpr (1::Int)
+       | n == "GHC.Types.False" = return $ toJExpr (0::Int)
+       | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
     where
       n = showPpr' . idName $ i
 
 -- entry id
-jsEnId :: Id -> JExpr
-jsEnId i = ValExpr (JVar $ jsEnIdI i)
+jsEnId :: Id -> G JExpr
+jsEnId i = ValExpr . JVar <$> jsEnIdI i
 
-jsEnIdI :: Id -> Ident
+jsEnIdI :: Id -> G Ident
 jsEnIdI i = jsIdIdent i Nothing "_e"
 
-jsEntryId :: Id -> JExpr
-jsEntryId i = ValExpr (JVar $ jsEntryIdI i)
+jsEntryId :: Id -> G JExpr
+jsEntryId i = ValExpr . JVar <$> jsEntryIdI i
 
-jsEntryIdI :: Id -> Ident
+jsEntryIdI :: Id -> G Ident
 jsEntryIdI i = jsIdIdent i Nothing "_e"
 
 -- datacon entry, different name than the wrapper
-jsDcEntryId :: Id -> JExpr
-jsDcEntryId i = ValExpr (JVar $ jsDcEntryIdI i)
+jsDcEntryId :: Id -> G JExpr
+jsDcEntryId i = ValExpr . JVar <$> jsDcEntryIdI i
 
-jsDcEntryIdI :: Id -> Ident
+jsDcEntryIdI :: Id -> G Ident
 jsDcEntryIdI i = jsIdIdent i Nothing "_con_e"
 
-jsIdV :: Id -> JVal
-jsIdV i = JVar $ jsIdIdent i Nothing ""
+jsIdV :: Id -> G JVal
+jsIdV i = JVar <$> jsIdIdent i Nothing ""
 
-jsIdI :: Id -> Ident
+jsIdI :: Id -> G Ident
 jsIdI i = jsIdIdent i Nothing ""
 
 -- some types, Word64, Addr#, unboxed tuple have more than one javascript var
-jsIdIN :: Id -> Int -> Ident
+jsIdIN :: Id -> Int -> G Ident
 jsIdIN i n = jsIdIdent i (Just n) ""
 
-jsIdN :: Id -> Int -> JExpr
-jsIdN i n = ValExpr (JVar $ jsIdIdent i (Just n) "")
+jsIdN :: Id -> Int -> G JExpr
+jsIdN i n = ValExpr . JVar <$> jsIdIdent i (Just n) ""
 
 
 
@@ -484,18 +558,23 @@ data CIType = CIFun { citArity :: Int  -- | number of arguments (double argument
             | CIBlackhole
             | CIInd
 
-data CIStatic = CIStaticParent { staticParent :: Id } -- ^ static refs are stored in parent in fungroup
-              | CIStaticRefs   { staticRefs :: [Id] } -- ^ list of refs that need to be kept alive
+data CIStatic = CIStaticParent { staticParent :: Ident } -- ^ static refs are stored in parent in fungroup
+              | CIStaticRefs   { staticRefs :: [Ident] } -- ^ list of refs that need to be kept alive
               | CINoStatic
 
 -- | static refs: array = references, single var = follow parent link, null = nothing to report
 instance ToJExpr CIStatic where
   toJExpr CINoStatic         = [je| null |]
-  toJExpr (CIStaticParent p) = jsId p
+  toJExpr (CIStaticParent p) = iex p -- jsId p
   toJExpr (CIStaticRefs [])  = [je| null |]
-  toJExpr (CIStaticRefs rs)  = toJExpr (map idStr rs)
-          where
+  toJExpr (CIStaticRefs rs)  = toJExpr (map istr rs) -- (map idStr rs)
+
+{-
+                   where
+         
             idStr i = let (StrI xs) = jsIdI i in [je| `xs` |]
+-}
+
 
 data CILayout = CILayoutVariable -- layout stored in object itself, first position from the start
               | CILayoutPtrs     -- size and pointer offsets known
@@ -580,29 +659,29 @@ shiftedPtrTag :: Int -> [Int] -> Maybe Int
 shiftedPtrTag shift = ptrTag . map (subtract shift)
 
 -- | generate all js vars for the ids (can be multiple per var)
-genIds :: Id -> [JExpr]
+genIds :: Id -> G [JExpr]
 genIds i
-  | s == 0    = mempty
-  | s == 1    = [jsId i]
-  | otherwise = map (jsIdN i) [1..s]
+  | s == 0    = return mempty
+  | s == 1    = (:[]) <$> jsId i
+  | otherwise = mapM (jsIdN i) [1..s]
   where
     s  = varSize vt
     vt = uTypeVt . idType $ i
 
 -- | get all idents for an id
-genIdsI :: Id -> [Ident]
+genIdsI :: Id -> G [Ident]
 genIdsI i
-  | s == 1    = [jsIdI i]
-  | otherwise = map (jsIdIN i) [1..s]
+  | s == 1    = (:[]) <$> jsIdI i
+  | otherwise = mapM (jsIdIN i) [1..s]
         where
           s = varSize . uTypeVt . idType $ i
 
--- | declare all js vars for the id
-declIds :: Id -> JStat
+-- | declare all js vars for the id, cannot be an unboxed tuple
+declIds :: Id -> C
 declIds  i
-  | s == 0    = mempty
-  | s == 1    = decl (jsIdI i)
-  | otherwise = mconcat $ map (\n -> decl (jsIdIN i n)) [1..s]
+  | s == 0    = return mempty
+  | s == 1    = decl <$> jsIdI i
+  | otherwise = mconcat <$> mapM (\n -> decl <$> jsIdIN i n) [1..s]
   where
     s  = varSize vt
     vt = uTypeVt . idType $ i
