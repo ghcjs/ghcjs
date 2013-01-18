@@ -22,6 +22,8 @@ module Gen2.Prim where
   MutableByteArray#  -> DataView
   ByteArray#         -> DataView
   Array#             -> Int32Array
+  
+  Pointers to pointers use a special representation with the .arr property
 -}
 
 import           Gen2.RtsTypes
@@ -50,18 +52,23 @@ genPrim CharLtOp          [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) ? 1 : 0; 
 genPrim CharLeOp          [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) ? 1 : 0; |]
 genPrim OrdOp             [r] [x]   = PrimInline [j| `r` = `x` |]
 
-genPrim IntAddOp          [r] [x,y] = PrimInline [j| `r` = `x` + `y` |]
+genPrim IntAddOp          [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0 |]
 genPrim IntSubOp          [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
-genPrim IntMulOp          [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]
-genPrim IntMulMayOfloOp   [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]  -- fixme loss of precision
+genPrim IntMulOp          [r] [x,y] =
+    PrimInline [j| `r` = hs_mulInt32(`x`,`y`); |]
+genPrim IntMulMayOfloOp   [r] [x,y] =
+    PrimInline [j| var tmp = (`x`*`y`); `r` = (tmp===(tmp|0))?0:1; |]
 genPrim IntQuotOp         [r] [x,y] = PrimInline [j| `r` = (`x`/`y`)|0; |]
 genPrim IntRemOp          [r] [x,y] = PrimInline [j| `r` = `x` % `y` |]
 genPrim IntQuotRemOp    [q,r] [x,y] = PrimInline [j| `q` = (`x`/`y`)|0;
                                                      `r` = `x`-`y`*`q`;
                                                    |]
 genPrim IntNegOp          [r] [x]   = PrimInline [j| `r` = `jneg x`; |]
-genPrim IntAddCOp         [r] [x,c] = PrimInline [j| `r` = `x`+`c` |]
-genPrim IntSubCOp         [r] [x,c] = PrimInline [j| `r` = `x`-`c` |]
+-- add with carry: overflow == 0 iff no overflow
+genPrim IntAddCOp         [r,overf] [x,y] =
+  PrimInline [j| var rt = `x`+`y`; `r` = rt|0; `overf` = (`r`!=rt)?1:0; |]
+genPrim IntSubCOp         [r,overf] [x,y] =
+  PrimInline [j| var rt = `x`-`y`; `r` = rt|0; `overf` = (`r`!=rt)?1:0; |]
 genPrim IntGtOp           [r] [x,y] = PrimInline [j| `r` = (`x` > `y`)|0 |]
 genPrim IntGeOp           [r] [x,y] = PrimInline [j| `r`= (`x` >= `y`) ? 1 : 0 |]
 genPrim IntEqOp           [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0 |]
@@ -73,15 +80,21 @@ genPrim Int2WordOp        [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim Int2FloatOp       [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim Int2DoubleOp      [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim ISllOp            [r] [x,y] = PrimInline [j| `r` = `x` << `y` |]
-genPrim ISraOp            [r] [x,y] = PrimInline [j| `r` = `x` >> `y` |]  -- fixme check: arith shift r
-genPrim ISrlOp            [r] [x,y] = PrimInline [j| `r` = `x` >>> `y` |] -- fixme check: logical shift r
+genPrim ISraOp            [r] [x,y] = PrimInline [j| `r` = `x` >> `y` |]
+genPrim ISrlOp            [r] [x,y] = PrimInline [j| `r` = `x` >>> `y` |]
 genPrim WordAddOp         [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0; |]
+-- fixme this thing is wrong
 genPrim WordAdd2Op      [h,l] [x,y] = PrimInline [j| `l` = (`x` + `y`)|0;
                                                      `h` = (`x` >>> 32) + (`y` >>> 32);
                                                    |]
-genPrim WordSubOp         [r] [x,y] = PrimInline [j| `r` = `x` - `y` |]
+genPrim WordSubOp         [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
+-- fixme stuff can be negative yo
+-- fixme inline?
 genPrim WordMulOp         [r] [x,y] =
-  PrimInline [j| if(`x` < `two_24` && `y` < `two_24`) {
+  PrimInline [j| `r` = hs_mulWord32(`x`,`y`); |]
+
+{-
+   if(`x` < `two_24` && `y` < `two_24`) {
                    `r` = `x`*`y`;
                  } else {
                    var xs = `x` >>> 16;
@@ -90,9 +103,13 @@ genPrim WordMulOp         [r] [x,y] =
                    var yl = `y` & 0xFFFF;
                    `r` = (xl*xl) + (((xs * yl) << 16)|0) + (((ys * xl) << 16)|0);
                  }
-               |]
+               |] -}
+-- fixme inline?
 genPrim WordMul2Op      [h,l] [x,y] =
-  PrimInline [j| if(x0 < `two_24` && y0 < `two_24`) {
+  PrimInline [j| `h` = hs_mul2Word32(`x`,`y`);
+                 `l` = ret1;
+               |]
+{-  PrimInline [j| if(x0 < `two_24` && y0 < `two_24`) {
                    `h` = 0;
                    `l` = x0*y0;
                  } else {
@@ -105,25 +122,30 @@ genPrim WordMul2Op      [h,l] [x,y] =
                     `l` = (`l` & 0xFFFF) | ((t & 0xFFFF) << 16);
                     `h` = xs * ys + ((t >> 16) & 0xFFFF);
                  }
-               |]
-genPrim WordQuotOp        [r] [x,y] = PrimInline [j| `r` = (`x`/`y`)|0; |]
-genPrim WordRemOp         [r] [x,y] = PrimInline [j| `r`= `x` % `y` |]
-genPrim WordQuotRemOp   [q,r] [x,y] = PrimInline [j| `q` = (`x`/`y`)|0;
-                                                     `r` = `x` - `q`*`y`;
+               |] -}
+-- prob wrong?
+genPrim WordQuotOp        [r] [x,y] = PrimInline [j| `r` = hs_quotWord32(`x`,`y`); |] -- [j| `r` = (`x`/`y`)|0; |]
+genPrim WordRemOp         [r] [x,y] = PrimInline [j| `r`= hs_remWord32(`x`,`y`); |] -- `x` % `y` |]
+genPrim WordQuotRemOp   [q,r] [x,y] = PrimInline [j| `q` = hs_quotWord32(`x`,`y`);
+                                                     `r` = hs_remWord32(`x`, `y`);
                                                   |]
 genPrim AndOp             [r] [x,y] = PrimInline [j| `r` = `x` & `y` |]
 genPrim OrOp              [r] [x,y] = PrimInline [j| `r` = `x` | `y` |]
 genPrim XorOp             [r] [x,y] = PrimInline [j| `r` = `x` ^ `y` |]
 genPrim NotOp             [r] [x]   = PrimInline [j| `r` = ~`x` |]
 genPrim SllOp             [r] [x,y] = PrimInline [j| `r` = `x` << `y` |]
-genPrim SrlOp             [r] [x,y] = PrimInline [j| `r` = `x` >> `y` |]
+genPrim SrlOp             [r] [x,y] = PrimInline [j| `r` = `x` >>> `y` |]
 genPrim Word2IntOp        [r] [x]   = PrimInline [j| `r` = `x` |]
-genPrim WordGtOp          [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) ? 1 : 0 |]
-genPrim WordGeOp          [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) ? 1 : 0 |]
+genPrim WordGtOp          [r] [x,y] =
+  PrimInline [j| `r` = ((`x`>>>1) > (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) > (`y`&1))) ? 1 : 0 |]
+genPrim WordGeOp          [r] [x,y] =
+  PrimInline [j| `r` = ((`x`>>>1) > (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) >= (`y`&1))) ? 1 : 0 |]
 genPrim WordEqOp          [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0 |]
 genPrim WordNeOp          [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) ? 1 : 0 |]
-genPrim WordLtOp          [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) ? 1 : 0 |]
-genPrim WordLeOp          [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) ? 1 : 0 |]
+genPrim WordLtOp          [r] [x,y] =
+  PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) < (`y`&1))) ? 1 : 0 |]
+genPrim WordLeOp          [r] [x,y] =
+  PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) <= (`y`&1))) ? 1 : 0 |]
 genPrim PopCnt8Op         [r] [x]   = PrimInline [j| `r` = popCntTab[`x` & 0xFF] |]
 genPrim PopCnt16Op        [r] [x]   =
   PrimInline [j| `r` = popCntTab[`x`&0xFF] +
@@ -166,7 +188,7 @@ genPrim DoubleNegOp       [r] [x]   = PrimInline [j| `r` = `jneg x` |] -- fixme 
 genPrim Double2IntOp      [r] [x]   = PrimInline [j| `r` = `x`|0; |]
 genPrim Double2FloatOp    [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim DoubleExpOp       [r] [x]   = PrimInline [j| `r` = Math.exp(`x`) |]
-genPrim DoubleLogOp       [r] [x]   = PrimInline [j| `r` = Math.ln(`x`) |]
+genPrim DoubleLogOp       [r] [x]   = PrimInline [j| `r` = Math.log(`x`) |]
 genPrim DoubleSqrtOp      [r] [x]   = PrimInline [j| `r` = Math.sqrt(`x`) |]
 genPrim DoubleSinOp       [r] [x]   = PrimInline [j| `r` = Math.sin(`x`) |]
 genPrim DoubleCosOp       [r] [x]   = PrimInline [j| `r` = Math.cos(`x`) |]
@@ -178,7 +200,12 @@ genPrim DoubleSinhOp      [r] [x]   = PrimInline [j| `r` = (Math.exp(`x`)-Math.e
 genPrim DoubleCoshOp      [r] [x]   = PrimInline [j| `r` = (Math.exp(`x`)+Math.exp(`jneg x`))/2 |]
 genPrim DoubleTanhOp      [r] [x]   = PrimInline [j| `r` = (Math.exp(2*`x`)-1)/(Math.exp(2*`x`)+1) |]
 genPrim DoublePowerOp     [r] [x,y] = PrimInline [j| `r` = Math.pow(`x`,`y`) |]
--- genPrim DoubleDecode_2IntOp [x] =
+genPrim DoubleDecode_2IntOp [s,h,l,e] [x] =
+  PrimInline [j| `s` = $hs_decodeDouble2Int(`x`);
+                 `h` = ret1;
+                 `l` = ret2;
+                 `e` = ret3;
+               |]
 genPrim FloatGtOp         [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) ? 1 : 0 |]
 genPrim FloatGeOp         [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) ? 1 : 0 |]
 genPrim FloatEqOp         [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0 |]
@@ -200,13 +227,12 @@ genPrim FloatTanOp        [r] [x]   = PrimInline [j| `r` = Math.tan(`x`) |]
 genPrim FloatAsinOp       [r] [x]   = PrimInline [j| `r` = Math.asin(`x`) |]
 genPrim FloatAcosOp       [r] [x]   = PrimInline [j| `r` = Math.acos(`x`) |]
 genPrim FloatAtanOp       [r] [x]   = PrimInline [j| `r` = Math.atan(`x`) |]
-genPrim FloatSinhOp       [r] [x]   = PrimInline [j| `r` = (Math.exp(`x`)-Math.exp(`jneg x`))/2 |] -- fixme neg
-genPrim FloatCoshOp       [r] [x]   = PrimInline [j| `r` = (Math.exp(`x`)+Math.exp(`jneg x`))/2 |] -- fixme neg
+genPrim FloatSinhOp       [r] [x]   = PrimInline [j| `r` = (Math.exp(`x`)-Math.exp(`jneg x`))/2 |]
+genPrim FloatCoshOp       [r] [x]   = PrimInline [j| `r` = (Math.exp(`x`)+Math.exp(`jneg x`))/2 |]
 genPrim FloatTanhOp       [r] [x]   = PrimInline [j| `r` = (Math.exp(2*`x`)-1)/(Math.exp(2*`x`)+1) |]
 genPrim FloatPowerOp      [r] [x,y] = PrimInline [j| `r` = Math.pow(`x`,`y`) |]
 genPrim Float2DoubleOp    [r] [x]   = PrimInline [j| `r` = `x` |]
--- genPrim FloatDecode_IntOp
-
+genPrim FloatDecode_IntOp [s,e] [x] = PrimInline [j| `s` = $hs_decodeFloatInt(`x`); `e` = ret1; |]
 genPrim NewArrayOp          [r] [l,e]   =
   PrimInline [j| `newArray r l`;
                  for(var i=`l` - 1; i>=0;i--) {
@@ -256,7 +282,7 @@ genPrim IndexByteArrayOp_Double [r] [a,i] = PrimInline [j| `r` = `a`.getFloat64(
 genPrim IndexByteArrayOp_Int8 [r] [a,i] = PrimInline [j| `r` = `a`.getInt8(`i`); |]
 genPrim IndexByteArrayOp_Int16 [r] [a,i] = PrimInline [j| `r` = `a`.getInt16(`i`<<1); |]
 genPrim IndexByteArrayOp_Int32 [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`<<2); |]
-genPrim IndexByteArrayOp_Int64 [r1,r2] [a,i] =  -- fixme one of these should be unsigned
+genPrim IndexByteArrayOp_Int64 [r1,r2] [a,i] =
   PrimInline [j| `r1` = `a`.getInt32(`i`<<3);
                  `r2` = `a`.getInt32((`i`<<3)+4);
                |]
@@ -351,14 +377,17 @@ genPrim AddrLtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <  `o2`) ? 1 :
 genPrim AddrLeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <= `o2`) ? 1 : 0; |]
 
 -- addr indexing: unboxed arrays
-genPrim IndexOffAddrOp_Char [c] [a,o,i] = PrimInline [j| `c` = `a`.getInt8(`o`+`i`); |]
-genPrim IndexOffAddrOp_WideChar [c] [a,o,i] = PrimInline [j| `c` = `a`.getInt32(`o`+(`i`<<2)); |]
+genPrim IndexOffAddrOp_Char [c] [a,o,i] = PrimInline [j| `c` = `a`.getUint8(`o`+`i`); |]
+genPrim IndexOffAddrOp_WideChar [c] [a,o,i] = PrimInline [j| `c` = `a`.getUint32(`o`+(`i`<<2)); |]
 -- indexoff: offset is in elements
 -- readoff: offset is in bytes
 
 genPrim IndexOffAddrOp_Int [c] [a,o,i] = PrimInline [j| `c` = `a`.getInt32(`o`+(`i`<<2)); |]
 genPrim IndexOffAddrOp_Word [c] [a,o,i] = PrimInline [j| `c` = `a`.getUint32(`o`+(`i`<<2)); |]
--- IndexOffAddrOp_Addr
+genPrim IndexOffAddrOp_Addr [ca,co] [a,o,i] =
+  PrimInline [j| `ca` = `a`.arr[`o`+(`i`<<2)][0];
+                 `co` = `a`.arr[`o`+(`i`<<2)][1];
+              |]
 genPrim IndexOffAddrOp_Float [c] [a,o,i] = PrimInline [j| `c` = `a`.getFloat32(`o`+(`i`<<2)); |]
 genPrim IndexOffAddrOp_Double [c] [a,o,i] = PrimInline [j| `c` = `a`.getFloat64(`o`+(`i`<<3)); |]
 {-
@@ -398,25 +427,28 @@ genPrim ReadOffAddrOp_Word64 [c1,c2] [a,o,i] =
    PrimInline [j| `c1` = `a`.getUint32(`o`+`i`);
                   `c2` = `a`.getUint32(`o`+`i`+4);
                 |]
--- genPrim WriteOffAddrOp_Char [] [a,o,i,v]     = PrimInline [j| `a`.set
--- WriteOffAddrOp_WideChar
-genPrim WriteOffAddrOp_Int [] [a,o,i,v]     = PrimInline [j| `a`.setInt32(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Word [] [a,o,i,v]    = PrimInline [j| `a`.setUint32(`o`+`i`, `v`); |]
--- WriteOffAddrOp_Addr -- fixme what to do here? write an addr? need to fake this
-genPrim WriteOffAddrOp_Float [] [a,o,i,v]   = PrimInline [j| `a`.setFloat32(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Double [] [a,o,i,v]  = PrimInline [j| `a`.setFloat64(`o`+`i`,`v`); |]
+genPrim WriteOffAddrOp_Char [] [a,o,i,v]     = PrimInline [j| `a`.setUint8(`o`+`i`, `v`); |]
+genPrim WriteOffAddrOp_WideChar [] [a,o,i,v] = PrimInline [j| `a`.setUint32(`o`+(`i`<<2), `v`); |]
+genPrim WriteOffAddrOp_Int [] [a,o,i,v]     = PrimInline [j| `a`.setInt32(`o`+(`i`<<2), `v`); |]
+genPrim WriteOffAddrOp_Word [] [a,o,i,v]    = PrimInline [j| `a`.setUint32(`o`+(`i`<<2), `v`); |]
+genPrim WriteOffAddrOp_Addr [] [a,o,i,va,vo] =
+  PrimInline [j| if(!`a`.arr) { `a`.arr = []; }
+                 `a`.arr[`o`+(`i`<<2)] = [`va`,`vo`];
+               |]
+genPrim WriteOffAddrOp_Float [] [a,o,i,v]   = PrimInline [j| `a`.setFloat32(`o`+(`i`<<2), `v`); |]
+genPrim WriteOffAddrOp_Double [] [a,o,i,v]  = PrimInline [j| `a`.setFloat64(`o`+(`i`<<3),`v`); |]
 -- WriteOffAddrOp_StablePtr
 genPrim WriteOffAddrOp_Int8 [] [a,o,i,v]    = PrimInline [j| `a`.setInt8(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Int16 [] [a,o,i,v]   = PrimInline [j| `a`.setInt16(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Int32 [] [a,o,i,v]   = PrimInline [j| `a`.setInt32(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Int64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.setInt32(`o`+`i`, `v1`);
-                                                               `a`.setInt32(`o`+`i`+4, `v2`);
+genPrim WriteOffAddrOp_Int16 [] [a,o,i,v]   = PrimInline [j| `a`.setInt16(`o`+(`i`<<1), `v`); |]
+genPrim WriteOffAddrOp_Int32 [] [a,o,i,v]   = PrimInline [j| `a`.setInt32(`o`+(`i`<<2), `v`); |]
+genPrim WriteOffAddrOp_Int64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.setInt32(`o`+(`i`<<3), `v1`);
+                                                               `a`.setInt32(`o`+(`i`<<3)+4, `v2`);
                                                              |]
 genPrim WriteOffAddrOp_Word8 [] [a,o,i,v]   = PrimInline [j| `a`.setUint8(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Word16 [] [a,o,i,v]  = PrimInline [j| `a`.setUint16(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Word32 [] [a,o,i,v]  = PrimInline [j| `a`.setUint32(`o`+`i`, `v`); |]
-genPrim WriteOffAddrOp_Word64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.setUint32(`o`+`i`, `v1`);
-                                                                 `a`.setUint32(`o`+`i`+4, `v2`);
+genPrim WriteOffAddrOp_Word16 [] [a,o,i,v]  = PrimInline [j| `a`.setUint16(`o`+(`i`<<1), `v`); |]
+genPrim WriteOffAddrOp_Word32 [] [a,o,i,v]  = PrimInline [j| `a`.setUint32(`o`+(`i`<<2), `v`); |]
+genPrim WriteOffAddrOp_Word64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.setUint32(`o`+(`i`<<3), `v1`);
+                                                                 `a`.setUint32(`o`+(`i`<<3)+4, `v2`);
                                                                |]
 -- fixme add GC writebars
 genPrim NewMutVarOp       [r] [x]   = PrimInline [j| `r` = [`x`];  |]
@@ -558,7 +590,6 @@ genPrim op rs as = PrimInline [j| log(`"warning, unhandled primop: "++show op++"
 
 
 -- fixme add fallback for untyped browsers
--- fixme is there a better way to get the length of a DataView?
 newByteArray :: JExpr -> JExpr -> JStat
 newByteArray tgt len = [j| `tgt` = new DataView(new ArrayBuffer(`len`)); |]
 
