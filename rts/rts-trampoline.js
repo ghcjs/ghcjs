@@ -1417,7 +1417,7 @@ function getGCStats(a) {
     var t = new Date().getTime() - sc.currentRunStart + sc.cpuSeconds;
     if(WORD_SIZE_IN_BITS==32) {
         throw "Todo identify the correct offset"
-        return 0;
+        // return 0;
     }
     else {
         (new Float64Array(a[0],a[1]+128))[0] = t/1000;
