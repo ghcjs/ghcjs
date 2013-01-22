@@ -88,7 +88,6 @@ genPrim WordAdd2Op      [h,l] [x,y] = PrimInline [j| `l` = (`x` + `y`)|0;
                                                      `h` = (`x` >>> 32) + (`y` >>> 32);
                                                    |]
 genPrim WordSubOp         [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
--- fixme stuff can be negative yo
 -- fixme inline?
 genPrim WordMulOp         [r] [x,y] =
   PrimInline [j| `r` = hs_mulWord32(`x`,`y`); |]
@@ -146,26 +145,26 @@ genPrim WordLtOp          [r] [x,y] =
   PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) < (`y`&1))) ? 1 : 0 |]
 genPrim WordLeOp          [r] [x,y] =
   PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) <= (`y`&1))) ? 1 : 0 |]
-genPrim PopCnt8Op         [r] [x]   = PrimInline [j| `r` = popCntTab[`x` & 0xFF] |]
+genPrim PopCnt8Op         [r] [x]   = PrimInline [j| `r` = $hs_popCntTab[`x` & 0xFF] |]
 genPrim PopCnt16Op        [r] [x]   =
-  PrimInline [j| `r` = popCntTab[`x`&0xFF] +
-                       popCntTab[(`x`>>>8)&0xFF]
+  PrimInline [j| `r` = $hs_popCntTab[`x`&0xFF] +
+                       $hs_popCntTab[(`x`>>>8)&0xFF]
                |]
 genPrim PopCnt32Op        [r] [x]   =
-  PrimInline [j| `r` = popCntTab[`x`&0xFF] +
-                       popCntTab[(`x`>>>8)&0xFF] +
-                       popCntTab[(`x`>>>16)&0xFF] +
-                       popCntTab[(`x`>>>24)&0xFF]
+  PrimInline [j| `r` = $hs_popCntTab[`x`&0xFF] +
+                       $hs_popCntTab[(`x`>>>8)&0xFF] +
+                       $hs_popCntTab[(`x`>>>16)&0xFF] +
+                       $hs_popCntTab[(`x`>>>24)&0xFF]
                |]
 genPrim PopCnt64Op        [r] [x1,x2] =
-  PrimInline [j| `r` = popCntTab[`x1`&0xFF] +
-                       popCntTab[(`x1`>>>8)&0xFF] +
-                       popCntTab[(`x1`>>>16)&0xFF] +
-                       popCntTab[(`x1`>>>24)&0xFF] +
-                       popCntTab[`x2`&0xFF] +
-                       popCntTab[(`x2`>>>8)&0xFF] +
-                       popCntTab[(`x2`>>>16)&0xFF] +
-                       popCntTab[(`x2`>>>24)&0xFF]
+  PrimInline [j| `r` = $hs_popCntTab[`x1`&0xFF] +
+                       $hs_popCntTab[(`x1`>>>8)&0xFF] +
+                       $hs_popCntTab[(`x1`>>>16)&0xFF] +
+                       $hs_popCntTab[(`x1`>>>24)&0xFF] +
+                       $hs_popCntTab[`x2`&0xFF] +
+                       $hs_popCntTab[(`x2`>>>8)&0xFF] +
+                       $hs_popCntTab[(`x2`>>>16)&0xFF] +
+                       $hs_popCntTab[(`x2`>>>24)&0xFF]
                |]
 genPrim PopCntOp          [r] [x]   = genPrim PopCnt32Op [r] [x]
 genPrim Narrow8IntOp      [r] [x]   = PrimInline [j| `r` = (`x` & 0x7F)-(`x` & 0x80) |]
@@ -275,7 +274,9 @@ genPrim IndexByteArrayOp_Char [r] [a,i] = PrimInline [j| `r` = `a`.getUint8(`i`)
 genPrim IndexByteArrayOp_WideChar [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`<<2); |]
 genPrim IndexByteArrayOp_Int [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`<<2); |]
 genPrim IndexByteArrayOp_Word [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`<<2); |]
--- genPrim IndexByteArrayOp_Addr
+genPrim IndexByteArrayOp_Addr [r1,r2] [a,i] = PrimInline [j| `r1` = `a`.arr[`i`<<2][0];
+                                                             `r2` = `a`.arr[`i`<<2][1];
+                                                           |]
 genPrim IndexByteArrayOp_Float [r] [a,i] = PrimInline [j| `r` = `a`.getFloat32(`i`<<2); |]
 genPrim IndexByteArrayOp_Double [r] [a,i] = PrimInline [j| `r` = `a`.getFloat64(`i`<<3); |]
 -- genPrim IndexByteArrayOp_StablePtr
@@ -297,7 +298,9 @@ genPrim ReadByteArrayOp_Char [r] [a,i] = PrimInline [j| `r` = `a`.getUint8(`i`);
 genPrim ReadByteArrayOp_WideChar [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
 genPrim ReadByteArrayOp_Int [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`); |]
 genPrim ReadByteArrayOp_Word [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
--- genPrim ReadByteArrayOp_Addr
+genPrim ReadByteArrayOp_Addr [r1,r2] [a,i] = PrimInline [j| `r1` = `a`.arr[`i`][0];
+                                                            `r2` = `a`.arr[`i`][1];
+                                                          |]
 genPrim ReadByteArrayOp_Float [r] [a,i] = PrimInline [j| `r` = `a`.getFloat32(`i`); |]
 genPrim ReadByteArrayOp_Double [r] [a,i] = PrimInline [j| `r` = `a`.getFloat64(`i`); |]
 -- genPrim ReadByteArrayOp_StablePtr
@@ -319,7 +322,9 @@ genPrim WriteByteArrayOp_Char [] [a,i,e] = PrimInline [j| `a`.setUint8(`i`, `e`)
 genPrim WriteByteArrayOp_WideChar [] [a,i,e] = PrimInline [j| `a`.setUint32(`i`<<3,`e`); |]
 genPrim WriteByteArrayOp_Int [] [a,i,e] = PrimInline [j| `a`.setInt32(`i`<<2, `e`); |]
 genPrim WriteByteArrayOp_Word [] [a,i,e] = PrimInline [j| `a`.setUint32(`i`<<2, `e`); |]
--- genPrim WriteByteArrayOp_Addr
+genPrim WriteByteArrayOp_Addr [] [a,i,e1,e2] = PrimInline [j| if(!`a`.arr) { `a`.arr = []; }
+                                                              `a`.arr[`i`<<2] = [`e1`,`e2`];
+                                                            |]
 genPrim WriteByteArrayOp_Float [] [a,i,e] = PrimInline [j| `a`.setFloat32(`i`<<2, `e`); |]
 genPrim WriteByteArrayOp_Double [] [a,i,e] = PrimInline [j| `a`.setFloat64(`i`<<3, `e`); |]
 -- genPrim WriteByteArrayOp_StablePtr
@@ -413,7 +418,10 @@ genPrim ReadOffAddrOp_WideChar [c] [a,o,i] =
    PrimInline [j| `c` = `a`.getUint32(`o`+`i`); |]
 genPrim ReadOffAddrOp_Int [c] [a,o,i] = PrimInline [j| `c` = `a`.getInt32(`o`+`i`); |]
 genPrim ReadOffAddrOp_Word [c] [a,o,i] = PrimInline [j| `c` = `a`.getUint32(`o`+`i`); |]
--- ReadOffAddrOp_Addr -- fixme
+genPrim ReadOffAddrOp_Addr [r1,r2] [a,o,i] =
+  PrimInline [j| `r1` = `a`.arr[`o`+`i`][0];
+                 `r2` = `a`.arr[`o`+`i`][1];
+               |]
 genPrim ReadOffAddrOp_Float [c] [a,o,i] = PrimInline [j| `c` = `a`.getFloat32(`o`+`i`); |]
 genPrim ReadOffAddrOp_Double [c] [a,o,i] = PrimInline [j| `c` = `a`.getFloat64(`o`+`i`); |]
 -- ReadOffAddrOp_StablePtr -- fixme
@@ -558,7 +566,9 @@ StableNameToIntOp
 ReallyUnsafePtrEqualityOp
 ParOp
 SparkOp
-SeqOp
+-}
+-- genPrim SeqOp [r] [e] = PRPrimCall [j|
+{-
 GetSparkOp
 NumSparks
 ParGlobalOp
@@ -567,8 +577,10 @@ ParAtOp
 ParAtAbsOp
 ParAtRelOp
 ParAtForNowOp
-DataToTagOp
-TagToEnumOp
+-}
+genPrim DataToTagOp [r] [d] = PrimInline [j| `r` = `d`.a |]
+-- genPrim TagToEnumOp [r] [d] = PrimInline [j| `r` = 
+{-
 AddrToAnyOp
 MkApUpd0_Op
 NewBCOOp
