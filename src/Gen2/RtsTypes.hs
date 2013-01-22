@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, TupleSections #-}
+{-# LANGUAGE QuasiQuotes, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, TupleSections, CPP #-}
 module Gen2.RtsTypes where
 
 import           Language.Javascript.JMacro
@@ -10,30 +10,46 @@ import           Gen2.StgAst
 import           Gen2.Utils
 
 import           Data.Char                        (toLower)
-import Control.Lens
+import           Control.Lens
 import           Data.Bits
 import qualified Data.List                        as L
 import           Data.Maybe                       (fromMaybe)
 import           Data.Monoid
 
 import qualified Data.Set as S
-import Data.Set (Set)
+import           Data.Set (Set)
 import qualified Data.Map as M
-import Data.Map (Map)
-import Control.Monad.State
+import           Data.Map (Map)
+import           Control.Monad.State
 
+import           DynFlags
 import           Encoding
+import           Gen2.RtsSettings
 import           Id
+import           Module
+import           Name
+import           Outputable hiding ((<>))
+import           Panic
 import           StgSyn
 import           TyCon
 import           Type
 import           Unique
-import Module
-import Name
-import Panic
-import           Gen2.RtsSettings
 
 import           System.IO.Unsafe
+
+showPpr' :: Outputable a => a -> G String
+showSDoc' :: SDoc -> G String
+#if __GLASGOW_HASKELL__ >= 706
+showPpr' a = do
+  df <- _gsDynFlags <$> get
+  return (showPpr df a)
+showSDoc' a = do
+  df <- _gsDynFlags <$> get
+  return (showSDoc df a)
+#else
+showPpr' a = return (showPpr a)
+showSDoc' a = return (showSDoc a)
+#endif
 
 -- closure types
 data CType = Thunk | Fun | Pap | Con | Ind | Blackhole
@@ -109,40 +125,43 @@ uTypeVt ut
   | otherwise          = primRepVt . typePrimRep $ ut
 
 primTypeVt :: Type -> VarType
-primTypeVt t
-  | st  == "GHC.Prim.Addr#" = AddrV
-  | st  == "GHC.Prim.Int#"  = IntV
-  | st  == "GHC.Prim.Int64#" = LongV
-  | st  == "GHC.Prim.Char#" = IntV
-  | st  == "GHC.Prim.Word#" = IntV
-  | st  == "GHC.Prim.Word64#" = LongV
-  | st  == "GHC.Prim.Double#" = DoubleV
-  | st  == "GHC.Prim.Float#" = DoubleV
-  | st' == "GHC.Prim.Array#" = JSArrV
-  | st' == "GHC.Prim.MutableArray#" = JSArrV
-  | st  == "GHC.Prim.ByteArray#" = ObjV
-  | st' == "GHC.Prim.MutableByteArray#" = ObjV
-  | st  == "GHC.Prim.ArrayArray#" = JSArrV
-  | st' == "GHC.Prim.MutableArrayArray#" = JSArrV
-  | st' == "GHC.Prim.MutVar#" = JSArrV -- one scannable thing
-  | st' == "GHC.Prim.TVar#" = JSArrV -- one scannable thing, can be null
-  | st' == "GHC.Prim.MVar#" = JSArrV -- one scannable thing, can be null
-  | st' == "GHC.Prim.State#" = VoidV
-  | st  == "GHC.Prim.RealWorld" = VoidV
-  | st  == "GHC.Prim.ThreadId#" = IntV
-  | st' == "GHC.Prim.Weak#" = JSArrV
-  | st' == "GHC.Prim.StablePtr#" = JSArrV
-  | st' == "GHC.Prim.StableName#" = JSArrV
-  | st' == "GHC.Prim.MutVar#" = JSArrV
-  | st  == "GHC.Prim.BCO#" = ObjV -- fixme what do we need here?
-  | st' == "(GHC.Prim.~#)" = ObjV -- ???
-  | st' == "GHC.Prim.Any" = PtrV
-  | st  == "Data.Dynamic.Obj" = PtrV -- ?
-  | otherwise = panic ("primTypeVt: unrecognized primitive type: " ++ st)
-   where
-    st | UnaryRep ut <- repType t = showPpr' ut
-       | otherwise                = panic "primTypeVt: non-unary type found"
-    st' = trim $ takeWhile (/=' ') st
+primTypeVt t = case repType t of
+                 UnaryRep ut -> case tyConAppTyCon_maybe ut of
+                                   Nothing -> panic "primTypeVt: not a TyCon"
+                                   Just tc -> go (show tc)
+                 _ -> panic "primTypeVt: non-unary type found"
+  where
+   pr xs = "ghc-prim:GHC.Prim." ++ xs
+   go st
+    | st == pr "Addr#" = AddrV
+    | st == pr "Int#"  = IntV
+    | st == pr "Int64#" = LongV
+    | st == pr "Char#" = IntV
+    | st == pr "Word#" = IntV
+    | st == pr "Word64#" = LongV
+    | st == pr "Double#" = DoubleV
+    | st == pr "Float#" = DoubleV
+    | st == pr "Array#" = JSArrV
+    | st == pr "MutableArray#" = JSArrV
+    | st == pr "ByteArray#" = ObjV
+    | st == pr "MutableByteArray#" = ObjV
+    | st == pr "ArrayArray#" = JSArrV
+    | st == pr "MutableArrayArray#" = JSArrV
+    | st == pr "MutVar#" = JSArrV -- one scannable thing
+    | st == pr "TVar#" = JSArrV -- one scannable thing, can be null
+    | st == pr "MVar#" = JSArrV -- one scannable thing, can be null
+    | st == pr "State#" = VoidV
+    | st == pr "RealWorld" = VoidV
+    | st == pr "ThreadId#" = IntV
+    | st == pr "Weak#" = JSArrV
+    | st == pr "StablePtr#" = JSArrV
+    | st == pr "StableName#" = JSArrV
+    | st == pr "MutVar#" = JSArrV
+    | st == pr "BCO#" = ObjV -- fixme what do we need here?
+    | st == pr "~#" = ObjV -- ???
+    | st == pr "Any" = PtrV
+    | st == "Data.Dynamic.Obj" = PtrV -- ?
+    | otherwise = panic ("primTypeVt: unrecognized primitive type: " ++ st)
 
 argVt :: StgArg -> VarType
 argVt = uTypeVt . stgArgType
@@ -216,6 +235,7 @@ data GenState = GenState
   , _gsToplevel :: Maybe Id  -- | the top-level function group we're generating
   , _gsScope    :: GenScope  -- | the current lexical environment
   , _gsId       :: Int       -- | integer for the id generator
+  , _gsDynFlags :: DynFlags  -- | the DynFlags, used for prettyprinting etc
   }
 
 -- | where can we find all Ids
@@ -227,11 +247,11 @@ data GenScope = GenScope
 emptyScope :: GenScope
 emptyScope = GenScope mempty mempty
 
-initState :: Module -> GenState
-initState m = GenState m Nothing emptyScope 1
+initState :: DynFlags -> Module -> GenState
+initState df m = GenState m Nothing emptyScope 1 df
 
-runGen :: Module -> G a -> a
-runGen m = flip evalState (initState m)
+runGen :: DynFlags -> Module -> G a -> a
+runGen df m = flip evalState (initState df m)
 
 {-
 -- | run an action in the initial state, useful for making one-off 
@@ -261,7 +281,7 @@ currentModule :: G String
 currentModule = moduleNameString . moduleName <$> use gsModule
 
 currentModulePkg :: G String
-currentModulePkg = showPpr' <$> use gsModule
+currentModulePkg = showPpr' =<< use gsModule
 
 
 -- arguments that the trampoline calls our funcs with
@@ -466,13 +486,15 @@ rewriteInternalId m ii@(StrI i)
 jsIdIdent :: Id -> Maybe Int -> String -> G Ident
 jsIdIdent i mn suffix = do
   (prefix, u) <- mkPrefixU
-  return $ StrI . (\x -> "$hs_"++prefix++x++mns++suffix++u) . zEncodeString $ name
+  StrI . (\x -> "$hs_"++prefix++x++mns++suffix++u) . zEncodeString <$> name
     where
       mns = maybe "" (('_':).show) mn
 --      (prefix,u)
-      name = ('.':) . showPpr' . localiseName . getName $ i
+      name = fmap ('.':) . showPpr' . localiseName . getName $ i
       mkPrefixU
-        | isExportedId i, Just x <- (nameModule_maybe . getName) i = return (zEncodeString (showPpr' x), "")
+        | isExportedId i, Just x <- (nameModule_maybe . getName) i = do
+           xstr <- showPpr' x
+           return (zEncodeString xstr, "")
         | otherwise = (,('_':) . show . getKey . getUnique $ i) . ('_':) . zEncodeString
                         <$> currentModulePkg
 {-
@@ -494,16 +516,16 @@ jsVar v = ValExpr . JVar . StrI $ v
 
 isBoolId :: Id -> Bool
 isBoolId i = n == "GHC.Types.True" || n == "GHC.Types.False"
-         where
-           n = showPpr' . idName $ i
+  where n = show . idName $ i
 
 -- regular id, shortcut for bools!
 jsId :: Id -> G JExpr
-jsId i | n == "GHC.Types.True"  = return $ toJExpr (1::Int)
-       | n == "GHC.Types.False" = return $ toJExpr (0::Int)
-       | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
-    where
-      n = showPpr' . idName $ i
+jsId i
+  | n == "GHC.Types.True"  = return $ toJExpr (1::Int)
+  | n == "GHC.Types.False" = return $ toJExpr (0::Int)
+  | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
+  where
+    n = show . idName $ i
 
 -- entry id
 jsEnId :: Id -> G JExpr

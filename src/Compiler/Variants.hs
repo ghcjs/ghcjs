@@ -25,6 +25,7 @@ import qualified Gen2.Generator        as Gen2
 import qualified Gen2.Linker           as Gen2
 #endif
 
+import           DynFlags              (DynFlags)
 import           Id                    (Id)
 import           Module                (Module (..))
 import           StgSyn                (StgBinding)
@@ -36,7 +37,7 @@ data Variant = Variant
     , variantMetaExtension     :: Maybe String
     , variantExeExtension      :: String
     , variantCallingConvention :: CallingConvention
-    , variantRender            :: StgPgm -> Module -> (ByteString, ByteString)
+    , variantRender            :: DynFlags -> StgPgm -> Module -> (ByteString, ByteString)
     , variantLink              :: String -> [FilePath] -> [FilePath] -> [ModuleName] -> IO [String]
     }
 
@@ -88,6 +89,7 @@ renderAbstract :: (Javascript js) => StgPgm -> Module-> js
 renderAbstract stg m = fst $ runGen (Js.generate m stg) newGenState
 #endif
 
-type StgPgm = [(StgBinding,[(Id,[Id])])]
+type StgPgm = [StgBinding]
+
 
 

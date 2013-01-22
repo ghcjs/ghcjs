@@ -18,12 +18,15 @@ import           ForeignCall
 import           Id
 import           Literal
 import           Module
+import           Name
 import           Outputable    hiding ((<>))
 import           PrimOp
 import           StgSyn
+import           TyCon
 import           Type
 import           UniqFM
 import           UniqSet
+import qualified Var
 
 import           Control.Lens
 import qualified Data.Foldable as F
@@ -32,30 +35,28 @@ import           Data.Set      (Set)
 import qualified Data.Set      as S
 import qualified Data.List      as L
 
-#if __GLASGOW_HASKELL__ >= 706
-showPpr' a = showPpr (defaultDynFlags undefined) a
-showSDoc' a = showSDoc (defaultDynFlags undefined) a
-#else
-showPpr' a = showPpr a
-showSDoc' a = showSDoc a
-#endif
-
+-- fixme make this more informative
+instance Show Type where
+  show ty = "_TYPE_"
 instance Show CostCentre where show _ = "CostCentre"
 instance Show CostCentreStack where show _ = "CostCentreStack"
 instance Show StgBinderInfo where show _ = "StgBinderInfo"
-instance Show Module where show = showPpr'
+instance Show Module where show m = packageIdString (modulePackageId m) ++ ":" ++ moduleNameString (moduleName m)
 instance Show (UniqFM Id) where show u = "[" ++ show (uniqSetToList u) ++ "]"
-instance Show Type where show = showPpr'
-instance Show AltType where show = showPpr'
+instance Show TyCon where show = show . tyConName
 instance Show SRT where
   show NoSRT = "SRT:NO"
   show (SRTEntries e) = "SRT:" ++ show e
   show (SRT i j b) = "SRT:BMP" ++ show [i,j]
-instance Show PrimCall where show = showPpr'
-instance Show ForeignCall where show = showPpr'
+instance Show PackageId where show = packageIdString
+instance Show Name where
+  show n = case nameModule_maybe n of
+                  Nothing -> show (nameOccName n)
+                  Just m  -> show m ++ "." ++ show (nameOccName n)
+instance Show OccName where show = occNameString
 #if __GLASGOW_HASKELL__ >= 706
-instance Show DataCon where show = showPpr'
-instance Show Var where show = showPpr'
+instance Show DataCon where show d = show (dataConName d)
+instance Show Var where show v = show (Var.varName v)
 #endif
 
 deriving instance Show UpdateFlag
@@ -65,6 +66,12 @@ deriving instance Show Literal
 deriving instance Show PrimOp
 deriving instance Show AltCon
 #endif
+deriving instance Show AltType
+deriving instance Show PrimCall
+deriving instance Show ForeignCall
+deriving instance Show CCallTarget
+deriving instance Show CCallSpec
+deriving instance Show CCallConv
 deriving instance Show FunctionOrData
 deriving instance Show StgExpr
 deriving instance Show StgBinding

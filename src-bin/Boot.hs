@@ -2,6 +2,7 @@
 {-# LANGUAGE NoImplicitPrelude         #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE OverloadedStrings         #-}
+{-# LANGUAGE CPP                       #-}
 
 {-
    Boot program to build the GHCJS core libraries from a configured GHC source tree
@@ -58,9 +59,15 @@ bootSettings :: [String] -> BootSettings
 bootSettings args = BootSettings (any (=="--skip-rts") args) (any  (=="--nobuild") args)
 
 main = withSocketsDo $ do
-  args <- getArgs
   tmp <- getTemporaryDirectory
-  withTempDirectory normal tmp "ghcjs-boot" $ \tmpDir -> shelly $ do
+#if MIN_VERSION_Cabal(1,17,0)
+  withTempDirectory normal False tmp "ghcjs-boot" mainTmp
+#else
+  withTempDirectory normal tmp "ghcjs-boot" mainTmp
+#endif
+
+mainTmp tmpDir = shelly $ do
+    args <- liftIO getArgs
     when (any (=="--auto") args) (autoBoot $ fromString tmpDir)
     ignoreExcep $ installBootPackages (bootSettings args)
 
@@ -114,7 +121,6 @@ installBootPackages settings = do
       when (not $ noBuild settings) $ forM_ corePackages $ \pkg -> do
         echo $ "Building package: " <> pkg
         run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs"]
-
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePackages
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
@@ -193,6 +199,7 @@ rtsConf incl lib = T.unlines
 
 initPackageDB :: ShIO ()
 initPackageDB = do
+  echo "creating package databases"
   base <- liftIO getGlobalPackageBase
   inst <- liftIO getGlobalPackageInst
   rm_rf . fromString =<< liftIO getGlobalPackageDB
@@ -209,19 +216,43 @@ installPkg ghcjs ghcjspkg pkg = verbosely $ do
   base <- liftIO getGlobalPackageBase
   dest <- liftIO getGlobalPackageInst
   db   <- liftIO getGlobalPackageDB
-  run_ "inplace/bin/ghc-cabal" [ "install"
-                               , toTextIgnore ghcjs
-                               , toTextIgnore ghcjspkg
+#if __GLASGOW_HASKELL__ >= 707
+  run_ "inplace/bin/ghc-cabal" [ "copy"
                                , "strip"
-                               , T.pack dest
                                , "libraries/" <> pkg
                                , "dist-install"
                                , ""
                                , T.pack base
                                , T.pack dest
                                , T.pack base <> "/doc"
-                               , "NO"
                                ]
+  run_ "inplace/bin/ghc-cabal" [ "register"
+                               , toTextIgnore ghcjs     -- ghc
+                               , toTextIgnore ghcjspkg  -- ghcpkg
+                               , T.pack dest -- topdir
+                               , "libraries/" <> pkg -- directory
+                               , "dist-install" -- distDir
+                               , "" -- myDestDir
+                               , T.pack base -- myPrefix
+                               , T.pack dest -- myLibDir
+                               , T.pack base <> "/doc" -- myDocDir
+                               , "NO" -- relocatablebuild
+                               ]
+#else
+  run_ "inplace/bin/ghc-cabal" [ "install"
+                               , toTextIgnore ghcjs    -- ghc
+                               , toTextIgnore ghcjspkg -- ghcpkg
+                               , "strip"               -- strip
+                               , T.pack dest           -- topdir
+                               , "libraries/" <> pkg   -- directory
+                               , "dist-install"        -- distdir
+                               , ""                    -- mydestdir
+                               , T.pack base           -- myprefix
+                               , T.pack dest           -- mylibdir
+                               , T.pack base <> "/doc" -- mydocdir
+                               , "NO"                  -- relocacable
+                               ]
+#endif
   -- now install the javascript files
   dirs <- chdir (fromString dest) (ls "")
   case filter (\x -> (pkg <> "-") `T.isPrefixOf` toTextIgnore x) dirs of

@@ -92,8 +92,8 @@ main =
           (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
           (dflags2, _) <- liftIO $ initPackages dflags1
-          _ <- setSessionDynFlags $ addPlatformDefines $
-                dflags2 { ghcLink = NoLink
+          _ <- setSessionDynFlags $ setDfOpts $ addPlatformDefines $
+               dflags2 { ghcLink = NoLink
                         , objectSuf = "ghcjs_o"
                         }
           let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
@@ -276,8 +276,11 @@ concreteJavascriptFromCgGuts dflags env core variant =
                                (cg_tycons $ core)
      stg <- coreToStg dflags core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-     return (variantRender variant stg' (cg_module core))
-
+#if __GLASGOW_HASKELL__ >= 707
+     return (variantRender variant dflags stg' (cg_module core))
+#else
+     return (variantRender variant dflags (map fst stg') (cg_module core))
+#endif
 {-
   with -o x, ghcjs links all required functions into an executable
   bundle, which is a directory x.jsexe, rather than a filename
@@ -322,6 +325,21 @@ printJi _                    = putStrLn "usage: ghcjs --print-ji jifile"
 printJi _ = return ()
 #endif
 
+#if __GLASGOW_HASKELL__ >= 707
+setOpt = gopt_set
+unsetOpt = gopt_unset
+#else
+setOpt = dopt_set
+unsetOpt = dopt_unset
+#endif
+
+-- add some configs
+setDfOpts :: DynFlags -> DynFlags
+setDfOpts df = foldl' setOpt (foldl' unsetOpt df unsetList) setList
+  where
+    setList = []
+    unsetList = [Opt_SplitObjs]
+
 -- ghcjs builds for a strange platform: like 32 bit
 -- instead of letting autoconf doing the defines, we override them here
 addPlatformDefines :: DynFlags -> DynFlags
@@ -365,7 +383,7 @@ addPlatformDefines df = df { settings = settings1 }
 -- that generated files don't clash with ours
 generateNative :: IO ()
 generateNative = do
---  putStrLn "generating native code"
+  putStrLn "generating native code"
   args <- getArgs
   ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
   pkgargs <- pkgConfArgs

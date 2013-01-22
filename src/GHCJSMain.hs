@@ -30,24 +30,25 @@ import Compiler.Variants
 import Control.Monad (forM_)
 #endif
 
+
 #ifndef GHCJS_ENABLED
-writeJavaScriptModule :: ModSummary -> CgGuts
-        -> ([(StgBinding,[(Id,[Id])])], CollectedCCs) -> IO ()
+writeJavaScriptModule :: DynFlags -> ModSummary -> CgGuts
+        -> ([StgBinding], CollectedCCs) -> IO ()
 writeJavaScriptModule _ _ _ = return ()
 
 linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
 linkJavaScript dyflags o_files dep_packages pagesMods = return ()
 #else
-writeJavaScriptModule :: ModSummary -> CgGuts
-        -> ([(StgBinding,[(Id,[Id])])], CollectedCCs) -> IO ()
-writeJavaScriptModule summary tidyCore (stg', _ccs) = do
+writeJavaScriptModule :: DynFlags -> ModSummary -> CgGuts
+        -> ([StgBinding], CollectedCCs) -> IO ()
+writeJavaScriptModule dyflags summary tidyCore (stg', _ccs) = do
     forM_ variants $ \variant -> do
-        writeJavaScriptModule' variant summary tidyCore (stg', _ccs)
+        writeJavaScriptModule' dyflags variant summary tidyCore (stg', _ccs)
 
-writeJavaScriptModule' :: Variant -> ModSummary -> CgGuts
-        -> ([(StgBinding,[(Id,[Id])])], CollectedCCs) -> IO ()
-writeJavaScriptModule' var summary _tidyCore (stg', _ccs) =
-  do let (program, meta) = variantRender var stg' (ms_mod summary)
+writeJavaScriptModule' :: DynFlags -> Variant -> ModSummary -> CgGuts
+        -> ([StgBinding], CollectedCCs) -> IO ()
+writeJavaScriptModule' dyflags var summary _tidyCore (stg', _ccs) =
+  do let (program, meta) = variantRender var dyflags stg' (ms_mod summary)
      putStrLn $ concat ["Writing module ", name, " (to ", outputFile vext, ")"]
      B.writeFile (outputFile vext) program
      case variantMetaExtension var of
