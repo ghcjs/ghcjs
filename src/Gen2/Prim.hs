@@ -274,8 +274,13 @@ genPrim IndexByteArrayOp_Char [r] [a,i] = PrimInline [j| `r` = `a`.getUint8(`i`)
 genPrim IndexByteArrayOp_WideChar [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`<<2); |]
 genPrim IndexByteArrayOp_Int [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`<<2); |]
 genPrim IndexByteArrayOp_Word [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`<<2); |]
-genPrim IndexByteArrayOp_Addr [r1,r2] [a,i] = PrimInline [j| `r1` = `a`.arr[`i`<<2][0];
-                                                             `r2` = `a`.arr[`i`<<2][1];
+genPrim IndexByteArrayOp_Addr [r1,r2] [a,i] = PrimInline [j| if(`a`.arr && `a`.arr[`i`<<2]) {
+                                                               `r1` = `a`.arr[`i`<<2][0];
+                                                               `r2` = `a`.arr[`i`<<2][1];
+                                                             } else {
+                                                               `r1` = null;
+                                                               `r2` = 0;
+                                                             }
                                                            |]
 genPrim IndexByteArrayOp_Float [r] [a,i] = PrimInline [j| `r` = `a`.getFloat32(`i`<<2); |]
 genPrim IndexByteArrayOp_Double [r] [a,i] = PrimInline [j| `r` = `a`.getFloat64(`i`<<3); |]
@@ -298,8 +303,13 @@ genPrim ReadByteArrayOp_Char [r] [a,i] = PrimInline [j| `r` = `a`.getUint8(`i`);
 genPrim ReadByteArrayOp_WideChar [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
 genPrim ReadByteArrayOp_Int [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`); |]
 genPrim ReadByteArrayOp_Word [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
-genPrim ReadByteArrayOp_Addr [r1,r2] [a,i] = PrimInline [j| `r1` = `a`.arr[`i`][0];
-                                                            `r2` = `a`.arr[`i`][1];
+genPrim ReadByteArrayOp_Addr [r1,r2] [a,i] = PrimInline [j| if(`a`.arr && `a`.arr[`i`]) {
+                                                              `r1` = `a`.arr[`i`][0];
+                                                              `r2` = `a`.arr[`i`][1];
+                                                            } else {
+                                                              `r1` = null;
+                                                              `r2` = 0;
+                                                            }
                                                           |]
 genPrim ReadByteArrayOp_Float [r] [a,i] = PrimInline [j| `r` = `a`.getFloat32(`i`); |]
 genPrim ReadByteArrayOp_Double [r] [a,i] = PrimInline [j| `r` = `a`.getFloat64(`i`); |]
@@ -390,8 +400,13 @@ genPrim IndexOffAddrOp_WideChar [c] [a,o,i] = PrimInline [j| `c` = `a`.getUint32
 genPrim IndexOffAddrOp_Int [c] [a,o,i] = PrimInline [j| `c` = `a`.getInt32(`o`+(`i`<<2)); |]
 genPrim IndexOffAddrOp_Word [c] [a,o,i] = PrimInline [j| `c` = `a`.getUint32(`o`+(`i`<<2)); |]
 genPrim IndexOffAddrOp_Addr [ca,co] [a,o,i] =
-  PrimInline [j| `ca` = `a`.arr[`o`+(`i`<<2)][0];
-                 `co` = `a`.arr[`o`+(`i`<<2)][1];
+  PrimInline [j| if(`a`.arr && `a`.arr[`o`+(`i`<<2)]) {
+                   `ca` = `a`.arr[`o`+(`i`<<2)][0];
+                   `co` = `a`.arr[`o`+(`i`<<2)][1];
+                 } else {
+                   `ca` = null;
+                   `co` = 0;
+                 }
               |]
 genPrim IndexOffAddrOp_Float [c] [a,o,i] = PrimInline [j| `c` = `a`.getFloat32(`o`+(`i`<<2)); |]
 genPrim IndexOffAddrOp_Double [c] [a,o,i] = PrimInline [j| `c` = `a`.getFloat64(`o`+(`i`<<3)); |]
@@ -418,9 +433,14 @@ genPrim ReadOffAddrOp_WideChar [c] [a,o,i] =
    PrimInline [j| `c` = `a`.getUint32(`o`+`i`); |]
 genPrim ReadOffAddrOp_Int [c] [a,o,i] = PrimInline [j| `c` = `a`.getInt32(`o`+`i`); |]
 genPrim ReadOffAddrOp_Word [c] [a,o,i] = PrimInline [j| `c` = `a`.getUint32(`o`+`i`); |]
-genPrim ReadOffAddrOp_Addr [r1,r2] [a,o,i] =
-  PrimInline [j| `r1` = `a`.arr[`o`+`i`][0];
-                 `r2` = `a`.arr[`o`+`i`][1];
+genPrim ReadOffAddrOp_Addr [c1,c2] [a,o,i] =
+  PrimInline [j| if(`a`.arr && `a`.arr[`o`+`i`]) {
+                   `c1` = `a`.arr[`o`+`i`][0];
+                   `c2` = `a`.arr[`o`+`i`][1];
+                 } else {
+                   `c1` = null;
+                   `c2` = 0;
+                 }
                |]
 genPrim ReadOffAddrOp_Float [c] [a,o,i] = PrimInline [j| `c` = `a`.getFloat32(`o`+`i`); |]
 genPrim ReadOffAddrOp_Double [c] [a,o,i] = PrimInline [j| `c` = `a`.getFloat64(`o`+`i`); |]
