@@ -10,6 +10,9 @@ import           TidyPgm (tidyProgram)
 import           CoreToStg (coreToStg)
 import           SimplStg (stg2stg)
 import           DynFlags
+#if __GLASGOW_HASKELL__ >= 707
+import           Platform
+#endif
 import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..))
 import           CorePrep (corePrepPgm)
 import           DriverPhases (HscSource (HsBootFile))
@@ -92,10 +95,10 @@ main =
           (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
           (dflags2, _) <- liftIO $ initPackages dflags1
-          _ <- setSessionDynFlags $ setDfOpts $ addPlatformDefines $
+          _ <- setSessionDynFlags $ setDfOpts $ setGhcjsPlatform $
                dflags2 { ghcLink = NoLink
-                        , objectSuf = "ghcjs_o"
-                        }
+                       , objectSuf = "ghcjs_o"
+                       }
           let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
 --          liftIO $ putStrLn $ "js targets: " ++ show jsArgs
           -- if guessing targets results in an exception, there were non-haskell files: fallback
@@ -103,9 +106,7 @@ main =
           case mtargets of
             Nothing      -> liftIO (fallbackGhc args1)
             Just targets -> do
-                          liftIO $ putStrLn ("outName: " ++ hscOutName sdflags ++ "outfile: " ++ show (outputFile sdflags))
-                          -- fixme find more reliable way to detect that we're not building an executable?
-                          when (ghcLink sdflags /= LinkBinary) (liftIO generateNative) -- build native code as well, for TH
+                          liftIO (generateNative argsS mbMinusB)
                           setTargets targets
                           _ <- load LoadAllTargets
                           mgraph <- depanal [] False
@@ -340,6 +341,27 @@ setDfOpts df = foldl' setOpt (foldl' unsetOpt df unsetList) setList
     setList = []
     unsetList = [Opt_SplitObjs]
 
+-- | configure the GHC API for building 32 bit code
+setGhcjsPlatform :: DynFlags -> DynFlags
+#if __GLASGOW_HASKELL__ >= 707
+setGhcjsPlatform df = addPlatformDefines $ df { settings = settings' }
+  where
+    settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
+                              , sPlatformConstants = ghcjsPlatformConstants
+                              }
+    ghcjsPlatform = Platform ArchUnknown OSUnknown 4 False False False False
+    ghcjsPlatformConstants = (sPlatformConstants (settings df))
+       { pc_WORD_SIZE       = 4
+       , pc_DOUBLE_SIZE     = 8
+       , pc_CINT_SIZE       = 4
+       , pc_CLONG_SIZE      = 4
+       , pc_CLONG_LONG_SIZE = 8
+       , pc_WORDS_BIGENDIAN = False
+       }
+#else
+setGhcjsPlatform = addPlatformDefines
+#endif
+
 -- ghcjs builds for a strange platform: like 32 bit
 -- instead of letting autoconf doing the defines, we override them here
 addPlatformDefines :: DynFlags -> DynFlags
@@ -381,11 +403,28 @@ addPlatformDefines df = df { settings = settings1 }
 
 -- also generate native code, compile with regular GHC, but make sure
 -- that generated files don't clash with ours
-generateNative :: IO ()
-generateNative = do
-  putStrLn "generating native code"
-  args <- getArgs
-  ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
-  pkgargs <- pkgConfArgs
-  ec <- rawSystem ghc $ pkgargs ++ args -- ++ ["-hisuf", "native_hi"]
-  when (ec /= ExitSuccess) (exitWith ec)
+generateNative :: [Located String] -> Maybe String -> IO ()
+generateNative argsS mbMinusB = 
+ do
+  libDir <- getGlobalPackageBase
+  defaultErrorHandler
+#if __GLASGOW_HASKELL__ >= 706
+        defaultFatalMessager
+        defaultFlushOut
+#else
+        defaultLogAction
+#endif
+        $ runGhc (mbMinusB `mplus` Just libDir) $
+       do   sdflags <- getSessionDynFlags
+            (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
+            dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
+            (dflags2, _) <- liftIO (initPackages dflags1)
+            setSessionDynFlags $ dflags2 { ghcLink = NoLink
+                                         , hiSuf   = "native_hi"
+                                         } 
+            let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
+            mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
+            _ <- load LoadAllTargets
+            mgraph <- depanal [] False
+            mapM_ compileModSummary mgraph
+
