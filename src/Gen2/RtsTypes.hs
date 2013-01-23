@@ -158,7 +158,7 @@ primTypeVt t = case repType t of
     | st == pr "StableName#" = JSArrV
     | st == pr "MutVar#" = JSArrV
     | st == pr "BCO#" = ObjV -- fixme what do we need here?
-    | st == pr "~#" = ObjV -- ???
+    | st == pr "~#" = VoidV -- ObjV -- ??? coercion token void?
     | st == pr "Any" = PtrV
     | st == "Data.Dynamic.Obj" = PtrV -- ?
     | otherwise = panic ("primTypeVt: unrecognized primitive type: " ++ st)
@@ -515,17 +515,21 @@ jsVar :: String -> JExpr
 jsVar v = ValExpr . JVar . StrI $ v
 
 isBoolId :: Id -> Bool
-isBoolId i = n == "GHC.Types.True" || n == "GHC.Types.False"
-  where n = show . idName $ i
+isBoolId i = isTrueCon i || isFalseCon i
+
+-- fixme remove dependency on the Show instances
+isTrueCon :: Id -> Bool
+isTrueCon i = show (idName i) == "ghc-prim:GHC.Types.True"
+
+isFalseCon :: Id -> Bool
+isFalseCon i = show (idName i) == "ghc-prim:GHC.Types.False"
 
 -- regular id, shortcut for bools!
 jsId :: Id -> G JExpr
 jsId i
-  | n == "GHC.Types.True"  = return $ toJExpr (1::Int)
-  | n == "GHC.Types.False" = return $ toJExpr (0::Int)
+  | isTrueCon i  = return $ toJExpr (1::Int)
+  | isFalseCon i = return $ toJExpr (0::Int)
   | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
-  where
-    n = show . idName $ i
 
 -- entry id
 jsEnId :: Id -> G JExpr
