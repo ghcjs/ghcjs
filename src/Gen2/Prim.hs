@@ -55,7 +55,7 @@ genPrim OrdOp             [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim IntAddOp          [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0 |]
 genPrim IntSubOp          [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
 genPrim IntMulOp          [r] [x,y] =
-    PrimInline [j| `r` = hs_mulInt32(`x`,`y`); |]
+    PrimInline [j| `r` = $hs_mulInt32(`x`,`y`); |]
 genPrim IntMulMayOfloOp   [r] [x,y] =
     PrimInline [j| var tmp = (`x`*`y`); `r` = (tmp===(tmp|0))?0:1; |]
 genPrim IntQuotOp         [r] [x,y] = PrimInline [j| `r` = (`x`/`y`)|0; |]
@@ -123,10 +123,10 @@ genPrim WordMul2Op      [h,l] [x,y] =
                  }
                |] -}
 -- prob wrong?
-genPrim WordQuotOp        [r] [x,y] = PrimInline [j| `r` = hs_quotWord32(`x`,`y`); |] -- [j| `r` = (`x`/`y`)|0; |]
-genPrim WordRemOp         [r] [x,y] = PrimInline [j| `r`= hs_remWord32(`x`,`y`); |] -- `x` % `y` |]
-genPrim WordQuotRemOp   [q,r] [x,y] = PrimInline [j| `q` = hs_quotWord32(`x`,`y`);
-                                                     `r` = hs_remWord32(`x`, `y`);
+genPrim WordQuotOp        [r] [x,y] = PrimInline [j| `r` = $hs_quotWord32(`x`,`y`); |] -- [j| `r` = (`x`/`y`)|0; |]
+genPrim WordRemOp         [r] [x,y] = PrimInline [j| `r`= $hs_remWord32(`x`,`y`); |] -- `x` % `y` |]
+genPrim WordQuotRemOp   [q,r] [x,y] = PrimInline [j| `q` = $hs_quotWord32(`x`,`y`);
+                                                     `r` = $hs_remWord32(`x`, `y`);
                                                   |]
 genPrim AndOp             [r] [x,y] = PrimInline [j| `r` = `x` & `y` |]
 genPrim OrOp              [r] [x,y] = PrimInline [j| `r` = `x` | `y` |]
@@ -215,7 +215,7 @@ genPrim FloatAddOp        [r] [x,y] = PrimInline [j| `r` = `x` + `y` |]
 genPrim FloatSubOp        [r] [x,y] = PrimInline [j| `r` = `x` - `y` |]
 genPrim FloatMulOp        [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]
 genPrim FloatDivOp        [r] [x,y] = PrimInline [j| `r` = `x` / `y` |]
-genPrim FloatNegOp        [r] [x,y] = PrimInline [j| `r` = `jneg x`  |]
+genPrim FloatNegOp        [r] [x]   = PrimInline [j| `r` = `jneg x`  |]
 genPrim Float2IntOp       [r] [x]   = PrimInline [j| `r` = `x`|0 |]
 genPrim FloatExpOp        [r] [x]   = PrimInline [j| `r` = Math.exp(`x`) |]
 genPrim FloatLogOp        [r] [x]   = PrimInline [j| `r` = Math.ln(`x`) |]
