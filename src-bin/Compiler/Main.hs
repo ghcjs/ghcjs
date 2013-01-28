@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables, PackageImports #-}
+{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables, PackageImports, TupleSections #-}
 module Main where
 
 import           Paths_ghcjs
@@ -13,12 +13,18 @@ import           DynFlags
 #if __GLASGOW_HASKELL__ >= 707
 import           Platform
 #endif
-import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..))
 import           CorePrep (corePrepPgm)
-import           DriverPhases (HscSource (HsBootFile))
-import           Packages (initPackages)
+import           DriverPhases (HscSource (HsBootFile), Phase (..), isHaskellSrcFilename)
+import           DriverPipeline (oneShot)
+import           Exception
+import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..), isBootSummary)
 import           Outputable (showPpr)
+import           Packages (initPackages)
+import           Panic
 
+import           Control.Applicative
+import           Control.Monad
+import           Data.Char (toLower)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 
@@ -64,13 +70,14 @@ import qualified Gen2.Rts       as Gen2
 main :: IO ()
 main =
   do args0 <- getArgs
-     logCmd <- getEnvMay "GHCJS_LOG_COMMANDLINE"
-     case logCmd of
-       Just "1" -> do
+     logCmd <- getEnvOpt "GHCJS_LOG_COMMANDLINE"
+     when logCmd $ do
          dir <- getAppUserDataDirectory "ghcjs"
          createDirectoryIfMissing True dir
          appendFile (dir </> "cmd.log") (intercalate " " ("ghcjs" : args0) ++ "\n")
-       _ -> return ()
+
+
+     noNative <- getEnvOpt "GHCJS_NO_NATIVE"
 
      let (minusB_args, args1) = partition ("-B" `isPrefixOf`) args0
          mbMinusB | null minusB_args = Nothing
@@ -79,9 +86,9 @@ main =
      handleCommandline args1
      libDir <- getGlobalPackageBase
      (argsS, _) <- parseStaticFlags $ map noLoc args1
-     defaultErrorHandler
+     errorHandler
 #if __GLASGOW_HASKELL__ >= 706
-        defaultFatalMessager
+        fatalMessager
         defaultFlushOut
 #else
         defaultLogAction
@@ -94,28 +101,48 @@ main =
                                  }
           (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
-          (dflags2, _) <- liftIO $ initPackages dflags1
+          (dflags2, _) <- liftIO (initPackages dflags1)
           _ <- setSessionDynFlags $ setDfOpts $ setGhcjsPlatform $
-               dflags2 { ghcLink = NoLink
-                       , objectSuf = "ghcjs_o"
+               dflags2 { objectSuf = "ghcjs_o"
                        }
           let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
---          liftIO $ putStrLn $ "js targets: " ++ show jsArgs
-          -- if guessing targets results in an exception, there were non-haskell files: fallback
-          mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
-          case mtargets of
-            Nothing      -> liftIO (fallbackGhc args1)
-            Just targets -> do
-                          liftIO (generateNative argsS mbMinusB)
+          if False -- noNative
+            then liftIO (putStrLn "skipping native code")
+            else liftIO $ do
+              putStrLn "generating native code"
+              generateNative oneshot argsS args1 mbMinusB
+          liftIO $ putStrLn "now doing the javascript stuff"
+          if all isBootFilename fileargs
+            then do
+              liftIO $ putStrLn "doing one shot"
+              env <- getSession
+              liftIO $ oneShot env StopLn (map (,Nothing) fileargs)
+            else do
+              mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
+              case mtargets of
+                Nothing      -> do
+                          liftIO (putStrLn "falling back")
+                          liftIO (fallbackGhc False args1)
+                Just targets -> do
+                          liftIO $ putStrLn "generating code myself"
                           setTargets targets
+                          origMgraph <- getModuleGraph
                           _ <- load LoadAllTargets
                           mgraph <- depanal [] False
-                          mapM_ compileModSummary mgraph
+--                          liftIO $ putStrLn ("orig: " ++ show (map (showPpr sdflags) origMgraph))
+--                          liftIO $ putStrLn ("result: " ++ show (map (showPpr sdflags) mgraph))
+                          if oneshot
+                            then mapM_ compileModSummary (take (length targets) mgraph) -- is this right? origMgraph
+                            else mapM_ compileModSummary mgraph
                           dflags3 <- getSessionDynFlags
                           case ghcLink sdflags of
-                            LinkBinary -> when (not oneshot) $ buildExecutable dflags3 jsArgs
+                            LinkBinary -> when (not oneshot) (buildExecutable dflags3 jsArgs)
                             LinkDynLib -> return ()
                             _          -> return ()
+
+
+isBootFilename :: FilePath -> Bool
+isBootFilename fn = any (`isSuffixOf` fn) [".hs-boot", ".lhs-boot"]
 
 catchMaybe a = (fmap Just a) `gcatch` \(_::Ex.SomeException) -> return Nothing
 
@@ -163,22 +190,40 @@ handleCommandline args
 --     unsupported xs = putStrLn (xs ++ " is currently unsupported") >> exitFailure
      acts :: [(String, IO ())]
      acts = [ ("--supported-languages", mapM_ putStrLn supportedLanguagesAndExtensions)
-            , ("--numeric-version", fallbackGhc args) -- putStrLn getCompilerVersion)
+            , ("--numeric-version", fallbackGhc False args) -- putStrLn getCompilerVersion)
             , ("--info", print =<< getCompilerInfo)
             , ("--print-libdir", putStrLn =<< getLibDir)
-            , ("--abi-hash", fallbackGhc args)
-            , ("-M", fallbackGhc args)
+            , ("--abi-hash", fallbackGhc False args)
+            , ("-M", fallbackGhc False args)
             , ("--print-rts", printRts)
             , ("--print-ji", printJi args)
             ]
 
 handleOneShot :: [String] -> IO ()
-handleOneShot args | fallback  = fallbackGhc args >> exitSuccess
+handleOneShot args | fallback  = fallbackGhc False args >> exitSuccess
                    | otherwise = return ()
     where
       fallback = any isFb (tails args)
-      isFb ({- "-c": -} c:_) = any (`isSuffixOf` c) [".c", ".cmm", ".hs-boot", ".lhs-boot"]
+      isFb ({- "-c": -} c:_) = any (`isSuffixOf` c) [".c", ".cmm"]
       isFb _          = False
+
+-- | make sure we don't show panic messages with the "report GHC bug" text, since
+--   those are probably our fault.
+errorHandler :: (ExceptionMonad m, MonadIO m)
+             => FatalMessager -> FlushOut -> m a -> m a
+errorHandler fm fo m = defaultErrorHandler fm fo (convertError m)
+  where
+    convertError m = handleGhcException (\ge ->
+                       throwGhcException $
+                         case ge of
+                           Panic str -> ProgramError str
+                           x         -> x
+                     ) m
+
+fatalMessager :: String -> IO ()
+fatalMessager str = do
+  args <- getArgs
+  hPutStrLn stderr (str ++ "\n--- arguments: \n" ++ unwords args ++ "\n---\n")
 
 {-
    call GHC for things that we don't handle internally
@@ -188,38 +233,40 @@ handleOneShot args | fallback  = fallbackGhc args >> exitSuccess
    if GHCJS_FALLBACK_PLAIN is set, all arguments are passed through verbatim
    to the fallback ghc, including -B
 -}
-fallbackGhc :: [String] -> IO ()
-fallbackGhc args = do
+fallbackGhc :: Bool -> [String] -> IO ()
+fallbackGhc isNative args = do
   pkgargs <- pkgConfArgs
   ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
-  plain <- getEnvMay "GHCJS_FALLBACK_PLAIN"
-  case plain of
-    Just _  -> do
-       as <- getArgs
-       rawSystem ghc as --  (as ++ ["-hisuf", "native_hi"])
-    Nothing -> rawSystem ghc $ pkgargs ++ args -- ++ ["-hisuf", "native_hi"]
+  plain <- getEnvOpt "GHCJS_FALLBACK_PLAIN"
+  args' <- if plain then getArgs else return args
+  if isNative
+    then rawSystem ghc $ pkgargs ++ args' ++ ["-hisuf", "native_hi"]
+    else rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "ghcjs_o"]
   return ()
 
 getEnvMay :: String -> IO (Maybe String)
 getEnvMay xs = fmap Just (getEnv xs)
                `Ex.catch` \(_::Ex.SomeException) -> return Nothing
 
+getEnvOpt :: MonadIO m => String -> m Bool
+getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)
+
+-- why doesn't GHC pick up .lhs-boot as boot? are we loading it wrong?
+isBootModSum :: ModSummary -> Bool
+isBootModSum ms = isBootSummary ms || (maybe False ("-boot"`isSuffixOf`).ml_hs_file.ms_location $ ms)
 
 compileModSummary :: GhcMonad m => ModSummary -> m ()
-compileModSummary mod =
-  case ms_hsc_src mod
-  of HsBootFile -> liftIO $ putStrLn $ concat ["Skipping boot ", name]
-     _ ->
+compileModSummary mod
+  | isBootModSum mod = liftIO $ putStrLn $ concat ["Skipping boot ", name]
+  | otherwise =
        do liftIO $ putStrLn $ concat ["Compiling ", name]
           desugaredMod <- desugaredModuleFromModSummary mod
           writeDesugaredModule desugaredMod
   where name = moduleNameString . moduleName . ms_mod $ mod
 
 desugaredModuleFromModSummary :: GhcMonad m => ModSummary -> m DesugaredModule
-desugaredModuleFromModSummary mod =
-  do parsedMod <- parseModule mod
-     typedCheckMod <- typecheckModule parsedMod
-     desugarModule typedCheckMod
+desugaredModuleFromModSummary =
+  parseModule >=> typecheckModule >=> desugarModule
 
 writeDesugaredModule :: GhcMonad m => DesugaredModule -> m ()
 writeDesugaredModule mod =
@@ -348,8 +395,12 @@ setGhcjsPlatform df = addPlatformDefines $ df { settings = settings' }
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
                               , sPlatformConstants = ghcjsPlatformConstants
+                              , sPgm_a             = ("ghcjs-gcc-stub", [])
+                              , sPgm_l             = ("ghcjs-gcc-stub", [])
                               }
-    ghcjsPlatform = Platform ArchUnknown OSUnknown 4 False False False False
+    ghcjsPlatform = (sTargetPlatform (settings df)) -- Platform ArchUnknown OSUnknown 4 False False False False
+       { platformWordSize = 4
+       }
     ghcjsPlatformConstants = (sPlatformConstants (settings df))
        { pc_WORD_SIZE       = 4
        , pc_DOUBLE_SIZE     = 8
@@ -403,13 +454,15 @@ addPlatformDefines df = df { settings = settings1 }
 
 -- also generate native code, compile with regular GHC, but make sure
 -- that generated files don't clash with ours
-generateNative :: [Located String] -> Maybe String -> IO ()
-generateNative argsS mbMinusB = 
+generateNative :: Bool -> [Located String] -> [String] -> Maybe String -> IO ()
+generateNative oneshot argsS args1 mbMinusB =
  do
+  return ()
+
   libDir <- getGlobalPackageBase
-  defaultErrorHandler
+  errorHandler
 #if __GLASGOW_HASKELL__ >= 706
-        defaultFatalMessager
+        fatalMessager
         defaultFlushOut
 #else
         defaultLogAction
@@ -419,12 +472,22 @@ generateNative argsS mbMinusB =
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
             dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
             (dflags2, _) <- liftIO (initPackages dflags1)
-            setSessionDynFlags $ dflags2 { ghcLink = NoLink
+            setSessionDynFlags $ dflags2 { ghcMode = if oneshot then OneShot else CompManager 
+                                         , ghcLink = NoLink
                                          , hiSuf   = "native_hi"
-                                         } 
+                                         }
             let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
-            mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
-            _ <- load LoadAllTargets
-            mgraph <- depanal [] False
-            mapM_ compileModSummary mgraph
+            if all isBootFilename fileargs
+              then do
+                env <- getSession
+                liftIO $ oneShot env StopLn (map (,Nothing) fileargs)
+              else do
+                mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
+                case mtargets of
+                  Nothing ->
+                    liftIO (fallbackGhc True args1)
+                  Just targets -> do
+                    setTargets targets
+                    _ <- load LoadAllTargets
+                    return ()
 
