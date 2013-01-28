@@ -705,9 +705,20 @@ genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l = do
       PrimInline s -> declIds bnd <> return s <> genInlinePrimCase top bnd (uTypeVt t) at alts
       PRPrimCall s -> genRet top bnd at alts l <> return s
 
+genCase top bnd x@(StgConApp c as) at@(UbxTupAlt n) [(DataAlt{}, bndrs, _, e)] l = do
+  args' <- concatMapM genArg as
+  ids   <- concatMapM genIds bndrs
+  mconcat (map declIds bndrs) <> return (assignAll ids args') <> genExpr top e
+
 genCase _ _ x at alts _ = panic ("unhandled gencase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
 -- genCase _ _ x at alts _ = return [j| unhandled_gencase_format = `show x` |]
 
+
+assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
+assignAll xs ys = mconcat (zipWith assignj xs ys)
+
+assignj :: (ToJExpr a, ToJExpr b) => a -> b -> JStat
+assignj x y = [j| `x` = `y` |]
 
 -- simple inline prim case, no return function needed
 genInlinePrimCase :: Id -> Id -> VarType -> AltType -> [StgAlt] -> C
@@ -806,11 +817,16 @@ genAlts :: Id -> Id -> AltType -> [StgAlt] -> C
 genAlts top e PolyAlt [alt] = snd <$> mkAlgBranch top e alt
 genAlts top e PolyAlt _ {- [(_, _, _, expr)] -} = panic "multiple polyalt"
 genAlts top e (PrimAlt tc) [(_, bs, use, expr)] = do
-  ie <- jsId e
-  loadParams ie bs use <> genExpr top expr
+  ie <- genIds e
+{-  loadParams ie bs use <> -}
+  bss <- concatMapM genIds bs
+  mconcat (map declIds bs) <> return (assignAll bss ie) <> genExpr top expr
 -- fixme: for 2-value arguments use more regs
 -- fixme this switch is wrong
-genAlts top e (PrimAlt tc) alts = mkSwitch [je| `Heap`[`R1`] |] <$> mapM (mkPrimBranch top (tyConVt tc)) alts
+-- genAlts top e (PrimAlt tc) alts = mkSwitch [je| `Heap`[`R1`] |] <$> mapM (mkPrimBranch top (tyConVt tc)) alts
+genAlts top e (PrimAlt tc) alts = do
+  ie <- genIds e
+  mkSw ie <$> mapM (mkPrimIfBranch top (tyConVt tc)) alts
 -- genAlts r e (PrimAlt tc) alts = mkSwitch [je| heap[r1] |] (map (mkPrimBranch r e) alts)
 genAlts top e (UbxTupAlt n) [(_, bs, use, expr)] = loadUbxTup bs n <> genExpr top expr
 --genAlts r e (AlgAlt tc) [alt] = mkSwitch [snd (mkAlgBranch r e alt)
@@ -868,6 +884,10 @@ mkSwitch e cases = SwitchStat e (map addBreak (init cases)) lastc
       addBreak (c,s) = (c, [j| `s`; break; |])
       lastc = snd (last cases)
 -}
+
+mkSw :: [JExpr] -> [(Maybe [JExpr], JStat)] -> JStat
+mkSw [e] cases = mkSwitch e (over (mapped._1.mapped) head cases)
+mkSw es cases = mkIfElse es cases
 
 -- switch for pattern matching on constructors or prims
 mkSwitch :: JExpr -> [(Maybe JExpr, JStat)] -> JStat
@@ -928,12 +948,19 @@ mkPrimBranch top vt (DEFAULT, bs, us, e) = (Nothing,) <$> genExpr top e
 mkPrimBranch top vt (cond,    bs, us, e) = (caseCond cond,) <$> genExpr top e
 
 -- possibly multi-var prim
+-- fixme load binders?
 mkPrimIfBranch :: Id -> VarType -> StgAlt -> G (Maybe [JExpr], JStat)
-mkPrimIfBranch top vt (DEFAULT, bs, us, e) = (Nothing,) <$> genExpr top e
-mkPrimIfBranch top vt (cond,    bs, us, e) = (ifCond cond,) <$> genExpr top e
+mkPrimIfBranch top vt (DEFAULT, bs, us, e) = do
+--  (Nothing,) <$> genExpr top e
+  expr <- genExpr top e
+  return (Nothing, expr)
+mkPrimIfBranch top vt (cond,    bs, us, e) = do
+  dec <- concatMapM declIds bs
+  expr <- genExpr top e
+  return (ifCond cond, expr) -- dec <> return (assignAll bs <> expr)
+
 
 dummyRet = [je| dummyRet |]
-
 
 ifCond :: AltCon -> Maybe [JExpr]
 ifCond (DataAlt da)
