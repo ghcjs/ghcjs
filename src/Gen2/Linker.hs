@@ -56,11 +56,11 @@ link out searchPath objFiles pageModules = do
   metas <- mapM (readDeps . metaFile) objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
   T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
-  (allDeps, src) <- collectDeps (lookup metas) (S.fromList $ concatMap modFuns roots)
+  (allDeps, src) <- collectDeps (lookup metas) (S.union rtsDeps (S.fromList $ concatMap modFuns roots))
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (BL.fromChunks src)
   writeFile (out </> "rts.js") rtsStr
-  getShims extraFiles allDeps (out </> "lib.js")
+  getShims extraFiles allDeps (out </> "lib.js", out </> "lib1.js")
   combineFiles out
   return []
   where
@@ -80,21 +80,22 @@ link out searchPath objFiles pageModules = do
       where
         modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> "gen2" <.> ext
 
-getShims :: [FilePath] -> Set Fun -> FilePath -> IO ()
-getShims extraFiles deps file = do
+getShims :: [FilePath] -> Set Fun -> (FilePath, FilePath) -> IO ()
+getShims extraFiles deps (fileBefore, fileAfter) = do
   base <- (</> "shims") <$> getGlobalPackageBase
-  t <- collectShims base pkgDeps
+  (before, after) <- collectShims base pkgDeps
+  T.writeFile fileBefore before
   t' <- mapM T.readFile extraFiles
-  T.writeFile file (T.unlines $ t : t')
+  T.writeFile fileAfter (T.unlines $ after : t')
     where
       pkgDeps = map (\(Package n v) -> (n, fromMaybe [] $ parseVersion v))
                   (S.toList $ S.map funPackage deps)
 
--- convenience: combine lib.js, rts.js, out.js to all.js that can be run
+-- convenience: combine lib.js, rts.js, lib1.js, out.js to all.js that can be run
 -- directly with node or spidermonkey
 combineFiles :: FilePath -> IO ()
 combineFiles fp = do
-  files <- mapM (T.readFile.(fp</>)) ["lib.js", "rts.js", "out.js"]
+  files <- mapM (T.readFile.(fp</>)) ["lib.js", "rts.js", "lib1.js", "out.js"]
   T.writeFile (fp</>"all.js") (mconcat (files ++ [runMain]))
 
 runMain :: Text
@@ -182,7 +183,7 @@ collectDeps lookup roots = do
   (allDeps, srcs) <- getDepsSources lookup roots
   srcs' <- mapM (uncurry extractDeps) srcs
   return (allDeps, srcs')
-  
+
 extractDeps :: FilePath -> Set Fun -> IO ByteString
 extractDeps file funs = do
   blocks <- collectBlocks <$> T.readFile file
@@ -255,3 +256,13 @@ funPkgTxt = showPkg . funPackage
 -- Fun -> packagename
 funPkgTxtNoVer :: Fun -> Text
 funPkgTxtNoVer = packageName . funPackage
+
+-- dependencies for the RTS, these need to be always linked
+rtsDeps :: Set Fun
+rtsDeps =
+ let mkDep (p,m,s) = Fun (Package p "") m s
+ in S.fromList $ map mkDep
+     [ ("ghc-prim", "GHC.Types",     "$hs_baseZCGHCziTypesziFalse")
+     , ("ghc-prim", "GHC.Types",     "$hs_baseZCGHCziTypesziTrue")
+     , ("base",     "GHC.Conc.Sync", "$hs_baseZCGHCziConcziSynczireportError") -- "reportError")
+     ]

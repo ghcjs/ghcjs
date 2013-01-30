@@ -82,12 +82,17 @@ instance FromJSON VersionRange where
 
 collectShims :: FilePath          -- ^ the base path
              -> [(Text, Version)] -- ^ packages being linked
-             -> IO Text           -- ^ collected shims
+             -> IO (Text, Text)   -- ^ collected shims, to be included (before, after) rts
 collectShims base pkgs = do
   files <- mapM (collectShim base) pkgs
   files' <- mapM (canonicalizePath . (base </>)) (concat files)
-  T.unlines <$> mapM tryReadFile (uniq files')
+  let (beforeRts, afterRts) = splitFiles files'
+  (,) <$> combineShims beforeRts <*> combineShims afterRts
     where
+      splitFiles files = (before, map init after)
+        where
+          (after, before) = L.partition ("@" `L.isSuffixOf`) files
+      combineShims files = T.unlines <$> mapM tryReadFile (uniq files)
       uniq xs = let go (x:xs) s
                       | x `S.notMember` s = x : go xs (S.insert x s)
                       | otherwise         = go xs s
