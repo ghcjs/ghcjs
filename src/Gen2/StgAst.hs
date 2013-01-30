@@ -10,8 +10,15 @@
 module Gen2.StgAst where
 
 import           BasicTypes
+import           Control.Lens
 import           CoreSyn
 import           CostCentre
+import           Data.Char (isSpace)
+import qualified Data.Foldable as F
+import qualified Data.List      as L
+import           Data.Monoid
+import           Data.Set      (Set)
+import qualified Data.Set      as S
 import           DataCon
 import           DynFlags
 import           ForeignCall
@@ -22,22 +29,34 @@ import           Name
 import           Outputable    hiding ((<>))
 import           PrimOp
 import           StgSyn
+import           SysTools (initSysTools)
 import           TyCon
 import           Type
 import           UniqFM
 import           UniqSet
 import qualified Var
 
-import           Control.Lens
-import qualified Data.Foldable as F
-import           Data.Monoid
-import           Data.Set      (Set)
-import qualified Data.Set      as S
-import qualified Data.List      as L
+import           Compiler.Info
+import           System.IO.Unsafe
+
+-- this is a hack to be able to use pprShow in a Show instance, should be removed
+{-# NOINLINE hackPprDflags #-}
+hackPprDflags :: DynFlags
+hackPprDflags = unsafePerformIO $ do
+  libDir <- getGlobalPackageBase
+  mySettings <- initSysTools (Just libDir)
+  initDynFlags (defaultDynFlags mySettings)
+
+fixSpace :: String -> String
+fixSpace xs = map f xs
+  where
+    f c | isSpace c = ' '
+        | otherwise = c
+
 
 -- fixme make this more informative
 instance Show Type where
-  show ty = "_TYPE_"
+  show ty = fixSpace (showPpr hackPprDflags ty)
 instance Show CostCentre where show _ = "CostCentre"
 instance Show CostCentreStack where show _ = "CostCentreStack"
 instance Show StgBinderInfo where show _ = "StgBinderInfo"
@@ -56,7 +75,7 @@ instance Show Name where
 instance Show OccName where show = occNameString
 #if __GLASGOW_HASKELL__ >= 706
 instance Show DataCon where show d = show (dataConName d)
-instance Show Var where show v = show (Var.varName v)
+instance Show Var where show v = "(" ++ show (Var.varName v) ++ " :: " ++ show (Var.varType v) ++ ")"
 #endif
 
 deriving instance Show UpdateFlag
