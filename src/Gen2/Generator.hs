@@ -249,8 +249,10 @@ genToplevelRhs i (StgRhsCon _cc con args) =
     typeComment i <>
     declIds i <> do
       id <- jsId i
+      eid <- jsEntryIdI i
       as <- mapM genArg args
-      allocConStatic id con . concat $ as -- no static here?
+      ec <- enterDataCon con
+      return (decl eid <> [j| `eid` = `ec` |]) <> (allocConStatic id con . concat $ as)
 genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable _srt [] body) =
   toplevel <$> do
         eid <- jsEnIdI i
