@@ -551,8 +551,10 @@ fun runhs t cb {
 //  `trace "runhs"`;
   run_init_static();
   stack[0] = done;
-  stack[1] = reduce;
-  sp = 1;
+  stack[1] = $hs_baseZCGHCziConcziSynczireportError;
+  stack[2] = stg_catch_e;
+  stack[3] = reduce;
+  sp = 3;
   var c = heap[t];
   `R1` = t;
   while(c !== done) {
