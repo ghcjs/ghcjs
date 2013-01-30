@@ -114,6 +114,7 @@ Library
     exposed: True
     buildable: True
     hs-source-dirs: src
+    GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -auto-all -caf-all
 
 Executable ghcjs
     if flag(rts-only)
@@ -180,6 +181,14 @@ Executable ghcjs-pkg
                       directory,
                       filepath
 
+Executable ghcjs-gcc-stub
+    if flag(compiler-only) || flag(rts-only)
+      Buildable:      False
+    Main-Is:          GccStub.hs
+    Default-Language: Haskell2010
+    Hs-Source-Dirs:   src-bin
+    Build-Depends:    base              >= 4 && < 5
+
 Executable ghcjs-boot
     if flag(compiler-only) || flag(rts-only)
       Buildable:      False
@@ -194,7 +203,7 @@ Executable ghcjs-boot
                       text              >= 0.11 && < 0.12,
                       bytestring        >= 0.9  && < 0.11,
                       system-filepath   >= 0.4  && < 0.5,
-                      shelly            >= 0.14 && < 0.15,
+                      shelly            >= 0.15 && < 0.16,
                       http-conduit      >= 1.5  && < 1.7,
                       bzlib-conduit     >= 0.2  && < 0.3,
                       conduit           >= 0.5.2  && < 0.7,
@@ -219,7 +228,7 @@ Executable ghcjs-cabal
                       bytestring        >= 0.9  && < 0.11,
                       base16-bytestring >= 0.1 && < 0.2,
                       skein             >= 0.1  && < 0.2,
-                      shelly            >= 0.14 && < 0.15
+                      shelly            >= 0.15 && < 0.16
 
 test-suite test
     type:             exitcode-stdio-1.0
