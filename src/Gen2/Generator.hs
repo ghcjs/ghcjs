@@ -414,7 +414,7 @@ genApp force mstackTop i a
          let (reg,over) = splitAt (idArity i) a
          in  do
            reg' <- concatMapM genArg reg
-           pushCont over <> jumpToII i reg' -- (concatMap genArg reg)
+           r1 <> pushCont over <> jumpToII i reg' -- (concatMap genArg reg)
     | otherwise      = r1 <> jumpToFast a
   where
     stackTop = [je| `Stack`[`Sp`] |] -- fixme, use known val? fromMaybe [je| stack[sp]; |] mstackTop
