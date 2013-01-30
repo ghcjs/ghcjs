@@ -90,7 +90,7 @@ genPrim WordAdd2Op      [h,l] [x,y] = PrimInline [j| `l` = (`x` + `y`)|0;
 genPrim WordSubOp         [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
 -- fixme inline?
 genPrim WordMulOp         [r] [x,y] =
-  PrimInline [j| `r` = hs_mulWord32(`x`,`y`); |]
+  PrimInline [j| `r` = $hs_mulWord32(`x`,`y`); |]
 
 {-
    if(`x` < `two_24` && `y` < `two_24`) {
@@ -105,7 +105,7 @@ genPrim WordMulOp         [r] [x,y] =
                |] -}
 -- fixme inline?
 genPrim WordMul2Op      [h,l] [x,y] =
-  PrimInline [j| `h` = hs_mul2Word32(`x`,`y`);
+  PrimInline [j| `h` = $hs_mul2Word32(`x`,`y`);
                  `l` = ret1;
                |]
 {-  PrimInline [j| if(x0 < `two_24` && y0 < `two_24`) {
@@ -248,7 +248,7 @@ genPrim IndexArrayOp        [r] [a,i]   = PrimInline [j| `r` = `a`[`i`]; |]
 genPrim UnsafeFreezeArrayOp [r] [a]     = PrimInline [j| `r` = `a`; |]
 genPrim UnsafeThawArrayOp   [r] [a]     = PrimInline [j| `r` = `a`; |]
 genPrim CopyArrayOp         [] [a,o1,ma,o2,n] =
-  PrimInline [j| for(var i=n - 1;i >= 0;i--) {
+  PrimInline [j| for(var i=`n` - 1;i >= 0;i--) {
                    `ma`[i+`o2`] = `a`[i+`o1`];
                  }
                |]
@@ -260,8 +260,10 @@ genPrim CloneArrayOp        [r] [a,start,n] =
                  }
                |]
 genPrim CloneMutableArrayOp [r] [a,start,n] = genPrim CloneArrayOp [r] [a,start,n]
-genPrim FreezeArrayOp       [r] [a] = PrimInline [j| `r` = `a`; |]
-genPrim ThawArrayOp         [r] [a] = PrimInline [j| `r` = `a`; |]
+genPrim FreezeArrayOp       [r] [a,start,n] =
+  PrimInline [j| `r` = new DataView(`a`.buffer.slice(`start`, `start`+`n`)); |]
+genPrim ThawArrayOp         [r] [a,start,n] =
+  PrimInline [j| `r` = new DataView(`a`.buffer.slice(`start`, `start`+`n`)); |]
 genPrim NewByteArrayOp_Char [r] [l] = PrimInline (newByteArray r l)
 genPrim NewPinnedByteArrayOp_Char [r] [l] = PrimInline (newByteArray r l)
 genPrim NewAlignedPinnedByteArrayOp_Char [r] [l,align] = PrimInline (newByteArray r l)
@@ -598,8 +600,8 @@ ParAtAbsOp
 ParAtRelOp
 ParAtForNowOp
 -}
-genPrim DataToTagOp [r] [d] = PrimInline [j| `r` = `d`.a |]
--- genPrim TagToEnumOp [r] [d] = PrimInline [j| `r` = 
+genPrim DataToTagOp [r] [d] = PrimInline [j| `r` = `Heap`[`d`].a - 1 |]
+genPrim TagToEnumOp [r] [t] = PrimInline [j| `r` = $hs_tagToEnum(`t`) |]
 {-
 AddrToAnyOp
 MkApUpd0_Op
