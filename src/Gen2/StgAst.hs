@@ -37,14 +37,21 @@ import           UniqSet
 import qualified Var
 
 import           Compiler.Info
+
+import           Control.Monad
+import           System.Environment (getArgs)
 import           System.IO.Unsafe
 
 -- this is a hack to be able to use pprShow in a Show instance, should be removed
 {-# NOINLINE hackPprDflags #-}
 hackPprDflags :: DynFlags
 hackPprDflags = unsafePerformIO $ do
+  args <- getArgs
+  let (minusB_args, args1) = L.partition ("-B" `L.isPrefixOf`) args
+      mbMinusB | null minusB_args = Nothing
+               | otherwise = Just . drop 2 . last $ minusB_args
   libDir <- getGlobalPackageBase
-  mySettings <- initSysTools (Just libDir)
+  mySettings <- initSysTools (mbMinusB `mplus` Just libDir)
   initDynFlags (defaultDynFlags mySettings)
 
 fixSpace :: String -> String
