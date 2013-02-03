@@ -42,7 +42,7 @@ import           GHCJS Compiler.Variants
 import qualified GHCJS GHCJSMain
 import           MonadUtils (MonadIO(..))
 import           System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
-import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory)
+import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory, doesFileExist)
 import qualified Control.Exception as Ex
 
 import           Control.Monad (when, mplus, forM, forM_)
@@ -51,7 +51,7 @@ import           System.Process (rawSystem)
 import           System.IO
 import           Data.Monoid (mconcat, First(..))
 import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub, intercalate, foldl')
-import           Data.Maybe (isJust, fromMaybe, catMaybes)
+import           Data.Maybe (isJust, fromMaybe, catMaybes, isNothing)
 
 import           Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
@@ -82,9 +82,9 @@ main =
      let (minusB_args, args1) = partition ("-B" `isPrefixOf`) args0
          mbMinusB | null minusB_args = Nothing
                   | otherwise = Just . drop 2 . last $ minusB_args
-
      handleCommandline args1
      libDir <- getGlobalPackageBase
+     when (isNothing mbMinusB) checkIsBooted
      (argsS, _) <- parseStaticFlags $ map noLoc args1
      errorHandler
 #if __GLASGOW_HASKELL__ >= 706
@@ -490,4 +490,15 @@ generateNative oneshot argsS args1 mbMinusB =
                     setTargets targets
                     _ <- load LoadAllTargets
                     return ()
+
+
+checkIsBooted :: IO ()
+checkIsBooted = do
+  base <- getGlobalPackageBase
+  let settingsFile = base </> "settings"
+  e <- doesFileExist settingsFile
+  when (not e) $ do
+    hPutStrLn stderr $ "cannot find `" ++ settingsFile ++ "'\n" ++
+                       "please install the GHCJS core libraries. See README for details"
+    exitWith (ExitFailure 1)
 
