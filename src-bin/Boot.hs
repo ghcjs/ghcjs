@@ -148,6 +148,7 @@ fixGhcWrapper wrapper ghcjs = T.unlines . concatMap fixLine . T.lines $ wrapper
               [ exec <> "\"" <> toTextIgnore ghcjs <> "\""
               , "export GHCJS_FALLBACK_GHC=" <> T.drop (T.length exec) line
               , "export GHCJS_FALLBACK_PLAIN=1"
+              , "export GHCJS_NO_NATIVE=1"
               ]
           | otherwise                             = [line]
 

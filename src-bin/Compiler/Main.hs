@@ -17,14 +17,20 @@ import           CorePrep (corePrepPgm)
 import           DriverPhases (HscSource (HsBootFile), Phase (..), isHaskellSrcFilename)
 import           DriverPipeline (oneShot)
 import           Exception
-import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..), isBootSummary)
+import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..), NameCache (..), isBootSummary)
+import           IfaceEnv (initNameCache)
+import           LoadIface
 import           Outputable (showPpr)
 import           Packages (initPackages)
 import           Panic
+import           PrelInfo (wiredInThings)
+import           PrelNames (basicKnownKeyNames)
+import           PrimOp (allThePrimOps)
 
 import           Control.Applicative
 import           Control.Monad
 import           Data.Char (toLower)
+import           Data.IORef (modifyIORef)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 
@@ -65,6 +71,7 @@ import qualified Data.Serialize as C
 import qualified Gen2.Generator as Gen2
 import qualified Gen2.Linker    as Gen2
 import qualified Gen2.Rts       as Gen2
+import           Gen2.PrimIface as Gen2
 #endif
 
 main :: IO ()
@@ -106,12 +113,13 @@ main =
                dflags2 { objectSuf = "ghcjs_o"
                        }
           let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
-          if False -- noNative
+          if noNative
             then liftIO (putStrLn "skipping native code")
             else liftIO $ do
               putStrLn "generating native code"
               generateNative oneshot argsS args1 mbMinusB
           liftIO $ putStrLn "now doing the javascript stuff"
+          fixNameCache
           if all isBootFilename fileargs
             then do
               liftIO $ putStrLn "doing one shot"
@@ -122,7 +130,7 @@ main =
               case mtargets of
                 Nothing      -> do
                           liftIO (putStrLn "falling back")
-                          liftIO (fallbackGhc False args1)
+                          when (not noNative) (liftIO $ fallbackGhc True args1)
                 Just targets -> do
                           liftIO $ putStrLn "generating code myself"
                           setTargets targets
@@ -197,6 +205,7 @@ handleCommandline args
             , ("-M", fallbackGhc False args)
             , ("--print-rts", printRts)
             , ("--print-ji", printJi args)
+            , ("--show-iface", printIface args)
             ]
 
 handleOneShot :: [String] -> IO ()
@@ -239,9 +248,10 @@ fallbackGhc isNative args = do
   ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
   plain <- getEnvOpt "GHCJS_FALLBACK_PLAIN"
   args' <- if plain then getArgs else return args
+  noNative <- getEnvOpt "GHCJS_NO_NATIVE"
   if isNative
-    then rawSystem ghc $ pkgargs ++ args' ++ ["-hisuf", "native_hi"]
-    else rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "ghcjs_o"]
+    then when (not noNative) (void $ rawSystem ghc $ pkgargs ++ args' ++ ["-hisuf", "native_hi"])
+    else void $ rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "ghcjs_o"]
   return ()
 
 getEnvMay :: String -> IO (Maybe String)
@@ -397,6 +407,9 @@ setGhcjsPlatform df = addPlatformDefines $ df { settings = settings' }
                               , sPlatformConstants = ghcjsPlatformConstants
                               , sPgm_a             = ("ghcjs-gcc-stub", [])
                               , sPgm_l             = ("ghcjs-gcc-stub", [])
+#ifdef GHCJS_GEN2
+                              , sOverridePrimIface = Just ghcjsPrimIface
+#endif
                               }
     ghcjsPlatform = (sTargetPlatform (settings df)) -- Platform ArchUnknown OSUnknown 4 False False False False
        { platformWordSize = 4
@@ -452,13 +465,22 @@ addPlatformDefines df = df { settings = settings1 }
            , "__GHCJS__=1"
            ]
 
--- also generate native code, compile with regular GHC, but make sure
+runGhcSession mbMinusB a = do
+     libDir <- getGlobalPackageBase
+     errorHandler
+#if __GLASGOW_HASKELL__ >= 706
+        fatalMessager
+        defaultFlushOut
+#else
+        defaultLogAction
+#endif
+        $ runGhc (mbMinusB `mplus` Just libDir) $ a
+
+-- also generate native code, compile with regular GHC settings, but make sure
 -- that generated files don't clash with ours
 generateNative :: Bool -> [Located String] -> [String] -> Maybe String -> IO ()
 generateNative oneshot argsS args1 mbMinusB =
  do
-  return ()
-
   libDir <- getGlobalPackageBase
   errorHandler
 #if __GLASGOW_HASKELL__ >= 706
@@ -472,9 +494,9 @@ generateNative oneshot argsS args1 mbMinusB =
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
             dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
             (dflags2, _) <- liftIO (initPackages dflags1)
-            setSessionDynFlags $ dflags2 { ghcMode = if oneshot then OneShot else CompManager 
+            setSessionDynFlags $ dflags2 { ghcMode = if oneshot then OneShot else CompManager
                                          , ghcLink = NoLink
-                                         , hiSuf   = "native_hi"
+                                         , hiSuf   = "native_" ++ hiSuf dflags2
                                          }
             let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
             if all isBootFilename fileargs
@@ -491,6 +513,18 @@ generateNative oneshot argsS args1 mbMinusB =
                     _ <- load LoadAllTargets
                     return ()
 
+-- replace primops in the name cache so that we get our correctly typed primops
+fixNameCache :: GhcMonad m => m ()
+fixNameCache = do
+  sess <- getSession
+  liftIO $ modifyIORef (hsc_NC sess) $ \(NameCache u _) ->
+    (initNameCache u knownNames)
+    where
+      knownNames = map getName (filter (not.isPrimOp) wiredInThings) ++
+                      basicKnownKeyNames ++
+                      map (getName . AnId . mkGhcjsPrimOpId) allThePrimOps
+      isPrimOp (AnId i) = isPrimOpId i
+      isPrimOp _        = False
 
 checkIsBooted :: IO ()
 checkIsBooted = do
@@ -501,4 +535,16 @@ checkIsBooted = do
     hPutStrLn stderr $ "cannot find `" ++ settingsFile ++ "'\n" ++
                        "please install the GHCJS core libraries. See README for details"
     exitWith (ExitFailure 1)
+
+-- we might generate .hi files for a different bitness than native GHC,
+-- make sure we can show then
+printIface :: [String] -> IO ()
+printIface ["--show-iface", iface] = do
+     (argsS, _) <- parseStaticFlags $ map noLoc []
+     runGhcSession Nothing $ do
+       sdflags <- getSessionDynFlags
+       setSessionDynFlags $ setGhcjsPlatform sdflags
+       env <- getSession
+       liftIO $ showIface env iface
+printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
 

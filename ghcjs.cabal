@@ -12,6 +12,8 @@ Cabal-Version:  >= 1.10
 data-dir:       .
 data-files:     rts/*.js
                 rts/*.html
+                include/prim/*.hs-incl
+                include/prim/*.txt
 
 source-repository head
   type:     git
@@ -61,7 +63,8 @@ Library
                          Gen2.GC,
                          Gen2.Printer,
                          Gen2.Linker,
-                         Gen2.Shim
+                         Gen2.Shim,
+                         Gen2.PrimIface
     build-depends: base           >= 4        && < 5,
                    Cabal,
                    ghc            >= 7.4    && < 7.8,
@@ -114,6 +117,7 @@ Library
     exposed: True
     buildable: True
     hs-source-dirs: src
+    include-dirs: include
     GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -auto-all -caf-all
 
 Executable ghcjs
