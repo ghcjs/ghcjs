@@ -19,13 +19,14 @@
 module Main where
 
 import           Compiler.Info
+import           Config
 import           Control.Monad             (forM, forM_)
 import qualified Data.ByteString.Lazy      as L
 import           Data.Maybe                (catMaybes)
 import           Data.Monoid
 import           Data.Text.Lazy            (Text)
 import qualified Data.Text.Lazy            as T
-import           Filesystem.Path.CurrentOS (empty, stripPrefix)
+import           Filesystem.Path.CurrentOS (empty, stripPrefix, encodeString, decodeString)
 import           Prelude                   hiding (FilePath)
 import           Shelly
 
@@ -38,9 +39,11 @@ import           System.Environment
 import qualified Codec.Archive.Tar         as Tar
 import qualified Codec.Archive.Tar.Check   as Tar
 
+import           Control.Monad
 import           Data.Conduit              (unwrapResumable, ($$), ($=), (=$=))
 import           Data.Conduit.BZlib
 import           Data.Conduit.Lazy         (lazyConsume)
+import           Data.Maybe (listToMaybe)
 import           Network.HTTP.Conduit
 import           System.Directory          (Permissions (..), getPermissions,
                                             setPermissions)
@@ -51,12 +54,15 @@ ghcDownloadLocation :: String -> String
 ghcDownloadLocation ver =
     "http://www.haskell.org/ghc/dist/" ++ ver ++ "/ghc-" ++ ver ++ "-src.tar.bz2"
 
-data BootSettings = BootSettings { skipRts :: Bool
-                                 , noBuild :: Bool
+data BootSettings = BootSettings { skipRts  :: Bool  -- ^ skip building the rts
+                                 , noBuild  :: Bool  -- ^ do not build, only reset the packages
+                                 , initTree :: Bool  -- ^ initialize the source tree: configure/build native ghc first
                                  } deriving (Ord, Eq)
 
 bootSettings :: [String] -> BootSettings
-bootSettings args = BootSettings (any (=="--skip-rts") args) (any  (=="--nobuild") args)
+bootSettings args = BootSettings (any (=="--skip-rts") args)
+                                 (any (=="--nobuild") args)
+                                 (any (=="--init") args)
 
 main = withSocketsDo $ do
   tmp <- getTemporaryDirectory
@@ -68,8 +74,11 @@ main = withSocketsDo $ do
 
 mainTmp tmpDir = shelly $ do
     args <- liftIO getArgs
-    when (any (=="--auto") args) (autoBoot $ fromString tmpDir)
-    ignoreExcep $ installBootPackages (bootSettings args)
+    let s = bootSettings args
+        auto = any (=="--auto") args
+    when auto (autoBoot $ fromString tmpDir)
+    when (initTree s && not auto) setupBuild
+    ignoreExcep $ installBootPackages s
 
 fromString :: String -> FilePath
 fromString = fromText . T.pack
@@ -96,8 +105,14 @@ autoBoot tmp = shelly $ do
                           liftIO $ putStrLn "unpacking tar"
                           liftIO $ Tar.unpack (toString tmp)  (Tar.read $ L.fromChunks tar) -- (Tar.checkTarbomb ("ghc-" ++ ghcVer) $ Tar.read tar)
   cd (tmp </> T.pack ghcDir)
-  run_ "sh" ["configure"]
-  ignoreExcep $ run_ "make" ["-j4", "1"] -- for some reason this still fails after a succesful build
+  setupBuild
+
+setupBuild :: ShIO ()
+setupBuild = do
+  mk <- readfile "mk/build.mk.sample"
+  writefile "mk/build.mk" ("BuildFlavour = quick\n" <> mk)
+  run_ "sh" ["configure","--enable-bootstrap-with-devel-snapshot"]
+  ignoreExcep $ run_ "make" ["-j4"] -- for some reason this still fails after a succesful build
 
 corePackages :: [Text]
 corePackages = ["ghc-prim", "integer-gmp", "base"]
@@ -118,9 +133,10 @@ installBootPackages settings = do
       when (not (skipRts settings || noBuild settings)) $ do
            echo "Building RTS"
            run_ "make" ["all_rts","-j4"] `catchany_sh` (const (return ()))
+      replacePrimOps
       when (not $ noBuild settings) $ forM_ corePackages $ \pkg -> do
         echo $ "Building package: " <> pkg
-        run_ "make" ["all_libraries/"<>pkg, "-j4", "GHC_STAGE1=inplace/bin/ghcjs"]
+        buildPkg pkg
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePackages
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
@@ -277,4 +293,53 @@ isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file
 isGhcjsFile :: FilePath -> Bool
 isGhcjsFile file = any (`T.isSuffixOf` toTextIgnore file) [".js", ".ji"]
 
+-- | make sure primops.txt is the one from our data, configured for
+--   JavaScript building
+replacePrimOps :: ShIO ()
+replacePrimOps = do
+   base <- liftIO (decodeString <$> ghcjsDataDir)
+   mapM_ (cp (base </> ("include/prim/primops-" ++ cProjectVersionInt) <.> "txt")) targets
+   where
+     -- not sure which of these are really necessary
+     targets = [ "compiler/stage1/build/primops.txt"
+               , "compiler/stage2/build/primops.txt"
+               , "compiler/prelude/primops.txt"
+               ]
+
+buildPkg :: Text -> ShIO ()
+buildPkg pkg = do
+   patchPkg pkg
+   cleanPkg pkg
+   run_ "make" ["all_libraries/" <> pkg, "GHC_STAGE1=inplace/bin/ghcjs"]
+
+-- | some packages need to be patched to run with GHCJS, for GHC 7.8.1:
+--    try packagename-708_1.patch first, then packagename-708.patch
+patchPkg :: Text -> ShIO ()
+patchPkg pkg = do
+  mfile <- findPatchFile pkg $ map T.pack
+                                [ cProjectVersionInt ++ "_" ++ cProjectPatchLevel
+                                , cProjectVersionInt
+                                ]
+  case mfile of
+    Nothing -> return () -- no patch
+    Just p -> sub $ do
+      echo $ "applying patch: " <> toTextIgnore p
+      cd ("libraries" </> pkg)
+      readfile p >>= setStdin
+      run_ "patch" ["-p1", "--forward"] -- ignore already applied patches
+
+findPatchFile :: Text -> [Text] -> ShIO (Maybe FilePath)
+findPatchFile pkg variants = liftIO $ do
+  base <- decodeString <$> ghcjsDataDir
+  listToMaybe <$> filterM (doesFileExist . encodeString)
+    (map (\x -> base </> "patch" </> (pkg <> "-" <> x) <.> "patch") variants)
+
+-- | to avoid conflicts with existing versions, remove all .hi files and
+--    .hs (PrimOpWrappers.hs!) files from the dist-install dir, keep the
+--    object files to keep the build system happy
+cleanPkg :: Text -> ShIO ()
+cleanPkg pkg = findWhen isRemovedFile ("libraries" </> pkg </> "dist-install" </> "build")
+                       >>= mapM_ rm
+  where
+    isRemovedFile file = return $ any (`hasExt` file) ["hi", "hs", "lhs", "p_hi", "dyn_hi"]
 

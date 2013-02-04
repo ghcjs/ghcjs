@@ -1,0 +1,91 @@
+diff --git a/GHC/Integer/GMP/Prim.hs b/GHC/Integer/GMP/Prim.hs
+index cf3b97e..cea4d99 100644
+--- a/GHC/Integer/GMP/Prim.hs
++++ b/GHC/Integer/GMP/Prim.hs
+@@ -196,6 +196,10 @@ foreign import ccall unsafe "hs_integerToWord64"
+ #endif
+ 
+ -- used to be primops:
++#ifdef __GHCJS__
++foreign import prim "integer_cmm_integer2Intzh" integer2Int#
++  :: Int# -> ByteArray# -> Int#
++#else
+ integer2Int# :: Int# -> ByteArray# -> Int#
+ integer2Int# s d = if s ==# 0#
+                        then 0#
+@@ -203,6 +207,7 @@ integer2Int# s d = if s ==# 0#
+                             if s <# 0#
+                                then negateInt# v
+                                else v
++#endif
+ 
+ integer2Word# :: Int# -> ByteArray# -> Word#
+ integer2Word# s d = int2Word# (integer2Int# s d)
+diff --git a/GHC/Integer/Logarithms/Internals.hs b/GHC/Integer/Logarithms/Internals.hs
+index 2128c41..9fc9655 100644
+--- a/GHC/Integer/Logarithms/Internals.hs
++++ b/GHC/Integer/Logarithms/Internals.hs
+@@ -22,7 +22,7 @@ import GHC.Integer.Type
+ 
+ -- When larger word sizes become common, add support for those,
+ -- it is not hard, just tedious.
+-#if (WORD_SIZE_IN_BITS != 32) && (WORD_SIZE_IN_BITS != 64)
++#if ((WORD_SIZE_IN_BITS != 32) && (WORD_SIZE_IN_BITS != 64)) || __GHCJS__
+ 
+ -- Less than ideal implementations for strange word sizes
+ 
+diff --git a/GHC/Integer/Type.lhs b/GHC/Integer/Type.lhs
+index c953786..f317c5a 100644
+--- a/GHC/Integer/Type.lhs
++++ b/GHC/Integer/Type.lhs
+@@ -255,9 +255,15 @@ gcdInteger a@(S# INT_MINBOUND) b = gcdInteger (toBig a) b
+ gcdInteger a b@(S# INT_MINBOUND) = gcdInteger a (toBig b)
+ gcdInteger (S# a) (S# b) = S# (gcdInt a b)
+ gcdInteger ia@(S# a)  ib@(J# sb b)
+- =      if a  ==# 0# then absInteger ib
+-   else if sb ==# 0# then absInteger ia
+-   else                   S# (gcdIntegerInt# absSb b absA)
++ = if a ==# 0#
++   then absInteger ib
++#ifdef __GHCJS__
++   else if cmpIntegerInt# sb b 0# ==# 0#
++#else
++   else if sb ==# 0#
++#endif
++          then absInteger ia
++          else S# (gcdIntegerInt# absSb b absA)
+        where !absA  = if a  <# 0# then negateInt# a  else a
+              !absSb = if sb <# 0# then negateInt# sb else sb
+ gcdInteger ia@(J# _ _) ib@(S# _) = gcdInteger ib ia
+@@ -391,7 +397,13 @@ instance Ord Integer where
+ absInteger :: Integer -> Integer
+ absInteger (S# INT_MINBOUND) = NEG_INT_MINBOUND
+ absInteger n@(S# i) = if i >=# 0# then n else S# (negateInt# i)
++#ifdef __GHCJS__
++absInteger n@(J# s d) = if cmpIntegerInt# s d 0# <# 0#
++                          then negateInteger n
++                          else n
++#else
+ absInteger n@(J# s d) = if (s >=# 0#) then n else J# (negateInt# s) d
++#endif
+ 
+ {-# NOINLINE signumInteger #-}
+ signumInteger :: Integer -> Integer
+@@ -444,7 +456,14 @@ timesInteger (J# s1 d1) (J# s2 d2) = case timesInteger# s1 d1 s2 d2 of
+ negateInteger :: Integer -> Integer
+ negateInteger (S# INT_MINBOUND) = NEG_INT_MINBOUND
+ negateInteger (S# i)            = S# (negateInt# i)
++#ifdef __GHCJS__
++negateInteger (J# s d)          = case int2Integer# 0# of
++                                    (# zs, zd #) ->
++                                      case minusInteger# zs zd s d of
++                                        (# s', d' #) -> J# s' d'
++#else
+ negateInteger (J# s d)          = J# (negateInt# s) d
++#endif
+ \end{code}
+ 
+ 
+diff --git a/gmp/ln b/gmp/ln
+old mode 100644
+new mode 100755

@@ -56,6 +56,9 @@ getGhcjsCompilerVersion = Version.showVersion version
 getCompilerVersion = cProjectVersion ++ "-" ++ Version.showVersion version
 
 getCompilerSubdir = "ghcjs-" ++ getCompilerVersion
+
+ghcjsDataDir :: IO FilePath
+ghcjsDataDir = getDataDir
 #else
 
 getCompilerVersion = cProjectVersion ++ "-0"
