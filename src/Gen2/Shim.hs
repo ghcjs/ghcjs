@@ -85,9 +85,11 @@ collectShims :: FilePath          -- ^ the base path
              -> IO (Text, Text)   -- ^ collected shims, to be included (before, after) rts
 collectShims base pkgs = do
   files <- mapM (collectShim base) pkgs
-  files' <- mapM (canonicalizePath . (base </>)) (concat files)
-  let (beforeRts, afterRts) = splitFiles files'
-  (,) <$> combineShims beforeRts <*> combineShims afterRts
+  let files' = map (base </>) (concat files)
+      (beforeRts, afterRts) = splitFiles files'
+  beforeRts' <- mapM canonicalizePath beforeRts
+  afterRts' <- mapM canonicalizePath afterRts
+  (,) <$> combineShims beforeRts' <*> combineShims afterRts'
     where
       splitFiles files = (before, map init after)
         where
