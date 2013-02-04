@@ -109,7 +109,8 @@ main =
           (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
           (dflags2, _) <- liftIO (initPackages dflags1)
-          _ <- setSessionDynFlags $ setDfOpts $ setGhcjsPlatform $
+          base <- liftIO ghcjsDataDir
+          _ <- setSessionDynFlags $ setDfOpts $ setGhcjsPlatform base $
                dflags2 { objectSuf = "ghcjs_o"
                        }
           let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
@@ -399,9 +400,9 @@ setDfOpts df = foldl' setOpt (foldl' unsetOpt df unsetList) setList
     unsetList = [Opt_SplitObjs]
 
 -- | configure the GHC API for building 32 bit code
-setGhcjsPlatform :: DynFlags -> DynFlags
+setGhcjsPlatform :: FilePath -> DynFlags -> DynFlags
 #if __GLASGOW_HASKELL__ >= 707
-setGhcjsPlatform df = addPlatformDefines $ df { settings = settings' }
+setGhcjsPlatform basePath df = addPlatformDefines basePath $ df { settings = settings' }
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
                               , sPlatformConstants = ghcjsPlatformConstants
@@ -428,11 +429,15 @@ setGhcjsPlatform = addPlatformDefines
 
 -- ghcjs builds for a strange platform: like 32 bit
 -- instead of letting autoconf doing the defines, we override them here
-addPlatformDefines :: DynFlags -> DynFlags
-addPlatformDefines df = df { settings = settings1 }
+-- and try to get our own includes included instead of the library ones
+addPlatformDefines :: FilePath -> DynFlags -> DynFlags
+addPlatformDefines baseDir df = df { settings = settings1 
+                                   , includePaths = includeDir : includePaths df
+                                   }
   where
+    includeDir = baseDir ++ "/include"
     settings0 = settings df
-    settings1 = settings0 { sOpt_P = map ("-D"++) defs ++ sOpt_P settings0 }
+    settings1 = settings0 { sOpt_P = ("-I" ++ includeDir) : map ("-D"++) defs ++ sOpt_P settings0 }
     defs = [ "__GHCAUTOCONF_H__=1"
            , "SIZEOF_CHAR=1"
            , "ALIGNMENT_CHAR=1"
@@ -543,7 +548,8 @@ printIface ["--show-iface", iface] = do
      (argsS, _) <- parseStaticFlags $ map noLoc []
      runGhcSession Nothing $ do
        sdflags <- getSessionDynFlags
-       setSessionDynFlags $ setGhcjsPlatform sdflags
+       base <- liftIO ghcjsDataDir
+       setSessionDynFlags $ setGhcjsPlatform base sdflags
        env <- getSession
        liftIO $ showIface env iface
 printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"

@@ -12,10 +12,11 @@ Cabal-Version:  >= 1.10
 data-dir:       .
 data-files:     rts/*.js
                 rts/*.html
+                include/*.h
                 include/prim/*.hs-incl
                 include/prim/*.txt
                 patch/*.patch
-		
+
 source-repository head
   type:     git
   location: https://github.com/ghcjs/ghcjs.git
