@@ -326,7 +326,7 @@ patchPkg pkg = do
       echo $ "applying patch: " <> toTextIgnore p
       cd ("libraries" </> pkg)
       readfile p >>= setStdin
-      run_ "patch" ["-p1", "--forward"] -- ignore already applied patches
+      ignoreExcep $ run_ "patch" ["-p1", "-N"] -- ignore already applied patches
 
 findPatchFile :: Text -> [Text] -> ShIO (Maybe FilePath)
 findPatchFile pkg variants = liftIO $ do
