@@ -115,8 +115,15 @@ setupBuild = do
   ignoreExcep $ run_ "make" ["-j4"] -- for some reason this still fails after a succesful build
 
 corePackages :: [Text]
-corePackages = ["ghc-prim", "integer-gmp", "base"]
--- corePackages = ["ghc-prim", "integer-gmp", "base", "array", "deepseq", "containers", "template-haskell"]
+corePackages = [ "ghc-prim"
+               , "integer-gmp"
+               , "base"
+               , "array"
+               , "deepseq"
+               , "containers"
+               , "pretty"
+               , "template-haskell"
+               ]
 
 -- to be called from a configured and built (at least stage 1) ghc tree
 installBootPackages :: BootSettings -> ShIO ()
