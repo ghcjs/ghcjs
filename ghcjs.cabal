@@ -120,7 +120,7 @@ Library
     buildable: True
     hs-source-dirs: src
     include-dirs: include
-    GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -auto-all -caf-all
+    GHC-Options:    -O -Wall -fno-warn-name-shadowing -fno-warn-orphans -auto-all -caf-all
 
 Executable ghcjs
     if flag(rts-only)
@@ -149,7 +149,7 @@ Executable ghcjs
       x-boot:     True
     else
       x-boot:     False
-    GHC-Options:    -Wall -fno-warn-name-shadowing -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
+    GHC-Options:    -Wall -O -fno-warn-name-shadowing -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
     cpp-options:    -DGHCJS_PACKAGE_IMPORT
 
 Executable ghcjs-link
