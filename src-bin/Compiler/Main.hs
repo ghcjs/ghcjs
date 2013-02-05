@@ -26,6 +26,7 @@ import           Panic
 import           PrelInfo (wiredInThings)
 import           PrelNames (basicKnownKeyNames)
 import           PrimOp (allThePrimOps)
+import           SysTools (touch)
 
 import           Control.Applicative
 import           Control.Monad
@@ -148,6 +149,7 @@ main =
                             LinkBinary -> when (not oneshot) (buildExecutable dflags3 jsArgs)
                             LinkDynLib -> return ()
                             _          -> return ()
+                          touchOutputFile
 
 
 isBootFilename :: FilePath -> Bool
@@ -485,16 +487,7 @@ runGhcSession mbMinusB a = do
 -- that generated files don't clash with ours
 generateNative :: Bool -> [Located String] -> [String] -> Maybe String -> IO ()
 generateNative oneshot argsS args1 mbMinusB =
- do
-  libDir <- getGlobalPackageBase
-  errorHandler
-#if __GLASGOW_HASKELL__ >= 706
-        fatalMessager
-        defaultFlushOut
-#else
-        defaultLogAction
-#endif
-        $ runGhc (mbMinusB `mplus` Just libDir) $
+  runGhcSession mbMinusB $
        do   sdflags <- getSessionDynFlags
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
             dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
@@ -553,4 +546,18 @@ printIface ["--show-iface", iface] = do
        env <- getSession
        liftIO $ showIface env iface
 printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
+
+-- touch an output file, don't overwrite if it exists, to keep build systems happy
+touchOutputFile :: GhcMonad m => m ()
+touchOutputFile = do
+  df <- getSessionDynFlags
+  liftIO $
+    case outputFile df of
+      Nothing -> return ()
+      Just file -> do
+        e <- doesFileExist file
+        putStrLn $ "touching: " ++ file
+        if not e
+          then writeFile file "GHCJS dummy output"
+          else touch df "keep build system happy" file
 
