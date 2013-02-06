@@ -16,6 +16,7 @@ import           Platform
 import           CorePrep (corePrepPgm)
 import           DriverPhases (HscSource (HsBootFile), Phase (..), isHaskellSrcFilename)
 import           DriverPipeline (oneShot)
+import           DsMeta (templateHaskellNames)
 import           Exception
 import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..), NameCache (..), isBootSummary)
 import           IfaceEnv (initNameCache)
@@ -520,6 +521,7 @@ fixNameCache = do
     where
       knownNames = map getName (filter (not.isPrimOp) wiredInThings) ++
                       basicKnownKeyNames ++
+                      templateHaskellNames ++
                       map (getName . AnId . mkGhcjsPrimOpId) allThePrimOps
       isPrimOp (AnId i) = isPrimOpId i
       isPrimOp _        = False
