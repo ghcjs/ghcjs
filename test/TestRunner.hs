@@ -13,7 +13,7 @@ import qualified Data.Text.IO as T
 import           Data.Time.Clock (getCurrentTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Filesystem (removeTree, isFile)
-import           Filesystem.Path (replaceExtension, basename, extension, addExtension)
+import           Filesystem.Path (replaceExtension, basename, dirname, extension, addExtension)
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
 import           Shelly
@@ -104,7 +104,18 @@ readFileIfExists file = do
     True  -> Just <$> T.readFile (encodeString file)
 
 runhaskellResult :: FilePath -> IO (Maybe StdioResult)
-runhaskellResult file = runProcess "runhaskell" [encodeString file] ""
+runhaskellResult file =
+  runProcess "runhaskell" [includeOpt file, encodeString file] ""
+
+includeOpt :: FilePath -> String
+includeOpt fp = "-i" <> encodeString (dirname fp)
+
+extraJsFiles :: FilePath -> IO [String]
+extraJsFiles file =
+  let jsFile = replaceExtension file "js"
+  in do
+    e <- isFile jsFile
+    return $ if e then [encodeString jsFile] else []
 
 -- | gen2 only so far
 runGhcjsResult :: FilePath -> IO [(StdioResult, String)]
@@ -112,13 +123,15 @@ runGhcjsResult file = concat <$> mapM run [False, True]
   where
     run optimize = do
       output <- outputPath
+      extra <- extraJsFiles file
       let outputG2 = addExtension output "gen2.jsexe"
           outputRun = encodeString $ outputG2 </> ("all.js"::FilePath)
           input  = encodeString file
           desc = ", optimization: " ++ show optimize
+          inc = includeOpt file
           compileOpts = if optimize
-                          then ["-o", encodeString output, "-O2"] ++ [input]
-                          else ["-o", encodeString output] ++ [input]
+                          then [inc, "-o", encodeString output, "-O2"] ++ [input] ++ extra
+                          else [inc, "-o", encodeString output] ++ [input] ++ extra
       e <- liftIO $ runProcess "ghcjs" {- "./dist/build/ghcs/ghcjs" -} compileOpts ""
       case e of
         Nothing -> assertFailure "cannot find ghcjs"
