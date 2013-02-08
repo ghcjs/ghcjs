@@ -32,7 +32,7 @@ import           SysTools (touch)
 import           Control.Applicative
 import           Control.Monad
 import           Data.Char (toLower)
-import           Data.IORef (modifyIORef)
+import           Data.IORef (modifyIORef, writeIORef)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 
@@ -76,6 +76,11 @@ import qualified Gen2.Rts       as Gen2
 import           Gen2.PrimIface as Gen2
 #endif
 
+-- debug
+import           Finder
+import           PrelNames
+import FastString
+
 main :: IO ()
 main =
   do args0 <- getArgs
@@ -112,36 +117,41 @@ main =
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
           (dflags2, _) <- liftIO (initPackages dflags1)
           base <- liftIO ghcjsDataDir
+          let way = WayCustom "js"
           _ <- setSessionDynFlags $ setDfOpts $ setGhcjsPlatform base $
-               dflags2 { objectSuf = "ghcjs_o"
+               dflags2 { objectSuf = "js_o"
+                       , hiSuf     = "js_hi"
+                       , buildTag   = mkBuildTag [way]
+                       , ways       = [way]
+                       , outputFile = fmap mkGhcjsOutput (outputFile dflags2)
+                       , outputHi   = fmap mkGhcjsOutput (outputHi dflags2)
+                       , hscOutName = mkGhcjsOutput (hscOutName dflags2)
                        }
           let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
           if noNative
             then liftIO (putStrLn "skipping native code")
             else liftIO $ do
-              putStrLn "generating native code"
+--              putStrLn "generating native code"
               generateNative oneshot argsS args1 mbMinusB
-          liftIO $ putStrLn "now doing the javascript stuff"
+--          liftIO $ putStrLn "now doing the javascript stuff"
           fixNameCache
           if all isBootFilename fileargs
             then do
-              liftIO $ putStrLn "doing one shot"
+--              liftIO $ putStrLn "doing one shot"
               env <- getSession
               liftIO $ oneShot env StopLn (map (,Nothing) fileargs)
             else do
               mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
               case mtargets of
                 Nothing      -> do
-                          liftIO (putStrLn "falling back")
+--                          liftIO (putStrLn "falling back")
                           when (not noNative) (liftIO $ fallbackGhc True args1)
                 Just targets -> do
-                          liftIO $ putStrLn "generating code myself"
+--                          liftIO $ putStrLn "generating code myself"
                           setTargets targets
                           origMgraph <- getModuleGraph
                           _ <- load LoadAllTargets
                           mgraph <- depanal [] False
---                          liftIO $ putStrLn ("orig: " ++ show (map (showPpr sdflags) origMgraph))
---                          liftIO $ putStrLn ("result: " ++ show (map (showPpr sdflags) mgraph))
                           if oneshot
                             then mapM_ compileModSummary (take (length targets) mgraph) -- is this right? origMgraph
                             else mapM_ compileModSummary mgraph
@@ -254,8 +264,8 @@ fallbackGhc isNative args = do
   args' <- if plain then getArgs else return args
   noNative <- getEnvOpt "GHCJS_NO_NATIVE"
   if isNative
-    then when (not noNative) (void $ rawSystem ghc $ pkgargs ++ args' ++ ["-hisuf", "native_hi"])
-    else void $ rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "ghcjs_o"]
+    then when (not noNative) (void $ rawSystem ghc $ pkgargs ++ args') -- ++ ["-hisuf", "native_hi"])
+    else void $ rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "js_o"]
   return ()
 
 getEnvMay :: String -> IO (Maybe String)
@@ -493,22 +503,40 @@ generateNative oneshot argsS args1 mbMinusB =
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
             dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
             (dflags2, _) <- liftIO (initPackages dflags1)
-            setSessionDynFlags $ dflags2 { ghcMode = if oneshot then OneShot else CompManager
+            
+            setSessionDynFlags $
+                                 dflags2 { ghcMode = if oneshot then OneShot else CompManager
                                          , ghcLink = NoLink
-                                         , hiSuf   = "native_" ++ hiSuf dflags2
+--                                         , buildTag = "native"
+--                                         , hiSuf   = "native_" ++ hiSuf dflags2
+--                                         , objectSuf = "o"
                                          }
+            df <- getSessionDynFlags
+            liftIO (writeIORef (canGenerateDynamicToo df) True)
             let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
             if all isBootFilename fileargs
               then do
+                liftIO $ putStrLn "native one shot"
                 env <- getSession
                 liftIO $ oneShot env StopLn (map (,Nothing) fileargs)
               else do
                 mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
+                env <- getSession
+                liftIO $ putStrLn ("building way: `" ++ buildTag (hsc_dflags env) ++ "'")
                 case mtargets of
-                  Nothing ->
+                  Nothing -> do
+                    liftIO $ putStrLn "falling back for native"
                     liftIO (fallbackGhc True args1)
                   Just targets -> do
+                    liftIO $ putStrLn "generating native myself"
+                    {-
+                    mb_found <- liftIO (findExactModule env $ mkBaseModule (mkFastString "GHC.Base"))
+                    case mb_found of
+                      Found ml mod -> liftIO (putStrLn $ "found module at: " ++ ml_hi_file ml)
+                      _            -> liftIO (putStrLn "module not found") -}
                     setTargets targets
+                    env2 <- getSession
+                    liftIO $ putStrLn ("building way (after set): `" ++ buildTag (hsc_dflags env2) ++ "'")
                     _ <- load LoadAllTargets
                     return ()
 
@@ -563,3 +591,11 @@ touchOutputFile = do
           then writeFile file "GHCJS dummy output"
           else touch df "keep build system happy" file
 
+mkGhcjsOutput :: String -> String
+mkGhcjsOutput "" = ""
+mkGhcjsOutput file
+  | ext == ".hi" = replaceExtension file ".js_hi"
+  | ext == ".o"  = replaceExtension file ".js_o"
+  | otherwise    = file
+  where
+    ext = takeExtension file
