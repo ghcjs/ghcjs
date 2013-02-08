@@ -47,6 +47,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Data.Text.Encoding.Error as T
 import           Data.Text (Text)
 import           Text.PrettyPrint.Leijen.Text hiding ((<>), (<$>), pretty)
 import           Language.Javascript.JMacro
@@ -1035,7 +1036,10 @@ r2d = realToFrac
 genLit :: Literal -> [JExpr]
 genLit (MachChar c)      = [ [je| `ord c` |] ]
 #if __GLASGOW_HASKELL__ >= 707
-genLit (MachStr  str)    = [ [je| encodeUtf8(`T.unpack (T.decodeUtf8 str)`) |], [je| 0 |] ]
+genLit (MachStr  str)    =
+  case T.decodeUtf8' str of
+    Right t -> [ [je| encodeUtf8(`T.unpack t`) |], [je| 0 |] ]
+    Left  _ -> [ [je| rawStringData(`map toInteger (B.unpack str)`) |], [je| 0 |] ]
 #else
 genLit (MachStr  str)    = [ [je| encodeUtf8(`unpackFS str`) |], [je| 0 |] ] -- [toJExpr . (++[0]) . map toInteger . B.unpack . T.encodeUtf8 . T.pack . unpackFS $ str , [je| 0 |] ]
 #endif
