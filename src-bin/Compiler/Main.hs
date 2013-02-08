@@ -159,8 +159,8 @@ main =
                           case ghcLink sdflags of
                             LinkBinary -> when (not oneshot) (buildExecutable dflags3 jsArgs)
                             LinkDynLib -> return ()
-                            _          -> return ()
-                          touchOutputFile
+                            _          -> touchOutputFile
+
 
 
 isBootFilename :: FilePath -> Bool
@@ -223,7 +223,7 @@ handleCommandline args
             ]
 
 handleOneShot :: [String] -> IO ()
-handleOneShot args | fallback  = fallbackGhc False args >> exitSuccess
+handleOneShot args | fallback  = fallbackGhc True args >> exitSuccess
                    | otherwise = return ()
     where
       fallback = any isFb (tails args)
