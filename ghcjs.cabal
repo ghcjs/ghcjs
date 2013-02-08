@@ -193,7 +193,9 @@ Executable ghcjs-gcc-stub
     Main-Is:          GccStub.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
-    Build-Depends:    base              >= 4 && < 5
+    Build-Depends:    base              >= 4 && < 5,
+                      filepath,
+                      directory
 
 Executable ghcjs-boot
     if flag(compiler-only) || flag(rts-only)
@@ -214,7 +216,8 @@ Executable ghcjs-boot
                       http-conduit      >= 1.5  && < 1.7,
                       bzlib-conduit     >= 0.2  && < 0.3,
                       conduit           >= 0.5.2  && < 0.7,
-                      tar               >= 0.4  && < 0.5
+                      tar               >= 0.4  && < 0.5,
+                      system-fileio
 
 Executable ghcjs-cabal
     if flag(compiler-only) || flag(rts-only)

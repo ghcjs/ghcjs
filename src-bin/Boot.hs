@@ -26,7 +26,8 @@ import           Data.Maybe                (catMaybes)
 import           Data.Monoid
 import           Data.Text.Lazy            (Text)
 import qualified Data.Text.Lazy            as T
-import           Filesystem.Path.CurrentOS (empty, stripPrefix, encodeString, decodeString)
+import           Filesystem                (isFile)
+import           Filesystem.Path.CurrentOS (empty, stripPrefix, encodeString, decodeString, replaceExtension)
 import           Prelude                   hiding (FilePath)
 import           Shelly
 
@@ -172,6 +173,7 @@ fixGhcWrapper wrapper ghcjs = T.unlines . concatMap fixLine . T.lines $ wrapper
               , "export GHCJS_FALLBACK_GHC=" <> T.drop (T.length exec) line
               , "export GHCJS_FALLBACK_PLAIN=1"
               , "export GHCJS_NO_NATIVE=1"
+              , "export GHCJS_FAKE_NATIVE=1"
               ]
           | otherwise                             = [line]
 
@@ -298,7 +300,7 @@ isPathPrefix :: Text -> FilePath -> Bool
 isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file
 
 isGhcjsFile :: FilePath -> Bool
-isGhcjsFile file = any (`T.isSuffixOf` toTextIgnore file) [".js", ".ji"]
+isGhcjsFile file = any (`T.isSuffixOf` toTextIgnore file) [".js", ".ji", ".native_hi", ".js_o", ".js_hi"]
 
 -- | make sure primops.txt is the one from our data, configured for
 --   JavaScript building
@@ -341,12 +343,20 @@ findPatchFile pkg variants = liftIO $ do
   listToMaybe <$> filterM (doesFileExist . encodeString)
     (map (\x -> base </> "patch" </> (pkg <> "-" <> x) <.> "patch") variants)
 
--- | to avoid conflicts with existing versions, remove all .hi files and
---    .hs (PrimOpWrappers.hs!) files from the dist-install dir, keep the
---    object files to keep the build system happy
+-- | remove files that we want to regenerate, backup .hi to make that things get rebuilt
 cleanPkg :: Text -> ShIO ()
-cleanPkg pkg = findWhen isRemovedFile ("libraries" </> pkg </> "dist-install" </> "build")
-                       >>= mapM_ rm
+cleanPkg pkg = do
+  findWhen (return . hasExt "hi") pkgDir >>= mapM_
+    (\file -> mvNoOverwrite file $ replaceExtension file "backup_hi")
+  findWhen isRemovedFile pkgDir >>= mapM_ rm
   where
-    isRemovedFile file = return $ any (`hasExt` file) ["hi", "hs", "lhs", "p_hi", "dyn_hi"]
+    pkgDir = "libraries" </> pkg </> "dist-install" </> "build"
+    isRemovedFile file = return $ any (`hasExt` file) ["hs", "lhs", "p_hi", "dyn_hi"]
 
+mvNoOverwrite :: FilePath -> FilePath -> ShIO ()
+mvNoOverwrite from to = do
+  to' <- absPath to
+  e <- liftIO (isFile to')
+  if e
+    then rm from
+    else mv from to
