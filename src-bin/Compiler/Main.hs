@@ -146,7 +146,7 @@ main =
               case mtargets of
                 Nothing      -> do
 --                          liftIO (putStrLn "falling back")
-                          when (not noNative) (liftIO $ fallbackGhc True args1)
+                          when (not noNative) (liftIO $ fallbackGhc False False args1)
                 Just targets -> do
 --                          liftIO $ putStrLn "generating code myself"
                           setTargets targets
@@ -213,18 +213,18 @@ handleCommandline args
 --     unsupported xs = putStrLn (xs ++ " is currently unsupported") >> exitFailure
      acts :: [(String, IO ())]
      acts = [ ("--supported-languages", mapM_ putStrLn supportedLanguagesAndExtensions)
-            , ("--numeric-version", fallbackGhc False args) -- putStrLn getCompilerVersion)
+            , ("--numeric-version", fallbackGhc False True args) -- putStrLn getCompilerVersion)
             , ("--info", print =<< getCompilerInfo)
             , ("--print-libdir", putStrLn =<< getLibDir)
-            , ("--abi-hash", fallbackGhc False args)
-            , ("-M", fallbackGhc False args)
+            , ("--abi-hash", fallbackGhc False True args)
+            , ("-M", fallbackGhc False True args)
             , ("--print-rts", printRts)
             , ("--print-ji", printJi args)
             , ("--show-iface", printIface args)
             ]
 
 handleOneShot :: [String] -> IO ()
-handleOneShot args | fallback  = fallbackGhc True args >> exitSuccess
+handleOneShot args | fallback  = fallbackGhc True True args >> exitSuccess
                    | otherwise = return ()
     where
       fallback = any isFb (tails args)
@@ -257,15 +257,15 @@ fatalMessager str = do
    if GHCJS_FALLBACK_PLAIN is set, all arguments are passed through verbatim
    to the fallback ghc, including -B
 -}
-fallbackGhc :: Bool -> [String] -> IO ()
-fallbackGhc isNative args = do
+fallbackGhc :: Bool -> Bool -> [String] -> IO ()
+fallbackGhc isNative nonHaskell args = do
   pkgargs <- pkgConfArgs
   ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
   plain <- getEnvOpt "GHCJS_FALLBACK_PLAIN"
   args' <- if plain then getArgs else return args
   noNative <- getEnvOpt "GHCJS_NO_NATIVE"
   if isNative
-    then when (not noNative) (void $ rawSystem ghc $ pkgargs ++ args') -- ++ ["-hisuf", "native_hi"])
+    then when (not noNative || nonHaskell) (void $ rawSystem ghc $ pkgargs ++ args') -- ++ ["-hisuf", "native_hi"])
     else void $ rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "js_o"]
   return ()
 
@@ -306,6 +306,7 @@ writeDesugaredModule mod =
             Nothing -> return ()
             Just mext -> B.writeFile (addExtension outputBase mext) meta
           return (variant, program, meta)
+     liftIO $ doFakeNative outputBase
      liftIO $ writeCachedFiles dflags outputBase versions
   where
     summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
@@ -502,7 +503,7 @@ generateNative oneshot argsS args1 mbMinusB =
                 case mtargets of
                   Nothing -> do
 --                    liftIO $ putStrLn "falling back for native"
-                    liftIO (fallbackGhc True args1)
+                    liftIO (fallbackGhc True False args1)
                   Just targets -> do
 --                    liftIO $ putStrLn "generating native myself"
                     setTargets targets
@@ -568,3 +569,23 @@ mkGhcjsOutput file
   | otherwise    = file
   where
     ext = takeExtension file
+
+doFakeNative :: FilePath -> IO ()
+doFakeNative base = do
+  b <- getEnvOpt "GHCJS_FAKE_NATIVE"
+  when b $ do
+    putStrLn ("faking native: " ++ base)
+    copyNoOverwrite (base ++ ".backup_hi") (base ++ ".hi")
+    touchFile (base ++ ".hi")
+    touchFile (base ++ ".o")
+
+touchFile :: FilePath -> IO ()
+touchFile file = do
+  e <- doesFileExist file
+  when e (appendFile file "")
+
+copyNoOverwrite :: FilePath -> FilePath -> IO ()
+copyNoOverwrite from to = do
+  ef <- doesFileExist from
+  et <- doesFileExist to
+  when (ef && not et) (copyFile from to)
