@@ -26,7 +26,7 @@ import           Data.Char              (isSpace)
 import           Data.Maybe             (catMaybes, fromMaybe)
 import           Filesystem.Path        (dropExtension, empty, extension)
 import           Shelly
-import           System.Directory       (getModificationTime)
+import           System.Directory       (getModificationTime, copyFile)
 #if MIN_VERSION_directory(1,2,0)
 import           Data.Time              (UTCTime)
 #endif
@@ -101,8 +101,11 @@ installCachedFile cache hiFile = do
     when e $ cp hn (hiFile `addExt` hne)
 
 hashedNames :: FilePath -> Skein_512_512 -> [(String, FilePath)]
-hashedNames cache hash = map (\v -> let ve = variantExtension v in (ve, base `addExt` ve)) variants
+hashedNames cache hash = map (\v -> (v, base `addExt` v)) exts
     where
+      exts     = map variantExtension variants ++
+                 catMaybes (map variantMetaExtension variants) ++
+                 [".js_hi", ".js_o"]
       base     = cache </> fromString basename
       basename = C8.unpack . B16.encode . C.encode $ hash
 

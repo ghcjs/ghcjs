@@ -50,7 +50,7 @@ import           GHCJS Compiler.Variants
 import qualified GHCJS GHCJSMain
 import           MonadUtils (MonadIO(..))
 import           System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
-import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory, doesFileExist)
+import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory, doesFileExist, copyFile)
 import qualified Control.Exception as Ex
 
 import           Control.Monad (when, mplus, forM, forM_)
@@ -320,11 +320,13 @@ writeDesugaredModule mod =
 -}
 writeCachedFiles :: DynFlags -> FilePath -> [(Variant, ByteString, ByteString)] -> IO ()
 writeCachedFiles df jsFile variants = do
-  let hiFile = (dropExtension jsFile) ++ "." ++ hiSuf df
+  let srcBase = dropExtension jsFile
+      hiFile = srcBase ++ ".hi" --  ++ hiSuf df
   (hash :: Skein_512_512) <- hashFile hiFile
   cacheDir <- getGlobalCache
   let basename = C8.unpack . B16.encode . C.encode $ hash
   createDirectoryIfMissing True cacheDir
+  copyFile (srcBase ++ ".js_hi") (cacheDir </> basename ++ ".js_hi")
   forM_ variants $ \(variant, program, meta) -> do
     B.writeFile (cacheDir </> basename ++ variantExtension variant) program
     case variantMetaExtension variant of
