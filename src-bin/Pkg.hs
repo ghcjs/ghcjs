@@ -1,6 +1,8 @@
 -- this module is based on lhc-pkg/Main.hs from LHC
 module Main where
 
+import Control.Monad (when)
+
 import System.Cmd
 import System.Environment
 import System.FilePath
@@ -9,6 +11,7 @@ import System.Info
 import System.Exit
 
 import Compiler.Info
+import Compiler.Cache
 
 import Data.List (partition, isPrefixOf)
 
@@ -20,6 +23,8 @@ main = do gPkgConf <- getGlobalPackageDB
           args <- getArgs
           let (pkgArgs, args') = partition ("--pkg-conf" `isPrefixOf`) args
           ghcjsPkg args' pkgArgs gPkgConf uPkgConf
+          when (any (`elem` ["register", "update"]) args')
+             (installFromCache >> emptyCache)
 
 ghcjsPkg :: [String] -> [String] -> String -> String -> IO ()
 ghcjsPkg args pkgArgs gPkgConf uPkgConf

@@ -45,6 +45,7 @@ import           System.Exit(ExitCode(..), exitWith)
 #define GHCJS "ghcjs"
 #endif
 
+import           GHCJS Compiler.Cache
 import           GHCJS Compiler.Info
 import           GHCJS Compiler.Variants
 import qualified GHCJS GHCJSMain
@@ -312,27 +313,6 @@ writeDesugaredModule mod =
     name = moduleNameString . moduleName . ms_mod $ summary
     dflags = ms_hspp_opts $ summary
 
-{-
-   temporary workaround for lacking Cabal support:
-   - write .js source to cache, file name based on the skein hash of
-     the corresponding .hi file. ghcjs-cabal picks this up to complete
-     the package installation
--}
-writeCachedFiles :: DynFlags -> FilePath -> [(Variant, ByteString, ByteString)] -> IO ()
-writeCachedFiles df jsFile variants = do
-  let srcBase = dropExtension jsFile
-      hiFile = srcBase ++ ".hi" --  ++ hiSuf df
-  (hash :: Skein_512_512) <- hashFile hiFile
-  cacheDir <- getGlobalCache
-  let basename = C8.unpack . B16.encode . C.encode $ hash
-  createDirectoryIfMissing True cacheDir
-  copyFile (srcBase ++ ".js_hi") (cacheDir </> basename ++ ".js_hi")
-  forM_ variants $ \(variant, program, meta) -> do
-    B.writeFile (cacheDir </> basename ++ variantExtension variant) program
-    case variantMetaExtension variant of
-      Nothing   -> return ()
-      Just mext -> B.writeFile (cacheDir </> basename ++ mext) meta
-
 cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
 cgGutsFromModGuts guts =
   do hscEnv <- getSession
@@ -505,40 +485,27 @@ generateNative oneshot argsS args1 mbMinusB =
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
             dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
             (dflags2, _) <- liftIO (initPackages dflags1)
-            
             setSessionDynFlags $
                                  dflags2 { ghcMode = if oneshot then OneShot else CompManager
                                          , ghcLink = NoLink
---                                         , buildTag = "native"
---                                         , hiSuf   = "native_" ++ hiSuf dflags2
---                                         , objectSuf = "o"
                                          }
             df <- getSessionDynFlags
             liftIO (writeIORef (canGenerateDynamicToo df) True)
             let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
             if all isBootFilename fileargs
               then do
-                liftIO $ putStrLn "native one shot"
+--                liftIO $ putStrLn "native one shot"
                 env <- getSession
                 liftIO $ oneShot env StopLn (map (,Nothing) fileargs)
               else do
                 mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
-                env <- getSession
-                liftIO $ putStrLn ("building way: `" ++ buildTag (hsc_dflags env) ++ "'")
                 case mtargets of
                   Nothing -> do
-                    liftIO $ putStrLn "falling back for native"
+--                    liftIO $ putStrLn "falling back for native"
                     liftIO (fallbackGhc True args1)
                   Just targets -> do
-                    liftIO $ putStrLn "generating native myself"
-                    {-
-                    mb_found <- liftIO (findExactModule env $ mkBaseModule (mkFastString "GHC.Base"))
-                    case mb_found of
-                      Found ml mod -> liftIO (putStrLn $ "found module at: " ++ ml_hi_file ml)
-                      _            -> liftIO (putStrLn "module not found") -}
+--                    liftIO $ putStrLn "generating native myself"
                     setTargets targets
-                    env2 <- getSession
-                    liftIO $ putStrLn ("building way (after set): `" ++ buildTag (hsc_dflags env2) ++ "'")
                     _ <- load LoadAllTargets
                     return ()
 
