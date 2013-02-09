@@ -58,12 +58,14 @@ ghcDownloadLocation ver =
 data BootSettings = BootSettings { skipRts  :: Bool  -- ^ skip building the rts
                                  , noBuild  :: Bool  -- ^ do not build, only reset the packages
                                  , initTree :: Bool  -- ^ initialize the source tree: configure/build native ghc first
+                                 , onlyBasic :: Bool -- ^ only build basic packages: ghc-prim, integer-gmp, base
                                  } deriving (Ord, Eq)
 
 bootSettings :: [String] -> BootSettings
 bootSettings args = BootSettings (any (=="--skip-rts") args)
                                  (any (=="--nobuild") args)
                                  (any (=="--init") args)
+                                 (any (=="--only-basic") args)
 
 main = withSocketsDo $ do
   tmp <- getTemporaryDirectory
@@ -115,16 +117,17 @@ setupBuild = do
   run_ "sh" ["configure","--enable-bootstrap-with-devel-snapshot"]
   ignoreExcep $ run_ "make" ["-j4"] -- for some reason this still fails after a succesful build
 
-corePackages :: [Text]
-corePackages = [ "ghc-prim"
-               , "integer-gmp"
-               , "base"
-               , "array"
-               , "deepseq"
-               , "containers"
-               , "pretty"
-               , "template-haskell"
-               ]
+corePackages :: Bool -> [Text]
+corePackages True = [ "ghc-prim", "integer-gmp", "base" ]
+corePackages _ = [ "ghc-prim"
+                 , "integer-gmp"
+                 , "base"
+                 , "array"
+                 , "deepseq"
+                 , "containers"
+                 , "pretty"
+                 , "template-haskell"
+                 ]
 
 -- to be called from a configured and built (at least stage 1) ghc tree
 installBootPackages :: BootSettings -> ShIO ()
@@ -138,15 +141,16 @@ installBootPackages settings = do
       when (not $ noBuild settings) $ do
         addWrappers ghcjs ghcjspkg
       initPackageDB
+      let corePkgs = corePackages (onlyBasic settings)
       when (not (skipRts settings || noBuild settings)) $ do
            echo "Building RTS"
            run_ "make" ["all_rts","-j4"] `catchany_sh` (const (return ()))
       replacePrimOps
-      when (not $ noBuild settings) $ forM_ corePackages $ \pkg -> do
+      when (not $ noBuild settings) $ forM_ corePkgs $ \pkg -> do
         echo $ "Building package: " <> pkg
         buildPkg pkg
       installRts
-      mapM_ (installPkg ghcjs ghcjspkg) corePackages
+      mapM_ (installPkg ghcjs ghcjspkg) corePkgs
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
 
 -- add inplace/bin/ghcjs and inplace/bin/ghcjs-pkg wrappers
