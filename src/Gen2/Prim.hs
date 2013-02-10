@@ -637,7 +637,7 @@ newByteArray :: JExpr -> JExpr -> JStat
 newByteArray tgt len = [j| `tgt` = new DataView(new ArrayBuffer(Math.max(`len`,1)),0,`len`); |]
 
 newArray :: JExpr -> JExpr -> JStat
-newArray tgt len = [j| `tgt` = new Int32Array(new ArrayBuffer(Math.max(4*`len`,1)),0,4*`len`); |]
+newArray tgt len = [j| `tgt` = new Int32Array(new ArrayBuffer(Math.max(4*`len`,1)),0,`len`); |]
 
 two_24 :: Int
 two_24 = 2^24
