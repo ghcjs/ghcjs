@@ -369,25 +369,27 @@ genPrim SetByteArrayOp [] [a,o,n,v] =
                  }
                |]
 #endif
-{-
-genPrim NewArrayArrayOp
-genPrim SameMutableArrayArrayOp
-genPrim UnsafeFreezeArrayArrayOp
-genPrim SizeofArrayArrayOp
-genPrim SizeofMutableArrayArrayOp
-genPrim IndexArrayArrayOp_ByteArray
-genPrim IndexArrayArrayOp_ArrayArray
-genPrim ReadArrayArrayOp_ByteArray
-genPrim ReadArrayArrayOp_MutableByteArray
-genPrim ReadArrayArrayOp_ArrayArray
-genPrim ReadArrayArrayOp_MutableArrayArray
-genPrim WriteArrayArrayOp_ByteArray
-genPrim WriteArrayArrayOp_MutableByteArray
-genPrim WriteArrayArrayOp_ArrayArray
-genPrim WriteArrayArrayOp_MutableArrayArray
-genPrim CopyArrayArrayOp
-genPrim CopyMutableArrayArrayOp
--}
+genPrim NewArrayArrayOp [r] [n] =
+  PrimInline [j| `r` = []; for(var i=0;i<`n`;i++) { `r`[i] = `r`; } |]
+genPrim SameMutableArrayArrayOp [r] [a1,a2] = PrimInline [j| `r` = (`a1` === `a2`) ? 1 : 0; |]
+genPrim UnsafeFreezeArrayArrayOp [r] [a] = PrimInline [j| `r` = `a` |]
+genPrim SizeofArrayArrayOp [r] [a] = PrimInline [j| `r` = `a`.length |]
+genPrim SizeofMutableArrayArrayOp [r] [a] = PrimInline [j| `r` = `a`.length |]
+genPrim IndexArrayArrayOp_ByteArray [r] [a,n] = PrimInline [j| `r` = `a`[`n`] |]
+genPrim IndexArrayArrayOp_ArrayArray [r] [a,n] = PrimInline [j| `r` = `a`[`n`] |]
+genPrim ReadArrayArrayOp_ByteArray [r] [a,n] = PrimInline [j| `r` = `a`[`n`] |]
+genPrim ReadArrayArrayOp_MutableByteArray [r] [a,n] = PrimInline [j| `r` = `a`[`n`] |]
+genPrim ReadArrayArrayOp_ArrayArray [r] [a,n] = PrimInline [j| `r` = `a`[`n`] |]
+genPrim ReadArrayArrayOp_MutableArrayArray [r] [a,n] = PrimInline [j| `r` = `a`[`n`] |]
+genPrim WriteArrayArrayOp_ByteArray [] [a,n,v] = PrimInline [j| `a`[`n`] = `v` |]
+genPrim WriteArrayArrayOp_MutableByteArray [] [a,n,v] = PrimInline [j| `a`[`n`] = `v` |]
+genPrim WriteArrayArrayOp_ArrayArray [] [a,n,v] = PrimInline [j| `a`[`n`] = `v` |]
+genPrim WriteArrayArrayOp_MutableArrayArray [] [a,n,v] = PrimInline [j| `a`[`n`] = `v` |]
+genPrim CopyArrayArrayOp [] [a1,o1,a2,o2,n] =
+  PrimInline [j| for(var i=0;i<`n`;i++) { `a2`[i+`o2`]=`a1`[i+`o1`]; } |]
+genPrim CopyMutableArrayArrayOp [] [a1,o1,a2,o2,n] =
+  PrimInline [j| for(var i=0;i<`n`;i++) { `a2`[i+`o2`]=`a1`[i+`o1`]; } |]
+
 -- fixme do we want global addr numbering? (third arg?)
 genPrim AddrAddOp  [a',o'] [a,o,i]   = PrimInline [j| `a'` = `a`; `o'` = `o` + `i`;|]
 genPrim AddrSubOp  [a',o'] [a,o,i]   = PrimInline [j| `a'` = `a`; `o'` = `o` - `i`;|]
