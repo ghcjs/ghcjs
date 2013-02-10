@@ -1,5 +1,6 @@
 {-# LANGUAGE QuasiQuotes     #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE CPP             #-}
 module Gen2.Prim where
 
 {-
@@ -361,6 +362,13 @@ genPrim CopyByteArrayOp [] [a1,o1,a2,o2,n] =
                  }
                |]
 genPrim CopyMutableByteArrayOp [] xs@[a1,o1,a2,o2,n] = genPrim CopyByteArrayOp [] xs
+#if __GLASGOW_HASKELL__ >= 707
+genPrim SetByteArrayOp [] [a,o,n,v] =
+  PrimInline [j| for(var i=0;i<`n`;i++) {
+                   `a`.setInt32(`o`+(i<<2),`v`);
+                 }
+               |]
+#endif
 {-
 genPrim NewArrayArrayOp
 genPrim SameMutableArrayArrayOp
