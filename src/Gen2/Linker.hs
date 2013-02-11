@@ -23,16 +23,16 @@ import qualified Data.Set                 as S
 
 import Data.Char (isDigit)
 import qualified Data.Foldable            as F
-import Data.List (partition, isSuffixOf)
+import Data.List (partition, isSuffixOf, isPrefixOf)
 import           Data.Serialize
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.IO             as T
 import qualified Data.Text.Encoding       as TE
 import qualified Data.Text.Encoding.Error as TE
-import           System.FilePath (dropExtension, takeFileName, (<.>), (</>))
+import           System.FilePath (dropExtension, splitPath, (<.>), (</>))
 import           System.Directory (createDirectoryIfMissing)
-
+import           Config
 import           Module                   (ModuleName, moduleNameString)
 
 import           Gen2.StgAst
@@ -65,7 +65,11 @@ link out searchPath objFiles pageModules = do
   return []
   where
     mods = map (T.pack . moduleNameString) pageModules
-    pkgLookup       = M.fromList (map (\p -> (T.pack . takeFileName $ p, p)) searchPath)
+    pkgLookup       = M.fromList (map (\p -> (pkgFromPath p, p)) searchPath)
+    -- pkg name-version is last path element, except when there's a ghc-version path element after
+    pkgFromPath path | (a:b:_) <- reverse (splitPath' path) =
+      if (("ghc-"++cProjectVersion) `isPrefixOf` a) then T.pack b else T.pack a
+    pkgFromPath _ = mempty
     pkgLookupNoVer  = M.mapKeys dropVersion pkgLookup
     localLookup metas  =
       M.fromList $ zipWith (\m o -> (depsModule m, dropExtension o)) metas objFiles
@@ -79,6 +83,9 @@ link out searchPath objFiles pageModules = do
                              (M.lookup (funModule fun) (localLookup metas))
       where
         modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> "gen2" <.> ext
+
+splitPath' :: FilePath -> [FilePath]
+splitPath' = map (filter (`notElem` "/\\")) . splitPath
 
 getShims :: [FilePath] -> Set Fun -> (FilePath, FilePath) -> IO ()
 getShims extraFiles deps (fileBefore, fileAfter) = do
