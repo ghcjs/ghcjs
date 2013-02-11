@@ -13,14 +13,19 @@ import System.Exit
 import Compiler.Info
 import Compiler.Cache
 
-import Data.List (partition, isPrefixOf)
+import Data.List (partition, isPrefixOf, intercalate)
 
 import System.Process (runProcess, waitForProcess)
 
 main :: IO ()
-main = do gPkgConf <- getGlobalPackageDB
+main = do args <- getArgs
+          logCmd <- getEnvOpt "GHCJS_LOG_COMMANDLINE"
+          when logCmd $ do
+            dir <- getAppUserDataDirectory "ghcjs"
+            createDirectoryIfMissing True dir
+            appendFile (dir </> "cmd.log") (intercalate " " ("ghcjs-pkg" : args) ++ "\n")
+          gPkgConf <- getGlobalPackageDB
           uPkgConf <- getUserPackageDB
-          args <- getArgs
           let (pkgArgs, args') = partition ("--pkg-conf" `isPrefixOf`) args
           ghcjsPkg args' pkgArgs gPkgConf uPkgConf
           when (any (`elem` ["register", "update"]) args')

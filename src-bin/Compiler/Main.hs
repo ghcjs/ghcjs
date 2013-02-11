@@ -24,6 +24,7 @@ import           LoadIface
 import           Outputable (showPpr)
 import           Packages (initPackages)
 import           Panic
+import           Module
 import           PrelInfo (wiredInThings)
 import           PrelNames (basicKnownKeyNames)
 import           PrimOp (allThePrimOps)
@@ -116,7 +117,8 @@ main =
                                  }
           (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
-          (dflags2, _) <- liftIO (initPackages dflags1)
+          (dflags2, pkgs) <- liftIO (initPackages dflags1)
+          liftIO (doPackageFallback pkgs args1)
           base <- liftIO ghcjsDataDir
           let way = WayCustom "js"
           _ <- setSessionDynFlags $ setDfOpts $ setGhcjsPlatform base $
@@ -268,13 +270,6 @@ fallbackGhc isNative nonHaskell args = do
     then when (not noNative || nonHaskell) (void $ rawSystem ghc $ pkgargs ++ args') -- ++ ["-hisuf", "native_hi"])
     else void $ rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "js_o"]
   return ()
-
-getEnvMay :: String -> IO (Maybe String)
-getEnvMay xs = fmap Just (getEnv xs)
-               `Ex.catch` \(_::Ex.SomeException) -> return Nothing
-
-getEnvOpt :: MonadIO m => String -> m Bool
-getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)
 
 -- why doesn't GHC pick up .lhs-boot as boot? are we loading it wrong?
 isBootModSum :: ModSummary -> Bool
@@ -589,3 +584,16 @@ copyNoOverwrite from to = do
   ef <- doesFileExist from
   et <- doesFileExist to
   when (ef && not et) (copyFile from to)
+
+-- | generate native code only from native compiler for these package
+--   used to support build system
+doPackageFallback :: [PackageId] -> [String] -> IO ()
+doPackageFallback pkgs args
+  | any isFallbackPkg pkgs = do
+    ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
+    getArgs >>= rawSystem ghc >>= exitWith -- run without GHCJS package args
+  | otherwise = return ()
+  where
+    isFallbackPkg pkgid =
+      let pkgname = takeWhile (/='-') (packageIdString pkgid)
+      in  pkgname `elem` ["Cabal"]

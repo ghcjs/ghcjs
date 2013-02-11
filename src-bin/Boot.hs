@@ -151,6 +151,7 @@ installBootPackages settings = do
         buildPkg pkg
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePkgs
+      installFakes
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
 
 -- add inplace/bin/ghcjs and inplace/bin/ghcjs-pkg wrappers
@@ -228,6 +229,36 @@ rtsConf incl lib = T.unlines
             , "includes:       Stg.h"
             , "library-dirs:   " <> lib
             , "hs-libraries:   HSrts"
+            ]
+
+-- | make fake, empty packages to keep the build system happy
+installFakes :: ShIO ()
+installFakes = do
+  base <- T.pack <$> liftIO getGlobalPackageBase
+  db   <- T.pack <$> liftIO getGlobalPackageDB
+  installed <- T.words <$> run "ghc-pkg" ["list", "--simple-output"]
+  forM_ fakePkgs $ \pkg ->
+    case filter ((pkg<>"-") `T.isPrefixOf`) installed of
+      [] -> error (T.unpack $ "required package " <> pkg <> " not found in host GHC")
+      (x:_) -> do
+        let version = T.drop 1 (T.dropWhile (/='-') x)
+            conf    = fakeConf base base pkg version
+        writefile (db </> (fromText (pkg <> "-" <> version <> "-ghcjs") <.> "conf")) conf
+  run_ "ghcjs-pkg" ["recache", "--global"]
+
+fakePkgs = [ "Cabal" ]
+
+fakeConf :: Text -> Text -> Text -> Text -> Text
+fakeConf incl lib name version = T.unlines
+            [ "name:           " <> name
+            , "version:        " <> version
+            , "id:             " <> name <> "-" <> version <> "-ghcjs"
+            , "license:        BSD3"
+            , "maintainer:     stegeman@gmail.com"
+            , "import-dirs:    " <> incl
+            , "include-dirs:   " <> incl
+            , "library-dirs:   " <> lib
+            , "exposed:        False"
             ]
 
 initPackageDB :: ShIO ()

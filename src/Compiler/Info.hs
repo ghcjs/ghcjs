@@ -1,8 +1,13 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP, ScopedTypeVariables #-}
 module Compiler.Info where
 
 import           Data.Version     as Version
-
+import           Data.Char (toLower)
+import           Control.Monad
+import           Control.Applicative
+import           Control.Monad.IO.Class
+import qualified Control.Exception as Ex
+import           System.Environment (getEnv)
 import           System.Directory (getAppUserDataDirectory)
 import           System.Info
 
@@ -65,3 +70,9 @@ getCompilerVersion = cProjectVersion ++ "-0"
 
 #endif
 
+getEnvMay :: String -> IO (Maybe String)
+getEnvMay xs = fmap Just (getEnv xs)
+               `Ex.catch` \(_::Ex.SomeException) -> return Nothing
+
+getEnvOpt :: MonadIO m => String -> m Bool
+getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)

@@ -99,7 +99,8 @@ Library
                    skein,
                    crypto-api,
                    cereal              >= 0.3  && < 0.4,
-                   crypto-conduit      >= 0.4 && < 0.5
+                   crypto-conduit      >= 0.4 && < 0.5,
+                   transformers
     exposed-modules: Compiler.Info,
                      Compiler.Cache,
                      Compiler.Variants,
