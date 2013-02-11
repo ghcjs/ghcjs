@@ -10,6 +10,7 @@ import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Filesystem (removeTree, isFile)
@@ -17,7 +18,7 @@ import           Filesystem.Path (replaceExtension, basename, dirname, extension
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
 import           Shelly
-import           System.Exit (ExitCode(..))
+import           System.Exit (ExitCode(..), exitFailure)
 import           System.Process (readProcessWithExitCode)
 import           System.Random (randomRIO)
 import           Test.Framework
@@ -27,7 +28,22 @@ import           Text.Read (readMaybe)
 
 main = defaultMain =<< tests
 
+-- fail if any of these are not installed
+requiredPackages :: [TL.Text]
+requiredPackages = [ "ghc-prim"
+                   , "integer-gmp"
+                   , "base"
+                   , "containers"
+                   , "array"
+                   , "deepseq"
+                   , "template-haskell"
+                   , "random"
+                   , "syb"
+                   , "transformers"
+                   ]
+
 tests = do
+  checkRequiredPackages
   fay     <- allTestsIn "test/fay"
   ghc     <- allTestsIn "test/ghc"
   arith   <- allTestsIn "test/arith"
@@ -79,6 +95,7 @@ stdioTest file = testCase (encodeString file) (stdioAssertion file)
 
 stdioAssertion :: FilePath -> Assertion
 stdioAssertion file = do
+  putStrLn ("running test: " ++ encodeString file)
   expected <- stdioExpected file
   actual <- runGhcjsResult file
   assertBool "no test results, install node and/or SpiderMonkey" (not $ null actual)
@@ -178,3 +195,11 @@ readExitCode = fmap convert . readMaybe . T.unpack
   where
     convert 0 = ExitSuccess
     convert n = ExitFailure n
+
+checkRequiredPackages :: IO ()
+checkRequiredPackages = shelly $ do
+  installedPackages <- TL.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
+  forM_ requiredPackages $ \pkg -> do
+    when (not $ any ((pkg <> "-") `TL.isPrefixOf`) installedPackages) $ do
+      echo ("package `" <> pkg <> "' is required by the test suite but is not installed")
+      liftIO exitFailure
