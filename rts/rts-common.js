@@ -3026,6 +3026,15 @@ function gtk2hs_closure_new(f) {
 function g_type_check_instance_is_a(o, t) {
   return $hs_int(o instanceof t ? 1 : 0);
 };
+function g_idle_add_full(priority, f, data, notify) {
+  $hs_runIO([f, f]);
+  // TODO do something with notify
+  return $hs_int(1);
+};
+function gdk_threads_enter() {
+};
+function gdk_threads_leave() {
+};
 function webkit_dom_event_target_add_event_listener_closure(obj, eventName, f, bubble) {
   obj.addEventListener($hs_fromUtf8(eventName), function(e) {
     $hs_runIO([f, {g:1, v:[obj]}, {g:1,v:[e]}]);
