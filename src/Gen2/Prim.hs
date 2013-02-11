@@ -89,43 +89,14 @@ genPrim WordAdd2Op      [h,l] [x,y] = PrimInline [j| `l` = (`x` + `y`)|0;
                                                      `h` = (`x` >>> 32) + (`y` >>> 32);
                                                    |]
 genPrim WordSubOp         [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
--- fixme inline?
 genPrim WordMulOp         [r] [x,y] =
   PrimInline [j| `r` = $hs_mulWord32(`x`,`y`); |]
-
-{-
-   if(`x` < `two_24` && `y` < `two_24`) {
-                   `r` = `x`*`y`;
-                 } else {
-                   var xs = `x` >>> 16;
-                   var ys = `y` >>> 16;
-                   var xl = `x` & 0xFFFF;
-                   var yl = `y` & 0xFFFF;
-                   `r` = (xl*xl) + (((xs * yl) << 16)|0) + (((ys * xl) << 16)|0);
-                 }
-               |] -}
--- fixme inline?
 genPrim WordMul2Op      [h,l] [x,y] =
   PrimInline [j| `h` = $hs_mul2Word32(`x`,`y`);
                  `l` = ret1;
                |]
-{-  PrimInline [j| if(x0 < `two_24` && y0 < `two_24`) {
-                   `h` = 0;
-                   `l` = x0*y0;
-                 } else {
-                    var xs  = `x` >>> 16;
-                    var ys  = `y` >>> 16;
-                    var xl  = `x` & 0xFFFF;
-                    var yl  = `y` & 0xFFFF;
-                    `l` = xl*yl;
-                    var t = ((`l`>>>16) & 0xFFFF) + ((xs*yl)|0)+((ys*xl)|0);
-                    `l` = (`l` & 0xFFFF) | ((t & 0xFFFF) << 16);
-                    `h` = xs * ys + ((t >> 16) & 0xFFFF);
-                 }
-               |] -}
--- prob wrong?
-genPrim WordQuotOp        [r] [x,y] = PrimInline [j| `r` = $hs_quotWord32(`x`,`y`); |] -- [j| `r` = (`x`/`y`)|0; |]
-genPrim WordRemOp         [r] [x,y] = PrimInline [j| `r`= $hs_remWord32(`x`,`y`); |] -- `x` % `y` |]
+genPrim WordQuotOp        [r] [x,y] = PrimInline [j| `r` = $hs_quotWord32(`x`,`y`); |]
+genPrim WordRemOp         [r] [x,y] = PrimInline [j| `r`= $hs_remWord32(`x`,`y`); |]
 genPrim WordQuotRemOp   [q,r] [x,y] = PrimInline [j| `q` = $hs_quotWord32(`x`,`y`);
                                                      `r` = $hs_remWord32(`x`, `y`);
                                                   |]
@@ -598,7 +569,9 @@ ReallyUnsafePtrEqualityOp
 ParOp
 SparkOp
 -}
--- genPrim SeqOp [r] [e] = PRPrimCall [j|
+genPrim SeqOp [r] [e] = PRPrimCall [j| var ht = `Heap`[`e`];
+                                       return (ht.t === `Thunk`) ? ht : `Stack`[`Sp`];
+                                     |]
 {-
 GetSparkOp
 NumSparks
