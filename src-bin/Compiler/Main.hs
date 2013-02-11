@@ -301,7 +301,8 @@ writeDesugaredModule mod =
             Nothing -> return ()
             Just mext -> B.writeFile (addExtension outputBase mext) meta
           return (variant, program, meta)
-     liftIO $ doFakeNative outputBase
+     df <- getSessionDynFlags
+     liftIO $ doFakeNative df outputBase
      liftIO $ writeCachedFiles dflags outputBase versions
   where
     summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
@@ -565,20 +566,20 @@ mkGhcjsOutput file
   where
     ext = takeExtension file
 
-doFakeNative :: FilePath -> IO ()
-doFakeNative base = do
+doFakeNative :: DynFlags -> FilePath -> IO ()
+doFakeNative df base = do
   b <- getEnvOpt "GHCJS_FAKE_NATIVE"
   when b $ do
     putStrLn ("faking native: " ++ base)
     copyNoOverwrite (base ++ ".backup_hi") (base ++ ".hi")
-    touchFile (base ++ ".hi")
-    touchFile (base ++ ".o")
+    touchFile df (base ++ ".hi")
+    touchFile df (base ++ ".o")
 
-touchFile :: FilePath -> IO ()
-touchFile file = do
+touchFile :: DynFlags -> FilePath -> IO ()
+touchFile df file = do
   e <- doesFileExist file
-  when e (appendFile file "")
-
+  when e (touch df "keep build system happy" file)
+  
 copyNoOverwrite :: FilePath -> FilePath -> IO ()
 copyNoOverwrite from to = do
   ef <- doesFileExist from
