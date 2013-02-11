@@ -336,7 +336,7 @@ genPrim CopyMutableByteArrayOp [] xs@[a1,o1,a2,o2,n] = genPrim CopyByteArrayOp [
 #if __GLASGOW_HASKELL__ >= 707
 genPrim SetByteArrayOp [] [a,o,n,v] =
   PrimInline [j| for(var i=0;i<`n`;i++) {
-                   `a`.setInt32(`o`+(i<<2),`v`);
+                   `a`.setUint8(`o`+i,`v`);
                  }
                |]
 #endif
