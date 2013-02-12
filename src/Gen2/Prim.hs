@@ -117,6 +117,10 @@ genPrim WordLtOp          [r] [x,y] =
   PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) < (`y`&1))) ? 1 : 0 |]
 genPrim WordLeOp          [r] [x,y] =
   PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) <= (`y`&1))) ? 1 : 0 |]
+#if __GLASGOW_HASKELL__ >= 707
+genPrim Word2DoubleOp     [r] [x] = PrimInline [j| `r` = (`x` & 0x7FFFFFFF) + (`x` >>> 31) * 2147483648 |]
+genPrim Word2FloatOp      [r] [x] = PrimInline [j| `r` = (`x` & 0x7FFFFFFF) + (`x` >>> 31) * 2147483648 |]
+#endif
 genPrim PopCnt8Op         [r] [x]   = PrimInline [j| `r` = $hs_popCntTab[`x` & 0xFF] |]
 genPrim PopCnt16Op        [r] [x]   =
   PrimInline [j| `r` = $hs_popCntTab[`x`&0xFF] +
