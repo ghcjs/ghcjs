@@ -14,7 +14,7 @@ import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Filesystem (removeTree, isFile)
-import           Filesystem.Path (replaceExtension, basename, dirname, extension, addExtension)
+import           Filesystem.Path (replaceExtension, basename, directory, extension, addExtension)
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
 import           Shelly
@@ -125,7 +125,7 @@ runhaskellResult file =
   runProcess "runhaskell" [includeOpt file, encodeString file] ""
 
 includeOpt :: FilePath -> String
-includeOpt fp = "-i" <> encodeString (dirname fp)
+includeOpt fp = "-i" <> encodeString (directory fp)
 
 extraJsFiles :: FilePath -> IO [String]
 extraJsFiles file =
@@ -149,7 +149,7 @@ runGhcjsResult file = concat <$> mapM run [False, True]
           compileOpts = if optimize
                           then [inc, "-o", encodeString output, "-O2"] ++ [input] ++ extra
                           else [inc, "-o", encodeString output] ++ [input] ++ extra
-      e <- liftIO $ runProcess "ghcjs" {- "./dist/build/ghcs/ghcjs" -} compileOpts ""
+      e <- liftIO $ runProcess "ghcjs" compileOpts ""
       case e of
         Nothing -> assertFailure "cannot find ghcjs"
         Just r  -> assertEqual "compile error" ExitSuccess (stdioExit r)
@@ -197,7 +197,7 @@ readExitCode = fmap convert . readMaybe . T.unpack
     convert n = ExitFailure n
 
 checkRequiredPackages :: IO ()
-checkRequiredPackages = shelly $ do
+checkRequiredPackages = shelly . silently $ do
   installedPackages <- TL.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
   forM_ requiredPackages $ \pkg -> do
     when (not $ any ((pkg <> "-") `TL.isPrefixOf`) installedPackages) $ do
