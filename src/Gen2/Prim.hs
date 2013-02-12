@@ -303,7 +303,7 @@ genPrim ReadByteArrayOp_Word64 [r1,r2] [a,i] =
                  `r2` = `a`.getUint32(`i`+4);
                |]
 genPrim WriteByteArrayOp_Char [] [a,i,e] = PrimInline [j| `a`.setUint8(`i`, `e`); |]
-genPrim WriteByteArrayOp_WideChar [] [a,i,e] = PrimInline [j| `a`.setUint32(`i`<<3,`e`); |]
+genPrim WriteByteArrayOp_WideChar [] [a,i,e] = PrimInline [j| `a`.setUint32(`i`<<2,`e`); |]
 genPrim WriteByteArrayOp_Int [] [a,i,e] = PrimInline [j| `a`.setInt32(`i`<<2, `e`); |]
 genPrim WriteByteArrayOp_Word [] [a,i,e] = PrimInline [j| `a`.setUint32(`i`<<2, `e`); |]
 genPrim WriteByteArrayOp_Addr [] [a,i,e1,e2] = PrimInline [j| if(!`a`.arr) { `a`.arr = []; }
