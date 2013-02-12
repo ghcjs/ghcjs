@@ -6,6 +6,7 @@ import Data.Char
 import Control.Monad.ST
 import Data.Word
 import Data.Array.ST
+import qualified Data.Array.Unsafe as U
 
 #include "ghcconfig.h"
 
@@ -20,7 +21,7 @@ reverse_if_bigendian = id
 main :: IO ()
 main = do
  sequence_ (map putStrLn double_tests)
- sequence_ (map putStrLn float_tests)
+           -- sequence_ (map putStrLn float_tests)
   where
    double_tests = run_tests double_numbers
    float_tests  = run_tests float_numbers
@@ -180,7 +181,7 @@ mkDouble ls =
  runST (( do
    arr <- newArray_ (0,7)
    sequence (zipWith (writeArray arr) [(0::Int)..] (take 8 ls))
-   arr' <- castSTUArray arr
+   arr' <- U.castSTUArray arr
    readArray arr' 0
  ) :: ST s Double )
 

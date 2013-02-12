@@ -230,16 +230,12 @@ genPrim CopyArrayOp         [] [a,o1,ma,o2,n] =
                |]
 genPrim CopyMutableArrayOp  [] [a1,o1,a2,o2,n] = genPrim CopyArrayOp [] [a1,o1,a2,o2,n]
 genPrim CloneArrayOp        [r] [a,start,n] =
-  PrimInline [j| `newArray r n`;
-                 for(var i=`n` - 1; i >= 0; i--) {
-                   `r`[i] = `a`[i+`start`];
-                 }
-               |]
+  PrimInline [j| `r` = $hs_sliceArray(`a`,`start`,`n`) |]
 genPrim CloneMutableArrayOp [r] [a,start,n] = genPrim CloneArrayOp [r] [a,start,n]
 genPrim FreezeArrayOp       [r] [a,start,n] =
-  PrimInline [j| `r` = new DataView(`a`.buffer.slice(`start`, `start`+`n`)); |]
+  PrimInline [j| `r` = $hs_sliceArray(`a`,`start`,`n`); |]
 genPrim ThawArrayOp         [r] [a,start,n] =
-  PrimInline [j| `r` = new DataView(`a`.buffer.slice(`start`, `start`+`n`)); |]
+  PrimInline [j| `r` = $hs_sliceArray(`a`,`start`,`n`); |]
 genPrim NewByteArrayOp_Char [r] [l] = PrimInline (newByteArray r l)
 genPrim NewPinnedByteArrayOp_Char [r] [l] = PrimInline (newByteArray r l)
 genPrim NewAlignedPinnedByteArrayOp_Char [r] [l,align] = PrimInline (newByteArray r l)

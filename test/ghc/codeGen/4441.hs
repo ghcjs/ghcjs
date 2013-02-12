@@ -5,7 +5,7 @@ import System.IO
 
 main = do
  let d = read "2.0e-2" :: Double
- print $ "Float Version : " ++ (fToStr $ realToFrac d)
+-- print $ "Float Version : " ++ (fToStr $ realToFrac d) -- disable since we don't do accurate float emulation
  print $ "Double Version: " ++ (dToStr d)
 
 double :: IO Double
