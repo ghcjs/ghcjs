@@ -16,8 +16,8 @@ import Data.Ratio
 main = putStr
 	 (test_chars	++ "\n"  ++
 	  test_ints	++ "\n"  ++
-	  test_addrs	++ "\n"  ++
-	  test_floats	++ "\n"  ++
+--	  test_addrs	++ "\n"  ++ -- disable test, strongly deprecated anyway
+--	  test_floats	++ "\n"  ++ -- disable test, no accurate float in ghcjs
 	  test_doubles	++ "\n"  ++
 	  test_ptrs	++ "\n")
 
@@ -59,7 +59,7 @@ test_chars
 	then []
 	else (arr ! (I# from#))
 	     : (lookup_range arr (from# +# 1#) to#)
-
+ 
 -- Arr# Int# -------------------------------------------
 
 test_ints :: String
@@ -248,3 +248,5 @@ test_ptrs
       = if (from > too)
 	then []
 	else (array ! from) : (lookup_range array (from + 1) too)
+
+

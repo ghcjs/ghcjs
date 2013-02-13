@@ -274,33 +274,34 @@ genPrim IndexByteArrayOp_Word64 [r1,r2] [a,i] =
                  `r2` = `a`.getUint32((`i`<<3)+4);
                |]
 genPrim ReadByteArrayOp_Char [r] [a,i] = PrimInline [j| `r` = `a`.getUint8(`i`); |]
-genPrim ReadByteArrayOp_WideChar [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
-genPrim ReadByteArrayOp_Int [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`); |]
-genPrim ReadByteArrayOp_Word [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
-genPrim ReadByteArrayOp_Addr [r1,r2] [a,i] = PrimInline [j| if(`a`.arr && `a`.arr[`i`]) {
-                                                              `r1` = `a`.arr[`i`][0];
-                                                              `r2` = `a`.arr[`i`][1];
+genPrim ReadByteArrayOp_WideChar [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`<<2); |]
+genPrim ReadByteArrayOp_Int [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`<<2); |]
+genPrim ReadByteArrayOp_Word [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`<<2); |]
+genPrim ReadByteArrayOp_Addr [r1,r2] [a,i] = PrimInline [j| var x = `i`<<2;
+                                                            if(`a`.arr && `a`.arr[x]) {
+                                                              `r1` = `a`.arr[x][0];
+                                                              `r2` = `a`.arr[x][1];
                                                             } else {
                                                               `r1` = null;
                                                               `r2` = 0;
                                                             }
                                                           |]
-genPrim ReadByteArrayOp_Float [r] [a,i] = PrimInline [j| `r` = `a`.getFloat32(`i`); |]
-genPrim ReadByteArrayOp_Double [r] [a,i] = PrimInline [j| `r` = `a`.getFloat64(`i`); |]
+genPrim ReadByteArrayOp_Float [r] [a,i] = PrimInline [j| `r` = `a`.getFloat32(`i`<<2); |]
+genPrim ReadByteArrayOp_Double [r] [a,i] = PrimInline [j| `r` = `a`.getFloat64(`i`<<3); |]
 -- genPrim ReadByteArrayOp_StablePtr
 genPrim ReadByteArrayOp_Int8 [r] [a,i] = PrimInline [j| `r` = `a`.getInt8(`i`); |]
-genPrim ReadByteArrayOp_Int16 [r] [a,i] = PrimInline [j| `r` = `a`.getInt16(`i`); |]
-genPrim ReadByteArrayOp_Int32 [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`); |]
+genPrim ReadByteArrayOp_Int16 [r] [a,i] = PrimInline [j| `r` = `a`.getInt16(`i`<<1); |]
+genPrim ReadByteArrayOp_Int32 [r] [a,i] = PrimInline [j| `r` = `a`.getInt32(`i`<<2); |]
 genPrim ReadByteArrayOp_Int64 [r1,r2] [a,i] = -- fixme need uint here in one
-  PrimInline [j| `r1` = `a`.getInt32(`i`);
-                 `r2` = `a`.getInt32(`i`+4);
+  PrimInline [j| `r1` = `a`.getInt32(`i`<<3);
+                 `r2` = `a`.getInt32((`i`<<3)+4);
               |]
 genPrim ReadByteArrayOp_Word8 [r] [a,i] = PrimInline [j| `r` = `a`.getUint8(`i`); |]
-genPrim ReadByteArrayOp_Word16 [r] [a,i] = PrimInline [j| `r` = `a`.getUint16(`i`); |]
-genPrim ReadByteArrayOp_Word32 [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`); |]
+genPrim ReadByteArrayOp_Word16 [r] [a,i] = PrimInline [j| `r` = `a`.getUint16(`i`<<1); |]
+genPrim ReadByteArrayOp_Word32 [r] [a,i] = PrimInline [j| `r` = `a`.getUint32(`i`<<2); |]
 genPrim ReadByteArrayOp_Word64 [r1,r2] [a,i] =
-  PrimInline [j| `r1` = `a`.getUint32(`i`);
-                 `r2` = `a`.getUint32(`i`+4);
+  PrimInline [j| `r1` = `a`.getUint32(`i`<<3);
+                 `r2` = `a`.getUint32((`i`<<3)+4);
                |]
 genPrim WriteByteArrayOp_Char [] [a,i,e] = PrimInline [j| `a`.setUint8(`i`, `e`); |]
 genPrim WriteByteArrayOp_WideChar [] [a,i,e] = PrimInline [j| `a`.setUint32(`i`<<2,`e`); |]
@@ -363,8 +364,8 @@ genPrim CopyMutableArrayArrayOp [] [a1,o1,a2,o2,n] =
 
 -- fixme do we want global addr numbering? (third arg?)
 genPrim AddrAddOp  [a',o'] [a,o,i]   = PrimInline [j| `a'` = `a`; `o'` = `o` + `i`;|]
-genPrim AddrSubOp  [a',o'] [a,o,i]   = PrimInline [j| `a'` = `a`; `o'` = `o` - `i`;|]
-genPrim AddrRemOp  [a',o'] [a,o,i]   = PrimInline [j| `a'` = `a`; `o'` = `o` - `i`;|]
+genPrim AddrSubOp  [i] [a1,o1,a2,o2] = PrimInline [j| `i` = `o1` - `o2` |]
+genPrim AddrRemOp  [r] [a,o,i]   = PrimInline [j| `r` = `o` % `i` |]
 genPrim Addr2IntOp [i]     [a,o]     = PrimInline [j| `i` = `o`; |] -- fimxe need global ints?
 genPrim Int2AddrOp [a,o]   [i]       = PrimInline [j| `a` = []; `o` = `i`; |] -- fixme
 genPrim AddrGtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >  `o2`) ? 1 : 0; |]
