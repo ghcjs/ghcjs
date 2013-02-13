@@ -1,6 +1,9 @@
 -- For testing +RTS -xc
 import Control.Exception
-main = try (evaluate (f ())) :: IO (Either SomeException ())
+import System.IO
+
+main :: IO ()
+main = print =<< (try (evaluate (f ())) :: IO (Either SomeException ()))
 
 f x = g x
 
