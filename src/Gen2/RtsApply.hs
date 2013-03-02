@@ -115,7 +115,7 @@ stackApply :: Int ->                   -- ^ number of registers in stack frame
               JStat
 stackApply n v mfixed = [j| `decl func`;
                             `JVar func` = `JFunc funArgs (preamble <> body)`;
-                            `ClosureInfo (iex func) [R1] funcName layout (CIFun 0 0) CINoStatic`;
+                            `ClosureInfo (iex func) [PtrV] funcName layout (CIFun 0 0) CINoStatic`;
                           |]
   where
     layout = case mfixed of
@@ -392,7 +392,7 @@ zeroApply :: JStat
 zeroApply = [j| fun stg_ap_0_fast { `preamble`; `enter`; }
 
                 fun stg_ap_0 { `preamble`; `adjSpN 1`; `enter`; }
-                `ClosureInfo (iex (StrI "stg_ap_0")) [R1] "stg_ap_0" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo (iex (StrI "stg_ap_0")) [PtrV] "stg_ap_0" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
                 fun stg_ap_v x {
                   `preamble`;
@@ -405,7 +405,7 @@ zeroApply = [j| fun stg_ap_0_fast { `preamble`; `enter`; }
                     return c;
                   }
                 }
-                `ClosureInfo (iex (StrI "stg_ap_v")) [R1] "stg_ap_v" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo (iex (StrI "stg_ap_v")) [PtrV] "stg_ap_v" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
                 var !stg_ap_0_v_fast = stg_ap_v_fast;
                 var !stg_ap_0_v = stg_ap_v;
 
@@ -458,7 +458,7 @@ updates =
         }
         return `Stack`[`Sp`];
       };
-      `ClosureInfo (iex $ StrI "stg_upd_frame") [R1] "stg_upd_frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
+      `ClosureInfo (iex $ StrI "stg_upd_frame") [PtrV] "stg_upd_frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
   |]
 {-
 updateApply :: Int -> JStat

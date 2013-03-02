@@ -158,14 +158,16 @@ var !mask = 0;                  // mask async exceptions
 
 // gc tuning
 var !staticFree = 2000;         // when garbage collecting, try to keep this many free indices for static
-var !allocArea  = 5000000;      // allocate this many indices before running minor gc
+var !allocArea  = 500;         // allocate this many indices before running minor gc
 var !hpLim = hpDyn + allocArea; // collect garbage if we go over this limit
-var !gcInc = 10;                // run full gc after this many incrementals
+var !gcInc = 10000000;                // run full gc after this many incrementals
 
 var !gcIncCurrent = gcInc;
 
 var !staticThunks    = {};      // funcName -> heapidx map for srefs
 var !staticThunksArr = [];      // indices of updatable thunks in static heap
+
+var $hs_stablePtrs = [];
 
 // stg registers
 `declRegs`;
@@ -183,7 +185,7 @@ fun blackhole { throw "<<loop>>"; return 0; }
 
 // really done now
 fun done o { return done; }
-`ClosureInfo (jsv "done") [R1] "done" (CILayoutPtrs 2 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo (jsv "done") [PtrV] "done" (CILayoutPtrs 2 []) (CIFun 0 0) CINoStatic`;
 
 // many primops return bool, and we can cheaply convert javascript bool to 0,1 with |0
 // so this is where we store our Bool constructors, hackily
@@ -194,11 +196,11 @@ fun false_e { return stack[sp]; }
 fun true_e { return stack[sp]; }
 `ClosureInfo (jsv "true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2) CINoStatic`;
 
-heap[0] = false_e;
+`Heap`[0] = false_e;
 var !$hs_ghczmprimZCGHCziTypesziFalse = 0;
 var !$hs_ghczmprimZCGHCziTypesziFalse_con_e = false_e;
 
-heap[1] = true_e;
+`Heap`[1] = true_e;
 var !$hs_ghczmprimZCGHCziTypesziTrue = 1;
 var !$hs_ghczmprimZCGHCziTypesziTrue_con_e = true_e;
 
@@ -225,7 +227,7 @@ fun stg_throw e {
     var f = stack[sp];
     if(f === stg_catch_e) break;
     var size = f.gtag & 0xff;
-    sp = sp - size;
+    `Sp` = `Sp` - size;
   }
   if(sp > 0) {
     var handler = stack[sp - 1];
@@ -261,7 +263,7 @@ fun reduce {
     return `Stack`[`Sp`];
   }
 }
-`ClosureInfo (jsv "reduce") [R1] "reduce" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo (jsv "reduce") [PtrV] "reduce" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
 fun gc_check next {
    if(hp > hpLim) {
@@ -577,7 +579,7 @@ fun runio_e {
   stack[++sp] = stg_ap_v;
   return stg_ap_v;
 }
-`ClosureInfo (jsv "runio_e") [R1] "runio" (CILayoutFixed 2 [PtrV]) CIThunk CINoStatic`;
+`ClosureInfo (jsv "runio_e") [PtrV] "runio" (CILayoutFixed 2 [PtrV]) CIThunk CINoStatic`;
 
 fun runio c {
   var h = hp;

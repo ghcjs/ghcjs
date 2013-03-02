@@ -99,7 +99,7 @@ generate df s m = (result, deps)
 
     result  = BL.toStrict $ TL.encodeUtf8 ( dumpAst <> prr ( {- addDebug $ rts <> -} runGen df m js ))
 
-    dumpAst = TL.pack (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s)) -- <>
+    dumpAst = TL.pack "" -- (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s)) -- <>
 --              TL.pack (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.removeNoEscape) s))
 
 
@@ -270,7 +270,7 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable _srt [] body) =
                    `decl id`;
                    `id` = static_thunk(`eid`);
                  |]
-genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) = -- genBody i body
+genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) =
   toplevel <$> do
         eid <- jsEnIdI i
         eid' <- jsEnId i
@@ -288,8 +288,6 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) = -- genBody
                    `id` = static_fun(`eid`);
                  |]
 
-
--- genRhs _ _ = panic "genRhs"
 
 updateThunk :: JStat
 updateThunk =
@@ -436,7 +434,7 @@ pushCont as = do
   case spec of
     True -> return (push $ reverse $ app : as')
     False -> do
-      let Just tag  = ptrTag $ ptrOffsets 0 (map argVt as)
+      let Just tag  = ptrTag $ scannableOffsets 0 (map argVt as)
       return (push $ reverse $ app : toJExpr tag : as')
   -- fixme is push order wrong?
 {-
@@ -502,21 +500,12 @@ genBind top bndr
 genEntry :: Id -> Id -> StgRhs -> C
 genEntry top i (StgRhsCon _cc con args) = mempty -- panic "local data entry" -- mempty ??
 genEntry top i (StgRhsClosure _cc _bi live Updatable _str [] (StgApp fun args)) = do
-{-  let (apfun, pushfun)
-          | length args == 0 = (jsv "stg_ap_0_fast", [])
-          | otherwise        = let ap = jsv ("stg_ap_" ++ show (length args))
-                               in (ap,[ap]) -}
-
   upd <- genUpdFrame Updatable
   ll <- loadLiveFun live
   app <- genApp False True fun args
   let f = JFunc funArgs $ preamble <> ll <> upd <> app
   ie <- jsEntryIdI i
   et <- genEntryType []
-{-
-                   <> push (concatMap genArg as ++ pushfun)
-                   <> [j| r1 = `head (genArg a1)`; return `apfun`(); |]
--}
 -- fixme args correct here?
   return $ toplevel
      [j| `decl ie`;
@@ -546,28 +535,12 @@ genEntryType args = do
   let nvoid = length $ takeWhile null (reverse args')
   return $ CIFun (length $ concat args') nvoid
 
-
--- arity & 0xff = number of arguments
--- arity >> 8   = number of trailing void arguments
-{-
-genArityTag :: [StgArg] -> CIType
-genArityTag args = length (concat args') + (nvoid `shiftL` 8)
-    where
-      args' = map genArg args
-      nvoid = length $ takeWhile null (reverse args')
-
-genArityTagId :: [Id] -> CIType
-genArityTagId args = length (concat args') + (nvoid `shiftL` 8)
-    where
-      args' = map genIdArg args
-      nvoid = length $ takeWhile null (reverse args')
--}
 genSetConInfo :: Id -> DataCon -> C
 genSetConInfo i d = do
   ei <- jsDcEntryIdI i
   return [j| `decl ei`;
              `iex ei`     = `mkDataEntry`;
-             `ClosureInfo (iex ei) [R1] (show d) (fixedLayout $ map uTypeVt fields)
+             `ClosureInfo (iex ei) [PtrV] (show d) (fixedLayout $ map uTypeVt fields)
                  (CICon $ dataConTag d) CINoStatic`;
            |]
     where
@@ -581,14 +554,17 @@ genSetConInfo i d = do
 -}
 -- info table for the arguments that are heap pointers when this function is to be calledb
 -- cl == True means that the current closure in r1 is a heap object
-genArgInfo :: Bool -> [Type] -> [StgReg]
-genArgInfo cl args = r1 <> map numReg (tbl 2 (map uTypeVt args))
+genArgInfo :: Bool -> [Type] -> [VarType] -- [StgReg]
+genArgInfo cl args = r1 <> map uTypeVt args -- map numReg (tbl 2 (map uTypeVt args))
     where
-      r1 = if cl then [R1] else []
-      tbl n [] = []
+      r1 = if cl then [PtrV] else [IntV]
+
+{-
+           tbl n [] = []
       tbl n (t:ts)
           | isPtr t   = n : tbl (n + varSize t) ts
           | otherwise = tbl (n + varSize t) ts
+-}
 
 mkDataEntry :: JExpr
 mkDataEntry = ValExpr $ JFunc funArgs [j| `preamble`; return `Stack`[`Sp`]; |]
@@ -1156,7 +1132,7 @@ jumpToFast as = do
       nargs = length as
       -- our tag is the bitmap of registers that contain pointers
       -- fixme support fallback to list?
-      Just tag  = ptrTag $ ptrOffsets 0 (map argVt as)
+      Just tag  = ptrTag $ scannableOffsets 0 (map argVt as)
 
 -- find a specialized application path if there is one
 selectApply :: Bool     ->    -- ^ true for fast apply, false for stack apply
@@ -1181,7 +1157,7 @@ selectApply fast args = do
       args' = mapM genArg args
       n args'    = length (concat args')
       nvoid args' = length (takeWhile null $ reverse args')
-      ptrs  = ptrTag $ ptrOffsets 0 (map argVt args)
+      ptrs  = ptrTag $ scannableOffsets 0 (map argVt args)
 
 -- jmacro hacks:
 
@@ -1226,6 +1202,7 @@ genPrimCall (PrimCall lbl _) args t =
 genForeignCall0 :: ForeignCall -> [JExpr] -> [StgArg] -> C
 genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) tgt args =
   genForeignCall' (unpackFS clbl) tgt args
+genForeignCall0 _ _ _ = panic "unsupported foreign call"
 
 -- fixme: what if the call returns a thunk?
 -- fixme: deal with safety and calling conventions

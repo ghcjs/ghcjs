@@ -76,14 +76,20 @@ data VarType = PtrV     -- pointer = heap index, one field (gc follows this)
              | LongV    -- two fields
              | AddrV    -- a pointer not to the heap: two fields, array + index
              | ObjV     -- some js object, does not contain heap pointers
-             | JSArrV   -- array of followable values
---             | UbxTupV [VarType]
+             | ArrV     -- array of followable values
+             | MVarV    -- [value], [tsos waiting]
+--             | TVarV
+--             | MutVarV -- single element array, ArrV
+             | WeakV
                deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- instance ToJExpr VarType where toJExpr = toJExpr . fromEnum
 
 varSize :: VarType -> Int
 varSize VoidV = 0
 varSize LongV = 2 -- hi, low
 varSize AddrV = 2 -- obj/array, offset
+varSize MVarV = 2 -- [value], [waiting threads]
 varSize _     = 1
 
 typeSize :: Type -> Int
@@ -108,6 +114,14 @@ isMatchable :: VarType -> Bool
 isMatchable DoubleV = True
 isMatchable IntV    = True
 isMatchable _       = False
+
+-- can this thing contain references to heap objects?
+isScannable :: VarType -> [Bool]
+isScannable PtrV = [True]
+-- isScannable MVarV = [True]
+-- isScannable TVarV = [True]
+isScannable ArrV = [True]
+isScannable x = replicate (varSize x) False
 
 -- go through PrimRep, not CgRep to make Int -> IntV instead of LongV
 tyConVt :: TyCon -> VarType
@@ -141,24 +155,24 @@ primTypeVt t = case repType t of
     | st == pr "Word64#" = LongV
     | st == pr "Double#" = DoubleV
     | st == pr "Float#" = DoubleV
-    | st == pr "Array#" = JSArrV
-    | st == pr "MutableArray#" = JSArrV
+    | st == pr "Array#" = ArrV
+    | st == pr "MutableArray#" = ArrV
     | st == pr "ByteArray#" = ObjV
     | st == pr "MutableByteArray#" = ObjV
-    | st == pr "ArrayArray#" = JSArrV
-    | st == pr "MutableArrayArray#" = JSArrV
-    | st == pr "MutVar#" = JSArrV -- one scannable thing
-    | st == pr "TVar#" = JSArrV -- one scannable thing, can be null
-    | st == pr "MVar#" = JSArrV -- one scannable thing, can be null
+    | st == pr "ArrayArray#" = ArrV
+    | st == pr "MutableArrayArray#" = ArrV
+    | st == pr "MutVar#" = ArrV -- one scannable thing
+    | st == pr "TVar#" = ArrV -- one scannable thing, can be null
+    | st == pr "MVar#" = ArrV -- one scannable thing, can be null
     | st == pr "State#" = VoidV
     | st == pr "RealWorld" = VoidV
     | st == pr "ThreadId#" = IntV
-    | st == pr "Weak#" = JSArrV
-    | st == pr "StablePtr#" = JSArrV
-    | st == pr "StableName#" = JSArrV
-    | st == pr "MutVar#" = JSArrV
+    | st == pr "Weak#" = WeakV
+    | st == pr "StablePtr#" = ObjV
+    | st == pr "StableName#" = ObjV
+    | st == pr "MutVar#" = ArrV -- MutVarV
     | st == pr "BCO#" = ObjV -- fixme what do we need here?
-    | st == pr "~#" = VoidV -- ObjV -- ??? coercion token void?
+    | st == pr "~#" = VoidV -- coercion token?
     | st == pr "Any" = PtrV
     | st == "Data.Dynamic.Obj" = PtrV -- ?
     | otherwise = panic ("primTypeVt: unrecognized primitive type: " ++ st)
@@ -567,12 +581,12 @@ jsIdN i n = ValExpr . JVar <$> jsIdIdent i (Just n) ""
 
 
 data ClosureInfo = ClosureInfo
-     { ciVar    :: JExpr    -- ^ object being infod
-     , ciRegs   :: [StgReg] -- ^ registers with pointers
-     , ciName   :: String   -- ^ friendly name for printing
-     , ciLayout :: CILayout -- ^ heap/stack layout of the object
-     , ciType   :: CIType   -- ^ type of the object, with extra info where required
-     , ciStatic :: CIStatic -- ^ static references of this object
+     { ciVar    :: JExpr     -- ^ object being infod
+     , ciRegs   :: [VarType] -- ^ things in registers
+     , ciName   :: String    -- ^ friendly name for printing
+     , ciLayout :: CILayout  -- ^ heap/stack layout of the object
+     , ciType   :: CIType    -- ^ type of the object, with extra info where required
+     , ciStatic :: CIStatic  -- ^ static references of this object
      }
 
 data CIType = CIFun { citArity :: Int  -- | number of arguments (double arguments are counted double)
@@ -603,7 +617,7 @@ instance ToJExpr CIStatic where
 
 
 data CILayout = CILayoutVariable -- layout stored in object itself, first position from the start
-              | CILayoutPtrs     -- size and pointer offsets known
+              | CILayoutPtrs     -- size and pointer offsets known, no other primitive things (like IORef, MVar, Array) inside
                   { layoutSize :: !Int
                   , layoutPtrs :: [Int] -- offsets of pointer fields
                   }
@@ -618,12 +632,17 @@ fixedLayout vts = CILayoutFixed (1 + sum (map varSize vts)) vts
 
 -- a gi gai i
 instance ToStat ClosureInfo where
-  toStat (ClosureInfo obj rs name layout CIThunk srefs)       = setObjInfoL obj rs layout Thunk name 0 srefs
-  toStat (ClosureInfo obj rs name layout (CIFun arity nvoid) srefs) = setObjInfoL obj rs layout Fun name (mkArityTag arity nvoid) srefs
-  toStat (ClosureInfo obj rs name layout (CICon con) srefs)   = setObjInfoL obj rs layout Con name con srefs
-  toStat (ClosureInfo obj rs name layout CIInd srefs)         = setObjInfoL obj rs layout Ind name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
-  toStat (ClosureInfo obj rs name layout CIBlackhole srefs)   = setObjInfoL obj rs layout Blackhole name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
-  
+  toStat (ClosureInfo obj rs name layout CIThunk srefs)       =
+    setObjInfoL obj rs layout Thunk name 0 srefs
+  toStat (ClosureInfo obj rs name layout (CIFun arity nvoid) srefs) =
+    setObjInfoL obj rs layout Fun name (mkArityTag arity nvoid) srefs
+  toStat (ClosureInfo obj rs name layout (CICon con) srefs)   =
+    setObjInfoL obj rs layout Con name con srefs
+  toStat (ClosureInfo obj rs name layout CIInd srefs)         =
+    setObjInfoL obj rs layout Ind name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
+  toStat (ClosureInfo obj rs name layout CIBlackhole srefs)   =
+    setObjInfoL obj rs layout Blackhole name 0 srefs
+
   -- pap have a special gtag for faster gc ident (only need to access gtag field)
   toStat (ClosureInfo obj rs name layout (CIPap size) srefs)  =
     setObjInfo obj Pap name [] size (toJExpr $ -3-size) rs srefs
@@ -634,27 +653,46 @@ mkArityTag :: Int -> Int -> Int
 mkArityTag arity trailingVoid = arity .|. (trailingVoid `shiftL` 8)
 
 setObjInfoL :: JExpr     -- ^ the object
-            -> [StgReg]  -- ^ registers with pointers
+            -> [VarType] -- ^ things in registers
             -> CILayout  -- ^ layout of the object
             -> CType     -- ^ closure type
             -> String    -- ^ object name, for printing
             -> Int       -- ^ `a' argument, depends on type (arity, conid, size)
             -> CIStatic  -- ^ static refs
             -> JStat
-setObjInfoL obj rs CILayoutVariable t n a            = setObjInfo obj t n [] a (toJExpr (-1 :: Int)) rs
-setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    = setObjInfo obj t n [] a (mkGcTag t size ptrs) rs
-setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n l' a (mkGcTag t size ptrs) rs
+setObjInfoL obj rs CILayoutVariable t n a            =
+  setObjInfo obj t n [] a (toJExpr (-1 :: Int)) rs
+setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    =
+  setObjInfo obj t n xs a tag rs
   where
-    ptrs = ptrOffsets 0 layout
-    l'   = map fromEnum layout
+    tag = mkGcTagPtrs t size ptrs
+    xs | tag /= 0  = []
+       | otherwise = map (\i -> fromEnum $ if i `elem` ptrs then PtrV else ObjV) [1..size-1]
+setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n xs a tag rs
+  where
+    tag  = mkGcTag t size layout
+    xs   = toTypeList layout
+       {-
+       | tag /= 0 = []
+       | otherwise = toTypeList layout
+       -}
+mkGcTag :: CType -> Int -> [VarType] -> JExpr
+mkGcTag t size vs = mkGcTagPtrs t size (scannableOffsets 0 vs)
+{-
+   | any (\v -> isScannable v && not (v==PtrV)) vs = 0
+  | otherwise = 
+-}
+
+toTypeList :: [VarType] -> [Int]
+toTypeList = concatMap (\x -> replicate (varSize x) (fromEnum x))
 
 -- the tag thingie, will be 0 if info cannot be read from the tag
-mkGcTag :: CType -> Int -> [Int] -> JExpr
-mkGcTag t objSize ptrs = fromMaybe fallback $
-                         toJExpr . (.|. objSize') <$> ptrTag (map (+8) ptrs)
+mkGcTagPtrs :: CType -> Int -> [Int] -> JExpr
+mkGcTagPtrs t objSize ptrs = fromMaybe fallback $
+                           toJExpr . (.|. objSize') <$> ptrTag (map (+8) ptrs)
   where
-    -- if tag bits don't fit in an integer, use a list
-    fallback = toJExpr (objSize' : ptrs)
+    -- if tag bits don't fit in an integer, set tag to 0, gc will use the info list
+    fallback = toJExpr (0::Int) -- (objSize' : ptrs)
     objSize' = if t == Thunk then max 2 objSize else objSize
 
 setObjInfo :: JExpr      -- ^ the thing to modify
@@ -663,18 +701,24 @@ setObjInfo :: JExpr      -- ^ the thing to modify
            -> [Int]      -- ^ list of item types in the object, if known (free variables, datacon fields)
            -> Int        -- ^ extra 'a' parameter, for constructor tag or arity
            -> JExpr      -- ^ tag for the garbage collector
-           -> [StgReg]   -- ^ pointers in registers
+           -> [VarType]  -- ^ things in registers
            -> CIStatic   -- ^ static refs
            -> JStat
 setObjInfo obj t name fields a gctag argptrs static =
-  [j| _setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `map regNum argptrs`, `static`);  |]
+  [j| _setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `scannableOffsets 1 argptrs`, `static`);  |]
+
+scannableOffsets :: Int -> [VarType] -> [Int]
+scannableOffsets start ts =
+  [o | (o,True) <- zip [start..] (concatMap isScannable ts) ]
 
 -- generates a list of pointer locations for a list of variable locations starting at start
+{-
 ptrOffsets :: Int -> [VarType] -> [Int]
 ptrOffsets start [] = []
 ptrOffsets start (t:ts)
     | isPtr t = start : ptrOffsets (start + varSize t) ts
     | otherwise = ptrOffsets (start + varSize t) ts
+-}
 
 ptrTag :: [Int] -> Maybe Int
 ptrTag ptrs
