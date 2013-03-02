@@ -383,6 +383,8 @@ cleanPkg :: Text -> ShIO ()
 cleanPkg pkg = do
   findWhen (return . hasExt "hi") pkgDir >>= mapM_
     (\file -> mvNoOverwrite file $ replaceExtension file "backup_hi")
+  findWhen (return . hasExt "o") pkgDir >>= mapM_
+    (\file -> mvNoOverwrite file $ replaceExtension file "backup_o")
   findWhen isRemovedFile pkgDir >>= mapM_ rm
   where
     pkgDir = "libraries" </> pkg </> "dist-install" </> "build"

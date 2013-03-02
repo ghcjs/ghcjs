@@ -576,6 +576,7 @@ doFakeNative df base = do
   when b $ do
     putStrLn ("faking native: " ++ base)
     copyNoOverwrite (base ++ ".backup_hi") (base ++ ".hi")
+    copyNoOverwrite (base ++ ".backup_o") (base ++ ".o")
     touchFile df (base ++ ".hi")
     touchFile df (base ++ ".o")
 
