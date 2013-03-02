@@ -544,9 +544,7 @@ LabelThreadOp
 -}
 genPrim IsCurrentThreadBoundOp [r] [] = PrimInline [j| `r` = 1; |]
 genPrim NoDuplicateOp [] [] = PrimInline mempty -- fixme what to do here?
-{-
-ThreadStatusOp
--}
+-- genPrim ThreadStatusOp [stat,cap,locked] [tid]
 genPrim MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = [`b`,`c`]; |] -- fixme c = finalizer, what is o?
 genPrim MkWeakForeignEnvOp [r] [o,b,a1a,a1o,a2a,a2o,i,a3a,a3o] = PrimInline [j| `r` = [`b`]; |]
 genPrim DeRefWeakOp        [r] [w] = PrimInline [j| `r` = `w`[0]; |]
@@ -559,14 +557,19 @@ genPrim FinalizeWeakOp     [i,a] [w] =
                  }
                |]
 genPrim TouchOp [] [e] = PrimInline mempty -- fixme what to do?
+
+genPrim MakeStablePtrOp [r] [a] = PrimInline [j| $hs_stablePtrs.push(r);
+                                                 `r` = $hs_stablePtrs.length;
+                                               |]
+genPrim DeRefStablePtrOp [r] [s] = PrimInline [j| `r` = $hs_stablePtrs[`s`]; |]
+genPrim EqStablePtrOp [r] [s1,s2] = PrimInline [j| (`s1` === `s2`) ? 1 : 0; |]
+genPrim MakeStableNameOp [r] [a] = PrimInline [j| `r` = [`a`, $hs_gcCount] |]
+genPrim EqStableNameOp [r] [s1,s2] = PrimInline [j| `r` = `s1`[0]===`s2`[0] && `s1`[1]===`s2`[1] |]
+genPrim StableNameToIntOp [r] [s] = PrimInline [j| `r` = `s`[0] ^ `s`[1]; |]
+genPrim ReallyUnsafePtrEqualityOp [r] [p1a,p1o,p2a,p2o] =
+  PrimInline [j| `r` = (`p1a` === `p2a` && `p1o` === `p2o`) ? 1 : 0; |]
+
 {-
-MakeStablePtrOp
-DeRefStablePtrOp
-EqStablePtrOp
-MakeStableNameOp
-EqStableNameOp
-StableNameToIntOp
-ReallyUnsafePtrEqualityOp
 ParOp
 SparkOp
 -}
@@ -614,4 +617,4 @@ newArray :: JExpr -> JExpr -> JStat
 newArray tgt len = [j| `tgt` = new Int32Array(new ArrayBuffer(Math.max(4*`len`,1)),0,`len`); |]
 
 two_24 :: Int
-two_24 = 2^24
+two_24 = 2^(24::Int)
