@@ -91,8 +91,8 @@ garbageCollector =
         `traceGc $ "incremental: " |+ incremental |+ " start: " |+ old`;
         `checkGc $ toStat ("heapCheck" |^^ [heap, hp])`;
 
-//        dumpHeapTo heap hp;
-//        dumpStack stack sp;
+        dumpHeapTo heap hp;
+        dumpStack stack sp;
         var startTime = new Date().getTime();
         var startTime0 = startTime;
         var work = [];
@@ -130,9 +130,7 @@ garbageCollector =
         // follow everything in work stack
         var c,c0,e,i,j,g,n;
         c = work.pop();
-        var rl = reachable.length;
-        var il = indirect.length;
-        `followPtr work gcStart heap indirect il reachable reachable_e rl c`;
+        `followPtr work gcStart heap indirect reachable reachable_e c`;
         `traceGc $  "func: "  |+ (next|."n")
                  |+ " gai: "  |+ stringify (next|."gai")
                  |+ " regs: " |+ stringify (enumFromTo R1 R5)`;
@@ -214,15 +212,14 @@ garbageCollector =
         `emitTime startTime "compact heap"`;
         `traceGc $ "heap length: " |+ (heap|."length")`;
 
-//        dumpHeapTo heap htgt;
-//        dumpStack stack sp;
+        dumpHeapTo heap htgt;
+        dumpStack stack sp;
         `traceGc $ "func: " |+ (next|."n") |+ " gai: " |+ stringify (next|."gai") |+ " regs: " |+ stringify (enumFromTo R1 R8)`;
         var spent = new Date().getTime()-startTime0;
         gcTotal += spent;
         `traceGcTiming $ "sp: " |+ sp |+ "   hp: " |+ hp |+ " -> " |+ htgt |+ " (" |+ spent |+ "ms)"`;
         `traceGcTiming $ "total: " |+ gcTotal |+ "ms)"`;
-//        for(var x=htgt;x < heap.length;x++) { heap[x] = -8888888; } // debug, overwrite so problems are caught quickly
-        `traceGc "hello please"`;
+        for(var x=htgt;x < heap.length;x++) { heap[x] = -8888888; } // debug, overwrite so problems are caught quickly
         `traceGc $ "heap length: " |+ (heap|."length")`;
          return htgt;
      }
@@ -266,7 +263,7 @@ garbageCollector =
               } else {
 //               frames += c;
                  if(c >= start0) {
-                   `followPtr work start heap indirect il reachable reachable_e rl c`;
+                   `followPtr work start heap indirect reachable reachable_e c`;
                  }
 }
              }
@@ -282,7 +279,7 @@ garbageCollector =
            for(var j=i.length - 1;j>=1;j--) {
              c = stack[sp-i[j]];
              if(c >= start0) {
-               `followPtr work start heap indirect il reachable reachable_e rl c`;
+               `followPtr work start heap indirect reachable reachable_e c`;
 //               work.push(c);
                log("reachable: " + c);
              }
@@ -582,15 +579,20 @@ updateArg r heap start = SwitchStat r (map mkUpdateCase $ enumFrom R1) mempty
                            |]
                        )
 
+withPtrs = withPtrs False
+withPtrsIdx = withPtrs True
+
 {-
-  iterate over all pointers in heap object, run some function on them
+  iterate over all followables in heap object, run some function on them
+  a followable may be a: heap pointer, array, more?
 -}
-withPtrs :: JExpr ->           -- ^ heap index of object to follow
+withPtrs' :: Bool  ->           -- ^ use heap index instead of pointed value?
+            JExpr ->           -- ^ heap index of object to follow
             JExpr ->           -- ^ entry point of index (since it might have been overwritten by an offset)
             JExpr ->           -- ^ heap array
            (JExpr -> JStat) -> -- ^ what to do with each pointer (heap index -> some statement)
             JStat
-withPtrs idx e heap f = [j| var tag = `e`.gtag;
+withPtrs' useIdx idx e heap f = [j| var tag = `e`.gtag;
                             `assertGc (notUndef tag) "garbage collector tag undefined"`;
                             var ptr;
                             if(tag !== 0) {   // tag info
@@ -609,14 +611,13 @@ withPtrs idx e heap f = [j| var tag = `e`.gtag;
                                   curr = `heap`[curr+1];
                                 }
                                 tag = (`heap`[curr].gtag >> skip) & (((1 << args) - 1) << 8); // fixme check this
-                              } else {           // layout stored in the tag we already have
+                              } else {
+                                // layout stored in the tag we already have
                                 offset = 1;
                               }
                               while(tag >= bits) {
                                 if(tag & bits) {
-                                  ptr = `heap`[`idx`+offset];
-                                  `checkGc $ checkPtr ptr offset`;
-                                  `f ptr`;
+                                  `callF ptr offset`;
                                  }
                                  offset++;
                                  bits = bits << 1;
@@ -624,18 +625,25 @@ withPtrs idx e heap f = [j| var tag = `e`.gtag;
                             } else {          // info list
                               var g = `e`.gi;
                               for(var i=g.length - 1;i >= 1;i--) {
-                                ptr = `heap`[`idx` + g[i]];
-                                `checkGc $ checkPtr ptr (g |! i)`;
-                                `f ptr`;
+                                `callF ptr (g |! i)`;
                               }
                             }
                           |]
     where
+      callF ptr offset
+        | useIdx = [j| `ptr` = `idx`+`offset`;
+                       `f ptr`;
+                     |]
+        | otherwise = [j| `ptr` = `heap`[`idx`+`offset`];
+                          `checkGc $ checkPtr ptr offset`;
+                          `f ptr`;
+                        |]
       checkPtr ptr offset =
-          [j| if(typeof `ptr` !== "number") {
+          [j| if(typeof `ptr` !== "number" && !`isArray ptr`) {
                 log("invalid pointer: " + `idx` + " + " + `offset` + " " + `e`.i[1]);
               }
             |]
+{-
 -- like above, but with pointer index, not its value
 withPtrsIdx :: JExpr ->           -- ^ heap index of object to follow
                JExpr ->           -- ^ entry point of index (since it might have been overwritten by an offset)
@@ -663,7 +671,7 @@ withPtrsIdx idx e heap f = [j| var tag = `e`.gtag;
                                  }
                                }
                           |]
-
+-}
 adjustPtr :: JExpr -> -- ^ heap array
              JExpr -> -- ^ start
              JExpr -> -- ^ index to adjust
@@ -683,27 +691,75 @@ adjustPtr heap start ptr =
               |]
 
 pushWorkPtr :: JExpr -> -- ^ work stack to push to
+               JExpr -> -- ^ push arrays here
                JExpr -> -- ^ start (don't push smaller ptrs)
                JExpr -> -- ^ reachable (don't push if reachable[ptr] exists)
                JExpr -> -- ^ the heap object pointer
                JStat
-pushWorkPtr work start heap ptr =
-  [j| if(`ptr` >= `start` && typeof `heap`[`ptr`] === "function") {
-        `work`.push(`ptr`);
+pushWorkPtr work arrs start heap ptr =
+  [j| if(typeof `ptr` === "number") {
+        `addPtr ptr`;
+      } else if(`isArray ptr`) {
+        `followArrayOnce addPtr ptr`;
+      } else {
+        log("invalid pointer: " + ptr);
       }
     |]
+  where addPtr ptr =
+    [j| if(`ptr` >= `start` && typeof `heap`[`ptr`] === "function") {
+          `work`.push(`ptr`);
+        }
+      |]
+
+-- follow an array recursively,
+-- if array has been visitied, don't visit it again
+followArrayOnce :: (JExpr -> JStat) -- ^ what to do with each non-array index
+                -> JExpr            -- ^ the array to start with
+                -> JStat
+followArrayOnce f arr =
+  [j| if(`arr`.gc !== h$gc_current) {
+        `arr`.gc = h$gc_current;
+        `followArray f arr`;
+        h$gc_followedArrays.push(`arr`);
+      }
+    |]
+
+followArray :: (JExpr -> JStat) -- ^ what to do with each non-array index
+            -> JExpr
+            -> JStat
+followArray f arr =
+  [j| for(var i=`arr`.length-1;i>=0;i--) {
+        var v = `arr`[i];
+        if(typeof v === "number") {
+          `f v`;
+        } else {
+          log("array contains non-numbers: " + i + " -> " + `arr` + );
+        }
+      }
+    |]
+
+
 
 pushForwardPtr :: JExpr -> -- ^ work stack to push to
                   JExpr -> -- ^ start (don't push smaller ptrs)
                   JExpr -> -- ^ the heap object pointer
                   JStat
 pushForwardPtr work start ptr =
-  [j| `checkGc checkPtr`;
-      if(`ptr` >= `start`) {
-        `work`.push(`ptr`);
+  [j| if(typeof `ptr` === "number") {
+        `addPtr ptr`;
+      } else if(`isArray ptr`) {
+        `followArrayOnce addPtr ptr`;
+      } else {
+        log("invalid pointer: " + `ptr`);
       }
    |]
   where
+    addPtr ptr =
+       [j| if(`ptr` >= `start`) {
+             `work`.push(`ptr`);
+           }
+         |]
+
     checkPtr =
         [j| if(typeof `ptr` !== 'number') {
               log("invalid pointer: " + `ptr`);
@@ -726,42 +782,46 @@ followPtr :: JExpr -> -- ^ work array, push newly found pointers on this, may co
              JExpr -> -- ^ start index, don't follow/mark things below this
              JExpr -> -- ^ heap array
              JExpr -> -- ^ indirections array: indiretions are not marked reachable, but pushed here
-             JExpr -> -- ^ length of ind array
+--             JExpr -> -- ^ length of ind array
              JExpr -> -- ^ reachable array: push indices of reachable closures here
              JExpr -> -- ^ reachable entry points: push entry functions of rechable closures here
-             JExpr -> -- ^ length of reachable array
+--             JExpr -> -- ^ length of reachable array
              JExpr -> -- ^ the pointer to start with
              JStat
-followPtr work start heap ind ip reach reach_e rp ptr =
+followPtr work start heap ind reach reach_e ptr =
   [j|
       while(`ptr` !== undefined) {
         var hptr = `heap`[`ptr`];
 //        log("following ptr: " + `ptr`);
-        if(`ptr` >= `start`) {
-          if(typeof hptr === "function") {
-            `checkGc $ checkClosure heap ptr`;
-            if(hptr.t === `Ind`) {
-              var iptr = `heap`[`ptr`+1];
-              `ind`[`ip`++] = `ptr`; // .push(`ptr`);
-              `heap`[`ptr`] = 1;
-              `ptr` = `iptr`;
-            } else {
-//              `reach`.push(`ptr`);
-//              `reach_e`.push(hptr);
-              `reach`[`rp`] = `ptr`;
-              `reach_e`[`rp`++] = hptr;
-              `heap`[`ptr`] = 0;
-              `withPtrs ptr hptr heap (pushWorkPtr work start heap)`;
+        if(typeof `ptr` === "Number") {
+          if(`ptr` >= `start`) {
+            if(typeof hptr === "function") {
+              `checkGc $ checkClosure heap ptr`;
+              if(hptr.t === `Ind`) {
+                var iptr = `heap`[`ptr`+1];
+                `ind`.push(`ptr`);
+                `heap`[`ptr`] = 1;
+                `ptr` = `iptr`;
+              } else {
+                `reach`.push(`ptr`);
+                `reach_e`.push(hptr);
+                `heap`[`ptr`] = 0;
+                `withPtrs ptr hptr heap (pushWorkPtr work start heap)`;
+                `ptr` = `work`.pop();
+              }
+            } else {   // already reached
               `ptr` = `work`.pop();
             }
-          } else {   // already reached
+          } else {
+            // not >= start, so old-gen indirection, don't overwrite entry fun
+            `withPtrs ptr hptr heap (pushWorkPtr work start heap)`;
             `ptr` = `work`.pop();
           }
-        } else {  // not >= start, so old-gen indirection, don't overwrite entry fun
-          `withPtrs ptr hptr heap (pushWorkPtr work start heap)`;
-          `ptr` = `work`.pop();
+        } else if(`isArray ptr`) {
+          if(`ptr`.gc !== h$gc_current) {
+            `ptr`.gc = h$gc_current;
+          }
         }
-      }
     |]
 
 -- | collect reachable static refs after scanning objects
