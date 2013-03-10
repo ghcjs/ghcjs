@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TupleSections #-}
+        {-# LANGUAGE OverloadedStrings, TupleSections #-}
 
 module Main where
 
@@ -13,7 +13,7 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import           Filesystem (removeTree, isFile)
+import           Filesystem (removeTree, isFile, getWorkingDirectory, setWorkingDirectory)
 import           Filesystem.Path (replaceExtension, basename, directory, extension, addExtension)
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
@@ -43,15 +43,17 @@ requiredPackages = [ "ghc-prim"
                    ]
 
 tests = do
-  checkRequiredPackages
+--  checkRequiredPackages
   fay     <- allTestsIn "test/fay"
   ghc     <- allTestsIn "test/ghc"
   arith   <- allTestsIn "test/arith"
   integer <- allTestsIn "test/integer"
+  pkg     <- allTestsIn "test/pkg"
   return [ testGroup "Tests from the Fay testsuite" fay
          , testGroup "Tests from the GHC testsuite" ghc
          , testGroup "Arithmetic" arith
          , testGroup "Integer" integer
+         , testGroup "Tests imported from packages" pkg
          ]
 
 {-
@@ -141,8 +143,9 @@ runGhcjsResult file = concat <$> mapM run [False, True]
     run optimize = do
       output <- outputPath
       extra <- extraJsFiles file
+      cd <- getWorkingDirectory
       let outputG2 = addExtension output "gen2.jsexe"
-          outputRun = encodeString $ outputG2 </> ("all.js"::FilePath)
+          outputRun = cd </> outputG2 </> ("all.js"::FilePath)
           input  = encodeString file
           desc = ", optimization: " ++ show optimize
           inc = includeOpt file
@@ -153,8 +156,10 @@ runGhcjsResult file = concat <$> mapM run [False, True]
       case e of
         Nothing -> assertFailure "cannot find ghcjs"
         Just r  -> assertEqual "compile error" ExitSuccess (stdioExit r)
-      nodeResult <- fmap (,"node" ++ desc) <$> runProcess "node" [outputRun] ""
-      smResult   <- fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" [outputRun] ""
+      setWorkingDirectory (cd </> directory outputRun)
+      nodeResult <- fmap (,"node" ++ desc) <$> runProcess "node" [encodeString outputRun] ""
+      smResult   <- fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" [encodeString outputRun] ""
+      setWorkingDirectory cd
       liftIO $ removeTree outputG2
       return $ catMaybes [nodeResult, smResult]
 
