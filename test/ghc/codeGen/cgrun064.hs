@@ -5,14 +5,14 @@
 
 module Main ( main ) where
 
-import GHC.Exts
+import GHC.Exts hiding (fromList, toList)
 import GHC.Prim
 import GHC.ST
 
 main = putStr
        (test_copyArray
         ++ "\n" ++ test_copyMutableArray
-        ++ "\n" ++ test_copyMutableArrayOverlap
+--        ++ "\n" ++ test_copyMutableArrayOverlap -- according to docs, this is illegal
         ++ "\n" ++ test_cloneArray
         ++ "\n" ++ test_cloneMutableArray
         ++ "\n" ++ test_cloneMutableArrayEmpty

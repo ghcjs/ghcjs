@@ -10,11 +10,11 @@ main = putStr (
  : shows t_d	    ( '\n'
  : shows hugeDouble ( '\n'
  : shows h_d	    ( '\n'
- : shows x_f	    ( '\n'
+-- : shows x_f	    ( '\n' -- disabled, GHCJS doesn't have accurate Float
  : shows x_d	    ( '\n'
- : shows y_f	    ( '\n'
+-- : shows y_f	    ( '\n'
  : shows y_d	    ( "\n"
- )))))))))))))
+ ))))))))))) --))
   where
     t_f :: Float
     t_d :: Double

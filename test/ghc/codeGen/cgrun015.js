@@ -1,4 +1,4 @@
-function putchar(ch) {
+function h$putchar(ch) {
   var str = String.fromCharCode(ch);
   if(typeof(process) !== 'undefined') {
     process.stdout.write(str);
@@ -8,3 +8,4 @@ function putchar(ch) {
     console.log(str);
   }
 }
+

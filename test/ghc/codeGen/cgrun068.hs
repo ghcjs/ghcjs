@@ -33,7 +33,7 @@ import Control.Exception (assert)
 import Control.Monad
 import Control.Monad.Trans.State.Strict
 import Control.Monad.Trans.Class
-import GHC.Exts
+import GHC.Exts hiding (fromList, toList)
 import GHC.ST hiding (liftST)
 import Prelude hiding (length, read)
 import qualified Prelude as P
@@ -54,11 +54,11 @@ main = do
 
 -- Number of arrays
 numArrays :: Int
-numArrays = 100
+numArrays = 10
 
 -- Maxmimum length of a sub-array
 maxLen :: Int
-maxLen = 1024
+maxLen = 128
 
 -- Create an array of arrays, with each sub-array having random length
 -- and content.
@@ -93,7 +93,8 @@ copy :: MArray s (MArray s a) -> CopyFunction s a
      -> Rng s (Int, Int, Int, Int, Int)
 copy marr f = do
     six <- rnd (0, length marr - 1)
-    dix <- rnd (0, length marr - 1)
+    dix' <- rnd (1, length marr - 1)
+    let dix = if dix' <= six then dix' - 1 else dix'
     src <- liftST $ read marr six
     dst <- liftST $ read marr dix
     let srcLen = length src
@@ -112,7 +113,8 @@ clone :: MArray s (MArray s a) -> CloneFunction s a
       -> Rng s (Int, Int, Int, Int)
 clone marr f = do
     six <- rnd (0, length marr - 1)
-    dix <- rnd (0, length marr - 1)
+    dix' <- rnd (1, length marr - 1)
+    let dix = if dix' <= six then dix' - 1 else dix'
     src <- liftST $ read marr six
     let srcLen = length src
     -- N.B. The array length might be zero if we previously cloned
