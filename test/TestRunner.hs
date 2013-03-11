@@ -14,7 +14,7 @@ import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Filesystem (removeTree, isFile, getWorkingDirectory, setWorkingDirectory)
-import           Filesystem.Path (replaceExtension, basename, directory, extension, addExtension)
+import           Filesystem.Path (replaceExtension, basename, directory, extension, addExtension, filename)
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
 import           Shelly
@@ -123,8 +123,13 @@ readFileIfExists file = do
     True  -> Just <$> T.readFile (encodeString file)
 
 runhaskellResult :: FilePath -> IO (Maybe StdioResult)
-runhaskellResult file =
-  runProcess "runhaskell" [includeOpt file, encodeString file] ""
+runhaskellResult file = do
+  cd <- getWorkingDirectory
+  setWorkingDirectory (cd </> directory file)
+  r <- runProcess "runhaskell" [ includeOpt file
+                               , encodeString $ filename file] ""
+  setWorkingDirectory cd
+  return r
 
 includeOpt :: FilePath -> String
 includeOpt fp = "-i" <> encodeString (directory fp)
@@ -156,7 +161,7 @@ runGhcjsResult file = concat <$> mapM run [False, True]
       case e of
         Nothing -> assertFailure "cannot find ghcjs"
         Just r  -> assertEqual "compile error" ExitSuccess (stdioExit r)
-      setWorkingDirectory (cd </> directory outputRun)
+      setWorkingDirectory (cd </> directory file)
       nodeResult <- fmap (,"node" ++ desc) <$> runProcess "node" [encodeString outputRun] ""
       smResult   <- fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" [encodeString outputRun] ""
       setWorkingDirectory cd
