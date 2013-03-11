@@ -12,3 +12,13 @@
 /vendor/
 /GNUmakefile
 /ghc.mk
+*.gen2.js
+*.gen2.ji
+*.js_hi
+*.hi
+*.o
+*.js_o
+*.gen2.jsexe
+*_stub.h
+.fuse_hidden*
+*~
