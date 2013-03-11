@@ -106,7 +106,8 @@ combineFiles fp = do
   T.writeFile (fp</>"all.js") (mconcat (files ++ [runMain]))
 
 runMain :: Text
-runMain = "\nrunhs(runio($hs_mainZCMainzimain), function(r) { runhs(runio($hs_flushStdout), function(r) {}); });\n"
+runMain = "\nh$run(h$runio(h$mainZCMainzimain), function(r) { h$run(h$runio(h$flushStdout), function(r) {}); });\n"
+-- runMain = "\nh$run(h$runio(h$mainZCMainzimain), function(r) { h$dumpRes(r); h$run(h$runio(h$flushStdout), function(r) {}); });\n"
 
 -- get the ji file for a js file
 metaFile :: FilePath -> FilePath
@@ -269,7 +270,7 @@ rtsDeps :: Set Fun
 rtsDeps =
  let mkDep (p,m,s) = Fun (Package p "") m s
  in S.fromList $ map mkDep
-     [ ("ghc-prim", "GHC.Types",     "$hs_baseZCGHCziTypesziFalse")
-     , ("ghc-prim", "GHC.Types",     "$hs_baseZCGHCziTypesziTrue")
-     , ("base",     "GHC.Conc.Sync", "$hs_baseZCGHCziConcziSynczireportError") -- "reportError")
+     [ ("ghc-prim", "GHC.Types",     "h$baseZCGHCziTypesziFalse")
+     , ("ghc-prim", "GHC.Types",     "h$baseZCGHCziTypesziTrue")
+     , ("base",     "GHC.Conc.Sync", "h$baseZCGHCziConcziSynczireportError") -- "reportError")
      ]

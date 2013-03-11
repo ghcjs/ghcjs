@@ -13,7 +13,7 @@ import           Language.Javascript.JMacro
 
 -- trace/debug messages from the garbage collector
 gcDebug :: Bool
-gcDebug = False
+gcDebug = True
 
 -- timing measurements for the garbage collector
 gcTiming :: Bool
@@ -21,7 +21,7 @@ gcTiming = True
 
 -- extra checks from the gc for consistency, usually shouldn't print, but make it a little slower
 gcChecks :: Bool
-gcChecks = False
+gcChecks = True
 
 -- extra rts assertions/checks
 rtsChecks :: Bool
@@ -29,15 +29,19 @@ rtsChecks = rtsDebug
 
 -- rts tracing/debugging
 rtsDebug :: Bool
-rtsDebug = True
+rtsDebug = False
 
--- trace calls from the trampoline
+-- Trace calls from the trampoline
 rtsTraceCalls :: Bool
 rtsTraceCalls = rtsDebug -- False -- True
 
 -- print top stack frame before each call
 rtsTraceStack :: Bool
 rtsTraceStack = rtsDebug -- False -- True
+
+-- trace all foreign calls
+rtsTraceForeign :: Bool
+rtsTraceForeign = True
 
 ------------------------------------------------------------------------------
 -- end of settings
@@ -137,7 +141,7 @@ clName :: JExpr -> JExpr
 clName c = [je| `c`.n |]
 
 clTypeName :: JExpr -> JExpr
-clTypeName c = [je| closureTypeName(`c`.t) |]
+clTypeName c = [je| h$closureTypeName(`c`.t) |]
 
 notUndef :: ToJExpr a => a -> JExpr
 notUndef e = [je| `e` !== undefined |]

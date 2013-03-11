@@ -27,45 +27,33 @@ import           Encoding
 
 -- fixme move somewhere else
 declRegs :: JStat
-{-  slower than globals
-declRegs = [j|
-    fun Regs {
-      `map initReg (enumFrom R1)`;
-    }
-    var !r = new Regs();
-  |]
-    where
-      initReg r = AssignStat (SelExpr (jsv "this") (StrI $ regName r)) [je| 0 |]
--}
 -- fixme prevent holes
-declRegs = [j| var !regs = []; |] <> mconcat (map declReg (enumFromTo R1 R32))
+declRegs = [j| var !h$regs = []; |]
+        <> mconcat (map declReg (enumFromTo R1 R32))
+        <> regGettersSetters
     where
       declReg r = (decl . StrI . map toLower . show) r <> [j| `r` = 0; |]
 
+regGettersSetters :: JStat
+regGettersSetters =
+  [j| fun h$getReg n {
+        `SwitchStat n getRegCases mempty`;
+      }
+      fun h$setReg n v {
+        `SwitchStat n (setRegCases v) mempty`;
+      }
+    |]
+  where
+    getRegCases =
+      map (\r -> (toJExpr (regNum r), [j| return  `r`; |])) (enumFrom R1)
+    setRegCases v =
+      map (\r -> (toJExpr (regNum r), [j| `r` = `v`; return; |])) (enumFrom R1)
+
 declRets :: JStat
-declRets = mconcat $ map (decl . StrI . map toLower . show) (enumFrom Ret1)
+declRets = mconcat $ map (decl . StrI . ("h$"++) . map toLower . show) (enumFrom Ret1)
 
 trace :: ToJExpr a => a -> JStat
 trace e = [j| log(`e`);  |]
-
--- generate function thingie
-{-
-cheatFun :: String -> Int -> [VarType] -> JStat
-cheatFun f tag free =
-    let fe   = ValExpr . JVar . StrI $ f
-        fu   = ValExpr $ JFunc [] [j| `preamble`; return `Stack`[`Sp`]; |]
---        info = ValExpr . JList $ [toJExpr (nfree+1), toJExpr (zDecodeString f)] ++ replicate nfree (toJExpr (2::Int))
-{-        objInfo =
-          "t" .= Con <>
-          "a" .= tag <>
-          "i" .= info <>
-          gcInfo (nfree+1) [] <>
-          "gai" .= ([]::[Int]) -}
-    in [j| `decl (StrI f)`;
-           `fe` = `fu`;
-           `ClosureInfo fe [] (zDecodeString f) (fixedLayout free) (CICon tag) CINoStatic`;
-         |]
--}
 
 closureTypes :: JStat
 closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> closureTypeName
@@ -74,24 +62,13 @@ closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> clo
     mkClosureType c = let s = StrI $ map toUpper (show c) ++ "_CLOSURE"
                       in  decl s <> [j| `iex s` = `c` |]
     closureTypeName :: JStat
-    closureTypeName = [j| fun closureTypeName c {
+    closureTypeName = [j| fun h$closureTypeName c {
                             `map (ifCT c) [minBound..maxBound]`;
                             return "InvalidClosureType";
                           }
                         |]
     ifCT :: JExpr -> CType -> JStat
     ifCT arg ct = [j| if(`arg` === `ct`) { return `show ct`; } |]
-
--- add some basic stuff locally, to make code run without base, fixme remove this once base builds
-{-
-coreTypes :: JStat
-coreTypes = mconcat $ map (\(x,fr) -> cheatFun x 1 fr)
-            [ ("$hs_GHCziTypesziIzh_e", [IntV])
-            , ("$hs_GHCziPrimziZLzhz2cUzhZR_e", [])
-            , ("$hs_GHCziTypesziIzh_con_e", [IntV])
-            , ("$hs_GHCziPrimziZLzhz2cUzhZR_con_e", [])
-            ]
--}
 
 hsCall :: JExpr -> JStat
 hsCall c = [j| `jstatIf rtsTraceCalls $ logCall c`;
@@ -100,10 +77,10 @@ hsCall c = [j| `jstatIf rtsTraceCalls $ logCall c`;
              |]
 
 logCall :: JExpr -> JStat
-logCall c = [j| logCall(`c`); |]
+logCall c = [j| h$logCall(`c`); |]
 
 logStack :: JStat
-logStack = [j| logStack(); |]
+logStack = [j| h$logStack(); |]
 
 
 rts = jsSaturate (Just "RTS") rts'
@@ -117,15 +94,16 @@ rts' = [j|
 
 // make logging work in browser, node, v8 and spidermonkey, browser also logs to
 // <div id="output"> if jquery is detected
-var glbl;
-fun getGlbl { glbl = this; }
-getGlbl();
+
+var h$glbl;
+fun h$getGlbl { h$glbl = this; }
+h$getGlbl();
 fun log {
-  if(glbl) {
-    if(glbl.console && glbl.console.log) {
-      glbl.console.log.apply(glbl.console,arguments);
+  if(h$glbl) {
+    if(h$glbl.console && h$glbl.console.log) {
+      h$glbl.console.log.apply(h$glbl.console,arguments);
     } else {
-      glbl.print.apply(this,arguments);
+      h$glbl.print.apply(this,arguments);
     }
   } else {
     print.apply(this, arguments);
@@ -140,101 +118,85 @@ fun log {
   }
 }
 
-var !stack = [done]; // [];                // thread-local
-for(var i=1;i<500;i++) { stack[i] = 0; }
-var !heap  = [done]; // [];                // global
-for(var i=1;i<300000;i++) { heap[i] = 0; }
-var !hpDyn = 10000;             // for h < hpDyn, heap[h] is static, otherwise dynamic
-var !hpS = 2;                   // static heap pointer (first two places reserved, see below)
-var !hp  = hpDyn;               // dynamic heap pointer
-var !hpOld = hpDyn;             // for h < hpOld, heap[h] belongs to the old generation
-var !hpForward = [];            // list closures from old generation that point to the new
-// var !staticForward = [];        // static closures pointing to dynamic heap
-var !initStatic = [];           // we need delayed initialization for static objects, push functions here
-                                // to be initialized just before haskell runs
+var !h$stack = [h$done]; // [];                // thread-local
+for(var i=1;i<500;i++) { h$stack[i] = 0; }
+var !h$initStatic = [];           // we need delayed initialization for static objects, push functions here
+                                  // to be initialized just before haskell runs
 
-var !sp  = 0;                   // stack pointer
-var !mask = 0;                  // mask async exceptions
+var !h$sp  = 0;                   // stack pointer
+var !h$mask = 0;                  // mask async exceptions
 
-// gc tuning
-var !staticFree = 2000;         // when garbage collecting, try to keep this many free indices for static
-var !allocArea  = 500;         // allocate this many indices before running minor gc
-var !hpLim = hpDyn + allocArea; // collect garbage if we go over this limit
-var !gcInc = 10000000;                // run full gc after this many incrementals
-
-var !gcIncCurrent = gcInc;
-
-var !staticThunks    = {};      // funcName -> heapidx map for srefs
-var !staticThunksArr = [];      // indices of updatable thunks in static heap
-
-var $hs_stablePtrs = [];
+var !h$staticThunks    = {};      // funcName -> heapidx map for srefs
+var !h$staticThunksArr = [];      // indices of updatable thunks in static heap
+var !h$threadId = 1;
 
 // stg registers
 `declRegs`;
 `declRets`;
 
-// mutable variables are just datacon-like things that contain one ptr
-fun mutvar { `R1` = heap[r1+1]; return stack[sp]; }
-`ClosureInfo (jsv "mutvar") [] "mutable cell" (CILayoutPtrs 2 [0]) (CIFun 0 0) CINoStatic`;
-
-// ptr arrays are regular js arrays
-
-// black hole size 2, we need enough space for the ind frame
-fun blackhole { throw "<<loop>>"; return 0; }
-`ClosureInfo (jsv "blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
+fun h$blackhole { throw "<<loop>>"; return 0; }
+`ClosureInfo (jsv "h$blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
 
 // really done now
-fun done o { return done; }
-`ClosureInfo (jsv "done") [PtrV] "done" (CILayoutPtrs 2 []) (CIFun 0 0) CINoStatic`;
+fun h$done o { return h$done; }
+`ClosureInfo (jsv "h$done") [PtrV] "done" (CILayoutPtrs 2 []) (CIFun 0 0) CINoStatic`;
 
 // many primops return bool, and we can cheaply convert javascript bool to 0,1 with |0
 // so this is where we store our Bool constructors, hackily
 // note: |0 hack removed because it's slow in v8, fixed positions still useful: x?1:0
-fun false_e { return stack[sp]; }
-`ClosureInfo (jsv "false_e") [] "GHC.Types.False" (CILayoutFixed 1 []) (CICon 1) CINoStatic`;
+fun h$false_e { return stack[sp]; }
+`ClosureInfo (jsv "h$false_e") [] "GHC.Types.False" (CILayoutFixed 1 []) (CICon 1) CINoStatic`;
 
-fun true_e { return stack[sp]; }
-`ClosureInfo (jsv "true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2) CINoStatic`;
+fun h$true_e { return stack[sp]; }
+`ClosureInfo (jsv "h$true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2) CINoStatic`;
 
-`Heap`[0] = false_e;
-var !$hs_ghczmprimZCGHCziTypesziFalse = 0;
-var !$hs_ghczmprimZCGHCziTypesziFalse_con_e = false_e;
+fun h$con_e { return `Stack`[`Sp`]; };
+var !h$f = { f: h$false_e, d: null };
+var !h$t = { f: h$true_e, d: null };
 
-`Heap`[1] = true_e;
-var !$hs_ghczmprimZCGHCziTypesziTrue = 1;
-var !$hs_ghczmprimZCGHCziTypesziTrue_con_e = true_e;
-
-fun stg_catch a handler {
+fun h$catch a handler {
   `preamble`;
   `adjSp 2`;
   `Stack`[`Sp` - 1] = handler;
-  `Stack`[`Sp`] = stg_catch_e;
+  `Stack`[`Sp`] = h$catch_e;
   `R1` = a;
-  return stg_ap_v_fast();
+  return h$ap_1_0_fast();
 }
 
-fun stg_catch_e {
+fun h$catch_e {
   `preamble`;
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "stg_catch_e") [] "exception handler" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo (jsv "h$catch_e") [] "exception handler" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
 
 
 // throw an exception: walk the thread's stack until you find a handler
-fun stg_throw e {
-  while(sp > 0) {
-    var f = stack[sp];
-    if(f === stg_catch_e) break;
-    var size = f.gtag & 0xff;
+fun h$throw e {
+  `preamble`;
+  while(`Sp` > 0) {
+    var f = `Stack`[`Sp`];
+    if(f === h$catch_e) break;
+    if(f === h$upd_frame) { // unclaim black hole
+      `Stack`[`Sp`-1].f = `Stack`[`Sp`-3];
+      `Stack`[`Sp`-1].d = `Stack`[`Sp`-2];
+    }
+    var tag = f.gtag;
+    if(tag <= 0) { // generic apply frame
+        tag = (stack[`Sp` - 1] >> 8) + 2;
+        offset = 2;
+    }
+    var size = tag & 0xff;
     `Sp` = `Sp` - size;
   }
-  if(sp > 0) {
-    var handler = stack[sp - 1];
+  if(`Sp` > 0) {
+    var handler = `Stack`[`Sp` - 1];
     `R1` = handler;
     `R2` = e;
-    `adjSpN 2`;
-    return stg_ap_pv_fast();
+    if(`Sp` > 3) { // don't pop the top-level handler
+      `adjSpN 2`;
+    }
+    return h$ap_2_1_fast();
   } else {
     throw "unhandled exception in haskell thread";
   }
@@ -243,47 +205,24 @@ fun stg_throw e {
 // reduce result if it's a thunk, follow if it's an ind
 // add this to the stack if you want the outermost result
 // to always be reduced to whnf, and not an ind
-fun reduce {
+fun h$reduce {
   `preamble`;
-  if(typeof(`Heap`[`R1`].t) !== "undefined" && heap[`R1`].t === `Thunk`) {
-    do {
-      switch(`Heap`[`R1`].t) {
-        case `Thunk`:
-          return `Heap`[`R1`];
-        case `Ind`:
-          `R1` = `Heap`[`R1`+1];
-          continue;
-        default:
-          `adjSpN 1`;
-          return `Stack`[`Sp`];
-      }
-    } while(true);
-  } else { // unboxed
+  if(`isThunk (toJExpr R1)`) {
+    return `R1`.f;
+  } else {
     `adjSpN 1`;
     return `Stack`[`Sp`];
   }
 }
-`ClosureInfo (jsv "reduce") [PtrV] "reduce" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo (jsv "h$reduce") [PtrV] "h$reduce" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
-fun gc_check next {
-   if(hp > hpLim) {
-      if(gcIncCurrent <= 0) {  // full collection, fixme, activate generational later
-        hp = gc(heap, hp, stack, sp, next, hpDyn, hpOld, hpForward, staticThunksArr, false);
-        hpForward = [];
-        gcIncCurrent = gcInc;
-      } else {                 // incremental collection
-        hp = gc(heap, hp, stack, sp, next, hpDyn, hpOld, hpForward, staticThunksArr, true);
-        hpForward = [];
-        gcIncCurrent--;
-      }
-      hpOld = hp;  // fixme do we promote everything to old gen immediately?
-      hpLim = hp + allocArea;
-//      for(var x=heap.length;x<hpLim+1000;x++) { heap[x] = 0; } // force alloc of heap
-   }
+fun h$gc_check next {
+//  log("gc_check: todo");
+  return 0;
 }
 
 // set heap/stack object information
-fun _setObjInfo o typ name fields a gcinfo regs srefs {
+fun h$setObjInfo o typ name fields a gcinfo regs srefs {
   o.t    = typ;
   o.i    = fields;
   o.n    = name;
@@ -300,31 +239,24 @@ fun _setObjInfo o typ name fields a gcinfo regs srefs {
 }
 
 // allocate function on heap
-fun static_fun f arity name gai {
-  if(hpS+1 >= hpDyn) run_gc();
-  var h = hpS;
-  heap[hpS++] = f;
-  return h;
+fun h$static_fun f arity name gai {
+  return { f: f, d: null }
 }
 
 // allocate static thunk on heap (after setting closure info)
 // we need two positions for static thunks, to have enough room for the update frame
 // third position is for storing the original fun again, to be able to revert it
-fun static_thunk f {
-  if((hpS+3) >= hpDyn) run_gc();
-  var h = hpS;
-  heap[hpS] = f;
-  heap[hpS+1] = 0;
-  heap[hpS+2] = f;
-  hpS += 3;
-  staticThunks[f.n] = h;
-  staticThunksArr.push(h);
+fun h$static_thunk f {
+  // fixme push stuff to restore stuff here
+  var h = { f: f, d: { } };
+   
   return h;
 }
 
 // print a closure
-fun printcl i {
-  var cl = heap[i];
+fun h$printcl i {
+  var cl = i.f;
+  var d  = i.d;
   var r = "";
   switch(cl.t) {
     case `Thunk`:
@@ -344,31 +276,31 @@ fun printcl i {
       break;
   }
   r += " :: " + cl.n + " ->";
-  var idx = i+1;
+  var idx = 1;
   for(var i=0;i<cl.i.length;i++) {
     r += " ";
     switch(cl.i[i]) {
       case `PtrV`:
-        r += "[" + heap[idx] + " :: " + heap[heap[idx]].i[1] + "]";
+        r += "[ Ptr :: " + d["d"+idx].f.n + "]";
         idx++;
         break;
       case `VoidV`:
         r += "void";
         break;
       case `DoubleV`:
-        r += "(" + heap[idx] + " :: double)";
+        r += "(" + d["d"+idx] + " :: double)";
         idx++;
         break;
       case `IntV`:
-        r += "(" + heap[idx] + " :: int)";
+        r += "(" + d["d"+idx] + " :: int)";
         idx++;
         break;
       case `LongV`:
-        r += "(" + heap[idx] + "," + heap[idx+1] + " :: long)";
+        r += "(" + d["d"+idx] + "," + d["d"+(idx+1)] + " :: long)";
         idx+=2;
         break;
       case `AddrV`:
-        r += "(" + heap[idx].length + "," + heap[idx+1] + " :: ptr)";
+        r += "(" + d["d"+idx].length + "," + d["d"+(idx+1)] + " :: ptr)";
         idx+=2;
         break;
       default:
@@ -377,15 +309,15 @@ fun printcl i {
   }
   log(r);
 }
-
-fun static_con0 f {
+/*
+fun h$static_con0 f {
   if(hpS+1 >= hpDyn) run_gc();
   var h = hpS;
   heap[hpS++] = f;
   return h;
 }
 
-fun static_con f xs {
+fun h$static_con f xs {
   if(hpS+1+xs.length >= hpDyn) run_gc();
   var h = hpS;
   var n = xs.length;
@@ -397,126 +329,119 @@ fun static_con f xs {
   return h;
 }
 
-fun alloc_static n {
+fun h$alloc_static n {
   if(hpS+n >= hpDyn) run_gc();
   var h = hpS;
   hpS += n;
   return h;
 }
-
-fun init_closure idx f xs {
-  heap[idx] = f;
-  for(var i=xs.length - 1;i>=0;i--) {
-    heap[idx+i+1] = xs[i];
+*/
+fun h$init_closure c xs {
+  switch(xs.length) {
+    case 0:
+      c.d = { };
+      return c;
+    case 1:
+      c.d = { d1: xs[0] };
+      return c;
+    case 2:
+      c.d = { d1: xs[0], d2: xs[1] };
+      return c;
+    case 3:
+      c.d = { d1: xs[0], d2: xs[1], d3: xs[2] };
+      return c;
+    case 4:
+      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3] };
+      return c;
+    case 5:
+      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3], d5: xs[4] };
+      return c;
+    case 6:
+      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3], d5: xs[4], d6: xs[5] };
+      return c;
+    case 7:
+      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3], d5: xs[4], d6: xs[5], d7: xs[6] };
+      return c;
+    default:
+      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3], d5: xs[4], d6: xs[5], d7: xs[6] };
+      // fixme does closure compiler bite us here?
+      for(var i=7;i<xs.length;i++) {
+        c.d["d"+(i+1)] = xs[i];
+      }
+      return c;
   }
 }
 
-fun run_init_static {
-  if(initStatic.length == 0) return;
-  for(var i=initStatic.length - 1;i>=0;i--) {
-    initStatic[i]();
+fun h$run_init_static {
+  if(h$initStatic.length == 0) return;
+  for(var i=h$initStatic.length - 1;i>=0;i--) {
+    h$initStatic[i]();
   }
-  initStatic = [];
+  h$initStatic = [];
 }
 
 // print function to be called and first few registers
-fun logCall c {
+fun h$logCall c {
   var f = c;
-  if(c && c.n) f = c.n;
-//  log("trampoline calling: " + f + "    " + JSON.stringify([r1,r2,r3,r4,r5,r6,r7,r8]) + "  hp: " + hp + "(l: " + heap.length + ")");
-  log("trampoline calling: " + f + "    " + JSON.stringify([printReg r1, printReg r2, printReg r3, printReg r4, printReg r5]) + "  hp: " + hp + "(l: " + heap.length + ")");
-  checkDynHeap();
-  checkStack();
-}
-
-// check that all pointers on the dyn heap indeed refer to some valid pointer target
-fun checkDynHeap {
-  var idx = hpDyn;
-  while(idx < hp) {
-    if(typeof(heap[idx]) === 'function') {
-      // updated objects are probably not the same size anymore
-      while(heap[idx].t === `Blackhole` || heap[idx].t === `Ind`) {
-        while(++idx < hp) {
-          if(typeof(heap[idx]) === 'function') {
-            break;
-          }
-        }
-        if(idx >= hp) return;
-      }
-      var g = heap[idx].gtag;
-      var offset = 1;
-      if(g < 0) {
-        if(heap[idx].t === `Pap`) { // skip pap objects for now
-          g = 0 - (g+1); // ignore object, just size
-          log("pap size: " + g);
-        } else {
-          g = heap[idx+1];
-          offset = 2;
-        }
-      }
-      var size = g & 0xff;
-      // if(heap[idx].t === `Thunk`) { // thunks on the dynheap are at least size 2
-        size = Math.max(size, 2);
-      // }
-      var ptrs = g >> 8;
-      while(ptrs) {
-        if(ptrs&1) {
-          var ptr = heap[idx+offset];
-          if(typeof heap[ptr] !== 'function') {
-            dh();
-            throw("expected pointer at: " + (idx+offset) + " inspecting: " + heap[idx].n);
-          }
-        }
-        ptrs = ptrs >> 1;
-        offset++;
-      }
-      idx += size;
-    } else {
-      dh();
-      throw("invalid heap object at: " + idx);
-    }
+  if(c && c.n) {
+    f = c.n;
+  } else {
+    f = h$collectProps c;
   }
+  log("trampoline calling: " + f + "    " + JSON.stringify([h$printReg `R1`, h$printReg `R2`, h$printReg `R3`, h$printReg `R4`, h$printReg `R5`]));
+  h$checkStack();
 }
 
-fun checkStack {
-  return 0; // fixme
-  var idx = sp;
+fun h$collectProps o {
+  var props = [];
+  for(var p in o) { props.push(p); }
+  return("{"+props.join(",")+"}");
+}
+
+fun h$checkStack {
+  var idx = `Sp`;
   while(idx >= 0) {
-    var f = stack[idx];
+    var f = `Stack`[idx];
     if(typeof(f) === 'function') {
-      var tag = stack[idx].gtag;
+      var tag = `Stack`[idx].gtag;
       var offset = 1;
-      if(tag <= 0) {
-        tag = stack[idx - 1];
+      if(tag <= 0) { // generic apply frame
+        tag = (stack[idx - 1] >> 8) + 2;
         offset = 2;
       }
-      var size = tag & 0xff;
-      if(size < 1) throw("invalid stack frame size at: stack[" + idx + "], frame: " + stack[idx].n);
-      var ptrs = tag >> 8;
-      while(ptrs) {
-        if(ptrs&1) {
-          var ptr = stack[idx-offset];
-          if(typeof heap[ptr] !== 'function') {
-            dumpStack stack sp;
-            dh();
-            throw("expected pointer at: stack[" + (idx-offset) + "] inspecting " + stack[idx].n);
+      var size = tag & 0xFF;
+      if(size < 1) throw("invalid stack frame size at: stack[" + idx + "], frame: " +`Stack`[idx].n);
+//        log("checking frame: " + `Stack`[idx].n + " size " + size);
+      if(f !== h$upd_frame) {
+        for(var i=0;i<size-offset;i++) {
+          if(typeof `Stack`[idx-offset-i] === 'function') {
+            h$dumpStackTop `Stack` 0 `Sp`;
+            throw("unexpected function in frame at: " + idx + " " + `Stack`[idx].n);
           }
         }
-        ptrs = ptrs >> 1;
-        offset++;
       }
       idx = idx - size;
     } else {
-      dumpStack stack sp;
-      dh();
+      h$dumpStackTop `Stack` 0 `Sp`;
       throw("invalid stack object at: " + idx);
     }
   }
 }
 
-fun printReg r {
-  if(r > 0 && r <= hp && heap[r].n) {
-    return (r + ":" + heap[r].n + " (" + closureTypeName(heap[r].t) + ", " + heap[r].a + ")");
+fun h$printReg r {
+  if(typeof r === 'object' && r.hasOwnProperty('f') && r.hasOwnProperty('d')) {
+    if(r.f.t === `Blackhole` && r.d.x1 && r.d.x1.n) {
+      return ("blackhole: -> " + h$printReg({ f: r.d.x1, d: r.d.x2 }) + ")");
+    } else {
+      return (r.f.n + " (" + h$closureTypeName(r.f.t) + ", " + r.f.a + ")");
+    }
+  } else if(typeof r === 'object') {
+    var res = h$collectProps(r);
+    if(res.length > 40) {
+      return (res.substr(0,40)+"...");
+    } else {
+      return res;
+    }
   } else {
     var xs = new String(r) + "";
     if(xs.length > 40) {
@@ -528,43 +453,41 @@ fun printReg r {
 }
 
 // print top stack frame
-fun logStack {
-  if(typeof stack[sp] === 'undefined') {
+fun h$logStack {
+  if(typeof `Stack`[`Sp`] === 'undefined') {
     log("warning: invalid stack frame");
     return;
   }
   var size = 0;
-  var gt = stack[sp].gtag;
+  var gt = `Stack`[`Sp`].gtag;
   if(gt === -1) {
-    size = stack[sp - 1] & 0xff;
+    size = `Stack`[`Sp` - 1] & 0xff;
   } else {
     size = gt & 0xff;
   }
-//  dumpStackTop stack (sp-size+1) sp;
-  dumpStackTop stack (sp-size - 2) sp;
-  for(var i=Math.max(0,sp-size+1); i <= sp; i++) {
-    if(typeof stack[i] === 'undefined') {
+  h$dumpStackTop `Stack` (`Sp`-size - 2) `Sp`;
+  for(var i=Math.max(0,`Sp`-size+1); i <= `Sp`; i++) {
+    if(typeof `Stack`[i] === 'undefined') {
       throw "undefined on stack";
     }
   }
 }
 
-fun runhs t cb {
+fun h$run cl cb {
 //  `trace "runhs"`;
-  run_init_static();
-  stack[0] = done;
-  stack[1] = $hs_baseZCGHCziConcziSynczireportError;
-  stack[2] = stg_catch_e;
-  stack[3] = reduce;
-  sp = 3;
-  var c = heap[t];
-  `R1` = t;
-  while(c !== done) {
+  h$run_init_static();
+  h$stack[0] = h$done;
+  h$stack[1] = h$baseZCGHCziConcziSynczireportError;
+  h$stack[2] = h$catch_e;
+  h$stack[3] = h$reduce;
+  h$sp = 3;
+  `R1` = cl;
+  var c = cl.f;
+  while(c !== h$done) {
     `replicate 10 (hsCall c)`;
     `hsCall c`;
-    gc_check(c);
+    h$gc_check(c);
   }
-  while(`R1`.t === `Ind`) { `R1` = heap[`R1`+1]; }
   cb(`R1`);
 }
 
@@ -573,46 +496,112 @@ fun runhs t cb {
 `closureTypes`;
 `garbageCollector`;
 
-fun runio_e {
+fun h$runio_e {
   `preamble`;
-  `R1` = `Heap`[`R1`+1];
-  stack[++sp] = stg_ap_v;
-  return stg_ap_v;
+  `R1` = `R1`.d.d1;
+  `Stack`[++`Sp`] = h$ap_1_0;
+  return h$ap_1_0;
 }
-`ClosureInfo (jsv "runio_e") [PtrV] "runio" (CILayoutFixed 2 [PtrV]) CIThunk CINoStatic`;
+`ClosureInfo (jsv "h$runio_e") [PtrV] "runio" (CILayoutFixed 2 [PtrV]) CIThunk CINoStatic`;
 
-fun runio c {
-  var h = hp;
-  heap[h] = runio_e;
-  heap[h+1] = c;
-  hp+=2;
-  return h;
+fun h$runio c {
+  return { f: h$runio_e, d: { d1: c } };
 }
 
-fun $hs_flushStdout_e {
-  `R1` = $hs_baseZCGHCziIOziHandlezihFlush;
-  `R2` = $hs_baseZCGHCziIOziHandleziFDzistdout;
-  return stg_ap_p_fast();
+fun h$flushStdout_e {
+  `R1` = h$baseZCGHCziIOziHandlezihFlush;
+  `R2` = h$baseZCGHCziIOziHandleziFDzistdout;
+  return h$ap_1_fast();
 }
-`ClosureInfo (jsv "$hs_flushStdout_e") [] "flushStdout" (CILayoutFixed 1 []) CIThunk CINoStatic`;
-var !$hs_flushStdout = static_thunk($hs_flushStdout_e);
+`ClosureInfo (jsv "h$flushStdout_e") [] "flushStdout" (CILayoutFixed 1 []) CIThunk CINoStatic`;
+var !h$flushStdout = h$static_thunk(h$flushStdout_e);
 
-var start = new Date();
-fun dumpRes cl {
-   printcl cl;
+var h$start = new Date();
+fun h$dumpRes cl {
+   h$printcl cl;
    var end = new Date();
-   log("elapsed time: " + (end.getTime()-start.getTime()) + "ms");
+   log("elapsed time: " + (end.getTime()-h$start.getTime()) + "ms");
 }
 
 // fixme move somewhere else
 
-fun ascii s {
+fun h$ascii s {
     var res = [];
     for(var i=0;i<s.length;i++) {
       res.push(s.charCodeAt(i));
     }
     res.push(0);
     return res;
+}
+
+fun h$dumpStackTop stack start sp {
+        for(var i=start;i<=sp;i++) {
+           var s = stack[i];
+           if(s && s.n) {
+             log("stack[" + i + "] = " + s.n);
+           } else {
+             if(typeof s === 'object' && s.hasOwnProperty("f") && s.hasOwnProperty("d")) {
+               if(s.f.t === `Blackhole` && s.d.x1 && s.d.x1.n) {
+                 log("stack[" + i + "] = blackhole -> " + s.d.x1.n);
+               } else {
+                 log("stack[" + i + "] = -> " + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
+               }
+             } else {
+               log("stack[" + i + "] = " + s);
+             }
+          }
+        }
+     }
+
+// check that a haskell heap object is what we expect:
+// f is a haskell entry function
+// d exists, but might be null, if it isn't, warn for any undefined/null fields or fields with unfamiliar names
+fun h$checkObj obj {
+  if(!obj.hasOwnProperty("f") || obj.f === null || obj.f === undefined || !obj.f.n || obj.f.a === undefined || typeof obj.f !== 'function') {
+    log("h$checkObj: WARNING, something wrong with f:");
+    log(obj);
+  }
+  if(!obj.hasOwnProperty("d") || obj.d === undefined || obj.d === null) {
+    log("h$checkObj: WARNING, something wrong with d:");
+    log(obj);
+  } else {
+    var d = obj.d;
+    for(var p in obj.d) {
+      if(d.hasOwnProperty(p)) {
+        if(p.substring(0,1) != "d") {
+          log("h$checkObj: WARNING, unexpected field name: " + p);
+          log(obj);
+        }
+        if(d[p] === undefined) {
+          log("h$checkObj: WARNING, undefined field detected: " + p);
+          log(obj);
+        }
+//        if(d[p] === null) {
+//          log("h$checkObj: WARNING, null field detected: " + p);
+//          log(obj);
+//        }
+      }
+    }
+  }
+}
+
+fun h$traceForeign f as {
+  if(`not rtsTraceForeign`) { return; }
+  var bs = [];
+  for(var i=0;i<as.length;i++) {
+    var ai = as[i];
+    if(typeof ai === 'object') {
+      var astr = ai.toString();
+      if(astr.length > 40) {
+        bs.push(astr.substring(0,40)+"...");
+      } else {
+        bs.push(astr);
+      }
+    } else {
+      bs.push(""+ai);
+    }
+  }
+  log("ffi: " + f + "(" + bs.join(",") + ")");
 }
 
 |]

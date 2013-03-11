@@ -52,7 +52,7 @@ showSDoc' a = return (showSDoc a)
 #endif
 
 -- closure types
-data CType = Thunk | Fun | Pap | Con | Ind | Blackhole
+data CType = Thunk | Fun | Pap | Con | Blackhole
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 --
@@ -61,7 +61,7 @@ ctNum Fun       = 1
 ctNum Con       = 2
 ctNum Thunk     = 0 -- 4
 ctNum Pap       = 3 -- 8
-ctNum Ind       = 4 -- 16
+-- ctNum Ind       = 4 -- 16
 ctNum Blackhole = 5 -- 32
 
 instance ToJExpr CType where
@@ -89,7 +89,6 @@ varSize :: VarType -> Int
 varSize VoidV = 0
 varSize LongV = 2 -- hi, low
 varSize AddrV = 2 -- obj/array, offset
-varSize MVarV = 2 -- [value], [waiting threads]
 varSize _     = 1
 
 typeSize :: Type -> Int
@@ -221,12 +220,12 @@ data StgRet = Ret1 | Ret2 | Ret3 | Ret4 | Ret5 | Ret6 | Ret7 | Ret8 | Ret9 | Ret
 
 instance ToJExpr StgReg where
   toJExpr r
-    | fromEnum r <= 32 = ve . {- ("r."++) . -} map toLower . show $ r
-    | otherwise   = [je| regs[`fromEnum r-32`] |]
+    | fromEnum r <= 32 = ve . ("h$"++) . map toLower . show $ r
+    | otherwise   = [je| h$regs[`fromEnum r-32`] |]
 
 
 instance ToJExpr StgRet where
-  toJExpr = ve . map toLower . show
+  toJExpr = ve . ("h$"++) . map toLower . show
 
 regName :: StgReg -> String
 regName = map toLower . show
@@ -302,67 +301,29 @@ currentModulePkg = showPpr' =<< use gsModule
 funArgs :: [Ident]
 funArgs = [] -- [StrI "o"] -- [StrI "_heap", StrI "_stack"] -- [] -- [StrI "r", StrI "heap", StrI "stack"]
 
-data Special = Stack | Sp | Heap | Hp deriving (Show, Eq)
+data Special = Stack
+             | Sp
+             | HTrue
+             | HFalse
+     deriving (Show, Eq)
 
 instance ToJExpr Special where
-  toJExpr Stack = [je| stack |] -- [je| _stack |]
-  toJExpr Sp    = [je| sp    |] -- [je| _sp    |]
-  toJExpr Heap  = [je| heap  |] -- [je| _heap  |]
-  toJExpr Hp    = [je| hp    |]
-
-
-adjHp :: Int -> JStat
-adjHp e = [j| hp+=`e`; |] -- [j| `jsv "hp = _hp"` = _hp + `e` |]
-
-adjHpN :: Int -> JStat
-adjHpN e = [j| hp=hp-`e`; |] -- [j| `jsv "hp = _hp"` = _hp - `e` |]
+  toJExpr Stack  = [je| h$stack |]
+  toJExpr Sp     = [je| h$sp    |]
+  toJExpr HTrue  = [je| h$t     |]
+  toJExpr HFalse = [je| h$f     |]
 
 adjSp :: Int -> JStat
-adjSp e = [j| sp = sp + `e`; |] -- [j| _sp += `e`; sp = _sp; |]
+adjSp e = [j| h$sp = h$sp + `e`; |] -- [j| _sp += `e`; sp = _sp; |]
 
 adjSpN :: Int -> JStat
-adjSpN e = [j| sp = sp  - `e`; |] -- [j| _sp = _sp - `e`; sp = _sp; |]
+adjSpN e = [j| h$sp = h$sp  - `e`; |] -- [j| _sp = _sp - `e`; sp = _sp; |]
 
 -- stuff that functions are supposed to execute at the start of the body
 -- (except very simple functions)
 preamble :: JStat
-preamble = mempty -- [j| var !_stack = stack; var !_heap = heap; var !_sp = sp; |] -- var !_heap = heap; |] -- var !_sp = sp; |]
--- [j| var th = `jsv "('x',eval)"`('this'); var !_stack = th.stack; var !_heap = th.heap; var !_sp = th.sp; |]
+preamble = mempty
 
--- setClosureInfo -- fixme
-
--- set fields used by the gc to follow pointers
--- gc info fields:
--- .gtag -> gtag & 0xFF = size, other bits indicate  offsets of pointers, gtag === 0 means tag invalid, use list
--- .gi   -> info list, [size, offset1, offset2, offset3, ...]
-{-
-gcInfo :: Int   -> -- ^ size of closure in array indices, including entry
-         [Int]  -> -- ^ offsets from entry where pointers are found
-          JObj
-gcInfo size offsets =
-  "gi"   .= infolist <>
-  "gtag" .= tag
-      where
-        tag | maximum (0:offsets) < 25 && minimum (1:offsets) >= 0 && size <= 255 =
-                size .|. (L.foldl' (.|.) 0 $ map (\x -> 1 `shiftL` (8+x)) offsets)
-            | otherwise = 0
-        infolist = size : L.sort offsets
--}
--- set fields to indicate that object layout is stored  inside the object in the second index
--- objects with embedded layout info have gtag == -1
-{-
-gcEmbedded :: JObj
-gcEmbedded =
-    "gi"   .= [ji (-1)] <>
-    "gtag" .= ji (-1)
--}
--- a pap has a special gtag, pap object size n (n-2 arguments), we hve gtag = -n-1
-{-
-gcPap :: Int -> JObj
-gcPap n =
-    "gi"   .= [n] <>
-    "gtag" .= ji (-n-1)
--}
 push :: [JExpr] -> JStat
 push [] = mempty
 push xs = [j| `adjSp l`; `items`; |]
@@ -412,32 +373,47 @@ popn n = adjSpN n
 -- below: c argument is closure entry, p argument is (heap) pointer to entry
 
 closureType :: JExpr -> JExpr
-closureType c = [je| `c`.t |]
+closureType c = [je| `c`.f.t |]
 
 isThunk :: JExpr -> JExpr
-isThunk c = [je| `closureType c` === `Thunk` |]
+isThunk c = [je| `c`.f.t === `Thunk` |]
+isThunk' f = [je| `f`.t === `Thunk` |]
 
 isFun :: JExpr -> JExpr
-isFun c = [je| `closureType c` === `Fun` |]
+isFun c = [je| `c`.f.t === `Fun` |]
+
+isFun' :: JExpr -> JExpr
+isFun' f = [je| `f`.t === `Fun` |]
 
 isPap :: JExpr -> JExpr
-isPap c = [je| `closureType c` === `Pap` |]
+isPap c = [je| `c`.f.t === `Pap` |]
+
+isPap' :: JExpr -> JExpr
+isPap' f = [je| `f`.t === `Pap` |]
 
 isCon :: JExpr -> JExpr
-isCon c = [je| `closureType c` === `Con` |]
+isCon c = [je| `c`.f.t === `Con` |]
 
-isInd :: JExpr -> JExpr
-isInd c = [je| `closureType c` === `Ind` |]
+isCon' :: JExpr -> JExpr
+isCon' f = [je| `f`.t === `Con` |]
+
+-- no ind anymore
+-- isInd :: JExpr -> JExpr
+-- isInd c = [je| `closureType c` === `Ind` |]
 
 conTag :: JExpr -> JExpr
-conTag c = [je| `c`.a |]
+conTag c = [je| `c`.f.a |]
+conTag' f = [je| `f`.a |]
 
 entry :: JExpr -> JExpr
-entry p = [je| `Heap`[`p`] |]
+entry p = [je| `p`.f |]
 
--- number of  arguments (arity & 0xff = arguments, arity >> 8 = number of trailing void args)
+-- number of  arguments (arity & 0xff = arguments, arity >> 8 = number of registers)
 funArity :: JExpr -> JExpr
-funArity c = [je| `c`.a |]
+funArity c = [je| `c`.f.a |]
+
+funArity' :: JExpr -> JExpr
+funArity' f = [je| `f`.a |]
 
 -- expects heap pointer to entry (fixme document this better or make typesafe)
 -- arity & 0xff = real number of arguments
@@ -445,20 +421,33 @@ funArity c = [je| `c`.a |]
 papArity :: JExpr -> JExpr -> JStat
 papArity tgt p = [j| `tgt` = 0;
                      var cur = `p`;
+                     var args = 0;
+                     var regs = 0;
                      do {
-                       `tgt` = `tgt`-`papArgs cur`;
-                       cur = `Heap`[cur+1];
-                     } while(`Heap`[cur].t === `Pap`);
-                     `tgt` += `Heap`[cur].a;
+                       regs += cur.f.a;
+                       args += cur.d.d2;
+                       `traceRts $ "pap: " |+ regs |+ " " |+ args`;
+                       cur = cur.d.d1;
+                     } while(cur.f.t === `Pap`);
+                     var fa = cur.f.a;
+                     `traceRts $ "pap base: " |+ fa`;
+                     `tgt` = (((fa>>8)-regs)<<8)|((fa&0xFF)-args);
+                     `traceRts $ "pap arity: " |+ tgt`;
                    |]
+{-
+papArgs :: JExpr -> JExpr
+papArgs p = [je| `p`.f.a |]
+-}
+--papArity tgt p = [j| `tgt` = `p`.f.a |]
 
 -- number of stored args in pap (fixme?)
-papArgs :: JExpr -> JExpr
--- papArgs p = [je| (`Heap`[`p`].gtag & 0xff) - 1 |] -- [je| (-3) - `Heap`[`p`].gtag |]
-papArgs p = [je| `Heap`[`p`].a |]
+{-
 
-funTag :: JExpr -> JExpr
-funTag c = [je| `c`.gtag |]
+papArgs p = [je| `Heap`[`p`].a |]
+-}
+
+-- funTag :: JExpr -> JExpr
+-- funTag c = [je| `c`.gtag |]
 
 -- some utilities do do something with a range of regs
 -- start or end possibly supplied as javascript expr
@@ -487,20 +476,21 @@ withRegsRE start end max fallthrough f =
           | otherwise   = [j| break; |]
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
 
-
+{-
 rewriteInternalId :: Module -> Ident -> Ident
 rewriteInternalId m ii@(StrI i)
   | internalPrefix `L.isPrefixOf` i =
-    StrI $ "$hs__" ++ modName ++ (drop (length internalPrefix) i)
+    StrI $ "h$_" ++ modName ++ (drop (length internalPrefix) i)
   | otherwise = ii
   where
-    modName        = zEncodeString . moduleNameString . moduleName $ m    
-    internalPrefix = "$hs_INTERNAL"
+    modName        = zEncodeString . moduleNameString . moduleName $ m
+    internalPrefix = "h$INTERNAL"
+-}
 
 jsIdIdent :: Id -> Maybe Int -> String -> G Ident
 jsIdIdent i mn suffix = do
   (prefix, u) <- mkPrefixU
-  StrI . (\x -> "$hs_"++prefix++x++mns++suffix++u) . zEncodeString <$> name
+  StrI . (\x -> "h$"++prefix++x++mns++suffix++u) . zEncodeString <$> name
     where
       mns = maybe "" (('_':).show) mn
 --      (prefix,u)
@@ -511,19 +501,6 @@ jsIdIdent i mn suffix = do
            return (zEncodeString xstr, "")
         | otherwise = (,('_':) . show . getKey . getUnique $ i) . ('_':) . zEncodeString
                         <$> currentModulePkg
-{-
-        | isExportedId i = "_" ++ (show . isInternalName . getName $ i ) ++ "_"
-                               ++ (show . isSystemName . getName $ i ) ++ "_"
-                               ++ (showPpr' . getSrcLoc $ i )
-        | otherwise      = '_' : (show . getKey . getUnique $ i)
--}
-
-           {-
-      | isLocalId i = '_' : (show . getKey . getUnique $ i)
-         | (not . isExportedId) i = "_nexp"
-         | otherwise   = ""
--}
---        "_" ++ (moduleNameString . moduleName $ x) 
 
 jsVar :: String -> JExpr
 jsVar v = ValExpr . JVar . StrI $ v
@@ -541,8 +518,8 @@ isFalseCon i = show (idName i) == "ghc-prim:GHC.Types.False"
 -- regular id, shortcut for bools!
 jsId :: Id -> G JExpr
 jsId i
-  | isTrueCon i  = return $ toJExpr (1::Int)
-  | isFalseCon i = return $ toJExpr (0::Int)
+  | isTrueCon i  = return $ toJExpr HTrue -- (1::Int)
+  | isFalseCon i = return $ toJExpr HFalse -- (0::Int)
   | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
 
 -- entry id
@@ -589,14 +566,14 @@ data ClosureInfo = ClosureInfo
      , ciStatic :: CIStatic  -- ^ static references of this object
      }
 
-data CIType = CIFun { citArity :: Int  -- | number of arguments (double arguments are counted double)
-                    , citNVoid :: Int  -- | number of trailing void args
+data CIType = CIFun { citArity :: Int  -- | function arity
+                    , citRegs  :: Int  -- | number of registers for the args
                     }
             | CIThunk
             | CICon { citConstructor :: Int }
             | CIPap { citSize :: Int } -- fixme is this ok?
             | CIBlackhole
-            | CIInd
+  --          | CIInd
 
 data CIStatic = CIStaticParent { staticParent :: Ident } -- ^ static refs are stored in parent in fungroup
               | CIStaticRefs   { staticRefs :: [Ident] } -- ^ list of refs that need to be kept alive
@@ -608,12 +585,6 @@ instance ToJExpr CIStatic where
   toJExpr (CIStaticParent p) = iex p -- jsId p
   toJExpr (CIStaticRefs [])  = [je| null |]
   toJExpr (CIStaticRefs rs)  = toJExpr (map istr rs) -- (map idStr rs)
-
-{-
-                   where
-         
-            idStr i = let (StrI xs) = jsIdI i in [je| `xs` |]
--}
 
 
 data CILayout = CILayoutVariable -- layout stored in object itself, first position from the start
@@ -634,12 +605,12 @@ fixedLayout vts = CILayoutFixed (1 + sum (map varSize vts)) vts
 instance ToStat ClosureInfo where
   toStat (ClosureInfo obj rs name layout CIThunk srefs)       =
     setObjInfoL obj rs layout Thunk name 0 srefs
-  toStat (ClosureInfo obj rs name layout (CIFun arity nvoid) srefs) =
-    setObjInfoL obj rs layout Fun name (mkArityTag arity nvoid) srefs
+  toStat (ClosureInfo obj rs name layout (CIFun arity nregs) srefs) =
+    setObjInfoL obj rs layout Fun name (mkArityTag arity nregs) srefs
   toStat (ClosureInfo obj rs name layout (CICon con) srefs)   =
     setObjInfoL obj rs layout Con name con srefs
-  toStat (ClosureInfo obj rs name layout CIInd srefs)         =
-    setObjInfoL obj rs layout Ind name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
+--  toStat (ClosureInfo obj rs name layout CIInd srefs)         =
+--    setObjInfoL obj rs layout Ind name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
   toStat (ClosureInfo obj rs name layout CIBlackhole srefs)   =
     setObjInfoL obj rs layout Blackhole name 0 srefs
 
@@ -705,7 +676,7 @@ setObjInfo :: JExpr      -- ^ the thing to modify
            -> CIStatic   -- ^ static refs
            -> JStat
 setObjInfo obj t name fields a gctag argptrs static =
-  [j| _setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `scannableOffsets 1 argptrs`, `static`);  |]
+  [j| h$setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `scannableOffsets 1 argptrs`, `static`);  |]
 
 scannableOffsets :: Int -> [VarType] -> [Int]
 scannableOffsets start ts =
