@@ -511,11 +511,11 @@ updates =
         var updatee = `Stack`[`Sp` - 1];
         updatee.f = `R1`.f;
         updatee.d = `R1`.d;
-        `adjSpN 4`;
+        `adjSpN 2`;
         `traceRts $ "h$upd_frame: updating: " |+ updatee |+ " -> " |+ R1`;
         return `Stack`[`Sp`];
       };
-      `ClosureInfo (iex $ StrI "h$upd_frame") [PtrV] "h$upd_frame" (CILayoutFixed 4 [PtrV]) (CIFun 0 0) CINoStatic`;
+      `ClosureInfo (iex $ StrI "h$upd_frame") [PtrV] "h$upd_frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
   |]
 
 mkFunc :: Ident -> JStat -> JStat

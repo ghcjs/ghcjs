@@ -126,22 +126,8 @@ genPrim PopCnt16Op        [r] [x]   =
   PrimInline [j| `r` = h$popCntTab[`x`&0xFF] +
                        h$popCntTab[(`x`>>>8)&0xFF]
                |]
-genPrim PopCnt32Op        [r] [x]   =
-  PrimInline [j| `r` = h$popCntTab[`x`&0xFF] +
-                       h$popCntTab[(`x`>>>8)&0xFF] +
-                       h$popCntTab[(`x`>>>16)&0xFF] +
-                       h$popCntTab[(`x`>>>24)&0xFF]
-               |]
-genPrim PopCnt64Op        [r] [x1,x2] =
-  PrimInline [j| `r` = h$popCntTab[`x1`&0xFF] +
-                       h$popCntTab[(`x1`>>>8)&0xFF] +
-                       h$popCntTab[(`x1`>>>16)&0xFF] +
-                       h$popCntTab[(`x1`>>>24)&0xFF] +
-                       h$popCntTab[`x2`&0xFF] +
-                       h$popCntTab[(`x2`>>>8)&0xFF] +
-                       h$popCntTab[(`x2`>>>16)&0xFF] +
-                       h$popCntTab[(`x2`>>>24)&0xFF]
-               |]
+genPrim PopCnt32Op        [r] [x]   = PrimInline [j| `r` = h$popCnt32(`x`); |]
+genPrim PopCnt64Op        [r] [x1,x2] = PrimInline [j| `r` = h$popCnt64(`x1`,`x2`); |]
 genPrim PopCntOp          [r] [x]   = genPrim PopCnt32Op [r] [x]
 genPrim Narrow8IntOp      [r] [x]   = PrimInline [j| `r` = (`x` & 0x7F)-(`x` & 0x80) |]
 genPrim Narrow16IntOp     [r] [x]   = PrimInline [j| `r` = (`x` & 0x7FFF)-(`x` & 0x8000) |]
@@ -526,33 +512,31 @@ genPrim TryPutMVarOp [r] [m,v] =
                |]
 genPrim SameMVarOp [r] [m1,m2] = PrimInline [j| `r` = (`m1` === `m2`) ? `HTrue` : `HFalse`; |]
 genPrim IsEmptyMVarOp [r] [m]  = PrimInline [j| `r` = (`m`[0] === null) ? `HTrue` : `HFalse`; |]
-{-
-DelayOp
-WaitReadOp
-WaitWriteOp
-ForkOp
-ForkOnOp
-KillThreadOp
-YieldOp
--}
-genPrim MyThreadIdOp [r] [] = PrimInline [j| `r` = h$threadId; |]
-{-
-LabelThreadOp
--}
+
+genPrim DelayOp [] [t] = PRPrimCall [j| return h$delayThread(`t`); |]
+genPrim WaitReadOp [] [fd] = PrimInline [j| h$waitRead(`fd`); |]
+genPrim WaitWriteOp [] [fd] = PrimInline [j| h$waitWrite(`fd`); |]
+genPrim ForkOp [tid] [x] = PrimInline [j| `tid` = h$fork(`x`); |]
+genPrim ForkOnOp [tid] [p,x] = PrimInline [j| `tid` = h$fork(`x`); |] -- ignore processor argument
+-- genPrim KillThreadOp [] [tid,a] = [j| h$killThread(`tid`); |]
+genPrim YieldOp [] [] = PRPrimCall [j| return h$reschedule; |]
+genPrim MyThreadIdOp [r] [] = PrimInline [j| `r` = h$currentThread.threadId; |]
+genPrim LabelThreadOp [] [t,la,lo] = PrimInline [j| h$currentThread.label = [la,lo]; |]
 genPrim IsCurrentThreadBoundOp [r] [] = PrimInline [j| `r` = 1; |]
-genPrim NoDuplicateOp [] [] = PrimInline mempty -- fixme what to do here?
--- genPrim ThreadStatusOp [stat,cap,locked] [tid]
-genPrim MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = [`b`,`c`]; |] -- fixme c = finalizer, what is o?
--- genPrim MkWeakNoFinalizerOp [r] [o,b] = 
+genPrim NoDuplicateOp [] [] = PrimInline mempty -- don't need to do anything as long as we have eager blackholing
+genPrim ThreadStatusOp [stat,cap,locked] [tid] = PrimInline
+  [j| `stat` = h$threadStatus(`tid`);
+      `cap` = `Ret1`;
+      `locked` = `Ret2`;
+    |]
+-- fixme these are wrong after heap change
+genPrim MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = h$makeWeak(`o`,`b`,`c`); |] -- fixme c = finalizer, what is o?
+genPrim MkWeakNoFinalizerOp [r] [o,b] = PrimInline [j| `r` = h$makeWeakNoFinalizer(`o`,`b`); |]
 genPrim MkWeakForeignEnvOp [r] [o,b,a1a,a1o,a2a,a2o,i,a3a,a3o] = PrimInline [j| `r` = [`b`]; |]
-genPrim DeRefWeakOp        [r] [w] = PrimInline [j| `r` = `w`[0]; |]
+genPrim DeRefWeakOp        [r] [w] = PrimInline [j| `r` = h$deRefWeak(`w`); |]
 genPrim FinalizeWeakOp     [i,a] [w] =
-  PrimInline [j| if(`w`.length > 1 && `w`[1] !== null) {
-                   `a` = `w`[1];
-                   `i` = 1;
-                 } else {
-                   `i` = 0;
-                 }
+  PrimInline [j| `i` h$finalizeWeak(`w`);
+                 `a` = `Ret1`;
                |]
 genPrim TouchOp [] [e] = PrimInline mempty -- fixme what to do?
 

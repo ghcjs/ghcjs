@@ -18,7 +18,10 @@ allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
   where
     makeObjs = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d: null } |]) cls
     fillObjs = mconcat $ map fillObj cls
-    fillObj (i,_,es) = [j| `i`.d = `JHash (M.fromList (zip dataFields es))` |]
+    fillObj (i,_,es) =
+      case es of
+        [e] -> [j| `i`.d = `e` |]
+        _   -> [j| `i`.d = `JHash (M.fromList (zip dataFields es))` |]
     dataFields = map (('d':).show) [(1::Int)..]
     dec i | haveDecl  = decl i
           | otherwise = mempty
@@ -29,7 +32,9 @@ allocDynamic :: Bool -> Ident -> JExpr -> [JExpr] -> JStat
 allocDynamic haveDecl to entry free =
   dec to <> [j| `to` = { f: `entry`, d: `fillObj` } |] <> checkObj
   where
-    fillObj = JHash $ M.fromList (zip dataFields free)
+    fillObj = case free of
+                [x] -> x
+                _   -> toJExpr (JHash $ M.fromList (zip dataFields free))
     dataFields = map (('d':).show) [(1::Int)..]
     dec i | haveDecl  = decl i
           | otherwise = mempty

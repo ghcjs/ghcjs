@@ -293,18 +293,21 @@ updateThunk :: JStat
 updateThunk =
   [j| `push frame`;
       `R1`.f = h$blackhole;
-      `R1`.d = h$threadId;
+      `R1`.d = h$currentThread.threadId;
     |]
   where
-    frame = [[je|`R1`.f|],[je|`R1`.d|],[je|`R1`|],jsv "h$upd_frame"]
+    frame = [[je|`R1`|],jsv "h$upd_frame"] -- [[je|`R1`.f|],[je|`R1`.d|],
 
 loadLiveFun :: [Id] -> C
-loadLiveFun l = do -- mempty -- mconcat $ zipWith (loadFunVar currentClosure) (map jsId l) [0..]
-   d <- makeIdent
-   l <- mconcat . zipWith (loadLiveVar $ toJExpr d) [(1::Int)..] <$> l'
-   return ([j| `decl d`; `d` = `R1`.d |] <> l)
+loadLiveFun l = do
+   l' <- concat <$> mapM genIdsI l
+   case l' of
+     [v] -> return (decl' v [je| `R1`.d |])
+     _   -> do   
+       d <- makeIdent
+       let l'' = mconcat . zipWith (loadLiveVar $ toJExpr d) [(1::Int)..] $ l'
+       return ([j| `decl d`; `d` = `R1`.d |] <> l'')
      where
-        l' = concat <$> mapM genIdsI l
         loadLiveVar d n v = let ident = StrI ("d" ++ show n)
                             in  decl' v (SelExpr d ident)
 
@@ -980,7 +983,10 @@ loadParams from args use = do
 loadParams' :: JExpr -> [Id] -> [Bool] -> C
 loadParams' from args use = do
   as <- concat <$> sequence args'
-  return $ mconcat $ zipWith load as [(0::Int)..]
+  case as of
+    [(a, True)] -> return (decl' a from)
+    _           ->
+      return $ mconcat $ zipWith load as [(0::Int)..]
   where
     args'            = zipWith (\a u -> map (,u) <$> genIdsI a) args use
     load (_,False) _ = mempty
@@ -1220,8 +1226,8 @@ genForeignCall (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) a
     tgt = map toJExpr . take (typeSize t) $ enumFrom R1
 genForeignCall _ _ _ = panic "unsupported foreign call"
 
-   
 -- | generate the actual call
+-- fixme if thing starts with &, what to do?
 genForeignCall' :: String -> [JExpr] -> [StgArg] -> C
 genForeignCall' clbl tgt args
   | (t:ts) <- tgt = do
