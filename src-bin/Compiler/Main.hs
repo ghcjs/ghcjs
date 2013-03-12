@@ -90,8 +90,9 @@ main =
      when logCmd $ do
          dir <- getAppUserDataDirectory "ghcjs"
          createDirectoryIfMissing True dir
-         appendFile (dir </> "cmd.log") (intercalate " " ("ghcjs" : args0) ++ "\n")
-
+         filename <- fromMaybe "cmd.log" <$>
+                         getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
+         appendFile (dir </> filename) (intercalate " " args0 ++ "\n")
 
      noNative <- getEnvOpt "GHCJS_NO_NATIVE"
 
@@ -192,7 +193,7 @@ pkgConfArgs :: IO [String]
 pkgConfArgs = do
   db1 <- getGlobalPackageDB
   db2 <- getUserPackageDB
-  return $ map ("-package-conf"++) [db1,db2]
+  return $ map ("-package-db"++) [db1,db2]
 
 ignoreUnsupported :: [Located String] -> [Located String]
 ignoreUnsupported =

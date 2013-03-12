@@ -59,6 +59,7 @@ data BootSettings = BootSettings { skipRts  :: Bool  -- ^ skip building the rts
                                  , noBuild  :: Bool  -- ^ do not build, only reset the packages
                                  , initTree :: Bool  -- ^ initialize the source tree: configure/build native ghc first
                                  , onlyBasic :: Bool -- ^ only build basic packages: ghc-prim, integer-gmp, base
+                                 , reboot    :: Bool -- ^ reboot using log of old ghcjs invocations
                                  } deriving (Ord, Eq)
 
 bootSettings :: [String] -> BootSettings
@@ -66,6 +67,7 @@ bootSettings args = BootSettings (any (=="--skip-rts") args)
                                  (any (=="--nobuild") args)
                                  (any (=="--init") args)
                                  (any (=="--only-basic") args)
+                                 (any (=="--reboot") args)
 
 main = withSocketsDo $ do
   tmp <- getTemporaryDirectory
@@ -137,28 +139,70 @@ installBootPackages settings = do
   case (mghcjs, mghcjspkg) of
     (Just ghcjs, Just ghcjspkg) -> do
       echo $ "Booting: " <> toTextIgnore ghcjs <> " (" <> toTextIgnore ghcjspkg <> ")"
+      p <- pwd
       ghcjsVer <- T.strip <$> run ghcjs ["--numeric-version"]
-      when (not $ noBuild settings) $ do
-        addWrappers ghcjs ghcjspkg
+      base  <- liftIO getGlobalPackageBase
+      let commandLog = base </> "boot.log"
+      when (not (noBuild settings || reboot settings)) $ do
+        addWrappers ghcjs (toTextIgnore commandLog) ghcjspkg
       initPackageDB
       let corePkgs = corePackages (onlyBasic settings)
-      when (not (skipRts settings || noBuild settings)) $ do
+      when (not (skipRts settings || noBuild settings || reboot settings)) $ do
            echo "Building RTS"
            run_ "make" ["all_rts","-j4"] `catchany_sh` (const (return ()))
-      replacePrimOps
-      when (not $ noBuild settings) $ forM_ corePkgs $ \pkg -> do
-        echo $ "Building package: " <> pkg
-        buildPkg pkg
+           replacePrimOps
+      if reboot settings
+        then do
+          echo "Rebooting"
+          lines <- T.lines <$> readfile commandLog
+          case lines of
+            (wd:cmds) -> do
+              cd (fromText wd)
+              setenv "GHCJS_NO_NATIVE" "1"
+              setenv "GHCJS_FALLBACK_PLAIN" "1"
+              forM_ cmds $ \r ->
+                let args = T.words r
+                in  when (isRebootCmd args) $ do
+                      echo ("replaying: ghcjs " <> r)
+                      (run_ "ghcjs" (T.words r))
+            _ -> error "can't reboot, invalid boot log"
+        else do
+          when (not $ noBuild settings) $ do
+             rm_f commandLog
+             p <- pwd
+             writefile commandLog (toTextIgnore p <> "\n")
+             forM_ corePkgs $ \pkg -> do
+               echo $ "Building package: " <> pkg
+               buildPkg pkg
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePkgs
       installFakes
+      cd p
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
 
+-- when rebooting, we replay the log of ghcjs calls
+-- but some of them are for package configuration
+-- testing features etc, filter them out here
+isRebootCmd :: [Text] -> Bool
+isRebootCmd args
+  | any (`elem` args)
+        [ "-M"
+        , "--info"
+        , "--numeric-version"
+        , "--print-libdir"
+        , "--supported-languages"
+        ] = False
+  | any isTmpCSource args = False
+  | otherwise = True
+  where
+    isTmpCSource a = "/tmp/" `T.isPrefixOf` a &&
+                     ".c" `T.isSuffixOf` a
+
 -- add inplace/bin/ghcjs and inplace/bin/ghcjs-pkg wrappers
-addWrappers :: FilePath -> FilePath -> ShIO ()
-addWrappers ghcjs ghcjspkg = do
+addWrappers :: FilePath -> Text -> FilePath -> ShIO ()
+addWrappers ghcjs log ghcjspkg = do
     ghcwrapper <- readfile "inplace/bin/ghc-stage1"
-    writefile "inplace/bin/ghcjs" (fixGhcWrapper ghcwrapper ghcjs)
+    writefile "inplace/bin/ghcjs" (fixGhcWrapper ghcwrapper log ghcjs)
     makeExecutable "inplace/bin/ghcjs"
     pkgwrapper <- readfile "inplace/bin/ghc-pkg"
     writefile "inplace/bin/ghcjs-pkg" (fixPkgWrapper pkgwrapper ghcjspkg)
@@ -168,8 +212,8 @@ addWrappers ghcjs ghcjspkg = do
         p <- getPermissions f
         setPermissions f (p {executable = True})
 
-fixGhcWrapper :: Text -> FilePath -> Text
-fixGhcWrapper wrapper ghcjs = T.unlines . concatMap fixLine . T.lines $ wrapper
+fixGhcWrapper :: Text -> Text -> FilePath -> Text
+fixGhcWrapper wrapper log ghcjs = T.unlines . concatMap fixLine . T.lines $ wrapper
     where
       exec = "executablename="
       fixLine line
@@ -179,6 +223,8 @@ fixGhcWrapper wrapper ghcjs = T.unlines . concatMap fixLine . T.lines $ wrapper
               , "export GHCJS_FALLBACK_PLAIN=1"
               , "export GHCJS_NO_NATIVE=1"
               , "export GHCJS_FAKE_NATIVE=1"
+              , "export GHCJS_LOG_COMMANDLINE=1"
+              , "export GHCJS_LOG_COMMANDLINE_NAME=" <> log
               ]
           | otherwise                             = [line]
 
