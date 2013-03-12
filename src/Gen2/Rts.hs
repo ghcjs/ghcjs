@@ -128,7 +128,7 @@ var !h$mask = 0;                  // mask async exceptions
 
 var !h$staticThunks    = {};      // funcName -> heapidx map for srefs
 var !h$staticThunksArr = [];      // indices of updatable thunks in static heap
-var !h$threadId = 1;
+var !h$currentThread = { threadId: 1 };
 
 // stg registers
 `declRegs`;
@@ -177,9 +177,10 @@ fun h$throw e {
   while(`Sp` > 0) {
     var f = `Stack`[`Sp`];
     if(f === h$catch_e) break;
-    if(f === h$upd_frame) { // unclaim black hole
-      `Stack`[`Sp`-1].f = `Stack`[`Sp`-3];
-      `Stack`[`Sp`-1].d = `Stack`[`Sp`-2];
+    if(f === h$upd_frame) {
+      var t = `Stack`[`Sp`-1];
+      t.f = h$raise_e;
+      t.d = e;
     }
     var tag = f.gtag;
     if(tag <= 0) { // generic apply frame
@@ -202,6 +203,12 @@ fun h$throw e {
   }
 }
 
+// a thunk that just raises an exceptions
+fun h$raise_e {
+  h$throw(`R1`.d)
+}
+`ClosureInfo (jsv "h$raise_e") [PtrV] "h$raise_e" (CILayoutFixed 1 []) CIThunk CINoStatic`;
+
 // reduce result if it's a thunk, follow if it's an ind
 // add this to the stack if you want the outermost result
 // to always be reduced to whnf, and not an ind
@@ -216,8 +223,15 @@ fun h$reduce {
 }
 `ClosureInfo (jsv "h$reduce") [PtrV] "h$reduce" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
+var h$gccheckcnt = 0;
 fun h$gc_check next {
 //  log("gc_check: todo");
+  if(++h$gccheckcnt > 1000) {
+    for(var i=`Sp`+1;i<`Stack`.length;i++) {
+      `Stack`[i] = null;
+    }
+    h$gccheckcnt = 0;
+  }
   return 0;
 }
 
@@ -277,6 +291,7 @@ fun h$printcl i {
   }
   r += " :: " + cl.n + " ->";
   var idx = 1;
+  // fixme update for single field data
   for(var i=0;i<cl.i.length;i++) {
     r += " ";
     switch(cl.i[i]) {
@@ -339,10 +354,10 @@ fun h$alloc_static n {
 fun h$init_closure c xs {
   switch(xs.length) {
     case 0:
-      c.d = { };
+      c.d = null; // { };
       return c;
     case 1:
-      c.d = { d1: xs[0] };
+      c.d = xs[0]; // { d1: xs[0] };
       return c;
     case 2:
       c.d = { d1: xs[0], d2: xs[1] };
@@ -430,8 +445,8 @@ fun h$checkStack {
 
 fun h$printReg r {
   if(typeof r === 'object' && r.hasOwnProperty('f') && r.hasOwnProperty('d')) {
-    if(r.f.t === `Blackhole` && r.d.x1 && r.d.x1.n) {
-      return ("blackhole: -> " + h$printReg({ f: r.d.x1, d: r.d.x2 }) + ")");
+    if(r.f.t === `Blackhole` && r.x) {
+      return ("blackhole: -> " + h$printReg({ f: r.x.x1, d: r.d.x2 }) + ")");
     } else {
       return (r.f.n + " (" + h$closureTypeName(r.f.t) + ", " + r.f.a + ")");
     }
@@ -498,14 +513,14 @@ fun h$run cl cb {
 
 fun h$runio_e {
   `preamble`;
-  `R1` = `R1`.d.d1;
+  `R1` = `R1`.d;
   `Stack`[++`Sp`] = h$ap_1_0;
   return h$ap_1_0;
 }
 `ClosureInfo (jsv "h$runio_e") [PtrV] "runio" (CILayoutFixed 2 [PtrV]) CIThunk CINoStatic`;
 
 fun h$runio c {
-  return { f: h$runio_e, d: { d1: c } };
+  return { f: h$runio_e, d: c };
 }
 
 fun h$flushStdout_e {
@@ -603,6 +618,13 @@ fun h$traceForeign f as {
   }
   log("ffi: " + f + "(" + bs.join(",") + ")");
 }
+
+// return this function when the scheduler needs to come into action
+// (yield, delay etc)
+fun h$reschedule {
+  return h$reschedule;
+}
+`ClosureInfo (jsv "h$reschedule") [] "reschedule" (CILayoutFixed 0 []) CIThunk CINoStatic`;
 
 |]
 
