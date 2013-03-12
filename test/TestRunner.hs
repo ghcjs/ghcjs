@@ -11,7 +11,7 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
-import           Data.Time.Clock (getCurrentTime)
+import           Data.Time.Clock (getCurrentTime, diffUTCTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Filesystem (removeTree, isFile, getWorkingDirectory, setWorkingDirectory)
 import           Filesystem.Path (replaceExtension, basename, directory, extension, addExtension, filename)
@@ -101,7 +101,14 @@ stdioAssertion file = do
   expected <- stdioExpected file
   actual <- runGhcjsResult file
   assertBool "no test results, install node and/or SpiderMonkey" (not $ null actual)
-  forM_ actual $ \(a,d) -> assertEqual (encodeString file ++ ": " ++ d) expected a
+  forM_ actual $ \((a,t),d) -> do
+    assertEqual (encodeString file ++ ": " ++ d) expected a
+    putStrLn ("    " ++ (padTo 40 d) ++ " " ++ show t ++ "ms")
+
+padTo :: Int -> String -> String
+padTo n xs | l < n     = xs ++ replicate (n-l) ' '
+           | otherwise = xs
+  where l = length xs
 
 stdioExpected :: FilePath -> IO StdioResult
 stdioExpected file = do
@@ -112,8 +119,8 @@ stdioExpected file = do
     else do
       mr <- runhaskellResult file
       case mr of
-        Nothing -> assertFailure "cannot run `runhaskell'" >> return undefined
-        Just r  -> return r
+        Nothing    -> assertFailure "cannot run `runhaskell'" >> return undefined
+        Just (r,t) -> return r
 
 readFileIfExists :: FilePath -> IO (Maybe Text)
 readFileIfExists file = do
@@ -122,7 +129,7 @@ readFileIfExists file = do
     False -> return Nothing
     True  -> Just <$> T.readFile (encodeString file)
 
-runhaskellResult :: FilePath -> IO (Maybe StdioResult)
+runhaskellResult :: FilePath -> IO (Maybe (StdioResult, Integer))
 runhaskellResult file = do
   cd <- getWorkingDirectory
   setWorkingDirectory (cd </> directory file)
@@ -142,7 +149,7 @@ extraJsFiles file =
     return $ if e then [encodeString jsFile] else []
 
 -- | gen2 only so far
-runGhcjsResult :: FilePath -> IO [(StdioResult, String)]
+runGhcjsResult :: FilePath -> IO [((StdioResult, Integer), String)]
 runGhcjsResult file = concat <$> mapM run [False, True]
   where
     run optimize = do
@@ -159,8 +166,8 @@ runGhcjsResult file = concat <$> mapM run [False, True]
                           else [inc, "-o", encodeString output] ++ [input] ++ extra
       e <- liftIO $ runProcess "ghcjs" compileOpts ""
       case e of
-        Nothing -> assertFailure "cannot find ghcjs"
-        Just r  -> assertEqual "compile error" ExitSuccess (stdioExit r)
+        Nothing    -> assertFailure "cannot find ghcjs"
+        Just (r,_) -> assertEqual "compile error" ExitSuccess (stdioExit r)
       setWorkingDirectory (cd </> directory file)
       nodeResult <- fmap (,"node" ++ desc) <$> runProcess "node" [encodeString outputRun] ""
       smResult   <- fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" [encodeString outputRun] ""
@@ -176,14 +183,18 @@ outputPath = do
   return . decodeString $ "ghcjs_test_" ++ t ++ "_" ++ rnd
 
 -- | returns Nothing if the program cannot be run
-runProcess :: MonadIO m => FilePath -> [String] -> String -> m (Maybe StdioResult)
+runProcess :: MonadIO m => FilePath -> [String] -> String -> m (Maybe (StdioResult, Integer))
 runProcess pgm args input = do
---  liftIO $ (putStrLn $ "running: "  ++ (encodeString pgm) ++ " " ++ show args)
+  before <- liftIO getCurrentTime
   (ex, out, err) <- liftIO $ readProcessWithExitCode (encodeString pgm) args input
-  return $ case ex of -- fixme is this the right way to find out that a program does not exist?
-    (ExitFailure 127) -> Nothing
-    _                 -> Just $ StdioResult ex (T.pack out) (T.pack err)
-
+  after <- liftIO getCurrentTime
+  return $ 
+    case ex of -- fixme is this the right way to find out that a program does not exist?
+      (ExitFailure 127) -> Nothing
+      _                 ->
+        Just ( StdioResult ex (T.pack out) (T.pack err)
+             , round $ 1000 * (after `diffUTCTime` before)
+             )
 
 {-
   a mocha test changes to the directory,
