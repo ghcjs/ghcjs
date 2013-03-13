@@ -1,4 +1,4 @@
-        {-# LANGUAGE OverloadedStrings, TupleSections #-}
+{-# LANGUAGE OverloadedStrings, TupleSections #-}
 
 module Main where
 
@@ -18,6 +18,7 @@ import           Filesystem.Path (replaceExtension, basename, directory, extensi
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
 import           Shelly
+import           System.Environment (getArgs)
 import           System.Exit (ExitCode(..), exitFailure)
 import           System.Process (readProcessWithExitCode)
 import           System.Random (randomRIO)
@@ -26,7 +27,12 @@ import           Test.Framework.Providers.HUnit (testCase)
 import           Test.HUnit.Base (assertBool, assertFailure, assertEqual, Assertion)
 import           Text.Read (readMaybe)
 
-main = defaultMain =<< tests
+main = do
+  args <- getArgs
+  let args' = filter (/="--benchmark") args
+  if any (=="--benchmark") args
+    then (\bs -> defaultMainWithArgs bs args') =<< benchmarks
+    else defaultMain =<< tests
 
 -- fail if any of these are not installed
 requiredPackages :: [TL.Text]
@@ -42,13 +48,23 @@ requiredPackages = [ "ghc-prim"
                    , "transformers"
                    ]
 
+data TestOpts = TestOpts { disableUnopt :: Bool
+                               }
+test = TestOpts False
+benchmark = TestOpts True
+
+benchmarks = do
+  nofib <- allTestsIn benchmark "test/nofib"
+  return [ testGroup "Benchmarks from nofib" nofib
+         ]
+
 tests = do
 --  checkRequiredPackages
-  fay     <- allTestsIn "test/fay"
-  ghc     <- allTestsIn "test/ghc"
-  arith   <- allTestsIn "test/arith"
-  integer <- allTestsIn "test/integer"
-  pkg     <- allTestsIn "test/pkg"
+  fay     <- allTestsIn test "test/fay"
+  ghc     <- allTestsIn test "test/ghc"
+  arith   <- allTestsIn test "test/arith"
+  integer <- allTestsIn test "test/integer"
+  pkg     <- allTestsIn test "test/pkg"
   return [ testGroup "Tests from the Fay testsuite" fay
          , testGroup "Tests from the GHC testsuite" ghc
          , testGroup "Arithmetic" arith
@@ -63,13 +79,14 @@ tests = do
    - that start with a lowercase letter
 -}
 -- allTestsIn :: FilePath -> IO [Test]
-allTestsIn path = shelly $
-  map stdioTest <$> findWhen (return . isTestFile) path
+allTestsIn testOpts path = shelly $
+  map (stdioTest testOpts) <$> findWhen (return . isTestFile) path
   where
     testFirstChar c = isLower c || isDigit c
     isTestFile file =
       (extension file == Just "hs" || extension file == Just "lhs") &&
-      (maybe False testFirstChar . listToMaybe . encodeString . basename $ file)
+      ((maybe False testFirstChar . listToMaybe . encodeString . basename $ file) ||
+      (basename file == "Main"))
 
 {-
   a stdio test tests two things:
@@ -88,18 +105,18 @@ instance Eq StdioResult where
     e1 == e2 && (T.strip ou1 == T.strip ou2) && (T.strip er1 == T.strip er2)
 
 instance Show StdioResult where
-  show (StdioResult ex out err) = 
-    "\n>>> exit: " ++ show ex ++ "\n>>> stdout >>>\n" ++ 
+  show (StdioResult ex out err) =
+    "\n>>> exit: " ++ show ex ++ "\n>>> stdout >>>\n" ++
     T.unpack out ++ "\n<<< stderr >>>\n" ++ T.unpack err ++ "\n<<<\n"
 
-stdioTest :: FilePath -> Test
-stdioTest file = testCase (encodeString file) (stdioAssertion file)
+stdioTest :: TestOpts -> FilePath -> Test
+stdioTest testOpts file = testCase (encodeString file) (stdioAssertion testOpts file)
 
-stdioAssertion :: FilePath -> Assertion
-stdioAssertion file = do
+stdioAssertion :: TestOpts -> FilePath -> Assertion
+stdioAssertion testOpts file = do
   putStrLn ("running test: " ++ encodeString file)
   expected <- stdioExpected file
-  actual <- runGhcjsResult file
+  actual <- runGhcjsResult testOpts file
   assertBool "no test results, install node and/or SpiderMonkey" (not $ null actual)
   forM_ actual $ \((a,t),d) -> do
     assertEqual (encodeString file ++ ": " ++ d) expected a
@@ -112,10 +129,11 @@ padTo n xs | l < n     = xs ++ replicate (n-l) ' '
 
 stdioExpected :: FilePath -> IO StdioResult
 stdioExpected file = do
-  xs@[mex,mou,mer] <- mapM (readFileIfExists.(replaceExtension file)) ["exit", "out", "err"]
+  xs@[mex,mout,merr] <- mapM (readFilesIfExists.(map (replaceExtension file)))
+       [["exit"], ["out", "stdout"], ["err","stderr"]]
   if any isJust xs
     then return $ StdioResult (fromMaybe ExitSuccess $ readExitCode =<< mex)
-                     (fromMaybe "" mou) (fromMaybe "" mer)
+                     (fromMaybe "" mout) (fromMaybe "" merr)
     else do
       mr <- runhaskellResult file
       case mr of
@@ -129,12 +147,31 @@ readFileIfExists file = do
     False -> return Nothing
     True  -> Just <$> T.readFile (encodeString file)
 
+readFilesIfExists :: [FilePath] -> IO (Maybe Text)
+readFilesIfExists [] = return Nothing
+readFilesIfExists (x:xs) = do
+  r <- readFileIfExists x
+  if (isJust r)
+    then return r
+    else readFilesIfExists xs
+
+-- command line args
+argsFor :: FilePath -> IO [String]
+argsFor file = do
+  r <- readFileIfExists (replaceExtension file "args")
+  case r of
+    Nothing -> return []
+    Just t  -> case T.lines t of
+                (x:_) -> return (map T.unpack $ T.words x)
+                _     -> return []
+
 runhaskellResult :: FilePath -> IO (Maybe (StdioResult, Integer))
 runhaskellResult file = do
   cd <- getWorkingDirectory
   setWorkingDirectory (cd </> directory file)
-  r <- runProcess "runhaskell" [ includeOpt file
-                               , encodeString $ filename file] ""
+  args <- argsFor file
+  r <- runProcess "runhaskell" ([ includeOpt file
+                               , encodeString $ filename file] ++ args) ""
   setWorkingDirectory cd
   return r
 
@@ -149,13 +186,16 @@ extraJsFiles file =
     return $ if e then [encodeString jsFile] else []
 
 -- | gen2 only so far
-runGhcjsResult :: FilePath -> IO [((StdioResult, Integer), String)]
-runGhcjsResult file = concat <$> mapM run [False, True]
+runGhcjsResult :: TestOpts -> FilePath -> IO [((StdioResult, Integer), String)]
+runGhcjsResult opts file = concat <$> mapM run runs
   where
+    runs | disableUnopt opts = [True]
+         | otherwise         = [False, True]
     run optimize = do
       output <- outputPath
       extra <- extraJsFiles file
       cd <- getWorkingDirectory
+      args <- argsFor file
       let outputG2 = addExtension output "gen2.jsexe"
           outputRun = cd </> outputG2 </> ("all.js"::FilePath)
           input  = encodeString file
@@ -169,8 +209,8 @@ runGhcjsResult file = concat <$> mapM run [False, True]
         Nothing    -> assertFailure "cannot find ghcjs"
         Just (r,_) -> assertEqual "compile error" ExitSuccess (stdioExit r)
       setWorkingDirectory (cd </> directory file)
-      nodeResult <- fmap (,"node" ++ desc) <$> runProcess "node" [encodeString outputRun] ""
-      smResult   <- fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" [encodeString outputRun] ""
+      nodeResult <- fmap (,"node" ++ desc) <$> runProcess "node" (encodeString outputRun:args) ""
+      smResult   <- fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" (encodeString outputRun:args) ""
       setWorkingDirectory cd
       liftIO $ removeTree outputG2
       return $ catMaybes [nodeResult, smResult]
