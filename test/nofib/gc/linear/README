@@ -1,0 +1,3 @@
+output has been taken from ghcjs, which uses double precision
+floats instead of single. hopefully it's correct
+
