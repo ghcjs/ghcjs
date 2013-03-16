@@ -460,20 +460,15 @@ genPrim CasMutVarOp [status,r] [mv,o,n] =
                |]
 genPrim CatchOp [r] [a,handler] = PRPrimCall
   [j| return h$catch(`a`, `handler`); |]
-genPrim RaiseOp         [b] [a] = PRPrimCall [j| return h$throw(`a`); |]
-genPrim RaiseIOOp       [b] [a] = PRPrimCall [j| return h$throw(`a`); |]
+genPrim RaiseOp         [b] [a] = PRPrimCall [j| return h$throw(`a`,false); |]
+genPrim RaiseIOOp       [b] [a] = PRPrimCall [j| return h$throw(`a`,false); |]
 
 genPrim MaskAsyncExceptionsOp [r] [a] =
-  PRPrimCall [j| h$currentThread.mask = 1;
-                 `R1` = `a`;
-                 return h$ap_1_0_fast();
-               |]
--- MaskUninterruptibleOp
+  PRPrimCall [j| return h$maskAsync(`a`); |]
+genPrim MaskUninterruptibleOp [r] [a] =
+  PRPrimCall [j| return h$maskUnintAsync(`a`); |]
 genPrim UnmaskAsyncExceptionsOp [r] [a] =
-  PRPrimCall [j| h$currentThread.mask = 0;
-                 `R1` = `a`;
-                 return h$ap_1_0_fast();
-               |]
+  PRPrimCall [j| return h$unmaskAsync(`a`); |]
 
 genPrim MaskStatus [r] [] = PrimInline [j| `r` = h$currentThread.mask; |]
 {-

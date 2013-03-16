@@ -167,7 +167,8 @@ var !h$t = { f: h$true_e, d1: null, d2: null };
 
 fun h$catch a handler {
   `preamble`;
-  `adjSp 2`;
+  `adjSp 3`;
+  `Stack`[`Sp` - 2] = h$currentThread.mask;
   `Stack`[`Sp` - 1] = handler;
   `Stack`[`Sp`] = h$catch_e;
   `R1` = a;
@@ -176,10 +177,10 @@ fun h$catch a handler {
 
 fun h$catch_e {
   `preamble`;
-  `adjSpN 2`;
+  `adjSpN 3`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$catch_e") [] "exception handler" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo (jsv "h$catch_e") [] "exception handler" (CILayoutFixed 3 [PtrV,PtrV]) (CIFun 0 0) CINoStatic`;
 
 
 // function application to one argument
@@ -236,9 +237,13 @@ fun h$select2_ret {
 `ClosureInfo (jsv "h$select2_ret") [] "select2ret" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
 // throw an exception: walk the thread's stack until you find a handler
-fun h$throw e {
+fun h$throw e async {
   `preamble`;
+//  h$dumpStackTop(`Stack`,0,`Sp`);
+  var origSp = `Sp`;
+  var lastBh = null; // position of last blackhole frame
   while(`Sp` > 0) {
+//    log("unwinding frame: " + `Sp`);
     var f = `Stack`[`Sp`];
     if(f === null || f === undefined) {
       throw("panic: invalid object while unwinding stack");
@@ -253,9 +258,20 @@ fun h$throw e {
           h$wakeupThread(waiters[i]);
         }
       }
-      t.f = h$raise_e;
-      t.d1 = e;
-      t.d2 = null;
+      if(async) {
+        // convert blackhole back to thunk
+        if(lastBh === null) {
+          h$makeResumable(t,`Sp`+1,origSp,[`R1`,h$return]);
+        } else {
+          h$makeResumable(t,`Sp`+1,lastBh-2,[h$ap_0_0,`Stack`[lastBh-1],h$return]);
+        }
+        lastBh = `Sp`;
+      } else {
+        // just raise the exception in the thunk
+        t.f = h$raise_e;
+        t.d1 = e;
+        t.d2 = null;
+      }
     }
     var size;
     if(f === h$ap_gen) { // h$ap_gen is special
@@ -271,11 +287,13 @@ fun h$throw e {
     `Sp` = `Sp` - size;
   }
   if(`Sp` > 0) {
+    var maskStatus = `Stack`[`Sp` - 2];
     var handler = `Stack`[`Sp` - 1];
+    h$currentThread.mask = maskStatus;
     `R1` = handler;
     `R2` = e;
     if(`Sp` > 3) { // don't pop the top-level handler
-      `adjSpN 2`;
+      `adjSpN 3`;
     }
     return h$ap_2_1_fast();
   } else {
@@ -283,20 +301,26 @@ fun h$throw e {
   }
 }
 
-// a thunk that just raises an exceptions
+// a thunk that just raises a synchronous exception
 fun h$raise_e {
-  return h$throw(`R1`.d1);
+  return h$throw(`R1`.d1, false);
 }
 `ClosureInfo (jsv "h$raise_e") [PtrV] "h$raise_e" (CILayoutFixed 1 []) CIThunk CINoStatic`;
 
+// a thunk that just raises an asynchronous exception
+fun h$raiseAsync_e {
+  return h$throw(`R1`.d1, true);
+}
+`ClosureInfo (jsv "h$raiseAsync_e") [PtrV] "h$raiseAsync_e" (CILayoutFixed 1 []) CIThunk CINoStatic`;
+
 // a stack frame that raises an exception, this is pushed by
-// other threads when raising an async exception
-fun h$raise_frame {
+// the scheduler when raising an async exception
+fun h$raiseAsync_frame {
   var ex = `Stack`[`Sp`-1];
   `adjSpN 2`;
-  return h$throw(ex);
+  return h$throw(ex,true);
 }
-`ClosureInfo (jsv "h$raise_frame") [] "h$raise_e" (CILayoutFixed 2 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo (jsv "h$raiseAsync_frame") [] "h$raiseAsync_frame" (CILayoutFixed 2 []) (CIFun 0 0) CINoStatic`;
 
 // reduce result if it's a thunk, follow if it's an ind
 // add this to the stack if you want the outermost result
@@ -582,23 +606,6 @@ fun h$logStack {
   }
 }
 
-fun h$runOldDontUse cl cb {
-//  `trace "runhs"`;
-  h$run_init_static();
-  h$stack[0] = h$done;
-  h$stack[1] = h$baseZCGHCziConcziSynczireportError;
-  h$stack[2] = h$catch_e;
-  h$sp = 2;
-  `R1` = cl;
-  var c = cl.f;
-  while(c !== h$done) {
-    `replicate 10 (hsCall c)`;
-    `hsCall c`;
-    h$gc_check(c);
-  }
-  cb(`R1`);
-}
-
 `rtsApply`;
 `rtsPrim`;
 `closureTypes`;
@@ -797,6 +804,38 @@ fun h$suspendCurrentThread next {
   h$currentThread.sp = `Sp`;
 }
 
+// resume an interrupted computation, the stack
+// we need to push is in d1, restore frame should
+// be there
+fun h$resume_e {
+  var s = `R1`.d1;
+  for(var i=0;i<s.length;i++) {
+    `Stack`[`Sp`+1+i] = s[i];
+  }
+  `Sp`=`Sp`+s.length;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$resume_e") [] "resume" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+
+fun h$unmaskFrame {
+  h$currentThread.mask = 0;
+  `adjSpN 1`;
+  // back to scheduler to give us async exception if pending
+  if(h$currentThread.excep.length > 0) {
+    `push [toJExpr R1, jsv "h$return"]`;
+    return h$reschedule;
+  } else {
+    return `Stack`[`Sp`];
+  }
+}
+`ClosureInfo (jsv "h$unmaskFrame") [] "unmask" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+
+fun h$maskFrame {
+  h$currentThread.mask = 2;
+  `adjSpN 1`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$maskFrame") [] "mask" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
 |]
 
