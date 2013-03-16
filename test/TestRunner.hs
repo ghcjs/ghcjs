@@ -168,8 +168,8 @@ argsFor file = do
 runhaskellResult :: FilePath -> IO (Maybe (StdioResult, Integer))
 runhaskellResult file = do
   cd <- getWorkingDirectory
-  setWorkingDirectory (cd </> directory file)
   args <- argsFor file
+  setWorkingDirectory (cd </> directory file)
   r <- runProcess "runhaskell" ([ includeOpt file
                                , encodeString $ filename file] ++ args) ""
   setWorkingDirectory cd
