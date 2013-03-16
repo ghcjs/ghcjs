@@ -59,7 +59,7 @@ closureTypes :: JStat
 closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> closureTypeName
   where
     mkClosureType :: CType -> JStat
-    mkClosureType c = let s = StrI $ map toUpper (show c) ++ "_CLOSURE"
+    mkClosureType c = let s = StrI $ "h$" ++ map toUpper (show c) ++ "_CLOSURE"
                       in  decl s <> [j| `iex s` = `c` |]
     closureTypeName :: JStat
     closureTypeName = [j| fun h$closureTypeName c {
@@ -118,17 +118,15 @@ fun log {
   }
 }
 
-var !h$stack = [h$done]; // [];                // thread-local
-for(var i=1;i<500;i++) { h$stack[i] = 0; }
+var !h$stack = null; // [];                // thread-local
 var !h$initStatic = [];           // we need delayed initialization for static objects, push functions here
                                   // to be initialized just before haskell runs
 
 var !h$sp  = 0;                   // stack pointer
-var !h$mask = 0;                  // mask async exceptions
 
 var !h$staticThunks    = {};      // funcName -> heapidx map for srefs
 var !h$staticThunksArr = [];      // indices of updatable thunks in static heap
-var !h$currentThread = { threadId: 1 };
+var !h$currentThread = null;
 
 // stg registers
 `declRegs`;
@@ -137,22 +135,35 @@ var !h$currentThread = { threadId: 1 };
 fun h$blackhole { throw "<<loop>>"; return 0; }
 `ClosureInfo (jsv "h$blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
 
-// really done now
-fun h$done o { return h$done; }
-`ClosureInfo (jsv "h$done") [PtrV] "done" (CILayoutPtrs 2 []) (CIFun 0 0) CINoStatic`;
+fun h$done o {
+  h$finishThread(h$currentThread);
+  return h$reschedule;
+}
+`ClosureInfo (jsv "h$done") [PtrV] "done" (CILayoutPtrs 1 []) (CIFun 0 0) CINoStatic`;
+
+fun h$doneMain {
+  if(typeof process !== 'undefined' && process.exit) {
+    process.exit(0);
+  } else if(typeof quit !== 'undefined') {
+    quit();
+  }
+  h$finishThread(h$currentThread);
+  return h$reschedule;
+}
+`ClosureInfo (jsv "h$doneMain") [PtrV] "doneMain" (CILayoutPtrs 1 []) (CIFun 0 0) CINoStatic`;
 
 // many primops return bool, and we can cheaply convert javascript bool to 0,1 with |0
 // so this is where we store our Bool constructors, hackily
 // note: |0 hack removed because it's slow in v8, fixed positions still useful: x?1:0
-fun h$false_e { return stack[sp]; }
+fun h$false_e { return `Stack`[`Sp`]; }
 `ClosureInfo (jsv "h$false_e") [] "GHC.Types.False" (CILayoutFixed 1 []) (CICon 1) CINoStatic`;
 
-fun h$true_e { return stack[sp]; }
+fun h$true_e { return `Stack`[`Sp`]; }
 `ClosureInfo (jsv "h$true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2) CINoStatic`;
 
 fun h$con_e { return `Stack`[`Sp`]; };
-var !h$f = { f: h$false_e, d: null };
-var !h$t = { f: h$true_e, d: null };
+var !h$f = { f: h$false_e, d1: null, d2: null };
+var !h$t = { f: h$true_e, d1: null, d2: null };
 
 fun h$catch a handler {
   `preamble`;
@@ -171,23 +182,92 @@ fun h$catch_e {
 `ClosureInfo (jsv "h$catch_e") [] "exception handler" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
 
 
+// function application to one argument
+fun h$ap1_e {
+  var c = `R1`;
+  `R1` = c.d1;
+  `R2` = c.d2;
+  return h$ap_1_1_fast();
+}
+`ClosureInfo (jsv "h$ap1_e") [] "apply1" (CILayoutFixed 2 [PtrV, PtrV]) CIThunk CINoStatic`;
+
+// select first field
+fun h$select1_e {
+  var t = `R1`.d1;
+  `adjSp 3`;
+  `Stack`[`Sp`-2] = `R1`;
+  `Stack`[`Sp`-1] = h$upd_frame;
+  `Stack`[`Sp`] = h$select1_ret;
+  `R1`.f = h$blackhole;
+  `R1`.d1 = h$currentThread.tid;
+  `R1`.d2 = null;
+  `R1` = t;
+  return h$ap_0_0_fast();
+}
+`ClosureInfo (jsv "h$select1_e") [] "select1" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
+
+fun h$select1_ret {
+  `R1` = `R1`.d1;
+  `adjSpN 1`;
+  return h$ap_0_0_fast();
+}
+`ClosureInfo (jsv "h$select1_ret") [] "select1ret" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+
+// select second field of a two-field constructor
+fun h$select2_e {
+  var t = `R1`.d1;
+  `adjSp 3`;
+  `Stack`[`Sp`-2] = `R1`;
+  `Stack`[`Sp`-1] = h$upd_frame;
+  `Stack`[`Sp`] = h$select2_ret;
+  `R1`.f = h$blackhole;
+  `R1`.d1 = h$currentThread.tid;
+  `R1`.d2 = null;
+  `R1` = t;
+  return h$ap_0_0_fast();
+}
+`ClosureInfo (jsv "h$select2_e") [] "select2" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
+
+fun h$select2_ret {
+  `R1` = `R1`.d2;
+  `adjSpN 1`;
+  return h$ap_0_0_fast();
+}
+`ClosureInfo (jsv "h$select2_ret") [] "select2ret" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+
 // throw an exception: walk the thread's stack until you find a handler
 fun h$throw e {
   `preamble`;
   while(`Sp` > 0) {
     var f = `Stack`[`Sp`];
+    if(f === null || f === undefined) {
+      throw("panic: invalid object while unwinding stack");
+    }
     if(f === h$catch_e) break;
     if(f === h$upd_frame) {
       var t = `Stack`[`Sp`-1];
+      // wake up threads blocked on blackhole
+      var waiters = t.d2;
+      if(waiters !== null) {
+        for(var i=0;i<waiters.length;i++) {
+          h$wakeupThread(waiters[i]);
+        }
+      }
       t.f = h$raise_e;
-      t.d = e;
+      t.d1 = e;
+      t.d2 = null;
     }
-    var tag = f.gtag;
-    if(tag <= 0) { // generic apply frame
-        tag = (stack[`Sp` - 1] >> 8) + 2;
-        offset = 2;
+    var size;
+    if(f === h$ap_gen) { // h$ap_gen is special
+      size = ((`Stack`[`Sp` - 1] >> 8) + 2);
+    } else {
+      var tag = f.gtag;
+      if(tag < 0) { // dynamic size
+        size = `Stack`[`Sp`-1];
+      } else {
+        size = tag & 0xff;
+      }
     }
-    var size = tag & 0xff;
     `Sp` = `Sp` - size;
   }
   if(`Sp` > 0) {
@@ -205,9 +285,18 @@ fun h$throw e {
 
 // a thunk that just raises an exceptions
 fun h$raise_e {
-  h$throw(`R1`.d)
+  return h$throw(`R1`.d1);
 }
 `ClosureInfo (jsv "h$raise_e") [PtrV] "h$raise_e" (CILayoutFixed 1 []) CIThunk CINoStatic`;
+
+// a stack frame that raises an exception, this is pushed by
+// other threads when raising an async exception
+fun h$raise_frame {
+  var ex = `Stack`[`Sp`-1];
+  `adjSpN 2`;
+  return h$throw(ex);
+}
+`ClosureInfo (jsv "h$raise_frame") [] "h$raise_e" (CILayoutFixed 2 []) (CIFun 0 0) CINoStatic`;
 
 // reduce result if it's a thunk, follow if it's an ind
 // add this to the stack if you want the outermost result
@@ -244,7 +333,7 @@ fun h$setObjInfo o typ name fields a gcinfo regs srefs {
   o.gai  = regs;        // active registers with ptrs
   o.s    = srefs;
   if(`isArray gcinfo`) { // info doesn't fit in int tag
-    o.gtag = 0;
+    o.gtag = gcinfo.length; // fixme this is wrong for multi-elem0;
     o.gi   = gcinfo;
   } else {
     o.gtag = gcinfo;
@@ -254,23 +343,19 @@ fun h$setObjInfo o typ name fields a gcinfo regs srefs {
 
 // allocate function on heap
 fun h$static_fun f arity name gai {
-  return { f: f, d: null }
+  return { f: f, d1: null, d2: null }
 }
 
-// allocate static thunk on heap (after setting closure info)
-// we need two positions for static thunks, to have enough room for the update frame
-// third position is for storing the original fun again, to be able to revert it
 fun h$static_thunk f {
   // fixme push stuff to restore stuff here
-  var h = { f: f, d: { } };
-   
+  var h = { f: f, d1: null, d2: null };
   return h;
 }
 
 // print a closure
 fun h$printcl i {
   var cl = i.f;
-  var d  = i.d;
+  var d  = i.d1;
   var r = "";
   switch(cl.t) {
     case `Thunk`:
@@ -354,34 +439,34 @@ fun h$alloc_static n {
 fun h$init_closure c xs {
   switch(xs.length) {
     case 0:
-      c.d = null; // { };
+      c.d1 = null; c.d2 = null;
       return c;
     case 1:
-      c.d = xs[0]; // { d1: xs[0] };
+      c.d1 = xs[0]; c.d2 = null;
       return c;
     case 2:
-      c.d = { d1: xs[0], d2: xs[1] };
+      c.d1 = xs[0]; c.d2 = xs[1];
       return c;
     case 3:
-      c.d = { d1: xs[0], d2: xs[1], d3: xs[2] };
+      c.d1 = xs[0]; c.d2 = { d1: xs[1], d2: xs[2] };
       return c;
     case 4:
-      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3] };
+      c.d1 = xs[0]; c.d2 = { d1: xs[1], d2: xs[2], d3: xs[3] };
       return c;
     case 5:
-      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3], d5: xs[4] };
+      c.d1 = xs[0]; c.d2 = { d1: xs[1], d2: xs[2], d3: xs[3], d4: xs[4] };
       return c;
     case 6:
-      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3], d5: xs[4], d6: xs[5] };
+      c.d1 = xs[0]; c.d2 = { d1: xs[1], d2: xs[2], d3: xs[3], d4: xs[4], d5: xs[5] };
       return c;
     case 7:
-      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3], d5: xs[4], d6: xs[5], d7: xs[6] };
+      c.d1 = xs[0]; c.d2 = { d1: xs[1], d2: xs[2], d3: xs[3], d4: xs[4], d5: xs[5], d6: xs[6] };
       return c;
     default:
-      c.d = { d1: xs[0], d2: xs[1], d3: xs[2], d4: xs[3], d5: xs[4], d6: xs[5], d7: xs[6] };
+      c.d1 = xs[0]; c.d2 = { d1: xs[1], d2: xs[2], d3: xs[3], d4: xs[4], d5: xs[5], d6: xs[6] };
       // fixme does closure compiler bite us here?
       for(var i=7;i<xs.length;i++) {
-        c.d["d"+(i+1)] = xs[i];
+        c.d2["d"+i] = xs[i];
       }
       return c;
   }
@@ -417,17 +502,24 @@ fun h$checkStack {
   var idx = `Sp`;
   while(idx >= 0) {
     var f = `Stack`[idx];
+    var size, offset;
     if(typeof(f) === 'function') {
-      var tag = `Stack`[idx].gtag;
-      var offset = 1;
-      if(tag <= 0) { // generic apply frame
-        tag = (stack[idx - 1] >> 8) + 2;
+      if(f === h$ap_gen) {
+        size = (`Stack`[idx - 1] >> 8) + 2;
         offset = 2;
+      } else {
+        var tag = `Stack`[idx].gtag;
+        if(tag <= 0) {
+          size = `Stack`[idx-1];
+          offset = 2;
+        } else {
+          size = tag & 0xff;
+          offset = 1;
+        }
       }
-      var size = tag & 0xFF;
       if(size < 1) throw("invalid stack frame size at: stack[" + idx + "], frame: " +`Stack`[idx].n);
 //        log("checking frame: " + `Stack`[idx].n + " size " + size);
-      if(f !== h$upd_frame) {
+      if(f !== h$returnf && f !== h$restoreThread) {
         for(var i=0;i<size-offset;i++) {
           if(typeof `Stack`[idx-offset-i] === 'function') {
             h$dumpStackTop `Stack` 0 `Sp`;
@@ -444,9 +536,11 @@ fun h$checkStack {
 }
 
 fun h$printReg r {
-  if(typeof r === 'object' && r.hasOwnProperty('f') && r.hasOwnProperty('d')) {
+  if(r === null) {
+    return "null";
+  } else if(typeof r === 'object' && r.hasOwnProperty('f') && r.hasOwnProperty('d1') && r.hasOwnProperty('d2')) {
     if(r.f.t === `Blackhole` && r.x) {
-      return ("blackhole: -> " + h$printReg({ f: r.x.x1, d: r.d.x2 }) + ")");
+      return ("blackhole: -> " + h$printReg({ f: r.x.x1, d: r.d1.x2 }) + ")");
     } else {
       return (r.f.n + " (" + h$closureTypeName(r.f.t) + ", " + r.f.a + ")");
     }
@@ -488,14 +582,13 @@ fun h$logStack {
   }
 }
 
-fun h$run cl cb {
+fun h$runOldDontUse cl cb {
 //  `trace "runhs"`;
   h$run_init_static();
   h$stack[0] = h$done;
   h$stack[1] = h$baseZCGHCziConcziSynczireportError;
   h$stack[2] = h$catch_e;
-  h$stack[3] = h$reduce;
-  h$sp = 3;
+  h$sp = 2;
   `R1` = cl;
   var c = cl.f;
   while(c !== h$done) {
@@ -513,20 +606,20 @@ fun h$run cl cb {
 
 fun h$runio_e {
   `preamble`;
-  `R1` = `R1`.d;
+  `R1` = `R1`.d1;
   `Stack`[++`Sp`] = h$ap_1_0;
   return h$ap_1_0;
 }
 `ClosureInfo (jsv "h$runio_e") [PtrV] "runio" (CILayoutFixed 2 [PtrV]) CIThunk CINoStatic`;
 
 fun h$runio c {
-  return { f: h$runio_e, d: c };
+  return { f: h$runio_e, d1: c, d2: null };
 }
 
 fun h$flushStdout_e {
   `R1` = h$baseZCGHCziIOziHandlezihFlush;
   `R2` = h$baseZCGHCziIOziHandleziFDzistdout;
-  return h$ap_1_fast();
+  return h$ap_1_1_fast();
 }
 `ClosureInfo (jsv "h$flushStdout_e") [] "flushStdout" (CILayoutFixed 1 []) CIThunk CINoStatic`;
 var !h$flushStdout = h$static_thunk(h$flushStdout_e);
@@ -555,14 +648,27 @@ fun h$dumpStackTop stack start sp {
            if(s && s.n) {
              log("stack[" + i + "] = " + s.n);
            } else {
-             if(typeof s === 'object' && s.hasOwnProperty("f") && s.hasOwnProperty("d")) {
-               if(s.f.t === `Blackhole` && s.d.x1 && s.d.x1.n) {
-                 log("stack[" + i + "] = blackhole -> " + s.d.x1.n);
+             if(s === null) {
+               log("stack[" + i + "] = null WARNING DANGER");
+             } else if(typeof s === 'object' && s !== null && s.hasOwnProperty("f") && s.hasOwnProperty("d1") && s.hasOwnProperty("d2")) {
+               if(s.d1 === undefined) { log("WARNING: stack[" + i + "] d1 undefined"); }
+               if(s.d2 === undefined) { log("WARNING: stack[" + i + "] d2 undefined"); }
+               if(s.f.t === `Blackhole` && s.d1 && s.d1.x1 && s.d1.x1.n) {
+                 log("stack[" + i + "] = blackhole -> " + s.d1.x1.n);
                } else {
                  log("stack[" + i + "] = -> " + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
                }
+             } else if(h$isInstanceOf(s,h$MVar)) {
+               var val = s.val ===
+                 null ? " empty"
+                      : " value -> " + s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")";
+               log("stack[" + i + "] = MVar " + val);
+             } else if(h$isInstanceOf(s,h$MutVar)) {
+               log("stack[" + i + "] = IORef -> " + s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")");
+             } else if(typeof s === 'object') {
+               log("stack[" + i + "] = " + h$collectProps(s).substring(0,50));
              } else {
-               log("stack[" + i + "] = " + s);
+               log("stack[" + i + "] = " + (""+s).substring(0,50));
              }
           }
         }
@@ -574,26 +680,29 @@ fun h$dumpStackTop stack start sp {
 fun h$checkObj obj {
   if(!obj.hasOwnProperty("f") || obj.f === null || obj.f === undefined || !obj.f.n || obj.f.a === undefined || typeof obj.f !== 'function') {
     log("h$checkObj: WARNING, something wrong with f:");
-    log(obj);
+    log((""+obj).substring(0,200));
   }
-  if(!obj.hasOwnProperty("d") || obj.d === undefined || obj.d === null) {
-    log("h$checkObj: WARNING, something wrong with d:");
-    log(obj);
-  } else {
-    var d = obj.d;
-    for(var p in obj.d) {
+  if(!obj.hasOwnProperty("d1") || obj.d1 === undefined) {
+    log("h$checkObj: WARNING, something wrong with d1:");
+    log((""+obj).substring(0,200));
+  } else if(!obj.hasOwnProperty("d2") || obj.d2 === undefined) {
+    log("h$checkObj: WARNING, something wrong with d2:");
+    log((""+obj).substring(0,200));
+  } else if(obj.d2 !== null && typeof obj.d2 === 'object') {
+    var d = obj.d2;
+    for(var p in d) {
       if(d.hasOwnProperty(p)) {
-        if(p.substring(0,1) != "d") {
-          log("h$checkObj: WARNING, unexpected field name: " + p);
-          log(obj);
-        }
+//        if(p.substring(0,1) != "d") {
+//          log("h$checkObj: WARNING, unexpected field name: " + p);
+//          log((""+obj).substring(0,200));
+//        }
         if(d[p] === undefined) {
           log("h$checkObj: WARNING, undefined field detected: " + p);
-          log(obj);
+          log((""+obj).substring(0,200));
         }
 //        if(d[p] === null) {
 //          log("h$checkObj: WARNING, null field detected: " + p);
-//          log(obj);
+//          log((""+obj).substring(0,200));
 //        }
       }
     }
@@ -605,7 +714,9 @@ fun h$traceForeign f as {
   var bs = [];
   for(var i=0;i<as.length;i++) {
     var ai = as[i];
-    if(typeof ai === 'object') {
+    if(ai === null) {
+      bs.push("null");
+    } else if(typeof ai === 'object') {
       var astr = ai.toString();
       if(astr.length > 40) {
         bs.push(astr.substring(0,40)+"...");
@@ -619,12 +730,73 @@ fun h$traceForeign f as {
   log("ffi: " + f + "(" + bs.join(",") + ")");
 }
 
+// the scheduler pushes this frame when suspending a thread that
+// has not called h$reschedule explicitly
+fun h$restoreThread {
+  var f         = `Stack`[`Sp`-2];
+  var frameSize = `Stack`[`Sp`-1];
+//  log("restoreThread " + h$currentThread.tid + " sp: " + h$sp + " frame size: " + frameSize);
+  var nregs = frameSize - 3;
+  for(var i=1;i<=nregs;i++) {
+    h$setReg(i, `Stack`[`Sp`-2-i]);
+  }
+  `Sp` = `Sp` - frameSize;
+  return f;
+}
+`ClosureInfo (jsv "h$restoreThread") [] "restoreThread" CILayoutVariable (CIFun 0 0) CINoStatic`;
+
+// return a closure in the stack frame to the next thing on the stack
+fun h$return {
+  `R1` = `Stack`[`Sp`-1];
+//  log("h$return, returning: " + `R1`.f.n);
+  `adjSpN 2`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$return") [] "return" (CILayoutFixed 2 []) (CIFun 0 0) CINoStatic`;
+
+// return a function in the stack frame for the next call
+fun h$returnf {
+  var r = `Stack`[`Sp`-1];
+//  log("h$returnf, returning: " + r.n);
+  `adjSpN 2`;
+  return r;
+}
+`ClosureInfo (jsv "h$returnf") [] "returnf" (CILayoutFixed 2 []) (CIFun 0 0) CINoStatic`;
+
 // return this function when the scheduler needs to come into action
-// (yield, delay etc)
+// (yield, delay etc), returning thread needs to push all relevant
+// registers to stack frame, thread will be resumed by calling the stack top
 fun h$reschedule {
   return h$reschedule;
 }
 `ClosureInfo (jsv "h$reschedule") [] "reschedule" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+
+// carefully suspend the current thread, looking at the
+// function that would be called next
+fun h$suspendCurrentThread next {
+   var nregs;
+  // pap arity
+  if(next.t === `Pap`) {
+    var pa;
+    `papArity pa (toJExpr R1)`;
+    nregs = (pa >> 8) + 1;
+  } else if(next.t === `Fun`) {
+    // for normal functions, the number active registers is in the .a proprty
+    // fixme check that this is ok for stack frames with unboxed vals
+    nregs = (next.a >> 8) + 1;
+  } else {
+    nregs = 1;  // Thunk, Con, Blackhole only have R1
+  }
+  `Sp` = `Sp`+nregs+3;
+  for(var i=1;i<=nregs;i++) {
+    `Stack`[`Sp`-2-i] = h$getReg(i);
+  }
+  `Stack`[`Sp`-2] = next;
+  `Stack`[`Sp`-1] = nregs+3;
+  `Stack`[`Sp`]   = h$restoreThread;
+  h$currentThread.sp = `Sp`;
+}
+
 
 |]
 

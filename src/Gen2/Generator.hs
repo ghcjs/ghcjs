@@ -291,23 +291,24 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) =
 
 updateThunk :: JStat
 updateThunk =
-  [j| `push frame`;
+  [j| `push [toJExpr R1, jsv "h$upd_frame"]`;
       `R1`.f = h$blackhole;
-      `R1`.d = h$currentThread.threadId;
+      `R1`.d1 = h$currentThread.tid;
+      `R1`.d2 = null
     |]
-  where
-    frame = [[je|`R1`|],jsv "h$upd_frame"] -- [[je|`R1`.f|],[je|`R1`.d|],
 
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
    l' <- concat <$> mapM genIdsI l
    case l' of
-     [v] -> return (decl' v [je| `R1`.d |])
-     _   -> do   
+     []  -> return mempty
+     [v] -> return (decl' v [je| `R1`.d1 |])
+     [v1,v2] -> return (decl' v1 [je| `R1`.d1 |] <> decl' v2 [je| `R1`.d2 |])
+     (v:vs)  -> do
        d <- makeIdent
-       let l'' = mconcat . zipWith (loadLiveVar $ toJExpr d) [(1::Int)..] $ l'
-       return ([j| `decl d`; `d` = `R1`.d |] <> l'')
-     where
+       let l'' = mconcat . zipWith (loadLiveVar $ toJExpr d) [(1::Int)..] $ vs
+       return (decl' v [je| `R1`.d1 |] <> [j| `decl d`; `d` = `R1`.d2 |] <> l'')
+  where
         loadLiveVar d n v = let ident = StrI ("d" ++ show n)
                             in  decl' v (SelExpr d ident)
 
@@ -377,11 +378,13 @@ genApp force mstackTop i a
           ii <- jsIdI i
           return [j|
                  var t = `ii`.f;
-                 if(`isThunk' t`) { // thunk
-                   `R1` = `ii`;
+                 var tt = t.t;
+                 `R1` = `ii`;
+                 if(tt === `Thunk`) {
                    return t;
+                 } else if(tt === `Blackhole`) {
+                   return h$ap_0_0_fast();
                  } else { // con
-                   `R1` = `ii`;
                    return `stackTop`; // stack[sp];
                  }
                 |]
@@ -397,11 +400,13 @@ genApp force mstackTop i a
              ii <- jsIdI i
              return [j|
                  var t = `ii`.f;
-                 if(`isThunk' t`) { // thunk
-                   `R1` = `ii`;
+                 var tt = t.t;
+                 `R1` = `ii`;
+                 if(tt === `Thunk`) {
                    return t;
+                 } else if(tt === `Blackhole`) {
+                   return h$ap_0_0_fast();
                  } else { // con
-                   `R1` = `ii`;
                    return `stackTop`;
                  }
                 |]
@@ -665,7 +670,7 @@ genCase top bnd x@(StgCase {}) at alts l =
 genCase top bnd (StgOpApp (StgFCallOp fc _) args t) (UbxTupAlt n) [(DataAlt{}, bndrs, _, e)] l =
   do
    ids <- concatMapM genIds bndrs
-   concatMapM declIds bndrs <> 
+   concatMapM declIds bndrs <>
      genForeignCall0 fc ids args <>
      genExpr top e
 
@@ -702,6 +707,9 @@ genCase top bnd x@(StgConApp c as) at@(UbxTupAlt n) [(DataAlt{}, bndrs, _, e)] l
   args' <- concatMapM genArg as
   ids   <- concatMapM genIds bndrs
   mconcat (map declIds bndrs) <> return (assignAll ids args') <> genExpr top e
+
+genCase top bnd expr at@PolyAlt alts l = do
+   genRet top bnd at alts l <> genExpr top expr
 
 genCase _ _ x at alts _ = panic ("unhandled gencase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
 -- genCase _ _ x at alts _ = return [j| unhandled_gencase_format = `show x` |]
@@ -977,18 +985,33 @@ fourth (_,_,_,x) = x
 loadParams :: JExpr -> [Id] -> [Bool] -> C
 loadParams from args use = do
   i <- makeIdent
-  p <- loadParams' (toJExpr i) args use
-  return [j| `decl i`; `i` = `from`.d; `p`; |]
+--  p <- loadParams' (toJExpr i) args use
+  as <- concat <$> sequence (zipWith (\a u -> map (,u) <$> genIdsI a) args use)
+  return $ case as of
+    []                 -> mempty
+    [(x,u)]            -> loadIfUsed [je| `from`.d1 |] x  u
+    [(x1,u1),(x2,u2)]  -> loadIfUsed [je| `from`.d1 |] x1 u1 <>
+                          loadIfUsed [je| `from`.d2 |] x2 u2
+    ((x,u):xs)         -> loadIfUsed [je| `from`.d1 |] x  u  <>
+                          [j| var d = `from`.d2;
+                              `loadConVarsIfUsed d xs`;
+                            |]
+  where
+    loadIfUsed fr tgt True = decl' tgt fr
+    loadIfUsed  _ _ _  = mempty
 
-loadParams' :: JExpr -> [Id] -> [Bool] -> C
+    loadConVarsIfUsed fr cs = mconcat $ zipWith f cs [(1::Int)..]
+      where f (x,u) n = loadIfUsed (SelExpr fr (StrI $ "d" ++ show n)) x u
+
+--  return [j| `decl i`; `i` = `from`.d1; `p`; |]
+{-
+loadParams' :: JExpr -> [JExpr] -> [Bool] -> C
 loadParams' from args use = do
-  as <- concat <$> sequence args'
   case as of
     [(a, True)] -> return (decl' a from)
     _           ->
       return $ mconcat $ zipWith load as [(0::Int)..]
   where
-    args'            = zipWith (\a u -> map (,u) <$> genIdsI a) args use
     load (_,False) _ = mempty
     load (a,True)  n = loadConVar from a n
 
@@ -997,7 +1020,7 @@ loadConVar :: JExpr -> Ident -> Int -> JStat
 loadConVar from to n = [j| `decl to`; `to` = `ident from`; |]
   where
     ident f = SelExpr f (StrI ("d" ++ show (n+1)))
-
+-}
 genPrimOp :: PrimOp -> [StgArg] -> Type -> C
 genPrimOp op args t = do
   as <- concatMapM genArg args
@@ -1100,10 +1123,10 @@ allocConStatic :: JExpr -> DataCon -> [JExpr] -> C
 -- allocConStatic to tag [] = [j| `to` = `nullaryConClosure tag`; |]
 allocConStatic to con [] = do
   e <- enterDataCon con
-  return [j| `to` = { f: `e`, d: {} }; |]
+  return [j| `to` = { f: `e`, d1: null, d2: null }; |]
 allocConStatic to con xs = do
   e <- enterDataCon con
-  return [j| `to` = { f: `e`, d: null };
+  return [j| `to` = { f: `e`, d1: null, d2: null };
              h$initStatic.push( \ { h$init_closure(`to`, `JList xs`); } );
            |]
 {-

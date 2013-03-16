@@ -167,7 +167,7 @@ primTypeVt t = case repType t of
     | st == pr "RealWorld" = VoidV
     | st == pr "ThreadId#" = IntV
     | st == pr "Weak#" = WeakV
-    | st == pr "StablePtr#" = ObjV
+    | st == pr "StablePtr#" = AddrV
     | st == pr "StableName#" = ObjV
     | st == pr "MutVar#" = ArrV -- MutVarV
     | st == pr "BCO#" = ObjV -- fixme what do we need here?
@@ -425,9 +425,9 @@ papArity tgt p = [j| `tgt` = 0;
                      var regs = 0;
                      do {
                        regs += cur.f.a;
-                       args += cur.d.d2;
+                       args += cur.d2.d1;
                        `traceRts $ "pap: " |+ regs |+ " " |+ args`;
-                       cur = cur.d.d1;
+                       cur = cur.d1;
                      } while(cur.f.t === `Pap`);
                      var fa = cur.f.a;
                      `traceRts $ "pap base: " |+ fa`;
@@ -623,6 +623,7 @@ instance ToStat ClosureInfo where
 mkArityTag :: Int -> Int -> Int
 mkArityTag arity trailingVoid = arity .|. (trailingVoid `shiftL` 8)
 
+-- tag repurposed as size
 setObjInfoL :: JExpr     -- ^ the object
             -> [VarType] -- ^ things in registers
             -> CILayout  -- ^ layout of the object
@@ -636,12 +637,12 @@ setObjInfoL obj rs CILayoutVariable t n a            =
 setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    =
   setObjInfo obj t n xs a tag rs
   where
-    tag = mkGcTagPtrs t size ptrs
-    xs | tag /= 0  = []
-       | otherwise = map (\i -> fromEnum $ if i `elem` ptrs then PtrV else ObjV) [1..size-1]
+    tag = toJExpr size  -- mkGcTagPtrs t size ptrs
+    xs -- | tag /= 0  = []
+       = map (\i -> fromEnum $ if i `elem` ptrs then PtrV else ObjV) [1..size-1]
 setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n xs a tag rs
   where
-    tag  = mkGcTag t size layout
+    tag  = toJExpr size -- mkGcTag t size layout
     xs   = toTypeList layout
        {-
        | tag /= 0 = []
@@ -676,7 +677,9 @@ setObjInfo :: JExpr      -- ^ the thing to modify
            -> CIStatic   -- ^ static refs
            -> JStat
 setObjInfo obj t name fields a gctag argptrs static =
-  [j| h$setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `scannableOffsets 1 argptrs`, `static`);  |]
+  [j| h$setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
+  where
+    nregs = sum $ map varSize argptrs 
 
 scannableOffsets :: Int -> [VarType] -> [Int]
 scannableOffsets start ts =

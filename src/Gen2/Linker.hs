@@ -106,8 +106,7 @@ combineFiles fp = do
   T.writeFile (fp</>"all.js") (mconcat (files ++ [runMain]))
 
 runMain :: Text
-runMain = "\nh$run(h$runio(h$mainZCMainzimain), function(r) { h$run(h$runio(h$flushStdout), function(r) {}); });\n"
--- runMain = "\nh$run(h$runio(h$mainZCMainzimain), function(r) { h$dumpRes(r); h$run(h$runio(h$flushStdout), function(r) {}); });\n"
+runMain = "\nh$main(h$mainZCMainzimain);\n"
 
 -- get the ji file for a js file
 metaFile :: FilePath -> FilePath
@@ -121,7 +120,7 @@ dropVersion = fst . splitVersion
 
 splitVersion :: Text -> (Text, Text)
 splitVersion t
-  | T.null ver || T.any (`notElem` "1234567890.") ver 
+  | T.null ver || T.any (`notElem` "1234567890.") ver
       = (t, mempty)
   | T.null name = (mempty, mempty)
   | otherwise   = (T.reverse (T.tail name), T.reverse ver)
@@ -272,5 +271,6 @@ rtsDeps =
  in S.fromList $ map mkDep
      [ ("ghc-prim", "GHC.Types",     "h$baseZCGHCziTypesziFalse")
      , ("ghc-prim", "GHC.Types",     "h$baseZCGHCziTypesziTrue")
-     , ("base",     "GHC.Conc.Sync", "h$baseZCGHCziConcziSynczireportError") -- "reportError")
+     , ("base",     "GHC.Conc.Sync", "h$baseZCGHCziConcziSynczireportError")
      ]
+

@@ -41,7 +41,11 @@ rtsTraceStack = rtsDebug -- False -- True
 
 -- trace all foreign calls
 rtsTraceForeign :: Bool
-rtsTraceForeign = True
+rtsTraceForeign = False
+
+rtsHaveWeakMap :: Bool
+rtsHaveWeakMap = False
+
 
 ------------------------------------------------------------------------------
 -- end of settings

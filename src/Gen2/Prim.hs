@@ -12,13 +12,13 @@ module Gen2.Prim where
   Word#   -> number
   Addr#   -> DataView / offset    [array/object, offset (number)]
     properties: region: number, unique increasing number for comparisons?
-  MutVar# -> [one-element array]
+  MutVar# -> h$MutVar object
   TVar#   -> [?]
-  MVar#   -> [mvar object] /* contains list of waiting threads */
+  MVar#   -> h$MVar object
   Weak#   -> [weak object]
-  ThreadId -> [number ?]
+  ThreadId -> h$Thread object
   State#  -> nothing
-  StablePtr# -> [one-elem array]
+  StablePtr# -> DataView / offset (base pkg expects unsafeCoerce to Addr# to work)
   MutableArrayArray# -> DataView
   MutableByteArray#  -> DataView
   ByteArray#         -> DataView
@@ -38,8 +38,8 @@ import           Data.Monoid
 import           Panic
 import           PrimOp
 
-data PrimRes = PrimInline JStat  -- ^ primop is inline
-             | PRPrimCall JStat  -- ^ primop is async call
+data PrimRes = PrimInline JStat  -- ^ primop is inline, result is assigned directly
+             | PRPrimCall JStat  -- ^ primop is async call, primop returns the next function to run. result returned to stack top in registers
 
 genPrim :: PrimOp   -- ^ the primitive operation
         -> [JExpr]  -- ^ where to store the result
@@ -343,12 +343,11 @@ genPrim CopyArrayArrayOp [] [a1,o1,a2,o2,n] =
 genPrim CopyMutableArrayArrayOp [] [a1,o1,a2,o2,n] =
   PrimInline [j| for(var i=0;i<`n`;i++) { `a2`[i+`o2`]=`a1`[i+`o1`]; } |]
 
--- fixme do we want global addr numbering? (third arg?)
 genPrim AddrAddOp  [a',o'] [a,o,i]   = PrimInline [j| `a'` = `a`; `o'` = `o` + `i`;|]
 genPrim AddrSubOp  [i] [a1,o1,a2,o2] = PrimInline [j| `i` = `o1` - `o2` |]
 genPrim AddrRemOp  [r] [a,o,i]   = PrimInline [j| `r` = `o` % `i` |]
-genPrim Addr2IntOp [i]     [a,o]     = PrimInline [j| `i` = `o`; |] -- fimxe need global ints?
-genPrim Int2AddrOp [a,o]   [i]       = PrimInline [j| `a` = []; `o` = `i`; |] -- fixme
+genPrim Addr2IntOp [i]     [a,o]     = PrimInline [j| `i` = `o`; |] -- only usable for comparisons within one range
+genPrim Int2AddrOp [a,o]   [i]       = PrimInline [j| `a` = []; `o` = `i`; |] -- unsupported
 genPrim AddrGtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >  `o2`) ? `HTrue` : `HFalse`; |]
 genPrim AddrGeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >= `o2`) ? `HTrue` : `HFalse`; |]
 genPrim AddrEqOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? `HTrue` : `HFalse`; |]
@@ -442,29 +441,41 @@ genPrim WriteOffAddrOp_Word32 [] [a,o,i,v]  = PrimInline [j| `a`.setUint32(`o`+(
 genPrim WriteOffAddrOp_Word64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.setUint32(`o`+(`i`<<3), `v1`);
                                                                  `a`.setUint32(`o`+(`i`<<3)+4, `v2`);
                                                                |]
--- fixme add GC writebars
-genPrim NewMutVarOp       [r] [x]   = PrimInline [j| `r` = [`x`];  |]
-genPrim ReadMutVarOp      [r] [m]   = PrimInline [j| `r` = `m`[0]; |]
--- fimxe, update something to inform gc that this thing can point to newer stuff
-genPrim WriteMutVarOp     [] [m,x]  = PrimInline [j| `m`[0] = `x`; |]
-genPrim SameMutVarOp      [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? `HTrue` : `HFalse`; |]
--- genPrim AtomicModifyMutVarOp [r] [x,y] =
--- CasMutVarOp
--- actual exception handling: push catch handling stack frame
--- [stg_catch, handler]
--- raise: unwind stack until first stg_catch
+genPrim NewMutVarOp       [r] [x]   = PrimInline [j| `r` = new h$MutVar(`x`);  |]
+genPrim ReadMutVarOp      [r] [m]   = PrimInline [j| `r` = `m`.val; |]
+genPrim WriteMutVarOp     [] [m,x]  = PrimInline [j| `m`.val = `x`; |]
+genPrim SameMutVarOp      [r] [x,y] =
+  PrimInline [j| `r` = (`x` === `y`) ? `HTrue` : `HFalse`; |]
+genPrim AtomicModifyMutVarOp [r] [m,f] =
+  PrimInline [j| `r` = h$atomicModifyMutVar(`m`,`f`); |]
+genPrim CasMutVarOp [status,r] [mv,o,n] =
+  PrimInline [j| if(`mv`.val === `o`) {
+                    `status` = 0;
+                    `r` = `mv`.val;
+                    `mv`.val = `n`;
+                 } else {
+                    `status` = 1;
+                    `r` = `mv`.val;
+                 }
+               |]
 genPrim CatchOp [r] [a,handler] = PRPrimCall
   [j| return h$catch(`a`, `handler`); |]
 genPrim RaiseOp         [b] [a] = PRPrimCall [j| return h$throw(`a`); |]
 genPrim RaiseIOOp       [b] [a] = PRPrimCall [j| return h$throw(`a`); |]
 
 genPrim MaskAsyncExceptionsOp [r] [a] =
-  PRPrimCall [j| h$mask = 1; `R1` = `a`; return h$ap_1_0_fast(); |]
+  PRPrimCall [j| h$currentThread.mask = 1;
+                 `R1` = `a`;
+                 return h$ap_1_0_fast();
+               |]
 -- MaskUninterruptibleOp
 genPrim UnmaskAsyncExceptionsOp [r] [a] =
-  PRPrimCall [j| h$mask = 0; `R1` = `a`; return h$ap_1_0_fast(); |]
+  PRPrimCall [j| h$currentThread.mask = 0;
+                 `R1` = `a`;
+                 return h$ap_1_0_fast();
+               |]
 
-genPrim MaskStatus [r] [] = PrimInline [j| `r` = h$mask; |]
+genPrim MaskStatus [r] [] = PrimInline [j| `r` = h$currentThread.mask; |]
 {-
 AtomicallyOp
 RetryOp
@@ -477,51 +488,29 @@ ReadTVarIOOp
 WriteTVarOp
 SameTVarOp
 -}
-genPrim NewMVarOp [r] []   = PrimInline [j| `r` = [null]; |]
-genPrim TakeMVarOp [r] [m] =
-  PrimInline [j| if(`m`[0] !== null) {
-                   `r` = `m`[0];
-                   `m`[0] = null;
-                 } else {
-                   throw "blocked on MVar";
-                 }
-               |]
-genPrim TryTakeMVarOp [v,r] [m] =
-  PrimInline [j| if(`m`[0] !== null) {
-                   `v` = 1;
-                   `r` = `m`[0];
-                   `m`[0] = null;
-                 } else {
-                   `v` = 0;
-                 }
-               |]
-genPrim PutMVarOp [] [m,v] =
-  PrimInline [j| if(`m`[0] !== null) {
-                   throw "blocked on MVar";
-                 } else {
-                   `m`[0] = `v`;
-                 }
-               |]
-genPrim TryPutMVarOp [r] [m,v] =
-  PrimInline [j| if(`m`[0] !== null) {
-                   `r` = 0;
-                 } else {
-                   `r` = 1;
-                   `m`[0] = `v`;
-                 }
-               |]
-genPrim SameMVarOp [r] [m1,m2] = PrimInline [j| `r` = (`m1` === `m2`) ? `HTrue` : `HFalse`; |]
-genPrim IsEmptyMVarOp [r] [m]  = PrimInline [j| `r` = (`m`[0] === null) ? `HTrue` : `HFalse`; |]
+genPrim NewMVarOp [r] []   = PrimInline [j| `r` = new h$MVar(); |]
+genPrim TakeMVarOp [r] [m] = PRPrimCall [j| return h$takeMVar(`m`); |]
+genPrim TryTakeMVarOp [v,r] [m] = PrimInline [j| `v` = h$tryTakeMVar(`m`);
+                                                 `r` = `Ret1`;
+                                              |]
+genPrim PutMVarOp [] [m,v] = PRPrimCall [j| return h$putMVar(`m`,`v`); |]
+genPrim TryPutMVarOp [r] [m,v] = PrimInline [j| `r` = h$tryPutMVar(`m`,`v`) |]
+
+genPrim SameMVarOp [r] [m1,m2] =
+   PrimInline [j| `r` = (`m1` === `m2`) ? `HTrue` : `HFalse`; |]
+genPrim IsEmptyMVarOp [r] [m]  =
+  PrimInline [j| `r` = (`m`.val === null) ? 1 : 0; |]
 
 genPrim DelayOp [] [t] = PRPrimCall [j| return h$delayThread(`t`); |]
 genPrim WaitReadOp [] [fd] = PrimInline [j| h$waitRead(`fd`); |]
 genPrim WaitWriteOp [] [fd] = PrimInline [j| h$waitWrite(`fd`); |]
 genPrim ForkOp [tid] [x] = PrimInline [j| `tid` = h$fork(`x`); |]
 genPrim ForkOnOp [tid] [p,x] = PrimInline [j| `tid` = h$fork(`x`); |] -- ignore processor argument
--- genPrim KillThreadOp [] [tid,a] = [j| h$killThread(`tid`); |]
+genPrim KillThreadOp [] [tid,ex] =
+  PRPrimCall [j| return h$killThread(`tid`,`ex`); |]
 genPrim YieldOp [] [] = PRPrimCall [j| return h$reschedule; |]
-genPrim MyThreadIdOp [r] [] = PrimInline [j| `r` = h$currentThread.threadId; |]
-genPrim LabelThreadOp [] [t,la,lo] = PrimInline [j| h$currentThread.label = [la,lo]; |]
+genPrim MyThreadIdOp [r] [] = PrimInline [j| `r` = h$currentThread.tid; |]
+genPrim LabelThreadOp [] [t,la,lo] = PrimInline [j| `t`.label = [la,lo]; |]
 genPrim IsCurrentThreadBoundOp [r] [] = PrimInline [j| `r` = 1; |]
 genPrim NoDuplicateOp [] [] = PrimInline mempty -- don't need to do anything as long as we have eager blackholing
 genPrim ThreadStatusOp [stat,cap,locked] [tid] = PrimInline
@@ -535,22 +524,23 @@ genPrim MkWeakNoFinalizerOp [r] [o,b] = PrimInline [j| `r` = h$makeWeakNoFinaliz
 genPrim MkWeakForeignEnvOp [r] [o,b,a1a,a1o,a2a,a2o,i,a3a,a3o] = PrimInline [j| `r` = [`b`]; |]
 genPrim DeRefWeakOp        [r] [w] = PrimInline [j| `r` = h$deRefWeak(`w`); |]
 genPrim FinalizeWeakOp     [i,a] [w] =
-  PrimInline [j| `i` h$finalizeWeak(`w`);
+  PrimInline [j| `i` = h$finalizeWeak(`w`);
                  `a` = `Ret1`;
                |]
 genPrim TouchOp [] [e] = PrimInline mempty -- fixme what to do?
 
-genPrim MakeStablePtrOp [r] [a] = PrimInline [j| `r` = `a`; |]
-genPrim DeRefStablePtrOp [r] [s] = PrimInline [j| `r` = `s`; |]
-genPrim EqStablePtrOp [r] [s1,s2] = PrimInline [j| `r` = (`s1` === `s2`) ? `HTrue` : `HFalse`; |]
+genPrim MakeStablePtrOp [s1,s2] [a] = PrimInline [j| `s1` = h$makeStablePtr(`a`); `s2` = `Ret1`; |]
+genPrim DeRefStablePtrOp [r] [s1,s2] = PrimInline [j| `r` = `s1`.arr[`s2`]; |]
+genPrim EqStablePtrOp [r] [sa1,sa2,sb1,sb2] = PrimInline [j| `r` = (`sa1` === `sb1` && `sa2` === `sb2`) ? `HTrue` : `HFalse`; |]
+
 genPrim MakeStableNameOp [r] [a] = PrimInline [j| `r` = `a`; |]
 genPrim EqStableNameOp [r] [s1,s2] = PrimInline [j| `r` = `s1` === `s2`; |]
 genPrim StableNameToIntOp [r] [s] = PrimInline [j| `r` = h$stableNameInt(`s`) |]
 genPrim ReallyUnsafePtrEqualityOp [r] [p1a,p1o,p2a,p2o] =
   PrimInline [j| `r` = (`p1a` === `p2a` && `p1o` === `p2o`) ? `HTrue` : `HFalse`; |]
 
+genPrim ParOp [r] [a] = PrimInline [j| `r` = 0; |]
 {-
-ParOp
 SparkOp
 -}
 genPrim SeqOp [r] [e] = PRPrimCall [j| `R1` = `e`;
@@ -589,8 +579,6 @@ genPrim op rs as = PrimInline [j| log(`"warning, unhandled primop: "++show op++"
     f = ApplStat (iex . StrI $ "h$prim_" ++ show op) as
     copyRes = mconcat $ zipWith (\r reg -> [j| `r` = `reg`; |]) rs (enumFrom Ret1)
 
-
--- fixme add fallback for untyped browsers
 newByteArray :: JExpr -> JExpr -> JStat
 newByteArray tgt len = [j| `tgt` = new DataView(new ArrayBuffer(Math.max(`len`,1)),0,`len`); |]
 

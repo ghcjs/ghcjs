@@ -29,7 +29,7 @@ rtsApply = mconcat $  map (uncurry stackApply) applySpec
                       , genericStackApply
                       , genericFastApply
                       , zeroApply
-                      , compatApply
+--                      , compatApply
                       , updates
                       ]
 
@@ -89,6 +89,9 @@ genericStackApply =
             var parity;
             `papArity parity (toJExpr R1)`;
             `funCase c parity`;
+          case `Blackhole`:
+            `push [toJExpr R1, jsv "h$return"]`;
+            return h$blockOnBlackhole(`R1`);
           default:
             throw "h$ap_gen: unexpected closure type";
         }
@@ -148,7 +151,7 @@ genericFastApply =
         switch(c.t) {
           case `Thunk`:
             `traceRts $ "h$ap_gen_fast: thunk"`;
-            `thunkCase c tag`;
+            `pushStackApply c tag`;
             return c;
           case `Fun`:
             var farity = `funArity' c`;
@@ -160,9 +163,14 @@ genericFastApply =
             `traceRts $ "h$ap_gen_fast: pap " |+ parity`;
             `funCase c tag parity`;
           case `Con`:
-            `traceRts $ "h$ap_gen_fast: con "`;
+            `traceRts $ "h$ap_gen_fast: con"`;
             if(tag != 0) { throw "h$ap_gen_fast: invalid apply"; }
             return c;
+          case `Blackhole`:
+            `traceRts $ "h$ap_gen_fast: blackhole"`;
+            `pushStackApply c tag`;
+            `push [toJExpr R1, jsv "h$return"]`;
+            return h$blockOnBlackhole(`R1`);
           default:
             throw ("h$ap_gen_fast: unexpected closure type: " + c.t);
         }
@@ -170,8 +178,8 @@ genericFastApply =
     |]
   where
      -- thunk: push everything to stack frame, enter thunk first
-    thunkCase :: JExpr -> JExpr -> JStat
-    thunkCase c tag =
+    pushStackApply :: JExpr -> JExpr -> JStat
+    pushStackApply c tag =
       [j| `pushAllRegs tag`;
           var ap = h$apply[`tag`];
           if(ap === h$ap_gen) {
@@ -267,6 +275,9 @@ stackApply r n = [j| `decl func`;
                  case `Pap`:
                    `traceRts $ funcName |+ ": pap"`;
                    `papCase c`;
+                 case `Blackhole`:
+                   `push [toJExpr R1, jsv "h$return"]`;
+                   return h$blockOnBlackhole(`R1`);
                  default:
                    throw (`"panic: " ++ funcName ++ ", unexpected closure type: "` + c.t);
                }
@@ -335,7 +346,7 @@ stackApply r n = [j| `decl func`;
           where
             switchAlts = map (\x -> ([je|`x`|], [j|`numReg (x+1)` = `Stack`[`Sp`-`x`]; |])) [r,r-1..1]
 
-
+{-
 vApply :: JStat
 vApply = [j| fun h$ap_v_fast {
                `traceRts "h$ap_v_fast"`;
@@ -354,7 +365,7 @@ vApply = [j| fun h$ap_v_fast {
                }
              }
          |]
-
+-}
 {-
   stg_ap_n_fast is entered if a function of unknown arity
   is called, arguments are already in registers
@@ -409,6 +420,11 @@ fastApply r n =
                      `traceRts $ (funName ++ ": thunk")`;
                      `push $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
                      return c;
+                   case `Blackhole`:
+                     `traceRts $ (funName ++ ": blackhole")`;
+                     `push $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
+                     `push [toJExpr R1, jsv "h$return"]`;
+                     return h$blockOnBlackhole(`R1`);
                    default:
                      throw (`funName ++ ": unexpected closure type: "` + c.t);
                  }
@@ -443,7 +459,7 @@ fastApply r n =
             saveRegs n = SwitchStat n switchAlts mempty
               where
                 switchAlts = map (\x -> ([je|`x`|],[j|`Stack`[`Sp`+`r-x`] = `numReg (x+2)`|])) [0..r-1]
-
+{-
 compatApply :: JStat
 compatApply =
   [j| var !h$ap_v = h$ap_1_0;
@@ -457,6 +473,7 @@ compatApply =
       var !h$ap_2 = h$ap_2_2;
       var !h$ap_0_v = h$ap_v;
     |]
+-}
 
 zeroApply :: JStat
 zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter`; }
@@ -482,35 +499,47 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter`; }
 -- carefully enter a closure that might be a thunk or a function
 
 enter :: JStat
-enter = [j| var c = `R1`.f; `enter' c`; |]
-
+enter = [j| var c = `R1`.f;
+            switch(c.t) {
+              case `Con`:
+                `(mempty :: JStat)`;
+              case `Fun`:
+                `(mempty :: JStat)`;
+              case `Pap`:
+                return `Stack`[`Sp`];
+              case `Blackhole`:
+                `push [toJExpr R1, jsv "h$return"]`;
+                return h$blockOnBlackhole(`R1`);
+              default:
+                return `c`;
+            }
+          |]
+{-
 enter' :: JExpr -> JStat
 enter' c = [j|
-                 switch(`c`.t) {
-                   case `Con`:
-                     `(mempty :: JStat)`;
-                   case `Fun`:
-                     `(mempty :: JStat)`;
-                   case `Pap`:
-                     return `Stack`[`Sp`];
-                   case `Blackhole`:
-                     throw "unexpected closure type: blackhole";
-                   default:
-                     return `c`;
-                 }
+
              |]
+-}
 
 enterv :: JStat
 enterv = push [jsv "h$ap_1_0"] <> enter
 
--- fixme can we do without storing the original data in the frame?
 updates =
   [j|
       fun h$upd_frame {
         `preamble`;
         var updatee = `Stack`[`Sp` - 1];
+        // wake up threads blocked on blackhole
+        var waiters = updatee.d2;
+        if(waiters !== null) {
+          for(var i=0;i<waiters.length;i++) {
+            h$wakeupThread(waiters[i]);
+          }
+        }
+        // overwrite the object
         updatee.f = `R1`.f;
-        updatee.d = `R1`.d;
+        updatee.d1 = `R1`.d1;
+        updatee.d2 = `R1`.d2;
         `adjSpN 2`;
         `traceRts $ "h$upd_frame: updating: " |+ updatee |+ " -> " |+ R1`;
         return `Stack`[`Sp`];
@@ -529,8 +558,10 @@ mkPap :: Ident   -- ^ id of the pap object
       -> JStat
 mkPap tgt fun n values =
     traceRts ("making pap with: " ++ show (length values) ++ " items") <>
-    allocDynamic True tgt (iex entry) (fun:n:map toJExpr values)
+    allocDynamic True tgt (iex entry) (fun:n:map toJExpr values')
         where
+          values' | null values = [jnull]
+                  | otherwise   = values
           entry = StrI $ "h$pap_" ++ show (length values)
 
 -- entry function for a pap with n stored registers
@@ -543,8 +574,8 @@ pap r = [j| `decl func`;
     funcName = "h$pap_" ++ show r
     func     = StrI funcName
 
-    body = [j| var d = `R1`.d;
-               var c = d.d1;
+    body = [j| var c = `R1`.d1;
+               var d = `R1`.d2;
                var f = c.f;
                `assertRts (isFun' f ||| isPap' f) (funcName ++ ": expected function or pap")`;
                var extra;
@@ -564,4 +595,4 @@ pap r = [j| `decl func`;
                    (reverse $ map moveCase [1..maxReg-r-1]) mempty
     moveCase m = (toJExpr m, [j| `numReg (m+r+1)` = `numReg (m+1)`; |])
     loadOwnArgs d = mconcat $ map (\r -> [j| `numReg (r+1)` = `dField d (r+2)`; |]) [1..r]
-    dField d n = SelExpr d (StrI ('d':show n))
+    dField d n = SelExpr d (StrI ('d':show (n-1)))
