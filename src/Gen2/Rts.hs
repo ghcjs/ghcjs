@@ -800,7 +800,6 @@ fun h$suspendCurrentThread next {
     nregs = (pa >> 8) + 1;
   } else if(next.t === `Fun`) {
     // for normal functions, the number active registers is in the .a proprty
-    // fixme check that this is ok for stack frames with unboxed vals
     nregs = (next.a >> 8) + 1;
   } else {
     nregs = 1;  // Thunk, Con, Blackhole only have R1

@@ -769,10 +769,10 @@ genRet top e at as l = withNewIdent $ \ret -> pushRetArgs free (iex ret) <> f re
                 <> (decl r)
                 <> [j| `r` = `fun'`;
                        `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
-                          (fixedLayout $ map (uTypeVt.idType) free) (CIFun 0 0) (CIStaticParent topi)`;
+                          (fixedLayout $ map (uTypeVt.idType) free) (CIFun regs regs) (CIStaticParent topi)`;
                      |]
     free   = uniqSetToList l
-
+    regs   = max 0 (typeSize (idType e) - 1)  -- number of active regs other than R1
 
     isBoxedAlt = case at of
                    PrimAlt {} -> False
