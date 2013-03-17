@@ -289,14 +289,6 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) =
                  |]
 
 
-updateThunk :: JStat
-updateThunk =
-  [j| `push [toJExpr R1, jsv "h$upd_frame"]`;
-      `R1`.f = h$blackhole;
-      `R1`.d1 = h$currentThread.tid;
-      `R1`.d2 = null
-    |]
-
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
    l' <- concat <$> mapM genIdsI l

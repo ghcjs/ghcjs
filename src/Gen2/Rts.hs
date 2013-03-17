@@ -25,6 +25,14 @@ import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
 
 import           Encoding
 
+updateThunk :: JStat
+updateThunk =
+  [j| `push [toJExpr R1, jsv "h$upd_frame"]`;
+      `R1`.f = h$blackhole;
+      `R1`.d1 = h$currentThread.tid;
+      `R1`.d2 = null; // will be filled with waiters array
+    |]
+
 -- fixme move somewhere else
 declRegs :: JStat
 -- fixme prevent holes
@@ -239,11 +247,12 @@ fun h$select2_ret {
 // throw an exception: walk the thread's stack until you find a handler
 fun h$throw e async {
   `preamble`;
-//  h$dumpStackTop(`Stack`,0,`Sp`);
+  // log("throwing exception: " + async);
+  // h$dumpStackTop(`Stack`,0,`Sp`);
   var origSp = `Sp`;
   var lastBh = null; // position of last blackhole frame
   while(`Sp` > 0) {
-//    log("unwinding frame: " + `Sp`);
+    // log("unwinding frame: " + `Sp`);
     var f = `Stack`[`Sp`];
     if(f === null || f === undefined) {
       throw("panic: invalid object while unwinding stack");
@@ -261,7 +270,7 @@ fun h$throw e async {
       if(async) {
         // convert blackhole back to thunk
         if(lastBh === null) {
-          h$makeResumable(t,`Sp`+1,origSp,[`R1`,h$return]);
+          h$makeResumable(t,`Sp`+1,origSp,[]); // [`R1`,h$return]);
         } else {
           h$makeResumable(t,`Sp`+1,lastBh-2,[h$ap_0_0,`Stack`[lastBh-1],h$return]);
         }
@@ -286,6 +295,8 @@ fun h$throw e async {
     }
     `Sp` = `Sp` - size;
   }
+  //log("unwound stack to: " + `Sp`);
+  //h$dumpStackTop(`Stack`,0,origSp);
   if(`Sp` > 0) {
     var maskStatus = `Stack`[`Sp` - 2];
     var handler = `Stack`[`Sp` - 1];
@@ -512,7 +523,7 @@ fun h$logCall c {
   } else {
     f = h$collectProps c;
   }
-  log("trampoline calling: " + f + "    " + JSON.stringify([h$printReg `R1`, h$printReg `R2`, h$printReg `R3`, h$printReg `R4`, h$printReg `R5`]));
+  log(h$threadString(h$currentThread) + "  trampoline calling: " + f + "    " + JSON.stringify([h$printReg `R1`, h$printReg `R2`, h$printReg `R3`, h$printReg `R4`, h$printReg `R5`]));
   h$checkStack();
 }
 
@@ -808,11 +819,15 @@ fun h$suspendCurrentThread next {
 // we need to push is in d1, restore frame should
 // be there
 fun h$resume_e {
+  //log("resuming computation");
+  //h$logStack();
   var s = `R1`.d1;
+  `updateThunk`;
   for(var i=0;i<s.length;i++) {
     `Stack`[`Sp`+1+i] = s[i];
   }
   `Sp`=`Sp`+s.length;
+  //h$logStack();
   return `Stack`[`Sp`];
 }
 `ClosureInfo (jsv "h$resume_e") [] "resume" (CILayoutFixed 0 []) CIThunk CINoStatic`;

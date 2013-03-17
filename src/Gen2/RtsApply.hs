@@ -423,7 +423,7 @@ fastApply r n =
                    case `Blackhole`:
                      `traceRts $ (funName ++ ": blackhole")`;
                      `push $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
-                     `push [toJExpr R1, jsv "h$return"]`;
+                     `push [jsv "h$ap_0_0", toJExpr R1, jsv "h$return"]`;
                      return h$blockOnBlackhole(`R1`);
                    default:
                      throw (`funName ++ ": unexpected closure type: "` + c.t);
@@ -487,6 +487,9 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter`; }
                   `traceRts $ "h$ap_1_0: " |+ (c|."n") |+ " :a " |+ (c|."a") |+ " (" |+ (clTypeName c) |+ ")"`;
                   if(c.t === `Thunk`) {
                     return c;
+                  } else if(c.t === `Blackhole`) {
+                    `push [toJExpr R1, jsv "h$return"]`;
+                    return h$blockOnBlackhole(`R1`);
                   } else {
                     `adjSpN 1`;
                     return c;
@@ -508,7 +511,7 @@ enter = [j| var c = `R1`.f;
               case `Pap`:
                 return `Stack`[`Sp`];
               case `Blackhole`:
-                `push [toJExpr R1, jsv "h$return"]`;
+                `push [jsv "h$ap_0_0", toJExpr R1, jsv "h$return"]`;
                 return h$blockOnBlackhole(`R1`);
               default:
                 return `c`;
