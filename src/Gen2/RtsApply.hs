@@ -423,7 +423,7 @@ fastApply r n =
                    case `Blackhole`:
                      `traceRts $ (funName ++ ": blackhole")`;
                      `push $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
-                     `push [jsv "h$ap_0_0", toJExpr R1, jsv "h$return"]`;
+                     `push [toJExpr R1, jsv "h$return"]`;
                      return h$blockOnBlackhole(`R1`);
                    default:
                      throw (`funName ++ ": unexpected closure type: "` + c.t);
@@ -459,21 +459,6 @@ fastApply r n =
             saveRegs n = SwitchStat n switchAlts mempty
               where
                 switchAlts = map (\x -> ([je|`x`|],[j|`Stack`[`Sp`+`r-x`] = `numReg (x+2)`|])) [0..r-1]
-{-
-compatApply :: JStat
-compatApply =
-  [j| var !h$ap_v = h$ap_1_0;
-      var !h$ap_0_fast = h$ap_0_0_fast;
-      var !h$ap_0 = h$ap_0_0;
-      var !h$ap_0_v_fast = h$ap_1_0_fast;
-      var !h$ap_v_fast = h$ap_1_0_fast;
-      var !h$ap_1_fast = h$ap_1_1_fast;
-      var !h$ap_1_v_fast = h$ap_2_1_fast;
-      var !h$ap_2_v_fast = h$ap_3_2_fast;
-      var !h$ap_2 = h$ap_2_2;
-      var !h$ap_0_v = h$ap_v;
-    |]
--}
 
 zeroApply :: JStat
 zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter`; }
