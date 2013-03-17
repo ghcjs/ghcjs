@@ -65,10 +65,12 @@ tests = do
   arith   <- allTestsIn test "test/arith"
   integer <- allTestsIn test "test/integer"
   pkg     <- allTestsIn test "test/pkg"
+  conc    <- allTestsIn test "test/conc"
   return [ testGroup "Tests from the Fay testsuite" fay
          , testGroup "Tests from the GHC testsuite" ghc
          , testGroup "Arithmetic" arith
          , testGroup "Integer" integer
+         , testGroup "Concurrency" conc
          , testGroup "Tests imported from packages" pkg
          ]
 
@@ -130,7 +132,7 @@ padTo n xs | l < n     = xs ++ replicate (n-l) ' '
 stdioExpected :: FilePath -> IO StdioResult
 stdioExpected file = do
   xs@[mex,mout,merr] <- mapM (readFilesIfExists.(map (replaceExtension file)))
-       [["exit"], ["out", "stdout"], ["err","stderr"]]
+       [["exit"], ["stdout", "out"], ["stderr","err"]]
   if any isJust xs
     then return $ StdioResult (fromMaybe ExitSuccess $ readExitCode =<< mex)
                      (fromMaybe "" mout) (fromMaybe "" merr)
