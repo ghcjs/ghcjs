@@ -20,7 +20,7 @@ import qualified Data.Set as S
 import           Data.Set (Set)
 import qualified Data.Map as M
 import           Data.Map (Map)
-import           Control.Monad.State
+import           Control.Monad.State.Strict
 
 import           DynFlags
 import           Encoding

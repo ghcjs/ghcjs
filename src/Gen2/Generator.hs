@@ -34,6 +34,7 @@ import           Data.ByteString (ByteString)
 import qualified Data.Serialize as C
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.IntMap.Strict as IM
 import           Data.Monoid
 import           Data.Maybe (isJust, fromMaybe)
 import           Data.Map (Map)
@@ -51,9 +52,9 @@ import qualified Data.Text.Encoding.Error as T
 import           Data.Text (Text)
 import           Text.PrettyPrint.Leijen.Text hiding ((<>), (<$>), pretty)
 import           Language.Javascript.JMacro
-import           Control.Monad.State
+import           Control.Monad.State.Strict
 import           Control.Applicative
-
+import           Control.DeepSeq
 import           Gen2.Floater
 import           Gen2.Utils
 import           Gen2.Prim
@@ -76,86 +77,38 @@ import           Data.Generics.Schemes
 
 import qualified Debug.Trace as DT
 
-type StgPgm     = [StgBinding] -- [(StgBinding, [(Id, [Id])])]
+type StgPgm     = [StgBinding]
 type StaticRefs = [Id]
-{-
-data GenerateSettings = GenerateSettings
-       { gsIncludeRts     :: Bool -- include the rts in the generated file
-       , gsRunMain        :: Bool -- immediately run the main IO action
-       , gsTraceFunctions :: Bool -- trace all function calls (not just trampoline)
-       , gsNodeModule     :: Bool -- export our global variables to make a node module
-       }
--}
-saying = flip DT.trace
 
 generate :: DynFlags -> StgPgm -> Module -> (ByteString, ByteString)  -- module,metadata
-generate df s m = (result, deps)
-  where
-    prr doc = let doc' = doc --  <> exportGlobals doc
-              in (displayT . renderPretty 0.8 150 . pretty . jsSaturate Nothing $ doc') <> TL.pack "\n"
-    (p1, meta)  = pass1 df m s
-    js          = pass2 m p1
-    deps        = C.runPut . C.put $ meta -- genMetaData m $ p1
-
-    result  = BL.toStrict $ TL.encodeUtf8 ( dumpAst <> prr ( {- addDebug $ rts <> -} runGen df m js ))
-
-    dumpAst = TL.pack "" -- (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s)) -- <>
---              TL.pack (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent.removeNoEscape) s))
-
-
-
-{-
-srts :: [[(Id, [Id])]] -> JStat
-srts xss = mconcat $ map (\xs -> [j| srts = `mconcat $ map toSrt xs`; |]) xss
-  where
-    toSrt (id, ids) = istr (jsIdI id) .= map jsId ids
--}
-
--- collect globals and export them, to make our source a node module
-exportGlobals :: JStat -> JStat
-exportGlobals s = [j| if(typeof exports !== "undefined") { `exp s`; } |]
-  where exp = mconcat . map exportVar . collectDecls . everywhere (mkT removeFunc)
-
-collectDecls :: JStat -> [Ident]
-collectDecls = map fromDecl . listify isDecl
-    where
-      isDecl (DeclStat {}) = True
-      isDecl _             = False
-      fromDecl (DeclStat i _) = i
-
-exportVar :: Ident -> JStat
-exportVar i = AssignStat (SelExpr [je|exports|] i) (ValExpr (JVar i))
-
-removeFunc :: JVal -> JVal
-removeFunc (JFunc {}) = JInt 0
-removeFunc x          = x
+generate df s m = flip evalState (initState df m) $ do
+  (p1, d) <- unzip <$> pass1 df m s
+  let result = BL.toStrict $ TL.encodeUtf8 (TL.unlines p1)
+  (deps, pkgs, funs) <- genMetaData d
+  let depsBs = C.runPut $ Linker.serializeDeps pkgs funs deps
+  return (result, depsBs)
 
 -- | variable prefix for the nth block in module
 modulePrefix :: Module -> Int -> String
 modulePrefix m n = "h$" ++ (zEncodeString . moduleNameString . moduleName $ m) ++ "_id_" ++ show n
 
-runMainIO :: Module -> JStat
-runMainIO m = [j|
-  runhs(runio(`main`), dumpRes);
- |]
-    where
-      main = JVar . StrI $ "h$" ++ (zEncodeString . moduleNameString . moduleName) m ++ "zimain"
-
 -- | pass1 generates unsaturated blocks and dependency info
 pass1 :: DynFlags
       -> Module
       -> StgPgm
-      -> ([(JStat, [Id], [Id])], Linker.Deps) -- | for each function block: js code, defined ids, dependencies
-pass1 df m ss = flip evalState (initState df m) $ do
-  blockDeps <- mapM generateBlock ss
-  ldeps <- genMetaData blockDeps
-  return (blockDeps, ldeps)
+      -> G [(TL.Text,([Id], [Id]))] -- for each toplevel chunk
+pass1 df m ss = sequence (zipWith generateBlock ss [(1::Int)..])
     where
-      generateBlock :: StgBinding -> G (JStat, [Id], [Id])
-      generateBlock decl = -- d@(decl,deps) =
-        let allDeps = {- L.nub $ concatMap snd deps ++ -} collectIds decl
-        -- ids = map fst deps
-        in  (,collectTopIds decl,allDeps) <$> genToplevel (removeNoEscape decl)
+      generateBlock :: StgBinding -> Int -> G (TL.Text,([Id], [Id]))
+      generateBlock decl n = do
+          tl <- genToplevel (removeNoEscape decl)
+          let allDeps = collectIds decl
+              topDeps = collectTopIds decl
+          tl' <- delimitBlock m topDeps
+                          . floatTop
+                          . jsSaturate (Just $ modulePrefix m n) $ tl
+          let tltxt   = displayT . renderPretty 0.8 150 . pretty $ tl'
+          rnf tltxt `seq` return (tltxt,(topDeps,allDeps))
 
 collectTopIds :: StgBinding -> [Id]
 collectTopIds (StgNonRec b _) = [b]
@@ -172,54 +125,57 @@ collectIds b = filter acceptId $ S.toList (bindingRefs b)
                     Linker.packageName (modulePackageText m) == T.pack "ghc-prim"
       | otherwise = False
 
--- | pass2 combines and saturates the AST and runs the transformations
-pass2 :: Module -> [(JStat,[Id],[Id])] -> C
-pass2 m = mconcat . zipWith p2 [1..]
-  where
-    p2 n (s,ids,_) = delimitBlock m ids
---                   . rewriteInternalIds m
-                   . floatTop
-                   . jsSaturate (Just $ modulePrefix m n)
-                   $ s
+data MetadataCache = MDC
+         { mdcPackage    :: (IM.IntMap Linker.Package)  -- Unique PackageId -> Linker.Package
+         , mdcId         :: (IM.IntMap Linker.Fun)      -- Unique Id -> Linker.Fun
+         }
 
-genMetaData :: [(a, [Id], [Id])] -> G Linker.Deps
+genMetaData :: [([Id], [Id])] -> G (Linker.Deps, Set Linker.Package, Set Linker.Fun)
 genMetaData p1 = do
   m <- use gsModule
-  ds <- concat <$> mapM oneDep p1
-  return $ Linker.Deps (modulePackageText m) (moduleNameText m) 
-                               (M.fromList ds)
-  where
-    oneDep (_, symbs, deps) = mapM (symbDep deps) symbs
+  (ds, (MDC pkgs funs)) <- runStateT (concat <$> mapM oneDep p1) (MDC IM.empty IM.empty)
+  let sp = S.fromList (IM.elems pkgs)
+      sf = S.fromList (IM.elems funs)
+  return (Linker.Deps (modulePackageText m) (moduleNameText m) (M.fromList ds), sp, sf)
+   where
+    oneDep (symbs, deps) = mapM (symbDep deps) symbs
     symbDep deps symb = do
       ds <- mapM idFun deps
-      st <- idTxt symb
+      st <- idFun symb
       return (st, S.fromList ds)
-    idTxt i = do
-       (StrI xs) <- (jsIdI i)
-       return (T.pack xs)
+    -- makes a Linker.Fun from an Id, from cache if possible
     idFun i = do
-      m <- use gsModule
-      let mod = fromMaybe m $ nameModule_maybe (getName i)
-      Linker.Fun (modulePackageText mod) (moduleNameText mod) <$> idTxt i
-{-
--- internal ids are named $hs_INTERNAL_xxx, rewrite them to include the module
-rewriteInternalIds :: Module -> JStat -> JStat
-rewriteInternalIds m = everywhere (mkT (rewriteInternalId m))
--}
+      let k = getKey . getUnique $ i
+      (MDC ps is) <- get
+      case IM.lookup k is of
+        Just x  -> return x
+        Nothing -> do
+          m <- lift (use gsModule)
+          let mod = fromMaybe m $ nameModule_maybe (getName i)
+              mk = getKey . getUnique $ mod
+          (StrI idStr) <- lift (jsIdI i)
+          let idTxt = T.pack idStr
+          case IM.lookup mk ps of
+            Just p -> do
+              let f = Linker.Fun p (moduleNameText mod) idTxt
+              put (MDC ps $ IM.insert k f is)
+              return f
+            Nothing -> do
+              let p = modulePackageText mod
+                  f = Linker.Fun p (moduleNameText mod) idTxt
+              put (MDC (IM.insert mk p ps) (IM.insert k f is))
+              return f
 
 moduleNameText :: Module -> Text
-moduleNameText = T.pack . moduleNameString . moduleName
+moduleNameText m
+  | xs == ":Main" = T.pack "Main" 
+  | otherwise = T.pack xs
+    where xs = moduleNameString . moduleName $ m
 
 modulePackageText :: Module -> Linker.Package
 modulePackageText m = Linker.Package n v
   where
     (n,v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
-
-{-
--- | run the monadic code generator
-runGenToplevel :: Module -> (StgBinding, [(Id, [Id])]) -> JStat
-runGenToplevel m b = evalState (genToplevel b) (initState m)
--}
 
 genToplevel :: StgBinding -> C -- (StgBinding, [(Id, [Id])]) -> C
 genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs -- (lookupStaticRefs bndr srts)

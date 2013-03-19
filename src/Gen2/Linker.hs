@@ -20,6 +20,7 @@ import           Data.Maybe               (fromMaybe)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
+import qualified Data.Vector              as V
 
 import Data.Char (isDigit)
 import qualified Data.Foldable            as F
@@ -131,12 +132,12 @@ splitVersion t
 -- | dependencies for a single module
 data Deps = Deps { depsPackage :: !Package
                  , depsModule  :: !Text
-                 , depsDeps    :: Map Text (Set Fun)
+                 , depsDeps    :: Map Fun (Set Fun)
                  }
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
-modFuns (Deps p m d) = map (Fun p m . fst) (M.toList d)
+modFuns (Deps p m d) = map fst (M.toList d)
 
 data Package = Package { packageName :: !Text
                        , packageVersion :: !Text
@@ -151,16 +152,44 @@ data Fun = Fun { funPackage :: !Package
                , funSymbol  :: !Text
                } deriving (Eq, Ord, Show)
 
-instance Serialize Deps where
-  get = Deps <$> get
-             <*> getText
-             <*> getMapOf getText (getSetOf get)
-  put (Deps p m d) = put p >> putText m >> putMapOf putText (putSetOf put) d
+data IndexedFun = IndexedFun { ifunPackage :: !Int
+                             , ifunModule  :: !Text
+                             , ifunSymbol  :: !Text
+                             }
 
+instance Serialize IndexedFun where
+  get             = IndexedFun <$> get <*> getText <*> getText
+  put (IndexedFun p m s) = put p >> mapM_ putText [m,s]
 
-instance Serialize Fun where
-  get             = Fun <$> get <*> getText <*> getText
-  put (Fun p m s) = put p >> mapM_ putText [m,s]
+toIndexedFun :: Map Package Int -> Fun -> IndexedFun
+toIndexedFun pkgs (Fun p m s) = (IndexedFun idx m s)
+  where
+    idx = fromMaybe (error $ "missing package in deps set: " ++ show p) (M.lookup p pkgs)
+
+fromIndexedFun :: V.Vector Package -> IndexedFun -> Fun
+fromIndexedFun pkgs (IndexedFun pi m s) = (Fun (pkgs V.! pi) m s)
+
+-- set of packages and set of funs must contain at least everything in Deps
+serializeDeps :: Set Package -> Set Fun -> Putter Deps --  -> Putter ByteString
+serializeDeps pkgs funs (Deps p m d) = do
+  put p
+  putText m
+  put (S.toAscList pkgs)
+  let pkgs' = M.fromList $ zip (S.toAscList pkgs) [(0::Int)..]
+      funs' = M.fromList $ zip (S.toAscList funs) [(0::Int)..]
+  put $ map (toIndexedFun pkgs') (S.toAscList funs)
+  let depIndex d = fromMaybe (error $ "missing symbol in deps set: " ++ show d) (M.lookup d funs')
+  put $ map (\(d,ds) -> (depIndex d, map depIndex $ S.toList ds)) (M.toAscList d)
+
+-- reads back a deps file, uses sharing for efficiency so be careful with the result
+unserializeDeps :: Get Deps
+unserializeDeps = do
+  p    <- get
+  m    <- getText
+  pkgs <- V.fromList <$> get
+  funs <- V.fromList . map (fromIndexedFun pkgs) <$> get
+  deps <- M.fromList . map (\(d,ds) -> (funs V.! d, S.fromList $ map (funs V.!) ds)) <$> get
+  return (Deps p m deps)
 
 -- | get all dependencies for a given set of roots
 getDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun)
@@ -174,7 +203,7 @@ getDeps lookup fun = go S.empty M.empty (S.toList fun)
             Nothing -> lookup "ji" f >>= readDeps >>=
                            \d -> go result (M.insert key d deps) ffs
             Just (Deps _ _ d)  -> let ds = filter (`S.notMember` result)
-                                           (maybe [] S.toList $ M.lookup (funSymbol f) d)
+                                           (maybe [] S.toList $ M.lookup f d)
                               in  go (S.insert f result) deps (ds++fs)
 
 -- | get all modules used by the roots and deps
@@ -232,14 +261,10 @@ putText t =
   let bs = TE.encodeUtf8 t
   in  putWord32le (fromIntegral $ B.length bs) >> putByteString bs
 
--- | write module dependencies file
-writeDeps :: FilePath -> Deps -> IO ()
-writeDeps file = B.writeFile file . runPut . put
-
 -- | read the modulename.gen2.ji file
 readDeps :: FilePath -> IO Deps
 readDeps file = do
-  either error id . runGet get <$> B.readFile file
+  either error id . runGet unserializeDeps <$> B.readFile file
 
 dumpDeps :: Deps -> String
 dumpDeps (Deps p m d) = T.unpack $
@@ -247,8 +272,8 @@ dumpDeps (Deps p m d) = T.unpack $
   "module: " <> m <> "\n" <>
   "deps:\n" <> T.unlines (map (uncurry dumpDep) (M.toList d))
   where
-    dumpDep s ds = s <> " -> \n" <>
-      F.foldMap (\(Fun fp fm fs) -> "   " 
+    dumpDep s ds = funSymbol s <> " -> \n" <>
+      F.foldMap (\(Fun fp fm fs) -> "   "
         <> showPkg fp <> ":" <> fm <> "." <> fs <> "\n") ds
 
 showPkg :: Package -> Text
