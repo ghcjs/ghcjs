@@ -161,7 +161,7 @@ main =
                             else mapM_ compileModSummary mgraph
                           dflags3 <- getSessionDynFlags
                           case ghcLink sdflags of
-                            LinkBinary -> when (not oneshot) (buildExecutable dflags3 jsArgs)
+                            LinkBinary -> when (not oneshot) (buildExecutable dflags3 jsArgs) >> touchOutputFile
                             LinkDynLib -> return ()
                             _          -> touchOutputFile
 
