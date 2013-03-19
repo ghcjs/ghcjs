@@ -28,7 +28,7 @@ import           Type hiding (typeSize)
 import           Name
 import           Id
 
-import           Data.Char (ord, isDigit)
+import           Data.Char (ord, chr, isDigit)
 import           Data.Bits ((.|.), shiftL, shiftR, (.&.), testBit, xor, complement)
 import           Data.ByteString (ByteString)
 import qualified Data.Serialize as C
@@ -44,6 +44,7 @@ import           Data.Foldable (fold)
 import qualified Data.Set as S
 import           Data.List (partition, intercalate, sort, find)
 import qualified Data.List as L
+import           Data.List.Split (splitOn)
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL
 import qualified Data.Text as T
@@ -51,6 +52,8 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.Encoding.Error as T
 import           Data.Text (Text)
 import           Text.PrettyPrint.Leijen.Text hiding ((<>), (<$>), pretty)
+import qualified Text.Parsec as P
+import qualified Text.Parsec.Char as P
 import           Language.Javascript.JMacro
 import           Control.Monad.State.Strict
 import           Control.Applicative
@@ -282,7 +285,8 @@ genExpr top (StgLit l)           = return $ (mconcat (zipWith assign (enumFrom R
                                             [j| return `Stack`[`Sp`]; |])
   where assign r v = [j| `r` = `v`; |]
 genExpr top (StgConApp con args) = genCon con =<< concatMapM genArg args
-genExpr top (StgOpApp (StgFCallOp f _) args t) = genForeignCall f args t
+genExpr top (StgOpApp (StgFCallOp f _) args t) =
+   genForeignCall0 f t (map toJExpr $ enumFrom R1) args
 genExpr top (StgOpApp (StgPrimOp op) args t) = genPrimOp op args t
 genExpr top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall c args t
 genExpr top (StgLam{}) = panic "StgLam"
@@ -619,21 +623,21 @@ genCase top bnd (StgOpApp (StgFCallOp fc _) args t) (UbxTupAlt n) [(DataAlt{}, b
   do
    ids <- concatMapM genIds bndrs
    concatMapM declIds bndrs <>
-     genForeignCall0 fc ids args <>
+     genForeignCall0 fc t ids args <>
      genExpr top e
 
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt tc) alts l =
   do
     ids <- genIds bnd
     declIds bnd <>
-      genForeignCall' (unpackFS lbl) ids args <>
+      parseFFIPattern (unpackFS lbl) t ids args <>
       genAlts top bnd at alts
 
 
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) _ [(DataAlt{}, bndrs, _, e)] l = do
   ids <- concatMapM genIds bndrs
   concatMapM declIds bndrs <>
-     genForeignCall' (unpackFS lbl) ids args <>
+     parseFFIPattern (unpackFS lbl) t ids args <>
      genExpr top e
 
 -- pattern match on an unboxed tuple
@@ -887,7 +891,7 @@ mkAlgBranch top d alt@(a,bs,use,expr) = (caseCond a,) <$> b
       | LitAlt  l  <- a = Just (genSingleLit l)
       | DEFAULT    <- a = Nothing -- panic "default branch"
 -}
-
+ 
 -- single-var prim
 {-
 mkPrimBranch :: JExpr -> JExpr -> StgAlt -> (Maybe JExpr, JStat)
@@ -1174,17 +1178,18 @@ typeComment i = do
 -- fixme: what if the call returns a thunk?
 genPrimCall :: PrimCall -> [StgArg] -> Type -> C
 genPrimCall (PrimCall lbl _) args t = 
-  genForeignCall' (unpackFS lbl) tgt args <> return [j| return `Stack`[`Sp`]; |]
+  parseFFIPattern (unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
   where
     tgt = map toJExpr . take (typeSize t) $ enumFrom R1
-    f = iex $ StrI (unpackFS lbl)
-    fcall = ApplExpr f <$> concatMapM genArg args
+--    f = iex $ StrI (unpackFS lbl)
+--    fcall = ApplExpr f <$> concatMapM genArg args
 
-genForeignCall0 :: ForeignCall -> [JExpr] -> [StgArg] -> C
-genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) tgt args =
-  genForeignCall' (unpackFS clbl) tgt args
-genForeignCall0 _ _ _ = panic "unsupported foreign call"
+genForeignCall0 :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> C
+genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) t tgt args =
+  parseFFIPattern (unpackFS clbl) t tgt args
+genForeignCall0 _ _ _ _ = panic "unsupported foreign call"
 
+{-
 -- fixme: what if the call returns a thunk?
 -- fixme: deal with safety and calling conventions
 genForeignCall :: ForeignCall
@@ -1192,31 +1197,120 @@ genForeignCall :: ForeignCall
                -> Type     -- ^ return type
                            -> C
 genForeignCall (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) args t =
-  genForeignCall' (unpackFS clbl) tgt args <> return [j| return `Stack`[`Sp`]; |]
-  where
-    tgt = map toJExpr . take (typeSize t) $ enumFrom R1
+  genForeignCall' (unpackFS clbl) t args <> return [j| return `Stack`[`Sp`]; |]
 genForeignCall _ _ _ = panic "unsupported foreign call"
-
+-}
 -- | generate the actual call
 -- fixme if thing starts with &, what to do?
-genForeignCall' :: String -> [JExpr] -> [StgArg] -> C
-genForeignCall' clbl tgt args
-  | (t:ts) <- tgt = do
-    as <- concat <$> mapM genArg args
-    return $ traceCall as <> [j| `t` = `ApplExpr f as` |] <> copyResult ts
-  | otherwise     = do
-      as <- concat <$> mapM genArg args
-      return $ traceCall as <> [j| `ApplStat f as` |]
-      where
-        copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs
-        f     = iex (StrI clbl')
-        wrapperPrefix = "ghczuwrapperZC"
-        clbl' | wrapperPrefix `L.isPrefixOf` clbl = ("h$"++) $ drop 2 $ dropWhile isDigit $ drop (length wrapperPrefix) clbl
-              | "@" `L.isPrefixOf` clbl = clbl
-              | otherwise = "h$" ++ clbl
-        traceCall as
-              | rtsTraceForeign = [j| h$traceForeign(`clbl'`, `as`); |]
-              | otherwise       = mempty
+{-
+  parse FFI patterns:
+   "&value         -> value
+  1. "@function"     -> ret = function(...)
+  2. "function"      -> ret = h$function(...)
+  3. "$r = $1.f($2)  -> r1 = a1.f(a2)
+  
+  arguments, $1, $2, $3 unary arguments
+     $1_1, $1_2, for a binary argument
+  
+  return type examples
+  1. $r                      unary return
+  2. $r1, $r2                binary return
+  3. $r1, $r2, $r3_1, $r3_2  unboxed tuple return
+ -}
+parseFFIPattern :: String   -- ^ pattern called
+                -> Type     -- ^ return type
+                -> [JExpr]  -- ^ expressions to return in (may be more than necessary)
+                -> [StgArg] -- ^ arguments
+                -> C
+parseFFIPattern pat t es as
+  | encPrefix `L.isPrefixOf` pat = parseFFIPattern (decode pat) t es as
+    where encPrefix = "ghcjs_encoded_"
+          decode = map (chr.read) . splitOn "_" . drop (length encPrefix)
+parseFFIPattern pat t ret args
+  | "@" `L.isPrefixOf` pat = mkApply (tail pat)  -- case 1
+  | wrapperPrefix `L.isPrefixOf` pat =
+     mkApply $ ("h$" ++ drop (length wrapperPrefix) pat) -- case 2 (wrapper)
+  | otherwise =
+      case parseJM pat of
+        Left err0 -> case parseJME pat of
+          Left err1 -> p (show err0)
+          Right (ValExpr (JVar (StrI ident))) -> mkApply ("h$" ++ pat)
+          Right _    -> p (show err0)
+        Right stat -> do
+          let rp = resultPlaceholders t ret
+          ap <- argPlaceholders args
+          let env = M.fromList (rp ++ ap)
+          return (everywhere (mkT $ replaceIdent env) stat) -- fixme trace?
+  where
+    tgt = take (typeSize t) ret
+    -- automatic apply, build call and result copy
+    mkApply f
+      | (t:ts) <- tgt = do
+         as <- concat <$> mapM genArg args
+         return $ traceCall as <> [j| `t` = `ApplExpr f' as`; |] <> copyResult ts
+      | otherwise = do
+         as <- concat <$> mapM genArg args
+         return $ traceCall as <> [j| `ApplStat f' as`; |]
+        where f' = toJExpr (StrI f)
+    copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs
+    wrapperPrefix = "ghczuwrapperZC"
+    p e = panic ("parse error in ffi pattern: " ++ pat ++ "\n" ++ e)
+    replaceIdent :: Map Ident JExpr -> JExpr -> JExpr
+    replaceIdent env e@(ValExpr (JVar i@(StrI xs)))
+      | isFFIPlaceholder i = fromMaybe err (M.lookup i env)
+      | otherwise = e
+        where err = panic (pat ++ ": invalid placeholder, check function type: " ++ xs)
+    replaceIdent _ e = e
+    traceCall as
+        | rtsTraceForeign = [j| h$traceForeign(`pat`, `as`); |]
+        | otherwise       = mempty
+
+-- $r for single, $r1,$r2 for dual
+-- $r1, $r2, etc for ubx tup, void args not counted
+resultPlaceholders :: Type -> [JExpr] -> [(Ident,JExpr)] -- ident, replacement
+resultPlaceholders t rs =
+  case repType t of
+    UbxTupleRep uts ->
+      let sizes = filter (>0) (map typeSize uts)
+          f n 0 = []
+          f n 1 = ["$r" ++ show n]
+          f n k = map (\x -> "$r" ++ show n ++ "_" ++ show x) [1..k]
+          phs   = zipWith (\size n -> f n size) sizes [(1::Int)..]
+      in zip (map StrI $ concat phs) rs
+    UnaryRep ut ->
+      case typeSize t of
+        0 -> []
+        1 -> [(StrI "$r",head rs)] -- single
+        n -> zipWith (\n r -> (StrI $ "$r" ++ show n, toJExpr r)) 
+                   [1..n] (take n rs)
+
+-- $1, $2, $3 for single, $1_1, $1_2 etc for dual
+-- void args not counted
+argPlaceholders :: [StgArg] -> G [(Ident,JExpr)]
+argPlaceholders args = do
+  idents <- filter (not.null) <$> mapM genArg args
+  return $ concat
+    (zipWith (\is n -> mkPlaceholder True ("$"++show n) is) idents [1..])
+
+mkPlaceholder :: Bool -> String -> [JExpr] -> [(Ident, JExpr)]
+mkPlaceholder undersc prefix aids =
+      case aids of
+             []  -> []
+             [x] -> [(StrI $ prefix, x)]
+             xs  -> zipWith (\x m ->
+               (StrI $ prefix ++ u ++ show m,x)) xs [(1::Int)..]
+   where u = if undersc then "_" else ""
+
+-- ident is $N, $N_R, $rN, $rN_R
+isFFIPlaceholder :: Ident -> Bool
+isFFIPlaceholder (StrI x) =
+  either (const False) (const True) (P.parse parser "" x)
+    where
+      parser = do
+        P.char '$'
+        P.optional (P.char 'r')
+        P.many1 P.digit
+        P.optional (P.char '_' >> P.many1 P.digit)
 
 withNewIdent :: (Ident -> G a) -> G a
 withNewIdent m = makeIdent >>= m
