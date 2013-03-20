@@ -169,6 +169,10 @@ fun h$false_e { return `Stack`[`Sp`]; }
 fun h$true_e { return `Stack`[`Sp`]; }
 `ClosureInfo (jsv "h$true_e") [] "GHC.Types.True" (CILayoutFixed 1 []) (CICon 2) CINoStatic`;
 
+// generic data constructor with 1 non-heapobj field
+fun h$data1_e { return `Stack`[`Sp`]; }
+`ClosureInfo (jsv "h$data1_e") [] "data1" (CILayoutFixed 2 [ObjV]) (CICon 1) CINoStatic`;
+
 fun h$con_e { return `Stack`[`Sp`]; };
 var !h$f = { f: h$false_e, d1: null, d2: null };
 var !h$t = { f: h$true_e, d1: null, d2: null };
@@ -850,6 +854,17 @@ fun h$maskFrame {
   return `Stack`[`Sp`];
 }
 `ClosureInfo (jsv "h$maskFrame") [] "mask" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+
+// async ffi results are returned in R1 = { f: ... d1: [array of values], d2: null }
+fun h$unboxFFIResult {
+  var d = `R1`.d1;
+  for(var i=0;i<d.length;i++) {
+    h$setReg(i+1, d[i]);
+  }
+  `adjSpN 1`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$unboxFFIResult") [PtrV] "unboxFFI" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
 |]
 

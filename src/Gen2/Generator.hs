@@ -275,10 +275,7 @@ loadArgs args = do
   return (mconcat $ zipWith loadArg args' (enumFrom R2))
    where
      loadArg a reg = decl a <> [j| `a` = `reg`; |]
---      args' = concatMap genIdArgI args
 
-
--- generate code for expression, assign result to r
 genExpr :: Id -> StgExpr -> C
 genExpr top (StgApp f args)      = genApp False True f args
 genExpr top (StgLit l)           = return $ (mconcat (zipWith assign (enumFrom R1) (genLit l)) <>
@@ -286,7 +283,7 @@ genExpr top (StgLit l)           = return $ (mconcat (zipWith assign (enumFrom R
   where assign r v = [j| `r` = `v`; |]
 genExpr top (StgConApp con args) = genCon con =<< concatMapM genArg args
 genExpr top (StgOpApp (StgFCallOp f _) args t) =
-   genForeignCall0 f t (map toJExpr $ enumFrom R1) args
+   fst <$> genForeignCall0 f t (map toJExpr $ enumFrom R1) args
 genExpr top (StgOpApp (StgPrimOp op) args t) = genPrimOp op args t
 genExpr top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall c args t
 genExpr top (StgLam{}) = panic "StgLam"
@@ -380,7 +377,7 @@ genApp force mstackTop i a
 
 --    fr1 = if hasFree then r1 else mempty
     ji = jsId i
-    n = length a -- 300000 -- length (filter (not.isDictArg) a)
+    n = length a
     b = mapM genArg a
 
 pushCont :: [StgArg] -> C
@@ -392,63 +389,6 @@ pushCont as = do
     else return (push $ reverse $ app : mkTag as' as : as')
   where
     mkTag rs ns = toJExpr ((length rs `shiftL` 8) .|. length ns)
-
-   {-
-    True -> 
-    False -> do
-      let Just tag  = ptrTag $ scannableOffsets 0 (map argVt as)
-      return (push $ reverse $ app : toJExpr tag : as')
-      -}
-  -- fixme is push order wrong?
-{-
-  | spec      = push $ reverse $ app : concatMap genArg as
-  | otherwise = push $ reverse $ app : toJExpr tag : concatMap genArg as
-     where
-       -- fixme support fallback to list
-       
--}
--- generate no-escape binding: no heap object but stack frame
-{-
-genNoEscape :: Id -> UniqSet Id -> UniqSet Id -> StgBinding -> C
-genNoEscape top l1 l2 bndr
- | (StgNonRec b r) <- bndr = slive <> assign b r <> allocCls [(b,r)]
- | (StgRec bs) <- bndr     = slive <> concatMapM (uncurry assign) bs <> allocCls bs
-  where
-    slive = do
-      live1 <- show <$> mapM (fmap istr . jsIdI) (uniqSetToList l1)
-      live2 <- show <$> mapM (fmap istr . jsIdI) (uniqSetToList l2)
-      return [j| log("noescape: " + `live1` + " " + `live2`);
-                 log("yar: " + `showIndent bndr`);
-              |]
-    assign :: Id -> StgRhs -> C
-    assign b r = genEntry top b r
--}
-
--- generate no-escape binding: since we don't have real pointers in JavaScript,
--- having closures on the stack is problematic, we'll allocate them on the
--- heap for now
--- this means we have to treat them as regular free variables, so the AST
--- subtree needs to be updated
-{-
-genNoEscape :: Id -> UniqSet Id -> UniqSet Id -> StgBinding -> C
-genNoEscape top l1 l2 (StgNonRec b r) =
-  genBind top (StgNonRec b $ propagateNoEscape b r)
-genNoEscape top l1 l2 (StgRec bs) = panic "recursive noescape"
--}
-
--- removeNoEscape :: StgBind -
-{-
-propagateNoEscape :: Id -> StgExpr -> StgExpr
-propagateNoEscape i (StgCase e live1 live2 b srt at alts)
-  |
-propagateNoEscape i (StgLetNoEscape
-
-propagateNoEscapeR :: Id -> StgRhs -> StgRhs
-propagateNoEscapeR i (StgRhsClosure cc bi live upd srt bs expr)
-  let live' = if i `S.member` exprRefs expr then i:live else live
-  in  StgRhsClosure cc bi live' upd srt bs (progagateNoEscape i expr)
-propagateNoEscapeR _ c = c
--}
 
 -- regular let binding: allocate heap object
 genBind :: Id -> StgBinding -> C
@@ -476,7 +416,7 @@ genEntry top i (StgRhsClosure _cc _bi live Updatable _str [] (StgApp fun args)) 
          `ClosureInfo (iex ie) (genArgInfo True []) (istr ie ++ "," ++ show i)
              (fixedLayout $ map (uTypeVt.idType) live) et CINoStatic`;
        |]
---                    `setObjInfo (jsEntryId i) $ genClosureInfo (showPpr' i) live [] <> "gai" .= genArgInfo True []`;
+
 genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag _srt args body) = do
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
@@ -507,14 +447,8 @@ genSetConInfo i d = do
                  (CICon $ dataConTag d) CINoStatic`;
            |]
     where
-      fields = dataConRepArgTys d -- trd4 (dataConSig d)
-{-
-           info = "i"   .= genConInfo d <>
-             genGcInfo (trd4 (dataConSig d)) <>
-             "t"   .= Con <>
-             "a"   .= dataConTag d <>
-             "gai" .= [ji 1];
--}
+      fields = dataConRepArgTys d
+
 -- info table for the arguments that are heap pointers when this function is to be calledb
 -- cl == True means that the current closure in r1 is a heap object
 genArgInfo :: Bool -> [Type] -> [VarType] -- [StgReg]
@@ -539,18 +473,6 @@ checkArgsList args xs
 
 mkDataEntry :: JExpr
 mkDataEntry = ValExpr $ JFunc funArgs [j| `preamble`; return `Stack`[`Sp`]; |]
-
--- generate the info table:
--- [size, descr, a0t, a1t, a2t]
-{-
-genConInfo :: DataCon -> JExpr
-genConInfo c = ValExpr . JList $ [s, d] ++ map (toJExpr . typeVt) as
-  where
-    as = trd4 (dataConSig c)
-    s  = toJExpr (argSize as + 1)
-    d  = toJExpr (showPpr' c)
--}
-trd4 (_,_,x,_) = x
 
 genFunInfo :: String -> [Id] -> JExpr
 genFunInfo name as = ValExpr . JList $ [s, jstr name] ++ map (toJExpr . uTypeVt . idType) as
@@ -619,25 +541,26 @@ genCase top bnd x@(StgCase {}) at alts l =
   genRet top bnd at alts l <> genExpr top x
 
 -- foreign call, fixme: do unsafe foreign calls inline
-genCase top bnd (StgOpApp (StgFCallOp fc _) args t) (UbxTupAlt n) [(DataAlt{}, bndrs, _, e)] l =
+genCase top bnd (StgOpApp (StgFCallOp fc _) args t) at@(UbxTupAlt n) alts@[(DataAlt{}, bndrs, _, e)] l =
   do
    ids <- concatMapM genIds bndrs
-   concatMapM declIds bndrs <>
-     genForeignCall0 fc t ids args <>
-     genExpr top e
+   (fc, async) <- genForeignCall0 fc t ids args
+   case async of
+     False -> concatMapM declIds bndrs <> return fc <> genExpr top e
+     True -> genRet top bnd at alts l <> return fc
 
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt tc) alts l =
   do
     ids <- genIds bnd
     declIds bnd <>
-      parseFFIPattern (unpackFS lbl) t ids args <>
+      parseFFIPattern False (unpackFS lbl) t ids args <>
       genAlts top bnd at alts
 
 
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) _ [(DataAlt{}, bndrs, _, e)] l = do
   ids <- concatMapM genIds bndrs
   concatMapM declIds bndrs <>
-     parseFFIPattern (unpackFS lbl) t ids args <>
+     parseFFIPattern False (unpackFS lbl) t ids args <>
      genExpr top e
 
 -- pattern match on an unboxed tuple
@@ -664,8 +587,6 @@ genCase top bnd expr at@PolyAlt alts l = do
    genRet top bnd at alts l <> genExpr top expr
 
 genCase _ _ x at alts _ = panic ("unhandled gencase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
--- genCase _ _ x at alts _ = return [j| unhandled_gencase_format = `show x` |]
-
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
 assignAll xs ys = mconcat (zipWith assignj xs ys)
@@ -690,31 +611,6 @@ genInlinePrimCase top bnd tc (PrimAlt ptc) alts
 --   genLoadUbxTup n bndrs <> genExpr top e
 genInlinePrimCase _ _ _ _ alt = panic ("unhandled primcase alt: " ++ show alt)
 
--- [j| unhandled_primcase_format = `show alt`; |]
-
-
-{-
-genForce :: Id -> Id -> JExpr -> AltType -> [StgAlt] -> StgLiveVars -> C
-genForce top bnd e at alts l = do
-  i <- makeIdent
-  r <- genRet top bnd at alts l
-  return $
-    toplevel [j| `decl i`; `r`; |] <>
-    [j| `R1` = `e`;
-             var c = _heap[`R1`];
-             `push [iex i]`;
-             if(c.t === `Thunk`) {
-               return c;
-             } else {
-               return `i`;
-             }
-      |]
--}
-
-needForce :: AltType -> Bool
-needForce PolyAlt  = True
-needForce AlgAlt{} = True
-needForce _        = False
 
 genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> C
 genRet top e at as l = withNewIdent $ \ret -> pushRetArgs free (iex ret) <> f ret
@@ -747,15 +643,6 @@ genRet top e at as l = withNewIdent $ \ret -> pushRetArgs free (iex ret) <> f re
       ras  <- loadRetArgs free
       alts <- genAlts top e at as
       return . ValExpr $ JFunc funArgs $ preamble <> l <> ras <> alts
-
- {-
-   ValExpr $ JFunc funArgs [j| `preamble`;
-                                         `decl (jsIdI e)`;
-                                         `jsId e` = `R1`;
-                                         `loadRetArgs free`;
-                                         `genAlts top e at as`;
-                                       |]
--}
 
 -- push/pop args in reverse order: first arg has lowest offset (corresponds with gc info)
 pushRetArgs :: [Id] -> JExpr -> C
@@ -830,14 +717,6 @@ loadUbxTup bs n = do
   return $ mconcat $ zipWith loadArg bs' (enumFrom R1)
     where
       loadArg b r = decl b <> [j| `b` = `r`; |]
-      
-{-
-mkSwitch :: JExpr -> [(JExpr,JStat)] -> JStat
-mkSwitch e cases = SwitchStat e (map addBreak (init cases)) lastc
-    where
-      addBreak (c,s) = (c, [j| `s`; break; |])
-      lastc = snd (last cases)
--}
 
 mkSw :: [JExpr] -> [(Maybe [JExpr], JStat)] -> JStat
 mkSw [e] cases = mkSwitch e (over (mapped._1.mapped) head cases)
@@ -893,10 +772,6 @@ mkAlgBranch top d alt@(a,bs,use,expr) = (caseCond a,) <$> b
 -}
  
 -- single-var prim
-{-
-mkPrimBranch :: JExpr -> JExpr -> StgAlt -> (Maybe JExpr, JStat)
-mkPrimBranch tgt d (a,bs,use,expr) = (caseCond a, genExpr tgt expr)
--}
 mkPrimBranch :: Id -> VarType -> StgAlt -> G (Maybe JExpr, JStat)
 mkPrimBranch top vt (DEFAULT, bs, us, e) = (Nothing,) <$> genExpr top e
 mkPrimBranch top vt (cond,    bs, us, e) = (caseCond cond,) <$> genExpr top e
@@ -955,24 +830,6 @@ loadParams from args use = do
     loadConVarsIfUsed fr cs = mconcat $ zipWith f cs [(1::Int)..]
       where f (x,u) n = loadIfUsed (SelExpr fr (StrI $ "d" ++ show n)) x u
 
---  return [j| `decl i`; `i` = `from`.d1; `p`; |]
-{-
-loadParams' :: JExpr -> [JExpr] -> [Bool] -> C
-loadParams' from args use = do
-  case as of
-    [(a, True)] -> return (decl' a from)
-    _           ->
-      return $ mconcat $ zipWith load as [(0::Int)..]
-  where
-    load (_,False) _ = mempty
-    load (a,True)  n = loadConVar from a n
-
--- load a variable into a local js var after pattern matching on the constructor
-loadConVar :: JExpr -> Ident -> Int -> JStat
-loadConVar from to n = [j| `decl to`; `to` = `ident from`; |]
-  where
-    ident f = SelExpr f (StrI ("d" ++ show (n+1)))
--}
 genPrimOp :: PrimOp -> [StgArg] -> Type -> C
 genPrimOp op args t = do
   as <- concatMapM genArg args
@@ -1081,25 +938,6 @@ allocConStatic to con xs = do
   return [j| `to` = { f: `e`, d1: null, d2: null };
              h$initStatic.push( \ { h$init_closure(`to`, `JList xs`); } );
            |]
-{-
-genConStatic :: JExpr -> DataCon -> [JExpr] -> JStat
-genConStatic d con args 
-  | otherwise = allocConStatic d con args
--}
-
--- load arguments and jump to fun
-{-
-jumpTo :: JExpr -> [JExpr] -> JStat
-jumpTo fun args = mconcat ra <> [j| return `fun`; |]
-  where
-      ra = zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) regargs
-      regargs = args
-
-jumpToI :: JExpr -> [JExpr] -> JStat
-jumpToI funIdx args = mconcat ra <> [j| return `Heap`[`funIdx`]; |] -- enter' [je| `Heap`[`funIdx`] |]
-  where
-      ra = zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) args
--}
 
 -- avoid one indirection for global ids
 -- fixme in many cases we can also jump directly to the entry for local?
@@ -1178,27 +1016,20 @@ typeComment i = do
 -- fixme: what if the call returns a thunk?
 genPrimCall :: PrimCall -> [StgArg] -> Type -> C
 genPrimCall (PrimCall lbl _) args t = 
-  parseFFIPattern (unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
+  parseFFIPattern False (unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
   where
     tgt = map toJExpr . take (typeSize t) $ enumFrom R1
---    f = iex $ StrI (unpackFS lbl)
---    fcall = ApplExpr f <$> concatMapM genArg args
 
-genForeignCall0 :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> C
-genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) t tgt args =
-  parseFFIPattern (unpackFS clbl) t tgt args
+genForeignCall0 :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, Bool)
+genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) t tgt args
+  = (,async) <$> parseFFIPattern async (unpackFS clbl) t tgt args
+  where
+    async = playSafe safe
 genForeignCall0 _ _ _ _ = panic "unsupported foreign call"
 
 {-
 -- fixme: what if the call returns a thunk?
 -- fixme: deal with safety and calling conventions
-genForeignCall :: ForeignCall
-               -> [StgArg] -- ^ the arguments
-               -> Type     -- ^ return type
-                           -> C
-genForeignCall (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) args t =
-  genForeignCall' (unpackFS clbl) t args <> return [j| return `Stack`[`Sp`]; |]
-genForeignCall _ _ _ = panic "unsupported foreign call"
 -}
 -- | generate the actual call
 -- fixme if thing starts with &, what to do?
@@ -1211,25 +1042,58 @@ genForeignCall _ _ _ = panic "unsupported foreign call"
   
   arguments, $1, $2, $3 unary arguments
      $1_1, $1_2, for a binary argument
-  
+
   return type examples
   1. $r                      unary return
   2. $r1, $r2                binary return
   3. $r1, $r2, $r3_1, $r3_2  unboxed tuple return
  -}
-parseFFIPattern :: String   -- ^ pattern called
+parseFFIPattern :: Bool
+                -> String
+                -> Type
+                -> [JExpr]
+                -> [StgArg]
+                -> C
+-- async calls get an extra callback argument
+-- call it with the result
+parseFFIPattern True pat t es as  = do
+  cb <- makeIdent
+  stat <- parseFFIPattern' (Just (toJExpr cb)) pat t es as
+  return [j| `decl cb`;
+             var x = { mv: null };
+             `cb` = h$mkForeignCallback(x);
+             `stat`;
+             if(x.mv === null) {
+               x.mv = new h$MVar();
+               `Sp` = `Sp` + 1;
+               `Stack`[`Sp`] = h$unboxFFIResult;
+               return h$takeMVar(x.mv);
+             } else {
+               var d = x.mv;
+               `copyResult d`;
+               return `Stack`[`Sp`];
+             }
+           |]
+     where nrst = typeSize t
+           copyResult d = mconcat $ zipWith
+              (\r i -> [j| `r` = `d`[`i`]; |]) (enumFrom R1) [0..nrst-1]
+parseFFIPattern False pat t es as =
+  parseFFIPattern' Nothing pat t es as
+
+parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
+                -> String   -- ^ pattern called
                 -> Type     -- ^ return type
                 -> [JExpr]  -- ^ expressions to return in (may be more than necessary)
                 -> [StgArg] -- ^ arguments
                 -> C
-parseFFIPattern pat t es as
-  | encPrefix `L.isPrefixOf` pat = parseFFIPattern (decode pat) t es as
+parseFFIPattern' callback pat t es as
+  | encPrefix `L.isPrefixOf` pat = parseFFIPattern' callback (decode pat) t es as
     where encPrefix = "ghcjs_encoded_"
           decode = map (chr.read) . splitOn "_" . drop (length encPrefix)
-parseFFIPattern pat t ret args
+parseFFIPattern' callback pat t ret args
   | "@" `L.isPrefixOf` pat = mkApply (tail pat)  -- case 1
   | wrapperPrefix `L.isPrefixOf` pat =
-     mkApply $ ("h$" ++ drop (length wrapperPrefix) pat) -- case 2 (wrapper)
+     mkApply $ ("h$" ++ (drop 2 $ dropWhile isDigit $ drop (length wrapperPrefix) pat)) -- case 2 (wrapper)
   | otherwise =
       case parseJM pat of
         Left err0 -> case parseJME pat of
@@ -1237,14 +1101,19 @@ parseFFIPattern pat t ret args
           Right (ValExpr (JVar (StrI ident))) -> mkApply ("h$" ++ pat)
           Right _    -> p (show err0)
         Right stat -> do
-          let rp = resultPlaceholders t ret
+          let rp = resultPlaceholders async t ret
+          let cp = callbackPlaceholders callback
           ap <- argPlaceholders args
-          let env = M.fromList (rp ++ ap)
+          let env = M.fromList (rp ++ ap ++ cp)
           return (everywhere (mkT $ replaceIdent env) stat) -- fixme trace?
   where
+    async = isJust callback
     tgt = take (typeSize t) ret
     -- automatic apply, build call and result copy
     mkApply f
+      | Just cb <- callback = do
+         as <- (++[cb]).concat <$> mapM genArg args
+         return $ traceCall as <> [j| `ApplStat f' as`; |]
       | (t:ts) <- tgt = do
          as <- concat <$> mapM genArg args
          return $ traceCall as <> [j| `t` = `ApplExpr f' as`; |] <> copyResult ts
@@ -1267,8 +1136,9 @@ parseFFIPattern pat t ret args
 
 -- $r for single, $r1,$r2 for dual
 -- $r1, $r2, etc for ubx tup, void args not counted
-resultPlaceholders :: Type -> [JExpr] -> [(Ident,JExpr)] -- ident, replacement
-resultPlaceholders t rs =
+resultPlaceholders :: Bool -> Type -> [JExpr] -> [(Ident,JExpr)] -- ident, replacement
+resultPlaceholders True _ _ = [] -- async has no direct resuls, use callback
+resultPlaceholders False t rs =
   case repType t of
     UbxTupleRep uts ->
       let sizes = filter (>0) (map typeSize uts)
@@ -1276,12 +1146,14 @@ resultPlaceholders t rs =
           f n 1 = ["$r" ++ show n]
           f n k = map (\x -> "$r" ++ show n ++ "_" ++ show x) [1..k]
           phs   = zipWith (\size n -> f n size) sizes [(1::Int)..]
-      in zip (map StrI $ concat phs) rs
-    UnaryRep ut ->
-      case typeSize t of
-        0 -> []
-        1 -> [(StrI "$r",head rs)] -- single
-        n -> zipWith (\n r -> (StrI $ "$r" ++ show n, toJExpr r)) 
+      in case sizes of
+           [n] -> mkUnary n
+           _   -> zip (map StrI $ concat phs) rs
+    UnaryRep t' -> mkUnary (typeSize t')
+  where
+    mkUnary 0 = []
+    mkUnary 1 = [(StrI "$r",head rs)] -- single
+    mkUnary n = zipWith (\n r -> (StrI $ "$r" ++ show n, toJExpr r))
                    [1..n] (take n rs)
 
 -- $1, $2, $3 for single, $1_1, $1_2 etc for dual
@@ -1292,6 +1164,10 @@ argPlaceholders args = do
   return $ concat
     (zipWith (\is n -> mkPlaceholder True ("$"++show n) is) idents [1..])
 
+callbackPlaceholders :: Maybe JExpr -> [(Ident,JExpr)]
+callbackPlaceholders Nothing  = []
+callbackPlaceholders (Just e) = [((StrI "$c"), e)]
+
 mkPlaceholder :: Bool -> String -> [JExpr] -> [(Ident, JExpr)]
 mkPlaceholder undersc prefix aids =
       case aids of
@@ -1301,12 +1177,13 @@ mkPlaceholder undersc prefix aids =
                (StrI $ prefix ++ u ++ show m,x)) xs [(1::Int)..]
    where u = if undersc then "_" else ""
 
--- ident is $N, $N_R, $rN, $rN_R
+-- ident is $N, $N_R, $rN, $rN_R or $r or $c
 isFFIPlaceholder :: Ident -> Bool
 isFFIPlaceholder (StrI x) =
   either (const False) (const True) (P.parse parser "" x)
     where
-      parser = do
+      parser = void (P.try $ P.string "$r") <|>
+               void (P.try $ P.string "$c") <|> do
         P.char '$'
         P.optional (P.char 'r')
         P.many1 P.digit
