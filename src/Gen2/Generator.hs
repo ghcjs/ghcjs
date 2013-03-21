@@ -553,14 +553,14 @@ genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt t
   do
     ids <- genIds bnd
     declIds bnd <>
-      parseFFIPattern False (unpackFS lbl) t ids args <>
+      parseFFIPattern False False (unpackFS lbl) t ids args <>
       genAlts top bnd at alts
 
 
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) _ [(DataAlt{}, bndrs, _, e)] l = do
   ids <- concatMapM genIds bndrs
   concatMapM declIds bndrs <>
-     parseFFIPattern False (unpackFS lbl) t ids args <>
+     parseFFIPattern False False (unpackFS lbl) t ids args <>
      genExpr top e
 
 -- pattern match on an unboxed tuple
@@ -1016,15 +1016,23 @@ typeComment i = do
 -- fixme: what if the call returns a thunk?
 genPrimCall :: PrimCall -> [StgArg] -> Type -> C
 genPrimCall (PrimCall lbl _) args t = 
-  parseFFIPattern False (unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
+  parseFFIPattern False False (unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
   where
     tgt = map toJExpr . take (typeSize t) $ enumFrom R1
 
 genForeignCall0 :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, Bool)
-genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) t tgt args
-  = (,async) <$> parseFFIPattern async (unpackFS clbl) t tgt args
+genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) JavaScriptCallConv safe)) t tgt args
+  = (,async) <$> parseFFIPattern async True (unpackFS clbl) t tgt args
   where
     async = playSafe safe
+genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) t tgt args
+  = (,False) <$> parseFFIPattern False False lbl t tgt args
+    where
+      cl = unpackFS clbl
+      lbl | wrapperPrefix `L.isPrefixOf` cl =
+              ("h$" ++ (drop 2 $ dropWhile isDigit $ drop (length wrapperPrefix) cl))
+          | otherwise = "h$" ++ cl
+      wrapperPrefix = "ghczuwrapperZC"
 genForeignCall0 _ _ _ _ = panic "unsupported foreign call"
 
 {-
@@ -1036,10 +1044,9 @@ genForeignCall0 _ _ _ _ = panic "unsupported foreign call"
 {-
   parse FFI patterns:
    "&value         -> value
-  1. "@function"     -> ret = function(...)
-  2. "function"      -> ret = h$function(...)
-  3. "$r = $1.f($2)  -> r1 = a1.f(a2)
-  
+  1. "function"      -> ret = function(...)
+  2. "$r = $1.f($2)  -> r1 = a1.f(a2)
+
   arguments, $1, $2, $3 unary arguments
      $1_1, $1_2, for a binary argument
 
@@ -1048,7 +1055,8 @@ genForeignCall0 _ _ _ _ = panic "unsupported foreign call"
   2. $r1, $r2                binary return
   3. $r1, $r2, $r3_1, $r3_2  unboxed tuple return
  -}
-parseFFIPattern :: Bool
+parseFFIPattern :: Bool  -- ^ async (only valid with javascript calling conv)
+                -> Bool  -- ^ javascript calling conv
                 -> String
                 -> Type
                 -> [JExpr]
@@ -1056,9 +1064,9 @@ parseFFIPattern :: Bool
                 -> C
 -- async calls get an extra callback argument
 -- call it with the result
-parseFFIPattern True pat t es as  = do
+parseFFIPattern True True pat t es as  = do
   cb <- makeIdent
-  stat <- parseFFIPattern' (Just (toJExpr cb)) pat t es as
+  stat <- parseFFIPattern' (Just (toJExpr cb)) True pat t es as
   return [j| `decl cb`;
              var x = { mv: null };
              `cb` = h$mkForeignCallback(x);
@@ -1077,28 +1085,32 @@ parseFFIPattern True pat t es as  = do
      where nrst = typeSize t
            copyResult d = mconcat $ zipWith
               (\r i -> [j| `r` = `d`[`i`]; |]) (enumFrom R1) [0..nrst-1]
-parseFFIPattern False pat t es as =
-  parseFFIPattern' Nothing pat t es as
+parseFFIPattern False javascriptCc pat t es as =
+  parseFFIPattern' Nothing javascriptCc pat t es as
+parseFFIPattern _ _ _ _ _ _ = panic "parseFFIPattern: non javascript must be non async" 
 
 parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
+                -> Bool     -- ^ javascript calling convention used
                 -> String   -- ^ pattern called
                 -> Type     -- ^ return type
                 -> [JExpr]  -- ^ expressions to return in (may be more than necessary)
                 -> [StgArg] -- ^ arguments
                 -> C
+{-
 parseFFIPattern' callback pat t es as
   | encPrefix `L.isPrefixOf` pat = parseFFIPattern' callback (decode pat) t es as
     where encPrefix = "ghcjs_encoded_"
-          decode = map (chr.read) . splitOn "_" . drop (length encPrefix)
-parseFFIPattern' callback pat t ret args
-  | "@" `L.isPrefixOf` pat = mkApply (tail pat)  -- case 1
-  | wrapperPrefix `L.isPrefixOf` pat =
-     mkApply $ ("h$" ++ (drop 2 $ dropWhile isDigit $ drop (length wrapperPrefix) pat)) -- case 2 (wrapper)
+          decode = map (chr.read) . splitOn "_" . drop (length encPrefix) -}
+parseFFIPattern' callback javascriptCc pat t ret args
+--   | "@" `L.isPrefixOf` pat = mkApply (tail pat)  -- case 1
+--  | wrapperPrefix `L.isPrefixOf` pat =
+--      mkApply $ ("h$" ++ (drop 2 $ dropWhile isDigit $ drop (length wrapperPrefix) pat)) -- case 2 (wrapper)
+  | not javascriptCc = mkApply pat
   | otherwise =
       case parseJM pat of
         Left err0 -> case parseJME pat of
           Left err1 -> p (show err0)
-          Right (ValExpr (JVar (StrI ident))) -> mkApply ("h$" ++ pat)
+          Right (ValExpr (JVar (StrI ident))) -> mkApply pat
           Right _    -> p (show err0)
         Right stat -> do
           let rp = resultPlaceholders async t ret
@@ -1122,7 +1134,6 @@ parseFFIPattern' callback pat t ret args
          return $ traceCall as <> [j| `ApplStat f' as`; |]
         where f' = toJExpr (StrI f)
     copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs
-    wrapperPrefix = "ghczuwrapperZC"
     p e = panic ("parse error in ffi pattern: " ++ pat ++ "\n" ++ e)
     replaceIdent :: Map Ident JExpr -> JExpr -> JExpr
     replaceIdent env e@(ValExpr (JVar i@(StrI xs)))
