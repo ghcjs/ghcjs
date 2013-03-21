@@ -97,7 +97,7 @@ hashedNames cache hash = map (\v -> (v, base `addExt` v)) exts
     where
       exts     = map variantExtension variants ++
                  catMaybes (map variantMetaExtension variants) ++
-                 [".js_hi", ".js_o"]
+                 [".js_hi"] -- , ".js_o"]
       base     = cache </> fromString basename
       basename = C8.unpack . B16.encode . C.encode $ hash
 
