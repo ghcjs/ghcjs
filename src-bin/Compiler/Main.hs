@@ -18,7 +18,7 @@ import           DriverPhases (HscSource (HsBootFile), Phase (..), isHaskellSrcF
 import           DriverPipeline (oneShot)
 import           DsMeta (templateHaskellNames)
 import           Exception
-import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..), NameCache (..), isBootSummary)
+import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..), NameCache (..), isBootSummary, mkSrcErr, ModGuts(..))
 import           IfaceEnv (initNameCache)
 import           LoadIface
 import           Outputable (showPpr)
@@ -29,6 +29,9 @@ import           PrelInfo (wiredInThings)
 import           PrelNames (basicKnownKeyNames)
 import           PrimOp (allThePrimOps)
 import           SysTools (touch)
+import           MkIface
+import           GhcMonad
+import           Digraph
 
 import           Control.Applicative
 import           Control.Monad
@@ -115,6 +118,7 @@ main =
           let oneshot = "-c" `elem` args1
               sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
                                  , ghcLink = NoLink
+                                 , hscTarget = HscAsm
                                  }
           (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
@@ -154,10 +158,13 @@ main =
 --                          liftIO $ putStrLn "generating code myself"
                           setTargets targets
                           origMgraph <- getModuleGraph
-                          _ <- load LoadAllTargets
-                          mgraph <- depanal [] False
+--                          liftIO $ print $ map (showPpr dflags2 . ms_mod) origMgraph
+--                          _ <- load LoadAllTargets
+                          mgraph0 <- reverse <$> depanal [] False
+                          let mgraph = flattenSCCs $ topSortModuleGraph False mgraph0 Nothing
+                          liftIO $ print $ map (showPpr dflags2 . ms_mod) mgraph
                           if oneshot
-                            then mapM_ compileModSummary (take (length targets) mgraph) -- is this right? origMgraph
+                            then mapM_ compileModSummary (take (length targets) mgraph)
                             else mapM_ compileModSummary mgraph
                           dflags3 <- getSessionDynFlags
                           case ghcLink sdflags of
@@ -282,17 +289,40 @@ compileModSummary mod
   | otherwise =
        do liftIO $ putStrLn $ concat ["Compiling ", name]
           desugaredMod <- desugaredModuleFromModSummary mod
-          writeDesugaredModule desugaredMod
+          dsm2 <- loadModule (noCode desugaredMod)
+          writeDesugaredModule desugaredMod -- dsm2 -- desugaredMod
   where name = moduleNameString . moduleName . ms_mod $ mod
+        mod' = mod { ms_hspp_opts = (ms_hspp_opts mod) { hscTarget = HscAsm } }
+
+noCode (DesugaredModule (TypecheckedModule (ParsedModule ms  ps esf) rs tcs cmi is) cm) =
+       (DesugaredModule (TypecheckedModule (ParsedModule ms' ps esf) rs tcs cmi is) cm)
+  where
+    ms' = ms { ms_hspp_opts = (ms_hspp_opts ms) { hscTarget = HscNothing } }
 
 desugaredModuleFromModSummary :: GhcMonad m => ModSummary -> m DesugaredModule
 desugaredModuleFromModSummary =
   parseModule >=> typecheckModule >=> desugarModule
 
+-- ioMsgMaybe :: GhcMonad m => IO (Messages, Maybe a) -> m a -- Hsc a
+ioMsgMaybe ioA = do
+    ((warns,errs), mb_r) <- liftIO ioA
+--    logWarnings warns
+    case mb_r of
+        Nothing -> liftIO . throwIO . mkSrcErr $ errs -- throwErrors errs
+        Just r  -> return r -- ASSERT( isEmptyBag errs ) return r
+
 writeDesugaredModule :: GhcMonad m => DesugaredModule -> m ()
 writeDesugaredModule mod =
-  do tidyCore <- cgGutsFromModGuts (coreModule mod)
-     env <- getSession
+  do env <- getSession
+     let mod_guts0 = coreModule mod
+         mb_old_iface = Nothing -- fixme?
+     liftIO $ putStrLn ("orig binds: " ++ (show . length . mg_binds $ mod_guts0))
+     mod_guts1 <- liftIO $ hscSimplify env mod_guts0
+     (tidyCore, details) <- liftIO $ tidyProgram env mod_guts1
+     liftIO $ putStrLn ("simpl binds: " ++ (show . length . mg_binds $ mod_guts1))
+     liftIO $ putStrLn ("tidy binds: " ++ (show . length . cg_binds $ tidyCore))
+     (iface, no_change) <- ioMsgMaybe $ mkIface env mb_old_iface details mod_guts1
+     liftIO $ writeIfaceFile dflags ifaceFile iface
      versions <- liftIO $ forM variants $ \variant -> do
           (program, meta) <- liftIO $ concreteJavascriptFromCgGuts dflags env tidyCore variant
           let outputFile = addExtension outputBase (variantExtension variant)
@@ -306,17 +336,19 @@ writeDesugaredModule mod =
      liftIO $ doFakeNative df outputBase
      liftIO $ writeCachedFiles dflags outputBase versions
   where
-    summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
-    outputBase = dropExtension (ml_hi_file . ms_location $ summary)
-    name = moduleNameString . moduleName . ms_mod $ summary
-    dflags = ms_hspp_opts $ summary
-
+    mod_summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
+    ifaceFile   = ml_hi_file (ms_location mod_summary)
+    outputBase = dropExtension (ml_hi_file . ms_location $ mod_summary)
+    name = moduleNameString . moduleName . ms_mod $ mod_summary
+    dflags = ms_hspp_opts mod_summary
+{-
 cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
 cgGutsFromModGuts guts =
   do hscEnv <- getSession
      simplGuts <- liftIO $ hscSimplify hscEnv guts
      (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
      return cgGuts
+-}
 
 concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
 concreteJavascriptFromCgGuts dflags env core variant =
@@ -326,6 +358,7 @@ concreteJavascriptFromCgGuts dflags env core variant =
 #endif
                                (cg_binds core)
                                (cg_tycons $ core)
+     putStrLn ("core bindings: " ++ (show $ length core_binds))
      stg <- coreToStg dflags core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
 #if __GLASGOW_HASKELL__ >= 707
@@ -406,7 +439,8 @@ setGhcjsPlatform basePath df = addPlatformDefines basePath $ df { settings = set
 #endif
                               }
     ghcjsPlatform = (sTargetPlatform (settings df)) -- Platform ArchUnknown OSUnknown 4 False False False False
-       { platformWordSize = 4
+       { platformArch     = ArchJavaScript
+       , platformWordSize = 4
        }
     ghcjsPlatformConstants = (sPlatformConstants (settings df))
        { pc_WORD_SIZE       = 4
