@@ -16,7 +16,7 @@ allocDynAll :: Bool -> [(Ident,JExpr,[JExpr])] -> JStat
 -- allocDynAll haveDecl [(to,entry,free)] = allocDynamic haveDecl to entry free
 allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
   where
-    makeObjs = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d1: null, d2: null } |]) cls
+    makeObjs = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0 } |]) cls
     fillObjs = mconcat $ map fillObj cls
     fillObj (i,_,es) =
       case es of
@@ -32,7 +32,7 @@ allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
 
 allocDynamic :: Bool -> Ident -> JExpr -> [JExpr] -> JStat
 allocDynamic haveDecl to entry free =
-  dec to <> [j| `to` = { f: `entry`, d1: `fillObj1`, d2: `fillObj2` } |] <> checkObj
+  dec to <> [j| `to` = { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |] <> checkObj
   where
     (fillObj1,fillObj2)
        = case free of

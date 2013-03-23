@@ -249,6 +249,7 @@ data GenState = GenState
   , _gsScope    :: GenScope  -- | the current lexical environment
   , _gsId       :: Int       -- | integer for the id generator
   , _gsDynFlags :: DynFlags  -- | the DynFlags, used for prettyprinting etc
+--  , _gsSRTs     :: Map Id Int
   }
 
 -- | where can we find all Ids
@@ -575,16 +576,16 @@ data CIType = CIFun { citArity :: Int  -- | function arity
             | CIBlackhole
   --          | CIInd
 
-data CIStatic = CIStaticParent { staticParent :: Ident } -- ^ static refs are stored in parent in fungroup
-              | CIStaticRefs   { staticRefs :: [Ident] } -- ^ list of refs that need to be kept alive
+data CIStatic = -- CIStaticParent { staticParent :: Ident } -- ^ static refs are stored in parent in fungroup
+                CIStaticRefs   { staticRefs :: [Ident] } -- ^ list of refs that need to be kept alive
               | CINoStatic
 
 -- | static refs: array = references, single var = follow parent link, null = nothing to report
 instance ToJExpr CIStatic where
   toJExpr CINoStatic         = [je| null |]
-  toJExpr (CIStaticParent p) = iex p -- jsId p
+--  toJExpr (CIStaticParent p) = iex p -- jsId p
   toJExpr (CIStaticRefs [])  = [je| null |]
-  toJExpr (CIStaticRefs rs)  = toJExpr (map istr rs) -- (map idStr rs)
+  toJExpr (CIStaticRefs rs)  = [je| \ -> `toJExpr rs` |] --- (map istr rs) -- (map idStr rs)
 
 
 data CILayout = CILayoutVariable -- layout stored in object itself, first position from the start
@@ -597,9 +598,9 @@ data CILayout = CILayoutVariable -- layout stored in object itself, first positi
                   , layout     :: [VarType]
                   }
 
--- standard fixed layout: entry fun + payload
+-- standard fixed layout: payload size
 fixedLayout :: [VarType] -> CILayout
-fixedLayout vts = CILayoutFixed (1 + sum (map varSize vts)) vts
+fixedLayout vts = CILayoutFixed (sum (map varSize vts)) vts
 
 -- a gi gai i
 instance ToStat ClosureInfo where
@@ -679,7 +680,7 @@ setObjInfo :: JExpr      -- ^ the thing to modify
 setObjInfo obj t name fields a gctag argptrs static =
   [j| h$setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
   where
-    nregs = sum $ map varSize argptrs 
+    nregs = sum $ map varSize argptrs
 
 scannableOffsets :: Int -> [VarType] -> [Int]
 scannableOffsets start ts =

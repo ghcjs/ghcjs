@@ -194,15 +194,21 @@ genToplevelDecl i rhs
 
 genToplevelConEntry :: Id -> StgRhs -> C
 genToplevelConEntry i (StgRhsCon _cc con args)
-    | i `elem` dataConImplicitIds con = genSetConInfo i con
-genToplevelConEntry i (StgRhsClosure _cc _bi [] upd_flag _srt args (StgConApp dc cargs))
-    | i `elem` dataConImplicitIds dc = genSetConInfo i dc
+    | i `elem` dataConImplicitIds con = genSetConInfo i con NoSRT
+genToplevelConEntry i (StgRhsClosure _cc _bi [] upd_flag srt args (StgConApp dc cargs))
+    | i `elem` dataConImplicitIds dc = genSetConInfo i dc srt
 genToplevelConEntry _ _ = mempty
 
 
--- fixme
-genStaticRefs :: StgExpr -> CIStatic
-genStaticRefs _ = CINoStatic
+genStaticRefs :: SRT -> G CIStatic
+genStaticRefs NoSRT = return CINoStatic
+genStaticRefs (SRTEntries s) = do
+  let xs = uniqSetToList s
+  CIStaticRefs <$> mapM getStaticRef xs
+genStaticRefs (SRT n e bmp) =
+  panic "genStaticRefs: unexpected SRT"
+
+getStaticRef = fmap head . genIdsI
 
 genToplevelRhs :: Id -> StgRhs -> C
 genToplevelRhs i (StgRhsCon _cc con args) =
@@ -213,7 +219,7 @@ genToplevelRhs i (StgRhsCon _cc con args) =
       as <- mapM genArg args
       ec <- enterDataCon con
       return (decl eid <> [j| `eid` = `ec` |]) <> (allocConStatic id con . concat $ as)
-genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable _srt [] body) =
+genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) =
   toplevel <$> do
         eid <- jsEnIdI i
         eid' <- jsEnId i
@@ -221,15 +227,16 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable _srt [] body) =
         id  <- jsIdI i
         body0 <- genBody i [] body Updatable i
         tci <- typeComment i
+        sr <- genStaticRefs srt
         return [j| `tci`;
                    `decl eid`;
                    `eid` = `JFunc funArgs (preamble <> updateThunk <> body0)`;
                    `ClosureInfo eid' [] (istr idi)
-                     (CILayoutFixed 2 []) CIThunk (genStaticRefs body)`;
+                     (CILayoutFixed 0 []) CIThunk sr`;
                    `decl id`;
                    `id` = h$static_thunk(`eid`);
                  |]
-genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) =
+genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) =
   toplevel <$> do
         eid <- jsEnIdI i
         eid' <- jsEnId i
@@ -238,11 +245,12 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag _srt args body) =
         body0 <- genBody i args body upd_flag i
         et <- genEntryType args
         tci <- typeComment i
+        sr <- genStaticRefs srt
         return [j| `tci`;
                    `decl eid`;
                    `eid` = `JFunc funArgs (preamble <> body0)`;
                    `ClosureInfo eid' (genArgInfo False $ map idType args) (istr idi)
-                          (CILayoutFixed 1 []) et (genStaticRefs body)`;
+                          (CILayoutFixed 0 []) et sr`;
                    `decl idi`;
                    `id` = h$static_fun(`eid`);
                  |]
@@ -287,7 +295,7 @@ genExpr top (StgOpApp (StgFCallOp f _) args t) =
 genExpr top (StgOpApp (StgPrimOp op) args t) = genPrimOp op args t
 genExpr top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall c args t
 genExpr top (StgLam{}) = panic "StgLam"
-genExpr top (StgCase e live1 liveRhs b s at alts) = genCase top b e at alts live1 -- check?
+genExpr top (StgCase e live1 liveRhs b srt at alts) = genCase top b e at alts live1 srt -- check?
 genExpr top (StgLet b e) = genBind top b <> genExpr top e
 
 genExpr top (StgLetNoEscape l1 l2 b e) = panic "StgLetNoEscape"
@@ -402,33 +410,35 @@ genBind top bndr
 -- generate the entry function for a local closure
 genEntry :: Id -> Id -> StgRhs -> C
 genEntry top i (StgRhsCon _cc con args) = mempty -- panic "local data entry" -- mempty ??
-genEntry top i (StgRhsClosure _cc _bi live Updatable _str [] (StgApp fun args)) = do
+genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) = do
   upd <- genUpdFrame Updatable
   ll <- loadLiveFun live
   app <- genApp False True fun args
   let f = JFunc funArgs $ preamble <> ll <> upd <> app
   ie <- jsEntryIdI i
   et <- genEntryType []
+  sr <- genStaticRefs srt
 -- fixme args correct here?
   return $ toplevel
      [j| `decl ie`;
          `iex ie` = `f`;
          `ClosureInfo (iex ie) (genArgInfo True []) (istr ie ++ "," ++ show i)
-             (fixedLayout $ map (uTypeVt.idType) live) et CINoStatic`;
+             (fixedLayout $ map (uTypeVt.idType) live) et sr`;
        |]
 
-genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag _srt args body) = do
+genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = do
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
   body <- genBody top args body upd_flag i
   let f = JFunc funArgs (preamble {- <> [j| log("entry: " + `showIndent cl`); |] -} <> ll <> upd <> body)
   ei <- jsEntryIdI i
   et <- genEntryType args
+  sr <- genStaticRefs srt
   return $ toplevel
              [j| `decl ei`;
                  `iex ei` = `f`;
                  `ClosureInfo (iex ei) (genArgInfo True $ map idType args) (istr ei ++ "," ++ show i)
-                    (fixedLayout $ map (uTypeVt.idType) live) et CINoStatic`;
+                    (fixedLayout $ map (uTypeVt.idType) live) et sr`;
                |]
 
 genEntryType :: [Id] -> G CIType
@@ -438,13 +448,14 @@ genEntryType args = do
 --  let nvoid = length $ takeWhile null (reverse args')
   return $ CIFun (length args) (length $ concat args')
 
-genSetConInfo :: Id -> DataCon -> C
-genSetConInfo i d = do
+genSetConInfo :: Id -> DataCon -> SRT -> C
+genSetConInfo i d srt = do
   ei <- jsDcEntryIdI i
+  sr <- genStaticRefs srt
   return [j| `decl ei`;
              `iex ei`     = `mkDataEntry`;
              `ClosureInfo (iex ei) [PtrV] (show d) (fixedLayout $ map uTypeVt fields)
-                 (CICon $ dataConTag d) CINoStatic`;
+                 (CICon $ dataConTag d) sr`;
            |]
     where
       fields = dataConRepArgTys d
@@ -516,16 +527,16 @@ allocCls xs = do
 
 -- bind result of case to bnd, final result to r
 -- fixme CgCase has a reps_compatible check here
-genCase :: Id -> Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> C
-genCase top bnd (StgApp i []) at@(PrimAlt tc) alts l 
+genCase :: Id -> Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
+genCase top bnd (StgApp i []) at@(PrimAlt tc) alts l srt
   | isUnLiftedType (idType i) = do
     ibnd <- jsId bnd
     ii   <- jsId i
     declIds bnd <> return [j| `ibnd` = `ii`; |] 
       <> genInlinePrimCase top bnd (tyConVt tc) at alts
 
-genCase top bnd (StgOpApp (StgPrimOp SeqOp) [StgVarArg a, _] _) at alts l =
-  genCase top bnd (StgApp a []) at alts l
+genCase top bnd (StgOpApp (StgPrimOp SeqOp) [StgVarArg a, _] _) at alts l srt =
+  genCase top bnd (StgApp a []) at alts l srt
 
 -- genCase r bnd (StgApp i []) at alts l = genForce r bnd (jsId i) at alts l
 -- genCase bnd (StgApp i xs) (PrimAlt tc) alts l = decl (jsIdI bnd) <> [j| `jsId bnd` = `jsId i`; |] <> 
@@ -533,60 +544,60 @@ genCase top bnd (StgOpApp (StgPrimOp SeqOp) [StgVarArg a, _] _) at alts l =
 genCase top bnd (StgApp i xs) at@(AlgAlt tc) [alt] l =
   gen
 -}
-genCase top bnd (StgApp i xs) at alts l =
-  genRet top bnd at alts l {- <> push [jsId bnd] -} <> genApp True False i xs -- genApp (jsId bnd) i xs
+genCase top bnd (StgApp i xs) at alts l srt =
+  genRet top bnd at alts l srt {- <> push [jsId bnd] -} <> genApp True False i xs -- genApp (jsId bnd) i xs
 
 -- fixme?
-genCase top bnd x@(StgCase {}) at alts l =
-  genRet top bnd at alts l <> genExpr top x
+genCase top bnd x@(StgCase {}) at alts l srt =
+  genRet top bnd at alts l srt <> genExpr top x
 
 -- foreign call, fixme: do unsafe foreign calls inline
-genCase top bnd (StgOpApp (StgFCallOp fc _) args t) at@(UbxTupAlt n) alts@[(DataAlt{}, bndrs, _, e)] l =
+genCase top bnd (StgOpApp (StgFCallOp fc _) args t) at@(UbxTupAlt n) alts@[(DataAlt{}, bndrs, _, e)] l srt =
   do
    ids <- concatMapM genIds bndrs
    (fc, async) <- genForeignCall0 fc t ids args
    case async of
      False -> concatMapM declIds bndrs <> return fc <> genExpr top e
-     True -> genRet top bnd at alts l <> return fc
+     True -> genRet top bnd at alts l srt <> return fc
 
-genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt tc) alts l =
+genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt tc) alts l srt =
   do
     ids <- genIds bnd
     declIds bnd <>
-      parseFFIPattern False False (unpackFS lbl) t ids args <>
+      parseFFIPattern False False ("h$" ++ unpackFS lbl) t ids args <>
       genAlts top bnd at alts
 
 
-genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) _ [(DataAlt{}, bndrs, _, e)] l = do
+genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) _ [(DataAlt{}, bndrs, _, e)] l srt = do
   ids <- concatMapM genIds bndrs
   concatMapM declIds bndrs <>
-     parseFFIPattern False False (unpackFS lbl) t ids args <>
+     parseFFIPattern False False ("h$" ++ unpackFS lbl) t ids args <>
      genExpr top e
 
 -- pattern match on an unboxed tuple
-genCase top bnd (StgOpApp (StgPrimOp p) args t) at@(UbxTupAlt n) alts@[(DataAlt{}, bndrs, _, e)] l = do
+genCase top bnd (StgOpApp (StgPrimOp p) args t) at@(UbxTupAlt n) alts@[(DataAlt{}, bndrs, _, e)] l srt = do
   args' <- concatMapM genArg args
   ids <- concatMapM genIds bndrs
   case genPrim p ids args' of
       PrimInline s -> mconcat (map declIds bndrs) <> return s <> genExpr top e
-      PRPrimCall s -> genRet top bnd at alts l <> return s
+      PRPrimCall s -> genRet top bnd at alts l srt <> return s
 -- other primop
-genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l = do
+genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l srt = do
     args' <- concatMapM genArg args
     ids   <- genIds bnd
     case genPrim p ids args' of
       PrimInline s -> declIds bnd <> return s <> genInlinePrimCase top bnd (uTypeVt t) at alts
-      PRPrimCall s -> genRet top bnd at alts l <> return s
+      PRPrimCall s -> genRet top bnd at alts l srt <> return s
 
-genCase top bnd x@(StgConApp c as) at@(UbxTupAlt n) [(DataAlt{}, bndrs, _, e)] l = do
+genCase top bnd x@(StgConApp c as) at@(UbxTupAlt n) [(DataAlt{}, bndrs, _, e)] l srt = do
   args' <- concatMapM genArg as
   ids   <- concatMapM genIds bndrs
   mconcat (map declIds bndrs) <> return (assignAll ids args') <> genExpr top e
 
-genCase top bnd expr at@PolyAlt alts l = do
-   genRet top bnd at alts l <> genExpr top expr
+genCase top bnd expr at@PolyAlt alts l srt = do
+   genRet top bnd at alts l srt <> genExpr top expr
 
-genCase _ _ x at alts _ = panic ("unhandled gencase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
+genCase _ _ x at alts _ _ = panic ("unhandled genCase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
 assignAll xs ys = mconcat (zipWith assignj xs ys)
@@ -612,20 +623,21 @@ genInlinePrimCase top bnd tc (PrimAlt ptc) alts
 genInlinePrimCase _ _ _ _ alt = panic ("unhandled primcase alt: " ++ show alt)
 
 
-genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> C
-genRet top e at as l = withNewIdent $ \ret -> pushRetArgs free (iex ret) <> f ret
+genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
+genRet top e at as l srt = withNewIdent $ \ret -> pushRetArgs free (iex ret) <> f ret
   where
     f :: Ident -> C
     f r    =  do
       fun' <- fun
       topi <- jsIdI top
       tce <- typeComment e
+      sr <- genStaticRefs srt
       return . toplevel $
                 tce -- is this correct?
                 <> (decl r)
                 <> [j| `r` = `fun'`;
                        `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
-                          (fixedLayout $ map (uTypeVt.idType) free) (CIFun regs regs) (CIStaticParent topi)`;
+                          (fixedLayout $ map (uTypeVt.idType) free) (CIFun regs regs) sr`;
                      |]
     free   = uniqSetToList l
     regs   = max 0 (typeSize (idType e) - 1)  -- number of active regs other than R1
@@ -1015,8 +1027,8 @@ typeComment i = do
 
 -- fixme: what if the call returns a thunk?
 genPrimCall :: PrimCall -> [StgArg] -> Type -> C
-genPrimCall (PrimCall lbl _) args t = 
-  parseFFIPattern False False (unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
+genPrimCall (PrimCall lbl _) args t =
+  parseFFIPattern False False ("h$" ++ unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
   where
     tgt = map toJExpr . take (typeSize t) $ enumFrom R1
 
@@ -1087,7 +1099,7 @@ parseFFIPattern True True pat t es as  = do
               (\r i -> [j| `r` = `d`[`i`]; |]) (enumFrom R1) [0..nrst-1]
 parseFFIPattern False javascriptCc pat t es as =
   parseFFIPattern' Nothing javascriptCc pat t es as
-parseFFIPattern _ _ _ _ _ _ = panic "parseFFIPattern: non javascript must be non async" 
+parseFFIPattern _ _ _ _ _ _ = panic "parseFFIPattern: non javascript must be non-async" 
 
 parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
                 -> Bool     -- ^ javascript calling convention used
@@ -1099,7 +1111,7 @@ parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
 {-
 parseFFIPattern' callback pat t es as
   | encPrefix `L.isPrefixOf` pat = parseFFIPattern' callback (decode pat) t es as
-    where encPrefix = "ghcjs_encoded_"
+                             where encPrefix = "ghcjs_encoded_"
           decode = map (chr.read) . splitOn "_" . drop (length encPrefix) -}
 parseFFIPattern' callback javascriptCc pat t ret args
 --   | "@" `L.isPrefixOf` pat = mkApply (tail pat)  -- case 1

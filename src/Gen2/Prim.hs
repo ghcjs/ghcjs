@@ -57,6 +57,7 @@ genPrim IntAddOp          [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0 |]
 genPrim IntSubOp          [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
 genPrim IntMulOp          [r] [x,y] =
     PrimInline [j| `r` = h$mulInt32(`x`,`y`); |]
+-- fixme may will give the wrong result in case of overflow
 genPrim IntMulMayOfloOp   [r] [x,y] =
     PrimInline [j| var tmp = (`x`*`y`); `r` = (tmp===(tmp|0))?0:1; |]
 genPrim IntQuotOp         [r] [x,y] = PrimInline [j| `r` = (`x`/`y`)|0; |]
@@ -516,12 +517,10 @@ genPrim ThreadStatusOp [stat,cap,locked] [tid] = PrimInline
 -- fixme these are wrong after heap change
 genPrim MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = h$makeWeak(`o`,`b`,`c`); |] -- fixme c = finalizer, what is o?
 genPrim MkWeakNoFinalizerOp [r] [o,b] = PrimInline [j| `r` = h$makeWeakNoFinalizer(`o`,`b`); |]
-genPrim MkWeakForeignEnvOp [r] [o,b,a1a,a1o,a2a,a2o,i,a3a,a3o] = PrimInline [j| `r` = [`b`]; |]
-genPrim DeRefWeakOp        [r] [w] = PrimInline [j| `r` = h$deRefWeak(`w`); |]
-genPrim FinalizeWeakOp     [i,a] [w] =
-  PrimInline [j| `i` = h$finalizeWeak(`w`);
-                 `a` = `Ret1`;
-               |]
+-- genPrim MkWeakForeignEnvOp [r] [o,b,a1a,a1o,a2a,a2o,i,a3a,a3o] = PrimInline [j| `r` = [`b`]; |]
+genPrim DeRefWeakOp        [f,v] [w] = PrimInline [j| `v` = `w`.val; `f`=(`v`===null)?0:1; |]
+genPrim FinalizeWeakOp     [fl,fin] [w] =
+  PrimInline [j| `fin` = `w`.finalizer; `w`.finalizer = null; `fl`=(`w`===null)?0:1; |]
 genPrim TouchOp [] [e] = PrimInline mempty -- fixme what to do?
 
 genPrim MakeStablePtrOp [s1,s2] [a] = PrimInline [j| `s1` = h$makeStablePtr(`a`); `s2` = `Ret1`; |]

@@ -254,7 +254,7 @@ stackApply r n = [j| `decl func`;
                      `ClosureInfo (iex func) [PtrV] funcName layout (CIFun 0 0) CINoStatic`;
                    |]
   where
-    layout    = CILayoutPtrs frameSize []
+    layout    = CILayoutPtrs r []
 
     frameSize = r+1
 
@@ -464,7 +464,7 @@ zeroApply :: JStat
 zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter`; }
 
                 fun h$ap_0_0 { `preamble`; `adjSpN 1`; `enter`; }
-                `ClosureInfo (iex (StrI "h$ap_0_0")) [PtrV] "h$ap_0_0" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo (iex (StrI "h$ap_0_0")) [PtrV] "h$ap_0_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
                 fun h$ap_1_0 x {
                   `preamble`;
@@ -480,7 +480,7 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter`; }
                     return c;
                   }
                 }
-                `ClosureInfo (iex (StrI "h$ap_1_0")) [PtrV] "h$ap_1_0" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo (iex (StrI "h$ap_1_0")) [PtrV] "h$ap_1_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
               |]
 
@@ -532,7 +532,7 @@ updates =
         `traceRts $ "h$upd_frame: updating: " |+ updatee |+ " -> " |+ R1`;
         return `Stack`[`Sp`];
       };
-      `ClosureInfo (iex $ StrI "h$upd_frame") [PtrV] "h$upd_frame" (CILayoutFixed 2 [PtrV]) (CIFun 0 0) CINoStatic`;
+      `ClosureInfo (iex $ StrI "h$upd_frame") [PtrV] "h$upd_frame" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
   |]
 
 mkFunc :: Ident -> JStat -> JStat
