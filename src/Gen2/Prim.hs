@@ -23,7 +23,7 @@ module Gen2.Prim where
   MutableByteArray#  -> DataView
   ByteArray#         -> DataView
   Array#             -> Array
-  
+
   Pointers to pointers use a special representation with the .arr property
 -}
 
@@ -530,9 +530,7 @@ genPrim EqStablePtrOp [r] [sa1,sa2,sb1,sb2] = PrimInline [j| `r` = (`sa1` === `s
 genPrim MakeStableNameOp [r] [a] = PrimInline [j| `r` = `a`; |]
 genPrim EqStableNameOp [r] [s1,s2] = PrimInline [j| `r` = `s1` === `s2`; |]
 genPrim StableNameToIntOp [r] [s] = PrimInline [j| `r` = h$stableNameInt(`s`) |]
-genPrim ReallyUnsafePtrEqualityOp [r] [p1a,p1o,p2a,p2o] =
-  PrimInline [j| `r` = (`p1a` === `p2a` && `p1o` === `p2o`) ? `HTrue` : `HFalse`; |]
-
+genPrim ReallyUnsafePtrEqualityOp [r] [p1,p2] = PrimInline [j| `r` = `p1`===`p2`?1:0; |]
 genPrim ParOp [r] [a] = PrimInline [j| `r` = 0; |]
 {-
 SparkOp
@@ -543,7 +541,9 @@ genPrim SeqOp [r] [e] = PRPrimCall [j| `R1` = `e`;
                                      |]
 {-
 GetSparkOp
-NumSparks
+-}
+genPrim NumSparks [r] [] = PrimInline [j| `r` = 0 |]
+{-
 ParGlobalOp
 ParLocalOp
 ParAtOp
@@ -561,8 +561,9 @@ UnpackClosureOp
 GetApStackValOp
 GetCCSOfOp
 GetCurrentCCSOp
-TraceEventOp
 -}
+genPrim TraceEventOp [] [ed,ea] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
+
 
 -- genPrim op rs as = PrimInline [j| throw `"unhandled primop:"++show op++" "++show (length rs, length as)`; |]
 genPrim op rs as = PrimInline [j| log(`"warning, unhandled primop: "++show op++" "++show (length rs, length as)`);
