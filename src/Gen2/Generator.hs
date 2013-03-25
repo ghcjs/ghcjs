@@ -11,6 +11,7 @@ import           StgCmmClosure
 import           ForeignCall
 import           Outputable hiding ((<>))
 import           FastString
+import           BasicTypes
 import           DynFlags
 import           Encoding
 import           UniqSet
@@ -89,7 +90,10 @@ generate df s m = flip evalState (initState df m) $ do
   let result = BL.toStrict $ TL.encodeUtf8 (TL.unlines p1)
   (deps, pkgs, funs) <- genMetaData d
   let depsBs = C.runPut $ Linker.serializeDeps pkgs funs deps
-  return (result, depsBs)
+  return ({- dumpAst s <> -} result, depsBs)
+
+dumpAst s = BL.toStrict . TL.encodeUtf8 . TL.pack $
+  (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s))
 
 -- | variable prefix for the nth block in module
 modulePrefix :: Module -> Int -> String
@@ -171,7 +175,7 @@ genMetaData p1 = do
 
 moduleNameText :: Module -> Text
 moduleNameText m
-  | xs == ":Main" = T.pack "Main" 
+  | xs == ":Main" = T.pack "Main"
   | otherwise = T.pack xs
     where xs = moduleNameString . moduleName $ m
 
@@ -888,18 +892,19 @@ genLit (MachStr  str)    =
     Right t -> [ [je| h$encodeUtf8(`T.unpack t`) |], [je| 0 |] ]
     Left  _ -> [ [je| h$rawStringData(`map toInteger (B.unpack str)`) |], [je| 0 |] ]
 #else
-genLit (MachStr  str)    = [ [je| h$encodeUtf8(`unpackFS str`) |], [je| 0 |] ] -- [toJExpr . (++[0]) . map toInteger . B.unpack . T.encodeUtf8 . T.pack . unpackFS $ str , [je| 0 |] ]
+genLit (MachStr  str)    = [ [je| h$encodeUtf8(`unpackFS str`) |], [je| 0 |] ]
 #endif
--- [ [je| decodeString(`unpackFS str`) |] ]
-genLit MachNullAddr      = [ [je| null |], [je| 0 |] ] -- is this right?
+genLit MachNullAddr      = [ [je| null |], [je| 0 |] ]
 genLit (MachInt i)       = [ [je| `i` |] ]
 genLit (MachInt64 i)     = [ [je| `shiftR i 32` |] , [je| `toSigned i` |] ]
 genLit (MachWord w)      = [ [je| `toSigned w` |] ]
 genLit (MachWord64 w)    = [ [je| `toSigned (shiftR w 32)` |] , [je| `toSigned w` |] ]
 genLit (MachFloat r)     = [ [je| `r2d r` |] ]
 genLit (MachDouble r)    = [ [je| `r2d r` |] ]
-genLit (MachLabel name size fod) = [ iex (StrI $ unpackFS name) ] -- fixme
-genLit (LitInteger i id) = [ [je| `i` |] ] -- fixme, convert to bytes and google int
+genLit (MachLabel name size fod)
+  | fod == IsFunction = [ [je| h$mkFunctionPtr(`StrI ("h$" ++ unpackFS name)`) |], [je| 0 |] ]
+  | otherwise         = [ iex (StrI $ "h$" ++ unpackFS name), [je| 0 |] ]
+genLit (LitInteger i id) = [ [je| `i` |] ] -- fixme, convert to bytes and JSBN int?
 
 -- make a signed 32 bit int from this unsigned one, lower 32 bits
 toSigned :: Integer -> Integer
