@@ -24,3 +24,9 @@ garbageCollector =
       }
     |]
 
+resetRegister :: StgReg -> JStat
+resetRegister r = [j| `r` = null; |]
+
+resetResultVar :: StgRet -> JStat
+resetResultVar r = [j| `r` = null; |]
+

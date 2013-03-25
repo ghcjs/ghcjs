@@ -504,7 +504,7 @@ genPrim ForkOp [tid] [x] = PrimInline [j| `tid` = h$fork(`x`); |]
 genPrim ForkOnOp [tid] [p,x] = PrimInline [j| `tid` = h$fork(`x`); |] -- ignore processor argument
 genPrim KillThreadOp [] [tid,ex] =
   PRPrimCall [j| return h$killThread(`tid`,`ex`); |]
-genPrim YieldOp [] [] = PRPrimCall [j| return h$reschedule; |]
+genPrim YieldOp [] [] = PRPrimCall [j| return h$yield(); |]
 genPrim MyThreadIdOp [r] [] = PrimInline [j| `r` = h$currentThread.tid; |]
 genPrim LabelThreadOp [] [t,la,lo] = PrimInline [j| `t`.label = [la,lo]; |]
 genPrim IsCurrentThreadBoundOp [r] [] = PrimInline [j| `r` = 1; |]

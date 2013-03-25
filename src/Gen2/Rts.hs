@@ -17,6 +17,7 @@ import           Gen2.Utils
 import           Data.Bits
 import           Data.Char                        (toLower, toUpper)
 import qualified Data.List                        as L
+import qualified Data.Map                         as M
 import           Data.Monoid
 
 import qualified Data.Text.Lazy                   as TL
@@ -24,6 +25,28 @@ import           Gen2.Printer
 import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
 
 import           Encoding
+
+{-
+  use h$c1, h$c2, h$c3, ... h$c16 instead of making objects manually
+  so layouts and fields can be changed more easily
+ -}
+closureConstructors :: JStat
+closureConstructors =
+  [j| fun h$c0 f { return { f: f, d1: null, d2: null, m: 0 }; }
+      fun h$c1 f x1 { return { f: f, d1: x1, d2: null, m: 0 }; }
+      fun h$c2 f x1 x2 { return {f: f, d1: x1, d2: x2, m: 0 }; }
+    |] <> mconcat (map mkClosureCon [3..16])
+  where
+    mkClosureCon :: Int -> JStat
+    mkClosureCon n = let funName = StrI ("h$c" ++ show n)
+                         vals   = map (StrI.('x':).show) [(1::Int)..n]
+                         fun    = JFunc (StrI "f" : vals) funBod
+                         funBod = [j| return { f: f, m: 0, d1: x1, d2: `obj` }; |]
+                         obj    = JHash . M.fromList . zip
+                                    (map (('d':).show) [(1::Int)..]) $
+                                    (map (toJExpr.StrI.('x':).show) [2..n])
+                     in decl funName <> [j| `funName` = `fun` |]
+
 
 updateThunk :: JStat
 updateThunk =
@@ -140,6 +163,9 @@ var !h$currentThread = null;
 `declRegs`;
 `declRets`;
 
+// use these things instead of building objects manually
+`closureConstructors`;
+
 fun h$blackhole { throw "<<loop>>"; return 0; }
 `ClosureInfo (jsv "h$blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
 
@@ -173,9 +199,14 @@ fun h$true_e { return `Stack`[`Sp`]; }
 fun h$data1_e { return `Stack`[`Sp`]; }
 `ClosureInfo (jsv "h$data1_e") [] "data1" (CILayoutFixed 1 [ObjV]) (CICon 1) CINoStatic`;
 
+// generic data constructor with 2 non-heapobj fields
+fun h$data2_e { return `Stack`[`Sp`]; }
+`ClosureInfo (jsv "h$data2_e") [] "data2" (CILayoutFixed 2 [ObjV,ObjV]) (CICon 1) CINoStatic`;
+
+
 fun h$con_e { return `Stack`[`Sp`]; };
-var !h$f = { f: h$false_e, d1: null, d2: null, m: 0 };
-var !h$t = { f: h$true_e, d1: null, d2: null, m: 0 };
+var !h$f = h$c0(h$false_e);
+var !h$t = h$c0(h$true_e);
 
 fun h$catch a handler {
   `preamble`;
@@ -191,8 +222,7 @@ fun h$noop_e {
   return `Stack`[`Sp`];
 }
 `ClosureInfo (jsv "h$noop_e") [] "no-op IO ()" (CILayoutFixed 0 []) (CIFun 1 0) CINoStatic`;
-var !h$noop = { f: h$noop_e, d1: null, d2: null, m: 0 };
-
+var !h$noop = h$c0(h$noop_e);
 
 fun h$catch_e {
   `preamble`;
@@ -648,7 +678,7 @@ fun h$runio_e {
 `ClosureInfo (jsv "h$runio_e") [PtrV] "runio" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
 
 fun h$runio c {
-  return { f: h$runio_e, d1: c, d2: null, m: 0 };
+  return h$c1(h$runio_e, c);
 }
 
 fun h$flushStdout_e {

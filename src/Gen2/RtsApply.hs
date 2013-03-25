@@ -224,7 +224,7 @@ genericFastApply =
               for(var i=0;i<myRegs;i++) {
                 dat.push(h$getReg(i+2));
               }
-              `R1` = { f: p, d: null };
+              `R1` = { f: p, d1: null, d2: null, m: 0 };
               h$init_closure(`R1`, dat);
             }
             return `Stack`[`Sp`];
