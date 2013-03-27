@@ -337,41 +337,36 @@ genApp force mstackTop i a
 
     | idArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do -- (not hasFree || not (isLocalId i))
           ii <- jsIdI i
-          return [j|
-                 var t = `ii`.f;
-                 var tt = t.t;
-                 `R1` = `ii`;
-                 if(tt === `Thunk`) {
-                   return t;
-                 } else if(tt === `Blackhole`) {
-                   return h$ap_0_0_fast();
-                 } else { // con
-                   return `stackTop`; // stack[sp];
-                 }
-                |]
+          if rtsInlineEnter
+             then return [j| var t = `ii`.f;
+                             var tt = t.t;
+                             `R1` = `ii`;
+                             if(tt === `Thunk`) {
+                               return t;
+                             } else if(tt === `Blackhole`) {
+                               return h$ap_0_0_fast();
+                             } else { // con
+                               return `stackTop`; // stack[sp];
+                             }
+                           |]
+             else return [j| return h$e(`ii`); |]
     | idArity i == 0 && n == 0 && not (might_be_a_function (idType i))
-          = do {- [j| var x = heap[`jsId i`];
-                var t = x.t;
-                switch(t) {
-                  case `Con`: `R1` = `jsId i`; return stack[sp];
-                  case `Ind`: `R1` = heap[`jsId i`+1]; return stack[sp];
-                  default: `R1` = `jsId i`; return x;
-                }
-             |] -}
+          = do
              ii <- jsIdI i
-             return [j|
-                 var t = `ii`.f;
-                 var tt = t.t;
-                 `R1` = `ii`;
-                 if(tt === `Thunk`) {
-                   return t;
-                 } else if(tt === `Blackhole`) {
-                   return h$ap_0_0_fast();
-                 } else { // con
-                   return `stackTop`;
-                 }
-                |]
-    | idArity i == n && not (isLocalId i) = do
+             if rtsInlineEnter
+                then return [j| var t = `ii`.f;
+                                var tt = t.t;
+                                `R1` = `ii`;
+                                if(tt === `Thunk`) {
+                                  return t;
+                                } else if(tt === `Blackhole`) {
+                                  return h$ap_0_0_fast();
+                                } else { // con
+                                  return `stackTop`;
+                                }
+                              |]
+                else return [j| return h$e(`ii`); |]
+    | idArity i == n && not (isLocalId i) && n /= 0 = do
         as' <- concatMapM genArg a
         r1 <> jumpToII i as'
     | idArity i <  n && idArity i > 0 =
@@ -379,7 +374,7 @@ genApp force mstackTop i a
          in  do
            reg' <- concatMapM genArg reg
            r1 <> pushCont over <> jumpToII i reg' -- (concatMap genArg reg)
-    | otherwise      = r1 <> jumpToFast a
+    | otherwise = r1 <> jumpToFast a
   where
     stackTop = [je| `Stack`[`Sp`] |] -- fixme, use known val? fromMaybe [je| stack[sp]; |] mstackTop
     r1 :: C
@@ -426,7 +421,7 @@ genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) =
   return $ toplevel
      [j| `decl ie`;
          `iex ie` = `f`;
-         `ClosureInfo (iex ie) (genArgInfo True []) (istr ie ++ "," ++ show i)
+         `ClosureInfo (iex ie) (genArgInfo True []) (istr ie ++ " ," ++ show i)
              (fixedLayout $ map (uTypeVt.idType) live) et sr`;
        |]
 

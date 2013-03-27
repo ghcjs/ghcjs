@@ -327,7 +327,9 @@ preamble = mempty
 
 push :: [JExpr] -> JStat
 push [] = mempty
-push xs = [j| `adjSp l`; `items`; |]
+push xs  
+   | rtsInlinePush || l > 32 || l < 2 = [j| `adjSp l`; `items`; |]
+   | otherwise                        = ApplStat (toJExpr . StrI $ "h$p" ++ show l) xs
   where
     items = zipWith (\i e -> [j| `Stack`[`offset i`] = `e`; |]) [(1::Int)..] xs
     offset i | i == l    = [je| `Sp` |]
@@ -477,17 +479,6 @@ withRegsRE start end max fallthrough f =
           | otherwise   = [j| break; |]
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
 
-{-
-rewriteInternalId :: Module -> Ident -> Ident
-rewriteInternalId m ii@(StrI i)
-  | internalPrefix `L.isPrefixOf` i =
-    StrI $ "h$_" ++ modName ++ (drop (length internalPrefix) i)
-  | otherwise = ii
-  where
-    modName        = zEncodeString . moduleNameString . moduleName $ m
-    internalPrefix = "h$INTERNAL"
--}
-
 jsIdIdent :: Id -> Maybe Int -> String -> G Ident
 jsIdIdent i mn suffix = do
   (prefix, u) <- mkPrefixU
@@ -519,8 +510,8 @@ isFalseCon i = show (idName i) == "ghc-prim:GHC.Types.False"
 -- regular id, shortcut for bools!
 jsId :: Id -> G JExpr
 jsId i
-  | isTrueCon i  = return $ toJExpr HTrue -- (1::Int)
-  | isFalseCon i = return $ toJExpr HFalse -- (0::Int)
+  | isTrueCon i  = return $ toJExpr HTrue
+  | isFalseCon i = return $ toJExpr HFalse
   | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
 
 -- entry id
@@ -677,8 +668,9 @@ setObjInfo :: JExpr      -- ^ the thing to modify
            -> [VarType]  -- ^ things in registers
            -> CIStatic   -- ^ static refs
            -> JStat
-setObjInfo obj t name fields a gctag argptrs static =
-  [j| h$setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
+setObjInfo obj t name fields a gctag argptrs static
+  | rtsDebug  = [j| h$setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
+  | otherwise = [j| h$o(`obj`,`t`,`a`,`gctag`,`nregs`,`static`); |]
   where
     nregs = sum $ map varSize argptrs
 

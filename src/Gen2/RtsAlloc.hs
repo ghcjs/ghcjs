@@ -16,14 +16,25 @@ allocDynAll :: Bool -> [(Ident,JExpr,[JExpr])] -> JStat
 -- allocDynAll haveDecl [(to,entry,free)] = allocDynamic haveDecl to entry free
 allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
   where
-    makeObjs = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0 } |]) cls
+    makeObjs
+      | rtsInlineAlloc = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0 } |]) cls
+      | otherwise      = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = h$c(`f`); |]) cls
     fillObjs = mconcat $ map fillObj cls
-    fillObj (i,_,es) =
-      case es of
-        []  -> mempty
-        [e] -> [j| `i`.d1 = `e`; |]
-        [e1,e2] -> [j| `i`.d1 = `e1`; `i`.d2 = `e2`; |]
-        (e:es)   -> [j| `i`.d1 = `e`; `i`.d2 = `JHash (M.fromList (zip dataFields es))` |]
+    fillObj (i,_,es)
+      | rtsInlineAlloc || length es > 24 =
+          case es of
+            []      -> mempty
+            [e]     -> [j| `i`.d1 = `e`; |]
+            [e1,e2] -> [j| `i`.d1 = `e1`; `i`.d2 = `e2`; |]
+            (e:es)  -> [j| `i`.d1 = `e`; `i`.d2 = `JHash (M.fromList (zip dataFields es))` |]
+      | otherwise = case es of
+            []      -> mempty
+            [e]     -> [j| `i`.d1 = `e`; |]
+            [e1,e2] -> [j| `i`.d1 = `e1`; `i`.d2 = `e2`; |]
+            (e:es)  -> [j| `i`.d1 = `e`; `i`.d2 = `fillFun es`; |]
+
+    fillFun es = ApplExpr (toJExpr . StrI $ "h$d" ++ show (length es)) es
+
     dataFields = map (('d':).show) [(1::Int)..]
     dec i | haveDecl  = decl i
           | otherwise = mempty
@@ -31,9 +42,12 @@ allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
               | otherwise = mempty
 
 allocDynamic :: Bool -> Ident -> JExpr -> [JExpr] -> JStat
-allocDynamic haveDecl to entry free =
-  dec to <> [j| `to` = { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |] <> checkObj
+allocDynamic haveDecl to entry free
+  | rtsInlineAlloc || length free > 24
+      = dec to <> [j| `to` = { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |] <> checkObj
+  | otherwise = dec to <> [j| `to` = `ApplExpr allocFun (toJExpr entry : free)`; |]
   where
+    allocFun = toJExpr $ StrI ("h$c" ++ show (length free))
     (fillObj1,fillObj2)
        = case free of
                 []  -> (jnull, jnull)
@@ -47,13 +61,14 @@ allocDynamic haveDecl to entry free =
              | otherwise = mempty
 
 -- fixme push unupdate thunks?
+{-
 allocStatic :: JExpr -> JExpr -> [JExpr] -> JStat
 allocStatic to info args =
   [j| `to` = { f: `info`, d: `fillObj` } |]
   where
     dataFields = map (('d':).show) [(1::Int)..]
     fillObj = JHash $ M.fromList (zip dataFields args)
-
+-}
 {-
    [j| if(hpS + `n` >= hpDyn) { run_gc(); }
       `Heap`[hpS] = `info`;

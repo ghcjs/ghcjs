@@ -27,15 +27,17 @@ import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
 import           Encoding
 
 {-
-  use h$c1, h$c2, h$c3, ... h$c16 instead of making objects manually
+  use h$c1, h$c2, h$c3, ... h$c24 instead of making objects manually
   so layouts and fields can be changed more easily
  -}
 closureConstructors :: JStat
 closureConstructors =
-  [j| fun h$c0 f { return { f: f, d1: null, d2: null, m: 0 }; }
+  [j| fun h$c f { return { f: f, d1: null, d2: null, m: 0 }; }
+      fun h$c0 f { return { f: f, d1: null, d2: null, m: 0 }; }
       fun h$c1 f x1 { return { f: f, d1: x1, d2: null, m: 0 }; }
       fun h$c2 f x1 x2 { return {f: f, d1: x1, d2: x2, m: 0 }; }
-    |] <> mconcat (map mkClosureCon [3..16])
+    |] <> mconcat (map mkClosureCon [3..24])
+       <> mconcat (map mkDataFill [1..24])
   where
     mkClosureCon :: Int -> JStat
     mkClosureCon n = let funName = StrI ("h$c" ++ show n)
@@ -46,16 +48,32 @@ closureConstructors =
                                     (map (('d':).show) [(1::Int)..]) $
                                     (map (toJExpr.StrI.('x':).show) [2..n])
                      in decl funName <> [j| `funName` = `fun` |]
+    mkDataFill :: Int -> JStat
+    mkDataFill n = let funName = StrI ("h$d" ++ show n)
+                       ds      = map (('d':).show) [(1::Int)..n]
+                       obj     = JHash . M.fromList . zip ds $ map (toJExpr.StrI) ds
+                       fun     = JFunc (map StrI ds) [j| return `obj` |]
+                   in decl funName <> [j| `funName` = `fun` |]
 
+stackManip :: JStat
+stackManip = mconcat $ map mkPush [1..32]
+  where
+    mkPush :: Int -> JStat
+    mkPush n = let funName = StrI ("h$p" ++ show n)
+                   as      = map (StrI . ('x':) . show) [1..n]
+                   fun     = JFunc as $ [j| `Sp` = `Sp` + `n`; |] <>
+                             mconcat (zipWith (\i a -> [j| `Stack`[`Sp`- `n-i`] = `a`; |]) [1..] as)
+               in decl funName <> [j| `funName` = `fun`; |]
 
 updateThunk :: JStat
-updateThunk =
-  [j| `push [toJExpr R1, jsv "h$upd_frame"]`;
-      `R1`.f = h$blackhole;
-      `R1`.d1 = h$currentThread.tid;
-      `R1`.d2 = null; // will be filled with waiters array
-    |]
-
+updateThunk
+  | rtsInlineBlackhole =
+      [j| `push [toJExpr R1, jsv "h$upd_frame"]`;
+          `R1`.f = h$blackhole;
+          `R1`.d1 = h$currentThread.tid;
+          `R1`.d2 = null; // will be filled with waiters array
+        |]
+  | otherwise = [j| h$bh(); |]
 -- fixme move somewhere else
 declRegs :: JStat
 -- fixme prevent holes
@@ -165,6 +183,15 @@ var !h$currentThread = null;
 
 // use these things instead of building objects manually
 `closureConstructors`;
+
+`stackManip`;
+
+fun h$bh {
+  `push [toJExpr R1, jsv "h$upd_frame"]`;
+  `R1`.f  = h$blackhole;
+  `R1`.d1 = h$currentThread.tid;
+  `R1`.d2 = null; // will be filled with waiters array
+}
 
 fun h$blackhole { throw "<<loop>>"; return 0; }
 `ClosureInfo (jsv "h$blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
@@ -400,6 +427,10 @@ fun h$gc_check next {
   return 0;
 }
 
+fun h$o o typ0 a gcinfo regs srefs {
+  h$setObjInfo o typ0 "" [] a gcinfo regs srefs;
+}
+
 // set heap/stack object information
 fun h$setObjInfo o typ name fields a gcinfo regs srefs {
   o.t    = typ;
@@ -407,7 +438,8 @@ fun h$setObjInfo o typ name fields a gcinfo regs srefs {
   o.n    = name;
   o.a    = a;
   o.gai  = regs;        // active registers with ptrs
-  o.s = null;
+  o.s    = null;
+  o.m    = 0;           // placeholder for uniqe idents
   if(srefs !== null) {
     h$initStatic.push(\x { o.s = srefs(); });
   }
@@ -847,6 +879,12 @@ fun h$reschedule {
 // carefully suspend the current thread, looking at the
 // function that would be called next
 fun h$suspendCurrentThread next {
+  `assertRts (next |!== (StrI "h$reschedule")) "suspend called with h$reschedule"`;
+  if(next === h$reschedule) { throw "suspend called with h$reschedule"; }
+  if(`Stack`[`Sp`] === h$restoreThread || next === h$return) {
+    h$currentThread.sp = `Sp`;
+    return;
+  }
    var nregs;
   // pap arity
   if(next.t === `Pap`) {

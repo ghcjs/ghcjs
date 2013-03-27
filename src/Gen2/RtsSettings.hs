@@ -46,6 +46,21 @@ rtsTraceForeign = False
 rtsHaveWeakMap :: Bool
 rtsHaveWeakMap = False
 
+-- inline all allocations, usually small allocations are done through
+-- h$cN, h$dN to save some code size, these small functions are expected
+-- to be inlined by the JS engine
+rtsInlineAlloc :: Bool
+rtsInlineAlloc = False
+
+-- inline h$r1.f = h$blackhole; ... things
+rtsInlineBlackhole :: Bool
+rtsInlineBlackhole = False
+
+rtsInlineEnter :: Bool
+rtsInlineEnter = False
+
+rtsInlinePush :: Bool
+rtsInlinePush = False
 
 ------------------------------------------------------------------------------
 -- end of settings
@@ -99,6 +114,9 @@ infixl 2 |!!
 
 (|===) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
 (|===) a b = [je| `a` === `b` |]
+
+(|!==) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|!==) a b = [je| `a` !== `b` |]
 
 -- trace a gc-related messages if gc debug is enabled
 traceGc :: ToJExpr a => a -> JStat

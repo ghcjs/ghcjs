@@ -461,9 +461,9 @@ fastApply r n =
                 switchAlts = map (\x -> ([je|`x`|],[j|`Stack`[`Sp`+`r-x`] = `numReg (x+2)`|])) [0..r-1]
 
 zeroApply :: JStat
-zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter`; }
+zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
 
-                fun h$ap_0_0 { `preamble`; `adjSpN 1`; `enter`; }
+                fun h$ap_0_0 { `preamble`; `adjSpN 1`; `enter (toJExpr R1)`; }
                 `ClosureInfo (iex (StrI "h$ap_0_0")) [PtrV] "h$ap_0_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
                 fun h$ap_1_0 x {
@@ -482,26 +482,29 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter`; }
                 }
                 `ClosureInfo (iex (StrI "h$ap_1_0")) [PtrV] "h$ap_1_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
+                fun h$e c { `preamble`; `R1` = c; `enter c`; }
+
               |]
 
 -- carefully enter a closure that might be a thunk or a function
 
-enter :: JStat
-enter = [j| var c = `R1`.f;
-            switch(c.t) {
-              case `Con`:
-                `(mempty :: JStat)`;
-              case `Fun`:
-                `(mempty :: JStat)`;
-              case `Pap`:
-                return `Stack`[`Sp`];
-              case `Blackhole`:
-                `push [jsv "h$ap_0_0", toJExpr R1, jsv "h$return"]`;
-                return h$blockOnBlackhole(`R1`);
-              default:
-                return `c`;
-            }
-          |]
+-- e may be a local var, but must've been copied to R1 before calling this
+enter :: JExpr -> JStat
+enter e = [j| var c = `e`.f;
+              switch(c.t) {
+                case `Con`:
+                  `(mempty :: JStat)`;
+                case `Fun`:
+                  `(mempty :: JStat)`;
+                case `Pap`:
+                  return `Stack`[`Sp`];
+                case `Blackhole`:
+                  `push [jsv "h$ap_0_0", e, jsv "h$return"]`;
+                  return h$blockOnBlackhole(`e`);
+                default:
+                  return c;
+              }
+            |]
 {-
 enter' :: JExpr -> JStat
 enter' c = [j|
@@ -510,7 +513,7 @@ enter' c = [j|
 -}
 
 enterv :: JStat
-enterv = push [jsv "h$ap_1_0"] <> enter
+enterv = push [jsv "h$ap_1_0"] <> enter (toJExpr R1)
 
 updates =
   [j|
