@@ -206,7 +206,7 @@ genPrim IndexArrayOp        [r] [a,i]   = PrimInline [j| `r` = `a`[`i`]; |]
 genPrim UnsafeFreezeArrayOp [r] [a]     = PrimInline [j| `r` = `a`; |]
 genPrim UnsafeThawArrayOp   [r] [a]     = PrimInline [j| `r` = `a`; |]
 genPrim CopyArrayOp         [] [a,o1,ma,o2,n] =
-  PrimInline [j| for(var i=0;i<`n`;i++) { // `n`-1;i >= 0;i--) {
+  PrimInline [j| for(var i=0;i<`n`;i++) {
                    `ma`[i+`o2`] = `a`[i+`o1`];
                  }
                |]
@@ -525,11 +525,12 @@ genPrim TouchOp [] [e] = PrimInline mempty -- fixme what to do?
 
 genPrim MakeStablePtrOp [s1,s2] [a] = PrimInline [j| `s1` = h$makeStablePtr(`a`); `s2` = `Ret1`; |]
 genPrim DeRefStablePtrOp [r] [s1,s2] = PrimInline [j| `r` = `s1`.arr[`s2`]; |]
-genPrim EqStablePtrOp [r] [sa1,sa2,sb1,sb2] = PrimInline [j| `r` = (`sa1` === `sb1` && `sa2` === `sb2`) ? `HTrue` : `HFalse`; |]
+genPrim EqStablePtrOp [r] [sa1,sa2,sb1,sb2] = PrimInline [j| `r` = (`sa1` === `sb1` && `sa2` === `sb2`) ? 1 : 0; |]
 
-genPrim MakeStableNameOp [r] [a] = PrimInline [j| `r` = `a`; |]
-genPrim EqStableNameOp [r] [s1,s2] = PrimInline [j| `r` = `s1` === `s2`; |]
-genPrim StableNameToIntOp [r] [s] = PrimInline [j| `r` = h$stableNameInt(`s`) |]
+genPrim MakeStableNameOp [r] [a] = PrimInline [j| `r` = h$makeStableName(`a`); |]
+genPrim EqStableNameOp [r] [s1,s2] = PrimInline [j| `r` = h$eqStableName(`s1`, `s2`); |]
+genPrim StableNameToIntOp [r] [s] = PrimInline [j| `r` = h$stableNameInt(`s`); |]
+
 genPrim ReallyUnsafePtrEqualityOp [r] [p1,p2] = PrimInline [j| `r` = `p1`===`p2`?1:0; |]
 genPrim ParOp [r] [a] = PrimInline [j| `r` = 0; |]
 {-
@@ -562,7 +563,7 @@ GetApStackValOp
 GetCCSOfOp
 GetCurrentCCSOp
 -}
-genPrim TraceEventOp [] [ed,ea] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
+genPrim TraceEventOp [] [ed,eo] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
 
 
 -- genPrim op rs as = PrimInline [j| throw `"unhandled primop:"++show op++" "++show (length rs, length as)`; |]
