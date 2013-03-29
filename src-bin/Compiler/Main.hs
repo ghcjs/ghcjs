@@ -10,9 +10,7 @@ import           TidyPgm (tidyProgram)
 import           CoreToStg (coreToStg)
 import           SimplStg (stg2stg)
 import           DynFlags
-#if __GLASGOW_HASKELL__ >= 707
 import           Platform
-#endif
 import           CorePrep (corePrepPgm)
 import           DriverPhases (HscSource (HsBootFile), Phase (..), isHaskellSrcFilename)
 import           DriverPipeline (oneShot)
@@ -73,7 +71,6 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8  as C8
 import           Crypto.Conduit (hashFile)
 import qualified Data.Serialize as C
-
 #ifdef GHCJS_GEN2
 import qualified Gen2.Generator as Gen2
 import qualified Gen2.Linker    as Gen2
@@ -100,23 +97,25 @@ main =
      noNative <- getEnvOpt "GHCJS_NO_NATIVE"
 
      let (minusB_args, args1) = partition ("-B" `isPrefixOf`) args0
+         oneshot = "-c" `elem` args1
          mbMinusB | null minusB_args = Nothing
                   | otherwise = Just . drop 2 . last $ minusB_args
      handleCommandline args1
      libDir <- getGlobalPackageBase
      when (isNothing mbMinusB) checkIsBooted
      (argsS, _) <- parseStaticFlags $ map noLoc args1
+
+     if noNative
+            then liftIO (putStrLn "skipping native code")
+            else liftIO $ do
+--              putStrLn "generating native code"
+              generateNative oneshot argsS args1 mbMinusB
      errorHandler
-#if __GLASGOW_HASKELL__ >= 706
         fatalMessager
         defaultFlushOut
-#else
-        defaultLogAction
-#endif
         $ runGhc (mbMinusB `mplus` Just libDir) $
        do sdflags <- getSessionDynFlags
-          let oneshot = "-c" `elem` args1
-              sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
+          let sdflags' = sdflags { ghcMode = if oneshot then OneShot else CompManager
                                  , ghcLink = NoLink
                                  , hscTarget = HscAsm
                                  }
@@ -136,19 +135,13 @@ main =
                        , hscOutName = mkGhcjsOutput (hscOutName dflags2)
                        }
           let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
-          if noNative
-            then liftIO (putStrLn "skipping native code")
-            else liftIO $ do
---              putStrLn "generating native code"
-              generateNative oneshot argsS args1 mbMinusB
---          liftIO $ putStrLn "now doing the javascript stuff"
           fixNameCache
           if all isBootFilename fileargs
-            then do
+            then sourceErrorHandler $ do
 --              liftIO $ putStrLn "doing one shot"
               env <- getSession
               liftIO $ oneShot env StopLn (map (,Nothing) fileargs)
-            else do
+            else sourceErrorHandler $ do
               mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
               case mtargets of
                 Nothing      -> do
@@ -162,7 +155,7 @@ main =
 --                          _ <- load LoadAllTargets
                           mgraph0 <- reverse <$> depanal [] False
                           let mgraph = flattenSCCs $ topSortModuleGraph False mgraph0 Nothing
-                          liftIO $ print $ map (showPpr dflags2 . ms_mod) mgraph
+--                          liftIO $ print $ map (showPpr dflags2 . ms_mod) mgraph
                           if oneshot
                             then mapM_ compileModSummary (take (length targets) mgraph)
                             else mapM_ compileModSummary mgraph
@@ -188,11 +181,7 @@ addPkgConf df = do
   db2 <- getUserPackageDB
   base <- getGlobalPackageBase
   return $ df {
-#if __GLASGOW_HASKELL__ >= 706
                extraPkgConfs = ([PkgConfFile db1, PkgConfFile db2]++)
-#else
-               extraPkgConfs = db1 : db2 : extraPkgConfs df
-#endif
              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
              }
 
@@ -245,7 +234,7 @@ handleOneShot args | fallback  = fallbackGhc True True args >> exitSuccess
 --   those are probably our fault.
 errorHandler :: (ExceptionMonad m, MonadIO m)
              => FatalMessager -> FlushOut -> m a -> m a
-errorHandler fm fo m = defaultErrorHandler fm fo (convertError m)
+errorHandler fm fo inner = defaultErrorHandler fm fo (convertError inner)
   where
     convertError m = handleGhcException (\ge ->
                        throwGhcException $
@@ -254,10 +243,15 @@ errorHandler fm fo m = defaultErrorHandler fm fo (convertError m)
                            x         -> x
                      ) m
 
+sourceErrorHandler m = handleSourceError (\e -> do
+  GHC.printException e
+  liftIO $ exitWith (ExitFailure 1)) m
+
 fatalMessager :: String -> IO ()
 fatalMessager str = do
   args <- getArgs
   hPutStrLn stderr (str ++ "\n--- arguments: \n" ++ unwords args ++ "\n---\n")
+  exitWith (ExitFailure 1)
 
 {-
    call GHC for things that we don't handle internally
@@ -316,11 +310,8 @@ writeDesugaredModule mod =
   do env <- getSession
      let mod_guts0 = coreModule mod
          mb_old_iface = Nothing -- fixme?
-     liftIO $ putStrLn ("orig binds: " ++ (show . length . mg_binds $ mod_guts0))
      mod_guts1 <- liftIO $ hscSimplify env mod_guts0
      (tidyCore, details) <- liftIO $ tidyProgram env mod_guts1
-     liftIO $ putStrLn ("simpl binds: " ++ (show . length . mg_binds $ mod_guts1))
-     liftIO $ putStrLn ("tidy binds: " ++ (show . length . cg_binds $ tidyCore))
      (iface, no_change) <- ioMsgMaybe $ mkIface env mb_old_iface details mod_guts1
      liftIO $ writeIfaceFile dflags ifaceFile iface
      versions <- liftIO $ forM variants $ \variant -> do
@@ -353,19 +344,13 @@ cgGutsFromModGuts guts =
 concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
 concreteJavascriptFromCgGuts dflags env core variant =
   do core_binds <- corePrepPgm dflags
-#if __GLASGOW_HASKELL__ >= 706
                                env
-#endif
                                (cg_binds core)
                                (cg_tycons $ core)
-     putStrLn ("core bindings: " ++ (show $ length core_binds))
      stg <- coreToStg dflags core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-#if __GLASGOW_HASKELL__ >= 707
      return (variantRender variant dflags stg' (cg_module core))
-#else
-     return (variantRender variant dflags (map fst stg') (cg_module core))
-#endif
+
 {-
   with -o x, ghcjs links all required functions into an executable
   bundle, which is a directory x.jsexe, rather than a filename
@@ -410,13 +395,8 @@ printJi _                    = putStrLn "usage: ghcjs --print-ji jifile"
 printJi _ = return ()
 #endif
 
-#if __GLASGOW_HASKELL__ >= 707
 setOpt = gopt_set
 unsetOpt = gopt_unset
-#else
-setOpt = dopt_set
-unsetOpt = dopt_unset
-#endif
 
 -- add some configs
 setDfOpts :: DynFlags -> DynFlags
@@ -427,7 +407,6 @@ setDfOpts df = foldl' setOpt (foldl' unsetOpt df unsetList) setList
 
 -- | configure the GHC API for building 32 bit code
 setGhcjsPlatform :: FilePath -> DynFlags -> DynFlags
-#if __GLASGOW_HASKELL__ >= 707
 setGhcjsPlatform basePath df = addPlatformDefines basePath $ df { settings = settings' }
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
@@ -438,7 +417,7 @@ setGhcjsPlatform basePath df = addPlatformDefines basePath $ df { settings = set
                               , sOverridePrimIface = Just ghcjsPrimIface
 #endif
                               }
-    ghcjsPlatform = (sTargetPlatform (settings df)) -- Platform ArchUnknown OSUnknown 4 False False False False
+    ghcjsPlatform = (sTargetPlatform (settings df))
        { platformArch     = ArchJavaScript
        , platformWordSize = 4
        }
@@ -450,23 +429,19 @@ setGhcjsPlatform basePath df = addPlatformDefines basePath $ df { settings = set
        , pc_CLONG_LONG_SIZE = 8
        , pc_WORDS_BIGENDIAN = False
        }
-#else
-setGhcjsPlatform = addPlatformDefines
-#endif
 
 -- ghcjs builds for a strange platform: like 32 bit
 -- instead of letting autoconf doing the defines, we override them here
 -- and try to get our own includes included instead of the library ones
 addPlatformDefines :: FilePath -> DynFlags -> DynFlags
-addPlatformDefines baseDir df = df { settings = settings1 
+addPlatformDefines baseDir df = df { settings = settings1
                                    , includePaths = includeDir : includePaths df
                                    }
   where
     includeDir = baseDir ++ "/include"
     settings0 = settings df
     settings1 = settings0 { sOpt_P = ("-I" ++ includeDir) : map ("-D"++) defs ++ sOpt_P settings0 }
-    defs = [ "GHCJS=1"
-           , "__GHCJS__=1"
+    defs = [ "__GHCJS__"
            , "__GHCAUTOCONF_H__=1"
            , "__GHCCONFIG_H__=1"
            , "SIZEOF_CHAR=1"
@@ -504,19 +479,15 @@ addPlatformDefines baseDir df = df { settings = settings1
 runGhcSession mbMinusB a = do
      libDir <- getGlobalPackageBase
      errorHandler
-#if __GLASGOW_HASKELL__ >= 706
         fatalMessager
-        defaultFlushOut
-#else
-        defaultLogAction
-#endif
-        $ runGhc (mbMinusB `mplus` Just libDir) $ a
+        defaultFlushOut $
+          runGhc (mbMinusB `mplus` Just libDir) $ a
 
 -- also generate native code, compile with regular GHC settings, but make sure
 -- that generated files don't clash with ours
 generateNative :: Bool -> [Located String] -> [String] -> Maybe String -> IO ()
 generateNative oneshot argsS args1 mbMinusB =
-  runGhcSession mbMinusB $
+  runGhcSession mbMinusB $ do -- sourceErrorHandler $ do
        do   sdflags <- getSessionDynFlags
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
             dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
@@ -538,7 +509,7 @@ generateNative oneshot argsS args1 mbMinusB =
                 case mtargets of
                   Nothing -> do
 --                    liftIO $ putStrLn "falling back for native"
-                    liftIO (fallbackGhc True False args1)
+                    liftIO (fallbackGhc True False args1) -- fixme check status code
                   Just targets -> do
 --                    liftIO $ putStrLn "generating native myself"
                     setTargets targets
