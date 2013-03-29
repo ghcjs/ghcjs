@@ -28,7 +28,7 @@ We currently have three code generators.
  * *gen2* - faster, but still work in progress
 
 Unless you are interested in helping on gen2, we suggest you stick to
-he trampoline code generator for now.
+the trampoline code generator for now.
 
 
 Installing GHCJS
