@@ -114,6 +114,7 @@ pass1 df m ss = sequence (zipWith generateBlock ss [(1::Int)..])
           let allDeps = collectIds decl
               topDeps = collectTopIds decl
           tl' <- delimitBlock m topDeps
+                          . O.optimize
                           . floatTop
                           . jsSaturate (Just $ modulePrefix m n) $ tl
           let tltxt   = displayT . renderPretty 0.8 150 . pretty $ tl'

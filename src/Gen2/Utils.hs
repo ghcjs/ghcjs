@@ -8,12 +8,22 @@ import Language.Haskell.TH.Quote
 import Language.Javascript.JMacro
 
 import Control.Applicative
+import Control.Lens
 import Control.Monad.State.Strict
 import Data.Monoid
 
 import Data.Char                  (isSpace)
 import Data.List                  (isPrefixOf)
 import Data.Map                   (Map, singleton)
+
+makeLenses ''JStat
+makePrisms ''JStat
+makeLenses ''JExpr
+makePrisms ''JExpr
+makeLenses ''JVal
+makePrisms ''JVal
+makeLenses ''Ident
+makePrisms ''Ident
 
 -- missing instances, todo: add to jmacro
 instance ToJExpr Ident where
