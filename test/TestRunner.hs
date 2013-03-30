@@ -66,11 +66,13 @@ tests = do
   integer <- allTestsIn test "test/integer"
   pkg     <- allTestsIn test "test/pkg"
   conc    <- allTestsIn test "test/conc"
+  ffi     <- allTestsIn test "test/ffi"
   return [ testGroup "Tests from the Fay testsuite" fay
          , testGroup "Tests from the GHC testsuite" ghc
          , testGroup "Arithmetic" arith
          , testGroup "Integer" integer
          , testGroup "Concurrency" conc
+         , testGroup "JavaScript interaction through FFI" ffi
          , testGroup "Tests imported from packages" pkg
          ]
 
