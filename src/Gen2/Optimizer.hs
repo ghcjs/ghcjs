@@ -39,9 +39,11 @@ renameLocalVars :: JStat -> JStat
 renameLocalVars = thisFunction . nestedFuns %~ renameLocalsFun
 
 newLocals :: [Ident]
-newLocals = map StrI $ concatMap (\n -> replicateM n chars) [1..]
+newLocals = map StrI $ (map (:[]) chars0) ++ concatMap mkIdents [1..]
   where
-    chars = ['a'..'z']++['A'..'Z']++['0'..'9']
+    mkIdents n = [c0:cs | c0 <- chars0, cs <- replicateM n chars]
+    chars0 = ['a'..'z']++['A'..'Z']
+    chars = chars0++['0'..'9'] 
 
 -- traverse all 'leaf' statements in this function
 thisFunction :: Traversal JStat JStat JStat JStat
@@ -72,7 +74,7 @@ renameLocalsFun f = ( map renameVar args
     renameVar i = fromMaybe i (M.lookup i rename)
     rename      = M.fromList $ zip locals (filter (`S.notMember` globals) newLocals)
     globals     = idents S.\\ (S.fromList locals)
-    idents      = S.fromList (s ^.. localIdents ++ args)
+    idents      = S.fromList (s ^.. localIdents ++ args) -- fixme does this scan the whole tree? it should
     locals      = L.nub $ args ++ s ^.. localVars
 
 -- progragate renaming of variables global relative to this function body
