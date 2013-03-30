@@ -160,12 +160,12 @@ primTypeVt t = case repType t of
     | st == pr "MutableByteArray#" = ObjV
     | st == pr "ArrayArray#" = ArrV
     | st == pr "MutableArrayArray#" = ArrV
-    | st == pr "MutVar#" = ArrV -- one scannable thing
-    | st == pr "TVar#" = ArrV -- one scannable thing, can be null
-    | st == pr "MVar#" = ArrV -- one scannable thing, can be null
+    | st == pr "MutVar#" = ObjV
+    | st == pr "TVar#" = ObjV
+    | st == pr "MVar#" = ObjV
     | st == pr "State#" = VoidV
     | st == pr "RealWorld" = VoidV
-    | st == pr "ThreadId#" = IntV
+    | st == pr "ThreadId#" = ObjV
     | st == pr "Weak#" = WeakV
     | st == pr "StablePtr#" = AddrV
     | st == pr "StableName#" = ObjV
