@@ -14,7 +14,9 @@ import           FastString
 import           BasicTypes
 import           DynFlags
 import           Encoding
+import           TysPrim
 import           UniqSet
+import           NameSet
 import           Literal
 import           DataCon
 import           CoreSyn
@@ -90,7 +92,7 @@ generate df s m = flip evalState (initState df m) $ do
   let result = BL.toStrict $ TL.encodeUtf8 (TL.unlines p1)
   (deps, pkgs, funs) <- genMetaData d
   let depsBs = C.runPut $ Linker.serializeDeps pkgs funs deps
-  return ({- dumpAst s <> -} result, depsBs)
+  return (dumpAst s <> result, depsBs)
 
 dumpAst s = BL.toStrict . TL.encodeUtf8 . TL.pack $
   (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s))
@@ -588,7 +590,7 @@ genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l srt = do
       PrimInline s -> declIds bnd <> return s <> genInlinePrimCase top bnd (uTypeVt t) at alts
       PRPrimCall s -> genRet top bnd at alts l srt <> return s
 
-genCase top bnd x@(StgConApp c as) at@(UbxTupAlt n) [(DataAlt{}, bndrs, _, e)] l srt = do
+genCase top bnd x@(StgConApp c as) at {- @(UbxTupAlt n) -} [(DataAlt{}, bndrs, _, e)] l srt = do
   args' <- concatMapM genArg as
   ids   <- concatMapM genIds bndrs
   mconcat (map declIds bndrs) <> return (assignAll ids args') <> genExpr top e
@@ -775,13 +777,6 @@ mkAlgBranch top d alt@(a,bs,use,expr) = (caseCond a,) <$> b
     b = {- checkAlgBranch alt d <>  -} (jsId d >>= \idd -> loadParams idd bs use)
                                            <> genExpr top expr
 
-
-{-
-    c | DataAlt da <- a = Just [je| `dataConTag da` |]
-      | LitAlt  l  <- a = Just (genSingleLit l)
-      | DEFAULT    <- a = Nothing -- panic "default branch"
--}
- 
 -- single-var prim
 mkPrimBranch :: Id -> VarType -> StgAlt -> G (Maybe JExpr, JStat)
 mkPrimBranch top vt (DEFAULT, bs, us, e) = (Nothing,) <$> genExpr top e
@@ -859,6 +854,85 @@ genArg a@(StgVarArg i)
    where
      r = uTypeVt . stgArgType $ a
 
+-- generate arg to be passed to FFI call, with marshalling JStat to be run before the call
+-- currently marshalling:
+--   String literals passed as real JS string
+--   Ptr ghcjs-base.GHCJS.Types.JSChar -> JavaScript String
+genFFIArg :: StgArg -> G (JStat, [JExpr])
+genFFIArg (StgLitArg (MachStr str)) =
+  case T.decodeUtf8' str of
+    Right t -> return (mempty, [toJExpr $ T.unpack t])
+    Left  _ -> panic "cannot encode FFI string literal"
+genFFIArg (StgLitArg l) = return (mempty, genLit l)
+genFFIArg a@(StgVarArg i)
+    | isVoid r                  = return (mempty, [])
+    | Just x <- marshalFFIArg a = x
+    | isMultiVar r              = ([j| hello=`getTyCon (idType i)`|],) <$> mapM (jsIdN i) [1..varSize r]
+    | otherwise                 = (\x -> ([j| hello=hello |],[x])) <$> jsId i
+   where
+     r = uTypeVt . stgArgType $ a
+
+marshalFFIArg :: StgArg -> Maybe (G (JStat, [JExpr]))
+marshalFFIArg a@(StgVarArg i)
+-- should we convert ByteString# to the 2-var Addr# rep? lots of code appears to expect that unsafeCoerce works there
+{-  | isJSCStringType (stgArgType a) = Just $ do
+      [d,o] <- genArg a
+      str   <- makeIdent
+      let stat = decl str <> [j| `str` = h$dU16(`d`, `o`); |]
+      return (stat, [toJExpr str]) -}
+  | otherwise = Nothing
+
+-- convert FFI return type back to some Haskell
+marshalFFIRet :: [JExpr] -> Type -> Maybe (G (JStat, [JExpr]))
+marshalFFIRet tgt t
+{-  | isJSCStringType t = Just $ do
+      str <- makeIdent
+      let [d,o] = take 2 tgt
+          stat = decl str <> [j| `d` = h$eU16(`str`); `o` = 0; |]
+      return (stat, [toJExpr str]) -}
+  | otherwise = Nothing
+
+-- Ptr JSChar
+isJSCStringType :: Type -> Bool
+isJSCStringType t
+  | Just {-[p]-}(p:_) <- matchTyCon "base:GHC.Ptr.Ptr" t = isJSCharType p
+  | otherwise = False
+
+-- ghcjs-base:GHCJS.Types.JSChar
+isJSCharType :: Type -> Bool
+isJSCharType t
+  | Just {-[]-}_ <- matchTyCon "ghcjs-base:GHCJS.Types.JSChar" t = True
+  | otherwise = False
+
+getTyCon :: Type -> String
+getTyCon t = case repType t of
+                    UnaryRep ut -> case splitTyConApp_maybe ut of
+                      Just (tc,args) -> show (tyConName tc) ++ " " ++ show (map getTyCon args)
+                      _ -> ""
+                    _ -> ""
+-- match a type constructor, looking through predicates, synonyms, foralls,
+-- but not through newtypes
+-- return args
+matchTyCon :: String -> Type -> Maybe [Type]
+matchTyCon xs t = case repType' t of
+                    UnaryRep ut -> case splitTyConApp_maybe ut of
+                      Just (tc,args) -> Just args -- | show (tyConName tc) == xs -> Just args
+                      _ -> Nothing
+                    _ -> Nothing
+  where
+    repType' :: Type -> RepType
+    repType' ty = go emptyNameSet ty
+      where
+        go :: NameSet -> Type -> RepType
+        go rec_nts ty
+          | Just ty' <- coreView ty = go rec_nts ty' -- Expand predicates and synonyms
+          | Just (_, ty') <- splitForAllTy_maybe ty = go rec_nts ty' -- Drop foralls
+          | Just (tc, tys) <- splitTyConApp_maybe ty, isUnboxedTupleTyCon tc =
+               if null tys
+                 then UnaryRep realWorldStatePrimTy
+                 else UbxTupleRep (concatMap (flattenRepType . go rec_nts) tys) -- fixme this part does look through newtype
+          | otherwise = UnaryRep ty
+
 genIdArg :: Id -> G [JExpr]
 genIdArg i
     | isVoid r     = return []
@@ -881,14 +955,10 @@ r2d = realToFrac
 
 genLit :: Literal -> [JExpr]
 genLit (MachChar c)      = [ [je| `ord c` |] ]
-#if __GLASGOW_HASKELL__ >= 707
 genLit (MachStr  str)    =
   case T.decodeUtf8' str of
     Right t -> [ [je| h$encodeUtf8(`T.unpack t`) |], [je| 0 |] ]
     Left  _ -> [ [je| h$rawStringData(`map toInteger (B.unpack str)`) |], [je| 0 |] ]
-#else
-genLit (MachStr  str)    = [ [je| h$encodeUtf8(`unpackFS str`) |], [je| 0 |] ]
-#endif
 genLit MachNullAddr      = [ [je| null |], [je| 0 |] ]
 genLit (MachInt i)       = [ [je| `i` |] ]
 genLit (MachInt64 i)     = [ [je| `shiftR i 32` |] , [je| `toSigned i` |] ]
@@ -1081,7 +1151,7 @@ parseFFIPattern True True pat t es as  = do
   stat <- parseFFIPattern' (Just (toJExpr cb)) True pat t es as
   return [j| `decl cb`;
              var x = { mv: null };
-             `cb` = h$mkForeignCallback(x);
+             `cb` = h$mkForeignCallback(x); // fixme need unmarshalling code!
              `stat`;
              if(x.mv === null) {
                x.mv = new h$MVar();
@@ -1099,7 +1169,7 @@ parseFFIPattern True True pat t es as  = do
               (\r i -> [j| `r` = `d`[`i`]; |]) (enumFrom R1) [0..nrst-1]
 parseFFIPattern False javascriptCc pat t es as =
   parseFFIPattern' Nothing javascriptCc pat t es as
-parseFFIPattern _ _ _ _ _ _ = panic "parseFFIPattern: non javascript must be non-async" 
+parseFFIPattern _ _ _ _ _ _ = panic "parseFFIPattern: non javascript must be non-async"
 
 parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
                 -> Bool     -- ^ javascript calling convention used
@@ -1108,15 +1178,7 @@ parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
                 -> [JExpr]  -- ^ expressions to return in (may be more than necessary)
                 -> [StgArg] -- ^ arguments
                 -> C
-{-
-parseFFIPattern' callback pat t es as
-  | encPrefix `L.isPrefixOf` pat = parseFFIPattern' callback (decode pat) t es as
-                             where encPrefix = "ghcjs_encoded_"
-          decode = map (chr.read) . splitOn "_" . drop (length encPrefix) -}
 parseFFIPattern' callback javascriptCc pat t ret args
---   | "@" `L.isPrefixOf` pat = mkApply (tail pat)  -- case 1
---  | wrapperPrefix `L.isPrefixOf` pat =
---      mkApply $ ("h$" ++ (drop 2 $ dropWhile isDigit $ drop (length wrapperPrefix) pat)) -- case 2 (wrapper)
   | not javascriptCc = mkApply pat
   | otherwise =
       case parseJM pat of
@@ -1127,23 +1189,30 @@ parseFFIPattern' callback javascriptCc pat t ret args
         Right stat -> do
           let rp = resultPlaceholders async t ret
           let cp = callbackPlaceholders callback
-          ap <- argPlaceholders args
+          (statPre, ap) <- argPlaceholders args
           let env = M.fromList (rp ++ ap ++ cp)
-          return (everywhere (mkT $ replaceIdent env) stat) -- fixme trace?
+          return $ statPre <> (everywhere (mkT $ replaceIdent env) stat) -- fixme trace?
   where
     async = isJust callback
     tgt = take (typeSize t) ret
     -- automatic apply, build call and result copy
     mkApply f
       | Just cb <- callback = do
-         as <- (++[cb]).concat <$> mapM genArg args
-         return $ traceCall as <> [j| `ApplStat f' as`; |]
-      | (t:ts) <- tgt = do
-         as <- concat <$> mapM genArg args
-         return $ traceCall as <> [j| `t` = `ApplExpr f' as`; |] <> copyResult ts
+         (stats, as) <- unzip <$> mapM genFFIArg args
+         return $ traceCall as <> mconcat stats <> ApplStat f' (concat as++[cb])
+      | (ts@(_:_)) <- tgt = do
+         (stats, as) <- unzip <$> mapM genFFIArg args
+         (statR, (t:ts')) <- case marshalFFIRet ts t of
+                                Nothing -> return (mempty, ts)
+                                Just m  -> m
+         return $ traceCall as
+                <> mconcat stats
+                <> [j| `t` = `ApplExpr f' (concat as)`; |]
+                <> copyResult ts
+                <> statR
       | otherwise = do
-         as <- concat <$> mapM genArg args
-         return $ traceCall as <> [j| `ApplStat f' as`; |]
+         (stats, as) <- unzip <$> mapM genFFIArg args
+         return $ traceCall as <> mconcat stats <> ApplStat f' (concat as)
         where f' = toJExpr (StrI f)
     copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs
     p e = panic ("parse error in ffi pattern: " ++ pat ++ "\n" ++ e)
@@ -1166,26 +1235,28 @@ resultPlaceholders False t rs =
     UbxTupleRep uts ->
       let sizes = filter (>0) (map typeSize uts)
           f n 0 = []
-          f n 1 = ["$r" ++ show n]
-          f n k = map (\x -> "$r" ++ show n ++ "_" ++ show x) [1..k]
+          f n 1 = [["$r" ++ show n]]
+          f n k = ["$r" ++ sn, "$r" ++ sn ++ "_1"] : map (\x -> ["$r" ++ sn ++ "_" ++ show x]) [2..k]
+            where sn = show n
           phs   = zipWith (\size n -> f n size) sizes [(1::Int)..]
       in case sizes of
            [n] -> mkUnary n
-           _   -> zip (map StrI $ concat phs) rs
+           _   -> concat $ zipWith (\phs' r -> map (\i -> (StrI i, r)) phs') (concat phs) rs
     UnaryRep t' -> mkUnary (typeSize t')
   where
     mkUnary 0 = []
     mkUnary 1 = [(StrI "$r",head rs)] -- single
-    mkUnary n = zipWith (\n r -> (StrI $ "$r" ++ show n, toJExpr r))
-                   [1..n] (take n rs)
+    mkUnary n = [(StrI "$r",head rs),(StrI "$r1", head rs)] ++
+       zipWith (\n r -> (StrI $ "$r" ++ show n, toJExpr r)) [2..n] (tail rs)
 
 -- $1, $2, $3 for single, $1_1, $1_2 etc for dual
 -- void args not counted
-argPlaceholders :: [StgArg] -> G [(Ident,JExpr)]
+argPlaceholders :: [StgArg] -> G (JStat, [(Ident,JExpr)])
 argPlaceholders args = do
-  idents <- filter (not.null) <$> mapM genArg args
-  return $ concat
-    (zipWith (\is n -> mkPlaceholder True ("$"++show n) is) idents [1..])
+  (stats, idents0) <- unzip <$> mapM genFFIArg args
+  let idents = filter (not . null) idents0
+  return $ (mconcat stats, concat
+    (zipWith (\is n -> mkPlaceholder True ("$"++show n) is) idents [1..]))
 
 callbackPlaceholders :: Maybe JExpr -> [(Ident,JExpr)]
 callbackPlaceholders Nothing  = []
@@ -1194,10 +1265,10 @@ callbackPlaceholders (Just e) = [((StrI "$c"), e)]
 mkPlaceholder :: Bool -> String -> [JExpr] -> [(Ident, JExpr)]
 mkPlaceholder undersc prefix aids =
       case aids of
-             []  -> []
-             [x] -> [(StrI $ prefix, x)]
-             xs  -> zipWith (\x m ->
-               (StrI $ prefix ++ u ++ show m,x)) xs [(1::Int)..]
+             []       -> []
+             [x]      -> [(StrI $ prefix, x)]
+             xs@(x:_) -> (StrI $ prefix, x) :
+                zipWith (\x m -> (StrI $ prefix ++ u ++ show m,x)) xs [(1::Int)..]
    where u = if undersc then "_" else ""
 
 -- ident is $N, $N_R, $rN, $rN_R or $r or $c
