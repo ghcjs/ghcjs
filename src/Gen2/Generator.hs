@@ -868,8 +868,8 @@ genFFIArg (StgLitArg l) = return (mempty, genLit l)
 genFFIArg a@(StgVarArg i)
     | isVoid r                  = return (mempty, [])
     | Just x <- marshalFFIArg a = x
-    | isMultiVar r              = ([j| hello=`getTyCon (idType i)`|],) <$> mapM (jsIdN i) [1..varSize r]
-    | otherwise                 = (\x -> ([j| hello=hello |],[x])) <$> jsId i
+    | isMultiVar r              = (mempty,) <$> mapM (jsIdN i) [1..varSize r]
+    | otherwise                 = (\x -> (mempty,[x])) <$> jsId i
    where
      r = uTypeVt . stgArgType $ a
 
@@ -1209,7 +1209,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
          return $ traceCall as
                 <> mconcat stats
                 <> [j| `t` = `ApplExpr f' (concat as)`; |]
-                <> copyResult ts
+                <> copyResult ts'
                 <> statR
       | otherwise = do
          (stats, as) <- unzip <$> mapM genFFIArg args
