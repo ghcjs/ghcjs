@@ -1,7 +1,7 @@
 {-
   GHCJS linker, manages dependencies with
-    modulename.gen2.ji files, which contain function-level dependencies
-    the source files (gen2.js) contain function groups delimited by
+    modulename.ji files, which contain function-level dependencies
+    the source files (.js) contain function groups delimited by
     special markers
 -}
 {-# LANGUAGE DefaultSignatures #-}
@@ -53,7 +53,7 @@ link :: String       -- ^ output file/directory
      -> [ModuleName] -- ^ modules to use as roots (include all their functions and deps)
      -> IO [String]  -- ^ arguments for the closure compiler to minify our result
 link out searchPath objFiles pageModules = do
-  let (objFiles', extraFiles) = partition (".gen2.js" `isSuffixOf`) objFiles
+  let (objFiles', extraFiles) = partition (".js" `isSuffixOf`) objFiles
   metas <- mapM (readDeps . metaFile) objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
   T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
@@ -83,7 +83,7 @@ link out searchPath objFiles pageModules = do
       | otherwise = return $ maybe ("." </> modPath) (<.> ext)
                              (M.lookup (funModule fun) (localLookup metas))
       where
-        modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> "gen2" <.> ext
+        modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> ext
 
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
@@ -261,7 +261,7 @@ putText t =
   let bs = TE.encodeUtf8 t
   in  putWord32le (fromIntegral $ B.length bs) >> putByteString bs
 
--- | read the modulename.gen2.ji file
+-- | read the modulename.ji file
 readDeps :: FilePath -> IO Deps
 readDeps file = do
   either error id . runGet unserializeDeps <$> B.readFile file

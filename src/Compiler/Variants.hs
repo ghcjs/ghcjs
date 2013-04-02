@@ -58,7 +58,7 @@ variants =
 
 #ifdef GHCJS_GEN2
 gen2Variant :: Variant
-gen2Variant = Variant ".gen2.js" (Just ".gen2.ji") ".gen2.jsexe" Gen2 Gen2.generate
+gen2Variant = Variant ".js" (Just ".ji") ".jsexe" Gen2 Gen2.generate
     Gen2.link
 #endif
 

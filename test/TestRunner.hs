@@ -200,7 +200,7 @@ runGhcjsResult opts file = concat <$> mapM run runs
       extra <- extraJsFiles file
       cd <- getWorkingDirectory
       args <- argsFor file
-      let outputG2 = addExtension output "gen2.jsexe"
+      let outputG2 = addExtension output "jsexe"
           outputRun = cd </> outputG2 </> ("all.js"::FilePath)
           input  = encodeString file
           desc = ", optimization: " ++ show optimize

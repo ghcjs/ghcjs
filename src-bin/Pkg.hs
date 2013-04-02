@@ -28,8 +28,8 @@ main = do args <- getArgs
           uPkgConf <- getUserPackageDB
           let (pkgArgs, args') = partition ("--pkg-conf" `isPrefixOf`) args
           ghcjsPkg args' pkgArgs gPkgConf uPkgConf
-          when (any (`elem` ["register", "update"]) args')
-             (installFromCache >> emptyCache)
+--          when (any (`elem` ["register", "update"]) args')
+--             (installFromCache >> emptyCache)
 
 ghcjsPkg :: [String] -> [String] -> String -> String -> IO ()
 ghcjsPkg args pkgArgs gPkgConf uPkgConf

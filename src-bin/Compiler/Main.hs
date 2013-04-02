@@ -211,7 +211,8 @@ handleCommandline args
      lookupAct = getFirst . mconcat . map (First . (`lookup` acts)) $ args
 --     unsupported xs = putStrLn (xs ++ " is currently unsupported") >> exitFailure
      acts :: [(String, IO ())]
-     acts = [ ("--supported-languages", mapM_ putStrLn supportedLanguagesAndExtensions)
+     acts = [ ("--supported-languages", mapM_ putStrLn (supportedLanguagesAndExtensions++
+                                          ["JavaScriptFFI", "NoJavaScriptFFI"]))
             , ("--numeric-version", fallbackGhc False True args) -- putStrLn getCompilerVersion)
             , ("--info", print =<< getCompilerInfo)
             , ("--print-libdir", putStrLn =<< getLibDir)
@@ -325,7 +326,7 @@ writeDesugaredModule mod =
           return (variant, program, meta)
      df <- getSessionDynFlags
      liftIO $ doFakeNative df outputBase
-     liftIO $ writeCachedFiles dflags outputBase versions
+--     liftIO $ writeCachedFiles dflags outputBase versions
   where
     mod_summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
     ifaceFile   = ml_hi_file (ms_location mod_summary)
