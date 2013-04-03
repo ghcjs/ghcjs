@@ -12,7 +12,7 @@ import           SimplStg (stg2stg)
 import           DynFlags
 import           Platform
 import           CorePrep (corePrepPgm)
-import           DriverPhases (HscSource (HsBootFile), Phase (..), isHaskellSrcFilename)
+import           DriverPhases (HscSource (HsBootFile), Phase (..), isHaskellSrcFilename, isSourceFilename)
 import           DriverPipeline (oneShot)
 import           DsMeta (templateHaskellNames)
 import           Exception
@@ -30,6 +30,11 @@ import           SysTools (touch)
 import           MkIface
 import           GhcMonad
 import           Digraph
+import           Binary (fingerprintBinMem, openBinMem, put_)
+import           Constants (hiVersion)
+import           TcRnMonad (initIfaceCheck)
+import           Util (looksLikeModuleName)
+import           Outputable
 
 import           Control.Applicative
 import           Control.Monad
@@ -37,6 +42,7 @@ import           Data.Char (toLower)
 import           Data.IORef (modifyIORef, writeIORef)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import Data.Maybe
 
 import           System.Environment (getArgs, getEnv)
 import           System.Exit(ExitCode(..), exitWith)
@@ -100,7 +106,7 @@ main =
          oneshot = "-c" `elem` args1
          mbMinusB | null minusB_args = Nothing
                   | otherwise = Just . drop 2 . last $ minusB_args
-     handleCommandline args1
+     handleCommandline args1 mbMinusB
      libDir <- getGlobalPackageBase
      when (isNothing mbMinusB) checkIsBooted
      (argsS, _) <- parseStaticFlags $ map noLoc args1
@@ -202,8 +208,8 @@ ignoreUnsupported =
       unsupPre = ["-H"]           -- remove arguments that start with these
 
 
-handleCommandline :: [String] -> IO ()
-handleCommandline args
+handleCommandline :: [String] -> Maybe String -> IO ()
+handleCommandline args minusBargs
     | "-c" `elem` args      = handleOneShot args
     | Just act <- lookupAct = act >> exitSuccess
     | otherwise             = return ()
@@ -216,7 +222,7 @@ handleCommandline args
             , ("--numeric-version", fallbackGhc False True args) -- putStrLn getCompilerVersion)
             , ("--info", print =<< getCompilerInfo)
             , ("--print-libdir", putStrLn =<< getLibDir)
-            , ("--abi-hash", fallbackGhc False True args)
+            , ("--abi-hash", abiHash args minusBargs) -- fallbackGhc False True args)
             , ("-M", fallbackGhc False True args)
             , ("--print-rts", printRts)
             , ("--print-ji", printJi args)
@@ -610,3 +616,45 @@ doPackageFallback pkgs args
     isFallbackPkg pkgid =
       let pkgname = takeWhile (/='-') (packageIdString pkgid)
       in  pkgname `elem` ["Cabal"]
+
+
+abiHash :: [String] -> Maybe String -> IO ()
+abiHash args minusB = do
+  (argsS, _) <- parseStaticFlags $ map noLoc args
+  runGhcSession minusB $ do
+    sdflags <- getSessionDynFlags
+    let sdflags' = sdflags { ghcMode = OneShot, ghcLink = LinkBinary }
+    (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
+    dflags1 <- liftIO $ if isJust minusB then return dflags0 else addPkgConf dflags0
+    (dflags2, pkgs) <- liftIO (initPackages dflags1)
+    _ <- setSessionDynFlags (setDfOpts dflags2)
+    abiHash' (map unLoc fileargs')
+
+abiHash' :: [String] -> Ghc ()
+abiHash' strs0 = do
+ let strs = filter looksLikeModuleName strs0
+ hsc_env <- getSession
+ let dflags = hsc_dflags hsc_env
+
+ liftIO $ do
+  let find_it str = do
+         let modname = mkModuleName str
+         r <- findImportedModule hsc_env modname Nothing
+         case r of
+           Found _ m -> return m
+           _error    -> throwGhcException $ CmdLineError $ showSDoc dflags $
+                          cannotFindInterface dflags modname r
+
+  mods <- mapM find_it strs
+  let get_iface modl = loadUserInterface False (text "abiHash") modl
+  ifaces <- initIfaceCheck hsc_env $ mapM get_iface mods
+  bh <- openBinMem (3*1024) -- just less than a block
+  put_ bh hiVersion
+    -- package hashes change when the compiler version changes (for now)
+    -- see #5328
+  mapM_ (put_ bh . mi_mod_hash) ifaces
+  f <- fingerprintBinMem bh
+
+  putStrLn (showPpr dflags f)
+
+

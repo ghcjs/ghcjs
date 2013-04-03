@@ -251,9 +251,9 @@ installRts = do
   mkdir_p lib
   sub $ cd "rts/dist/build" >> cp_r "." lib
   cp "settings" (base </> "settings")
-#if __GLASGOW_HASKELL__ >= 707
   cp "inplace/lib/platformConstants" (base </> "platformConstants")
-#endif
+  cp "inplace/lib/platformConstants" (base </> lib </> "platformConstants")
+
 
 fixRtsConf :: Text -> Text -> Text -> Text
 fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
