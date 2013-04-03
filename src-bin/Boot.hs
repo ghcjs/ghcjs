@@ -104,8 +104,8 @@ autoBoot tmp = shelly $ do
     putStrLn $ "fetching GHC: " ++ ghcDownloadLocation ghcVer
     request <- parseUrl (ghcDownloadLocation ghcVer)
     withManager $ \manager -> do
-                          Response _ _ _ src <- http request manager
-                          (src',_) <- unwrapResumable src
+                          response <- http request manager
+                          (src',_) <- unwrapResumable (responseBody response)
                           tar <- lazyConsume (src' =$= bunzip2)
                           liftIO $ putStrLn "unpacking tar"
                           liftIO $ Tar.unpack (toString tmp)  (Tar.read $ L.fromChunks tar) -- (Tar.checkTarbomb ("ghc-" ++ ghcVer) $ Tar.read tar)
