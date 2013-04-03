@@ -11,7 +11,6 @@ import System.Info
 import System.Exit
 
 import Compiler.Info
-import Compiler.Cache
 
 import Data.List (partition, isPrefixOf, intercalate)
 
@@ -28,8 +27,6 @@ main = do args <- getArgs
           uPkgConf <- getUserPackageDB
           let (pkgArgs, args') = partition ("--pkg-conf" `isPrefixOf`) args
           ghcjsPkg args' pkgArgs gPkgConf uPkgConf
---          when (any (`elem` ["register", "update"]) args')
---             (installFromCache >> emptyCache)
 
 ghcjsPkg :: [String] -> [String] -> String -> String -> IO ()
 ghcjsPkg args pkgArgs gPkgConf uPkgConf

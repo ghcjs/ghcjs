@@ -53,7 +53,6 @@ import           System.Exit(ExitCode(..), exitWith)
 #define GHCJS "ghcjs"
 #endif
 
-import           GHCJS Compiler.Cache
 import           GHCJS Compiler.Info
 import           GHCJS Compiler.Variants
 import qualified GHCJS GHCJSMain
@@ -70,19 +69,15 @@ import           Data.Monoid (mconcat, First(..))
 import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub, intercalate, foldl')
 import           Data.Maybe (isJust, fromMaybe, catMaybes, isNothing)
 
-import           Crypto.Skein
 import qualified Data.ByteString.Base16 as B16
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8  as C8
-import           Crypto.Conduit (hashFile)
 import qualified Data.Serialize as C
-#ifdef GHCJS_GEN2
 import qualified Gen2.Generator as Gen2
 import qualified Gen2.Linker    as Gen2
 import qualified Gen2.Rts       as Gen2
 import           Gen2.PrimIface as Gen2
-#endif
 
 -- debug
 import           Finder

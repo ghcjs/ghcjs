@@ -10,9 +10,7 @@ Stability:      Experimental
 Build-Type:     Custom
 Cabal-Version:  >= 1.10
 data-dir:       .
-data-files:     rts/*.js
-                rts/*.html
-                include/*.h
+data-files:     include/*.h
                 include/prim/*.hs-incl
                 include/prim/*.txt
                 patch/*.patch
@@ -27,55 +25,38 @@ flag boot
 flag compiler-only
   default:            True
 
-flag plain
-  default:            False
-
-flag trampoline
-  default:            False
-
-flag gen2
-  default:            True
-
-flag rts-only
-  default:            False
-  description:        Useful to install just rts files changes while developing the rts
-
 Library
     Default-Language: Haskell2010
     CPP-Options: -DGHCJS_ENABLED
-    if flag(plain)
-        CPP-Options: -DGHCJS_PLAIN
-    if flag(trampoline)
-        CPP-Options: -DGHCJS_TRAMPOLINE
-    if flag(gen2) && impl(ghc >= 7.6)
-        CPP-Options: -DGHCJS_GEN2
-        exposed-modules: Gen2.Generator,
-                         Gen2.Floater,
-                         Gen2.Prim,
-                         Gen2.Rts,
-                         Gen2.RtsApply,
-                         Gen2.RtsPrim,
-                         Gen2.RtsTypes,
-                         Gen2.RtsAlloc,
-                         Gen2.RtsSettings,
-                         Gen2.Utils,
-                         Gen2.StgAst,
-                         Gen2.Optimizer,
-                         Gen2.Debug,
-                         Gen2.GC,
-                         Gen2.Printer,
-                         Gen2.Linker,
-                         Gen2.Shim,
-                         Gen2.PrimIface
+    exposed-modules: Gen2.Generator,
+                     Gen2.Floater,
+                     Gen2.Prim,
+                     Gen2.Rts,
+                     Gen2.RtsApply,
+                     Gen2.RtsPrim,
+                     Gen2.RtsTypes,
+                     Gen2.RtsAlloc,
+                     Gen2.RtsSettings,
+                     Gen2.Utils,
+                     Gen2.StgAst,
+                     Gen2.Optimizer,
+                     Gen2.Debug,
+                     Gen2.GC,
+                     Gen2.Printer,
+                     Gen2.Linker,
+                     Gen2.Shim,
+                     Gen2.PrimIface,
+                     Compiler.Info,
+                     Compiler.Variants,
+                     GHCJSMain
+    other-modules: Paths_ghcjs
     build-depends: base           >= 4        && < 5,
                    Cabal,
-                   ghc            >= 7.7    && < 7.8,
+                   ghc            >= 7.7    && < 7.10,
                    directory,
                    filepath,
                    containers,
                    process,
-                   ghcjs-closure,
-                   ghcjs-hterm,
                    mtl,
                    ghc-paths,
                    template-haskell,
@@ -95,39 +76,11 @@ Library
                    time,
                    system-filepath,
                    base16-bytestring,
-                   skein,
-                   crypto-api,
                    cereal              >=0.3  && < 0.4,
-                   crypto-conduit      >= 0.5 && < 0.6,
                    transformers,
                    split,
                    deepseq,
                    vector
-    exposed-modules: Compiler.Info,
-                     Compiler.Cache,
-                     Compiler.Variants,
-                     GHCJSMain,
-                     Generator.Minify,
-                     Generator.Link
-    other-modules: Paths_ghcjs,
-                   RTS.Dependencies
-    if flag(plain) || flag(trampoline)
-        exposed-modules: Generator.Core,
-                         Generator.Dependencies,
-                         Generator.FFI,
-                         Generator.Helpers,
-                         Generator.PrimOp,
-                         Generator.TopLevel,
-                         Javascript.Formatted,
-                         Javascript.Language,
-                         Javascript.Trampoline,
-                         Javascript.Formatted.Base,
-                         Javascript.Formatted.Expression,
-                         Javascript.Formatted.Monads,
-                         Javascript.Formatted.Statement,
-                         RTS.Objects
-    if (flag(plain) || flag(trampoline)) && !(flag(gen2) && impl(ghc >= 7.6))
-        exposed-modules: Gen2.StgAst
     exposed: True
     buildable: True
     hs-source-dirs: src
@@ -135,16 +88,12 @@ Library
     GHC-Options:    -O -fno-warn-name-shadowing -fno-warn-orphans -auto-all -caf-all
 
 Executable ghcjs
-    if flag(rts-only)
-      Buildable:      False
-    if flag(gen2) && impl(ghc >= 7.6)
-      CPP-Options: -DGHCJS_GEN2
     Main-Is:        Compiler/Main.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs: src-bin
     Build-Depends:  base                >= 4  &&  < 5,
                     ghcjs,
-                    ghc                 >= 7.7 && < 7.10,
+                    ghc,
                     text                >= 0.11 && < 0.12,
                     ghc-paths,
                     process,
@@ -152,43 +101,13 @@ Executable ghcjs
                     filepath,
                     base16-bytestring   >= 0.1 && < 0.2,
                     bytestring          >= 0.9 && < 0.11,
-                    skein               >= 0.1 && < 0.2,
-                    crypto-api,
                     cereal              >= 0.3 && < 0.4,
-                    crypto-conduit      >= 0.5 && < 0.6,
                     Cabal
-    if flag(boot)
-      x-boot:     True
-    else
-      x-boot:     False
     GHC-Options:    -O -fno-warn-name-shadowing -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
     cpp-options:    -DGHCJS_PACKAGE_IMPORT
 
-Executable ghcjs-link
-    Buildable:      False
-    Main-Is:          Linker/Main.hs
-    Default-Language: Haskell2010
-    Hs-Source-Dirs:   src-bin
-    Build-Depends:    base              >= 4 && < 5,
-                      ghcjs,
-                      ghc,
-                      process,
-                      containers
-
-Executable ghcjs-min
-    if flag(compiler-only) || flag(rts-only)
-      Buildable:      False
-    Main-Is:          Minify.hs
-    Default-Language: Haskell2010
-    Hs-Source-Dirs:   src-bin
-    Build-Depends:    base              >= 4 && < 5,
-                      ghcjs,
-                      filepath,
-                      process,
-                      containers
-
 Executable ghcjs-pkg
-    if flag(compiler-only) || flag(rts-only)
+    if flag(compiler-only)
       Buildable:      False
     Main-Is:          Pkg.hs
     Default-Language: Haskell2010
@@ -200,7 +119,7 @@ Executable ghcjs-pkg
                       filepath
 
 Executable ghcjs-gcc-stub
-    if flag(compiler-only) || flag(rts-only)
+    if flag(compiler-only)
       Buildable:      False
     Main-Is:          GccStub.hs
     Default-Language: Haskell2010
@@ -210,7 +129,7 @@ Executable ghcjs-gcc-stub
                       directory
 
 Executable ghcjs-boot
-    if flag(compiler-only) || flag(rts-only)
+    if flag(compiler-only)
       Buildable:      False
     Main-Is:          Boot.hs
     Default-Language: Haskell2010
@@ -230,27 +149,6 @@ Executable ghcjs-boot
                       conduit           >= 0.5.2  && < 1.1,
                       tar               >= 0.4  && < 0.5,
                       system-fileio
-
-Executable ghcjs-cabal
-    if flag(compiler-only) || flag(rts-only)
-      Buildable:      False
-    Main-Is:          Cabal.hs
-    Default-Language: Haskell2010
-    Hs-Source-Dirs:   src-bin
-    Build-Depends:    base              >= 4    && < 5,
-                      containers,
-                      directory,
-                      time,
-                      process,
-                      ghcjs,
-                      cereal            >= 0.3  && < 0.4,
-                      crypto-conduit    >= 0.5  && < 0.6,
-                      text              >= 0.11 && < 0.12,
-                      system-filepath   >= 0.4  && < 0.5,
-                      bytestring        >= 0.9  && < 0.11,
-                      base16-bytestring >= 0.1 && < 0.2,
-                      skein             >= 0.1  && < 0.2,
-                      shelly            >= 0.15 && < 0.16
 
 test-suite test
     type:             exitcode-stdio-1.0
