@@ -22,6 +22,7 @@ import           Compiler.Info
 import           Config
 import           Control.Monad             (forM, forM_)
 import qualified Data.ByteString.Lazy      as L
+import           Data.Char
 import           Data.Maybe                (catMaybes)
 import           Data.Monoid
 import           Data.Text.Lazy            (Text)
@@ -49,40 +50,49 @@ import           Network.HTTP.Conduit
 import           System.Directory          (Permissions (..), getPermissions,
                                             setPermissions)
 
-default (T.Text)
+import           Options.Applicative
 
 ghcDownloadLocation :: String -> String
 ghcDownloadLocation ver =
     "http://www.haskell.org/ghc/dist/" ++ ver ++ "/ghc-" ++ ver ++ "-src.tar.bz2"
 
-data BootSettings = BootSettings { skipRts  :: Bool  -- ^ skip building the rts
-                                 , noBuild  :: Bool  -- ^ do not build, only reset the packages
-                                 , initTree :: Bool  -- ^ initialize the source tree: configure/build native ghc first
+data BootSettings = BootSettings { skipRts   :: Bool -- ^ skip building the rts
+                                 , noBuild   :: Bool -- ^ do not build, only reset the packages
+                                 , initTree  :: Bool -- ^ initialize the source tree: configure/build native ghc first
                                  , onlyBasic :: Bool -- ^ only build basic packages: ghc-prim, integer-gmp, base
                                  , reboot    :: Bool -- ^ reboot using log of old ghcjs invocations
+                                 , autoBoot  :: Bool
+                                 , preBuilt  :: Bool
                                  } deriving (Ord, Eq)
 
-bootSettings :: [String] -> BootSettings
-bootSettings args = BootSettings (any (=="--skip-rts") args)
-                                 (any (=="--nobuild") args)
-                                 (any (=="--init") args)
-                                 (any (=="--only-basic") args)
-                                 (any (=="--reboot") args)
+optParser' :: ParserInfo BootSettings
+optParser' = info (helper <*> optParser) ( fullDesc <>
+                  header "GHCJS booter, build base libraries for the compiler" )
+
+optParser :: Parser BootSettings
+optParser = BootSettings
+            <$> switch ( long "skipRts"   <> short 's' <>
+                  help "skip building the RTS" )
+            <*> switch ( long "noBuild"   <> short 'n' <>
+                  help "do not build, only reinstall packages" )
+            <*> switch ( long "init"      <> short 'i' <>
+                  help "initialize the GHC source tree for first time build" )
+            <*> switch ( long "onlyBasic" <> short 'b' <>
+                  help "only build ghc-prim, integer-gmp and base" )
+            <*> switch ( long "reboot"    <> short 'r' <>
+                  help "reboot using the same settings as last time (can be invoked from any directory)" )
+            <*> switch ( long "auto"      <> short 'a' <>
+                  help "attempt fully automated boot, download GHC sources" )
+            <*> switch ( long "preBuilt"  <> short 'p' <>
+                  help "download prebuilt libraries for compiler (might not be available)" )
 
 main = withSocketsDo $ do
   tmp <- getTemporaryDirectory
-#if MIN_VERSION_Cabal(1,17,0)
   withTempDirectory normal False tmp "ghcjs-boot" mainTmp
-#else
-  withTempDirectory normal tmp "ghcjs-boot" mainTmp
-#endif
 
-mainTmp tmpDir = shelly $ do
-    args <- liftIO getArgs
-    let s = bootSettings args
-        auto = any (=="--auto") args
-    when auto (autoBoot $ fromString tmpDir)
-    when (initTree s && not auto) setupBuild
+mainTmp tmpDir = execParser optParser' >>= \s -> shelly $ do
+    when (autoBoot s) (doAutoBoot $ fromString tmpDir)
+    when (initTree s && not (autoBoot s)) setupBuild
     ignoreExcep $ installBootPackages s
 
 fromString :: String -> FilePath
@@ -95,8 +105,8 @@ ignoreExcep a = a `catchany_sh` (\e -> echo $ "exception: " <> T.pack (show e))
 
 -- autoboots roll out
 -- download and configure a fresh ghc source tree
-autoBoot :: FilePath -> ShIO ()
-autoBoot tmp = shelly $ do
+doAutoBoot :: FilePath -> ShIO ()
+doAutoBoot tmp = shelly $ do
   ghcVer <- T.unpack . T.strip <$> run "ghc" ["--numeric-version"]
   let ghcDir = "ghc-" ++ ghcVer
   cd tmp
@@ -283,22 +293,33 @@ installFakes = do
   base <- T.pack <$> liftIO getGlobalPackageBase
   db   <- T.pack <$> liftIO getGlobalPackageDB
   installed <- T.words <$> run "ghc-pkg" ["list", "--simple-output"]
+  dumped <- T.lines <$> run "ghc-pkg" ["dump"]
   forM_ fakePkgs $ \pkg ->
     case filter ((pkg<>"-") `T.isPrefixOf`) installed of
       [] -> error (T.unpack $ "required package " <> pkg <> " not found in host GHC")
       (x:_) -> do
         let version = T.drop 1 (T.dropWhile (/='-') x)
-            conf    = fakeConf base base pkg version
-        writefile (db </> (fromText (pkg <> "-" <> version <> "-ghcjs") <.> "conf")) conf
+        case findPkgId dumped pkg version of
+          Nothing -> error (T.unpack $ "cannot find package id of " <> pkg <> "-" <> version)
+          Just pkgId -> do
+            let conf = fakeConf base base pkg version pkgId
+            writefile (db </> (pkgId <.> "conf")) conf
   run_ "ghcjs-pkg" ["recache", "--global"]
+
+findPkgId:: [Text] -> Text -> Text -> Maybe Text
+findPkgId dump pkg version =
+  listToMaybe (filter (pkgVer `T.isPrefixOf`) ids)
+    where
+      pkgVer = pkg <> "-" <> version <> "-"
+      ids = map (T.dropWhile isSpace . T.drop 3) $ filter ("id:" `T.isPrefixOf`) dump
 
 fakePkgs = [ "Cabal" ]
 
-fakeConf :: Text -> Text -> Text -> Text -> Text
-fakeConf incl lib name version = T.unlines
+fakeConf :: Text -> Text -> Text -> Text -> Text -> Text
+fakeConf incl lib name version pkgId = T.unlines
             [ "name:           " <> name
             , "version:        " <> version
-            , "id:             " <> name <> "-" <> version <> "-ghcjs"
+            , "id:             " <> pkgId
             , "license:        BSD3"
             , "maintainer:     stegeman@gmail.com"
             , "import-dirs:    " <> incl
@@ -325,8 +346,6 @@ installPkg ghcjs ghcjspkg pkg = verbosely $ do
   echo $ "installing package: " <> pkg
   base <- liftIO getGlobalPackageBase
   dest <- liftIO getGlobalPackageInst
-  db   <- liftIO getGlobalPackageDB
-#if __GLASGOW_HASKELL__ >= 707
   run_ "inplace/bin/ghc-cabal" [ "copy"
                                , "strip"
                                , "libraries/" <> pkg
@@ -348,21 +367,6 @@ installPkg ghcjs ghcjspkg pkg = verbosely $ do
                                , T.pack base <> "/doc" -- myDocDir
                                , "NO" -- relocatablebuild
                                ]
-#else
-  run_ "inplace/bin/ghc-cabal" [ "install"
-                               , toTextIgnore ghcjs    -- ghc
-                               , toTextIgnore ghcjspkg -- ghcpkg
-                               , "strip"               -- strip
-                               , T.pack dest           -- topdir
-                               , "libraries/" <> pkg   -- directory
-                               , "dist-install"        -- distdir
-                               , ""                    -- mydestdir
-                               , T.pack base           -- myprefix
-                               , T.pack dest           -- mylibdir
-                               , T.pack base <> "/doc" -- mydocdir
-                               , "NO"                  -- relocacable
-                               ]
-#endif
   -- now install the javascript files
   dirs <- chdir (fromString dest) (ls "")
   case filter (\x -> (pkg <> "-") `T.isPrefixOf` toTextIgnore x) dirs of

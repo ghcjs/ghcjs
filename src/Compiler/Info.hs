@@ -27,10 +27,12 @@ import           Paths_ghcjs
 getCompilerInfo = do
       glbDb <- getGlobalPackageDB
       df <- runGhc (Just GHC.Paths.libdir) getSessionDynFlags
+      libDir <- getGlobalPackageInst
       return . nubBy ((==) `on` fst) $
-           [ ("Project name", "The Glorious Glasgow Haskell Compilation System for Javascript")
+           [ ("Project name", "The Glorious Glasgow Haskell Compilation System for JavaScript")
            , ("Global Package DB", glbDb)
            , ("Project version", getCompilerVersion)
+           , ("LibDir", libDir)
            ] ++ compilerInfo df
 #endif
 

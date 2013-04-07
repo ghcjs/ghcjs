@@ -69,11 +69,9 @@ import           Data.Monoid (mconcat, First(..))
 import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub, intercalate, foldl')
 import           Data.Maybe (isJust, fromMaybe, catMaybes, isNothing)
 
-import qualified Data.ByteString.Base16 as B16
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8  as C8
-import qualified Data.Serialize as C
 import qualified Gen2.Generator as Gen2
 import qualified Gen2.Linker    as Gen2
 import qualified Gen2.Rts       as Gen2
@@ -216,8 +214,8 @@ handleCommandline args minusBargs
                                           ["JavaScriptFFI", "NoJavaScriptFFI"]))
             , ("--numeric-version", fallbackGhc False True args) -- putStrLn getCompilerVersion)
             , ("--info", print =<< getCompilerInfo)
-            , ("--print-libdir", putStrLn =<< getLibDir)
-            , ("--abi-hash", abiHash args minusBargs) -- fallbackGhc False True args)
+            , ("--print-libdir", putStrLn =<< getGlobalPackageInst)
+            , ("--abi-hash", abiHash args minusBargs)
             , ("-M", fallbackGhc False True args)
             , ("--print-rts", printRts)
             , ("--print-ji", printJi args)
@@ -383,19 +381,12 @@ collectDeps mis = nub $ concatMap pkgs mis
       pkgs mi = maybe [] (map fst . dep_pkgs . mi_deps) $ modInfoIface mi
 
 printRts :: IO ()
-#ifdef GHCJS_GEN2
 printRts = putStrLn Gen2.rtsStr >> exitSuccess
-#else
-printRts = return () >> exitSuccess
-#endif
+
 
 printJi :: [String] -> IO ()
-#ifdef GHCJS_GEN2
 printJi ["--print-ji", file] = Gen2.readDeps file >>= putStrLn . Gen2.dumpDeps
 printJi _                    = putStrLn "usage: ghcjs --print-ji jifile"
-#else
-printJi _ = return ()
-#endif
 
 setOpt = gopt_set
 unsetOpt = gopt_unset
@@ -415,9 +406,7 @@ setGhcjsPlatform basePath df = addPlatformDefines basePath $ df { settings = set
                               , sPlatformConstants = ghcjsPlatformConstants
                               , sPgm_a             = ("ghcjs-gcc-stub", [])
                               , sPgm_l             = ("ghcjs-gcc-stub", [])
-#ifdef GHCJS_GEN2
                               , sOverridePrimIface = Just ghcjsPrimIface
-#endif
                               }
     ghcjsPlatform = (sTargetPlatform (settings df))
        { platformArch     = ArchJavaScript

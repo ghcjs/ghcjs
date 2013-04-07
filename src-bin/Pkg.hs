@@ -1,4 +1,3 @@
--- this module is based on lhc-pkg/Main.hs from LHC
 module Main where
 
 import Control.Monad (when)
@@ -31,29 +30,29 @@ main = do args <- getArgs
 ghcjsPkg :: [String] -> [String] -> String -> String -> IO ()
 ghcjsPkg args pkgArgs gPkgConf uPkgConf
     | any (=="initglobal") args   =
-        ghcPkg gPkgConf ["init", gPkgConf]
+        ghcPkg gPkgConf uPkgConf ["init", gPkgConf]
     | any (=="inituser") args     =
-        ghcPkg gPkgConf ["init", uPkgConf]
+        ghcPkg gPkgConf uPkgConf ["init", uPkgConf]
     | any (=="--version") args    = do
         putStrLn $ "GHCJS package manager version " ++ getGhcCompilerVersion
         exitSuccess
-    | any ("--global-conf" `isPrefixOf`) args =
+    | any (`elem`["--global-package-db","--no-user-package-conf","--no-user-package-db"]) args =
         ghcPkgPlain $ args ++ pkgArgs
-    | any (=="--no-user-package-conf") args =
-        ghcPkgPlain $ args ++ pkgArgs
-    | any (=="--global") args  && not (any (=="--user") args) = -- if global, flip package conf arguments (rightmost one is used by ghc-pkg)
-        ghcPkg gPkgConf $ args ++ [ "--package-conf=" ++ uPkgConf
-                                  , "--package-conf=" ++ gPkgConf
-                                  ] ++ pkgArgs
+    | any (=="update") args = do
+        ghcPkg gPkgConf uPkgConf (args ++ ["--package-conf="++gPkgConf,"--package-conf="++uPkgConf])
     | otherwise                   =
-        ghcPkg gPkgConf $ args ++ [ "--package-conf=" ++ gPkgConf
-                                  , "--package-conf=" ++ uPkgConf
-                                  ] ++ pkgArgs
+        ghcPkg gPkgConf uPkgConf args
 
-ghcPkg :: String -> [String] -> IO ()
-ghcPkg globaldb args = do
-  ph <- runProcess "ghc-pkg" args Nothing (Just [("GHC_PACKAGE_PATH", globaldb)]) Nothing Nothing Nothing
+-- fixme correct separator for windows
+ghcPkg globalDb userDb args0 = do
+  ph <- runProcess "ghc-pkg" args2 Nothing (Just [("GHC_PACKAGE_PATH", path)]) Nothing Nothing Nothing
   exitWith =<< waitForProcess ph
+   where
+     gu  = ["--global", "--user"]
+     args1 | all (`elem` args0) gu = filter (`notElem` gu) args0
+           | otherwise = filter (/="--user") args0
+     args2 = args1 ++ ["--global-package-db", globalDb]
+     path  = userDb ++ ":" ++ globalDb
 
 ghcPkgPlain :: [String] -> IO ()
 ghcPkgPlain args = do
