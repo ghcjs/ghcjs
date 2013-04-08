@@ -514,8 +514,7 @@ genPrim ThreadStatusOp [stat,cap,locked] [tid] = PrimInline
       `cap` = `Ret1`;
       `locked` = `Ret2`;
     |]
--- fixme these are wrong after heap change
-genPrim MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = h$makeWeak(`o`,`b`,`c`); |] -- fixme c = finalizer, what is o?
+genPrim MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = h$makeWeak(`o`,`b`,`c`); |]
 genPrim MkWeakNoFinalizerOp [r] [o,b] = PrimInline [j| `r` = h$makeWeakNoFinalizer(`o`,`b`); |]
 -- genPrim MkWeakForeignEnvOp [r] [o,b,a1a,a1o,a2a,a2o,i,a3a,a3o] = PrimInline [j| `r` = [`b`]; |]
 genPrim DeRefWeakOp        [f,v] [w] = PrimInline [j| `v` = `w`.val; `f`=(`v`===null)?0:1; |]

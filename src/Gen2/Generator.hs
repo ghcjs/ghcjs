@@ -1182,17 +1182,25 @@ parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
 parseFFIPattern' callback javascriptCc pat t ret args
   | not javascriptCc = mkApply pat
   | otherwise =
-      case parseJM pat of
-        Left err0 -> case parseJME pat of
-          Left err1 -> p (show err0)
-          Right (ValExpr (JVar (StrI ident))) -> mkApply pat
-          Right _    -> p (show err0)
-        Right stat -> do
-          let rp = resultPlaceholders async t ret
-          let cp = callbackPlaceholders callback
+      case parseJME pat of
+        Right (ValExpr (JVar (StrI ident))) -> mkApply pat
+        Right expr | not async && length tgt < 2 -> do
           (statPre, ap) <- argPlaceholders args
-          let env = M.fromList (rp ++ ap ++ cp)
-          return $ statPre <> (everywhere (mkT $ replaceIdent env) stat) -- fixme trace?
+          let rp  = resultPlaceholders async t ret
+              env = M.fromList (rp ++ ap)
+          if length tgt == 1
+            then return $ statPre <> (everywhere (mkT $ replaceIdent env) [j| $r = `expr`; |])
+            else return $ statPre <> (everywhere (mkT $ replaceIdent env) (toStat expr))
+        Right _ -> p $ "invalid expression FFI pattern. Expression FFI patterns can only be used for synchronous FFI " ++
+                       " imports with result size 0 or 1.\n" ++ pat
+        Left _ -> case parseJM pat of
+          Left err -> p (show err)
+          Right stat -> do
+            let rp = resultPlaceholders async t ret
+            let cp = callbackPlaceholders callback
+            (statPre, ap) <- argPlaceholders args
+            let env = M.fromList (rp ++ ap ++ cp)
+            return $ statPre <> (everywhere (mkT $ replaceIdent env) stat) -- fixme trace?
   where
     async = isJust callback
     tgt = take (typeSize t) ret
