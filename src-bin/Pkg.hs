@@ -2,7 +2,7 @@ module Main where
 
 import Control.Monad (when)
 
-import System.Cmd
+import System.Process
 import System.Environment
 import System.FilePath
 import System.Directory
