@@ -162,7 +162,7 @@ main =
                           case ghcLink sdflags of
                             LinkBinary -> when (not oneshot && isJust (outputFile dflags3)) $ do
                               buildExecutable dflags3 jsArgs
-                              touchOutputFile
+--                              touchOutputFile
                             LinkDynLib -> return ()
                             _          -> touchOutputFile
 
@@ -214,7 +214,9 @@ handleCommandline args minusBargs
      acts :: [(String, IO ())]
      acts = [ ("--supported-languages", mapM_ putStrLn (supportedLanguagesAndExtensions++
                                           ["JavaScriptFFI", "NoJavaScriptFFI"]))
-            , ("--numeric-version", fallbackGhc False True args) -- putStrLn getCompilerVersion)
+            , ("--version", printVersion)
+            , ("--numeric-version", printNumericVersion)
+            , ("--numeric-ghc-version", putStrLn getGhcCompilerVersion) -- the ghc version this was compiled with
             , ("--info", print =<< getCompilerInfo)
             , ("--print-libdir", putStrLn =<< getGlobalPackageInst)
             , ("--abi-hash", abiHash args minusBargs)
@@ -223,6 +225,17 @@ handleCommandline args minusBargs
             , ("--print-ji", printJi args)
             , ("--show-iface", printIface args)
             ]
+
+printVersion :: IO ()
+printVersion = putStrLn $
+  "The Glorious Glasgow Haskell Compilation System for JavaScript, version " ++ getCompilerVersion ++
+    " (GHC " ++ getGhcCompilerVersion ++ ")"
+
+printNumericVersion :: IO ()
+printNumericVersion = do
+  booting <- getEnvOpt "GHCJS_BOOTING"
+  if booting then putStrLn getGhcCompilerVersion
+             else putStrLn getCompilerVersion
 
 handleOneShot :: [String] -> IO ()
 handleOneShot args | fallback  = fallbackGhc True True args >> exitSuccess
@@ -271,8 +284,12 @@ fallbackGhc isNative nonHaskell args = do
   args' <- if plain then getArgs else return args
   noNative <- getEnvOpt "GHCJS_NO_NATIVE"
   if isNative
-    then when (not noNative || nonHaskell) (void $ rawSystem ghc $ pkgargs ++ args') -- ++ ["-hisuf", "native_hi"])
-    else void $ rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "js_o"]
+    then when (not noNative || nonHaskell) $ do
+--      putStrLn ("falling back with: " ++ intercalate " " (pkgargs ++ args'))
+      void (rawSystem ghc $ pkgargs ++ args' ++ ["-v"]) -- ++ ["-hisuf", "native_hi"])
+    else do
+--      putStrLn $ "falling back with: " ++ intercalate " " (pkgargs ++ args' ++ ["-osuf", "js_o"])
+      void $ rawSystem ghc $ pkgargs ++ args' ++ ["-osuf", "js_o"]
   return ()
 
 -- why doesn't GHC pick up .lhs-boot as boot? are we loading it wrong?

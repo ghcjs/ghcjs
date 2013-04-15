@@ -42,7 +42,7 @@ getGlobalPackageBase = do
       where
         targetARCH = arch
         targetOS   = os
-        subdir     = targetARCH ++ '-':targetOS ++ '-':getCompilerVersion
+        subdir     = targetARCH ++ '-':targetOS ++ '-':getFullCompilerVersion
 
 getGlobalPackageDB = fmap (</> "package.conf.d") getGlobalPackageInst
 
@@ -50,17 +50,15 @@ getUserPackageDB = fmap (</> "package.conf.d") getGlobalPackageBase
 
 getGlobalPackageInst = fmap (</> "lib") getGlobalPackageBase
 
-getGlobalCache = fmap (</> "cache") getGlobalPackageBase
-
 -- Just the GHC version
 getGhcCompilerVersion = cProjectVersion
 
 #ifndef GHCJS_INTEGRATED
--- Just the GHCJS version
-getGhcjsCompilerVersion = Version.showVersion version
+-- GHCJS-GHC
+getFullCompilerVersion = Version.showVersion version ++ "-" ++ getGhcCompilerVersion
 
--- ghcversion-ghcjsversion
-getCompilerVersion = cProjectVersion ++ "-" ++ Version.showVersion version
+-- Just the GHCJS version
+getCompilerVersion = Version.showVersion version -- ++ "." ++ cProjectVersion
 
 getCompilerSubdir = "ghcjs-" ++ getCompilerVersion
 

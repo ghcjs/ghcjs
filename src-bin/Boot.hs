@@ -231,6 +231,7 @@ fixGhcWrapper wrapper log ghcjs = T.unlines . concatMap fixLine . T.lines $ wrap
               [ exec <> "\"" <> toTextIgnore ghcjs <> "\""
               , "export GHCJS_FALLBACK_GHC=" <> T.drop (T.length exec) line
               , "export GHCJS_FALLBACK_PLAIN=1"
+              , "export GHCJS_BOOTING=1"
               , "export GHCJS_NO_NATIVE=1"
               , "export GHCJS_FAKE_NATIVE=1"
               , "export GHCJS_LOG_COMMANDLINE=1"
@@ -261,8 +262,9 @@ installRts = do
   mkdir_p lib
   sub $ cd "rts/dist/build" >> cp_r "." lib
   cp "settings" (base </> "settings")
+  cp "settings" (base </> "lib" </> "settings")
   cp "inplace/lib/platformConstants" (base </> "platformConstants")
-  cp "inplace/lib/platformConstants" (base </> lib </> "platformConstants")
+  cp "inplace/lib/platformConstants" (base </> "lib" </> "platformConstants")
 
 
 fixRtsConf :: Text -> Text -> Text -> Text
@@ -295,7 +297,7 @@ installFakes = do
   installed <- T.words <$> run "ghc-pkg" ["list", "--simple-output"]
   dumped <- T.lines <$> run "ghc-pkg" ["dump"]
   forM_ fakePkgs $ \pkg ->
-    case filter ((pkg<>"-") `T.isPrefixOf`) installed of
+    case reverse (filter ((pkg<>"-") `T.isPrefixOf`) installed) of
       [] -> error (T.unpack $ "required package " <> pkg <> " not found in host GHC")
       (x:_) -> do
         let version = T.drop 1 (T.dropWhile (/='-') x)

@@ -34,12 +34,12 @@ ghcjsPkg args pkgArgs gPkgConf uPkgConf
     | any (=="inituser") args     =
         ghcPkg gPkgConf uPkgConf ["init", uPkgConf]
     | any (=="--version") args    = do
-        putStrLn $ "GHCJS package manager version " ++ getGhcCompilerVersion
+        putStrLn $ "GHCJS package manager version " ++ getCompilerVersion
         exitSuccess
     | any (`elem`["--global-package-db","--no-user-package-conf","--no-user-package-db"]) args =
         ghcPkgPlain $ args ++ pkgArgs
     | any (=="update") args = do
-        ghcPkg gPkgConf uPkgConf (args ++ ["--package-conf="++gPkgConf,"--package-conf="++uPkgConf])
+        ghcPkg gPkgConf uPkgConf (args ++ ["--package-db="++gPkgConf,"--package-db="++uPkgConf])
     | otherwise                   =
         ghcPkg gPkgConf uPkgConf args
 
