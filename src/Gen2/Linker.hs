@@ -11,6 +11,7 @@
 module Gen2.Linker where
 
 import           Control.Applicative
+import           Control.Monad
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
@@ -32,7 +33,7 @@ import qualified Data.Text.IO             as T
 import qualified Data.Text.Encoding       as TE
 import qualified Data.Text.Encoding.Error as TE
 import           System.FilePath (dropExtension, splitPath, (<.>), (</>))
-import           System.Directory (createDirectoryIfMissing)
+import           System.Directory (createDirectoryIfMissing, doesFileExist)
 import           Config
 import           Module                   (ModuleName, moduleNameString)
 
@@ -62,6 +63,7 @@ link out searchPath objFiles pageModules = do
   BL.writeFile (out </> "out.js") (BL.fromChunks src)
   writeFile (out </> "rts.js") rtsStr
   getShims extraFiles allDeps (out </> "lib.js", out </> "lib1.js")
+  writeHtml out
   combineFiles out
   return []
   where
@@ -108,6 +110,29 @@ combineFiles fp = do
 
 runMain :: Text
 runMain = "\nh$main(h$mainZCMainzimain);\n"
+
+basicHtml :: Text
+basicHtml = "<!DOCTYPE html>\n\
+            \<html>\n\
+            \  <head>\n\
+            \    <script language=\"javascript\" src=\"lib.js\"></script>\n\
+            \    <script language=\"javascript\" src=\"rts.js\"></script>\n\
+            \    <script language=\"javascript\" src=\"lib1.js\"></script>\n\
+            \    <script language=\"javascript\" src=\"out.js\"></script>\n\
+            \  </head>\n\
+            \  <body>\n\
+            \  </body>\n\
+            \  <script language=\"javascript\">\n\
+            \    " <> runMain <> "\n\
+            \  </script>\n\
+            \</html>\n"
+
+writeHtml :: FilePath -> IO ()
+writeHtml out = do
+  e <- doesFileExist htmlFile
+  when (not e) (T.writeFile htmlFile basicHtml)
+  where
+    htmlFile = out </> "index" <.> "html"
 
 -- get the ji file for a js file
 metaFile :: FilePath -> FilePath
