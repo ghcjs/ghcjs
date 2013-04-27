@@ -5,7 +5,6 @@
 
   assumptions:
   - ast is fully saturated
-  - no exceptions
 -}
 module Gen2.Optimizer where
 
@@ -15,24 +14,32 @@ import Control.Applicative
 import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Map (Map)
+import Data.Int
 import qualified Data.Map as M
+import qualified Data.IntMap as IM
 import Data.Generics.Aliases
 import Data.Generics.Schemes
 import Data.Data
 import Data.Monoid
 import Data.Data.Lens
+import Data.Tree
 import Control.Lens
 import Control.Arrow
+import Data.List (foldl')
 import qualified Data.List as L
 import Data.Maybe
 import Panic
+import Control.Monad.State
+import Data.Bits
+import Data.Default
 
-import Gen2.Utils
+import           Gen2.Utils
+import           Gen2.Dataflow
 
 import Debug.Trace
 
 optimize :: JStat -> JStat
-optimize = removeDeadVars . propagateConstants . renameLocalVars -- . combineStackUpdates
+optimize = renameLocalVars . removeDeadVars . dataflow
 
 renameLocalVars :: JStat -> JStat
 renameLocalVars = thisFunction . nestedFuns %~ renameLocalsFun
@@ -42,7 +49,7 @@ newLocals = map StrI $ (map (:[]) chars0) ++ concatMap mkIdents [1..]
   where
     mkIdents n = [c0:cs | c0 <- chars0, cs <- replicateM n chars]
     chars0 = ['a'..'z']++['A'..'Z']
-    chars = chars0++['0'..'9'] 
+    chars = chars0++['0'..'9']
 
 -- traverse all expressions in the statement (no recursion into nested statements)
 statExprs :: Traversal' JStat JExpr
@@ -65,6 +72,17 @@ subStats f (BlockStat ss) = BlockStat <$> traverse f ss
 subStats f (LabelStat l s) = LabelStat l <$> f s
 subStats _ s = pure s
 
+subExprs :: Traversal' JExpr JExpr
+subExprs f (SelExpr e i) = SelExpr <$> f e <*> pure i
+subExprs f (IdxExpr e1 e2) = IdxExpr <$> f e1 <*> f e2
+subExprs f (InfixExpr o e1 e2) = InfixExpr o <$> f e1 <*> f e2
+subExprs f (PPostExpr b xs e) = PPostExpr b xs <$> f e
+subExprs f (IfExpr e1 e2 e3) = IfExpr <$> f e1 <*> f e2 <*> f e3
+subExprs f (NewExpr e) = NewExpr <$> f e
+subExprs f (ApplExpr e es) = ApplExpr <$> f e <*> traverse f es
+subExprs f (TypeExpr b e t) = TypeExpr b <$> f e <*> pure t
+subExprs f e = f e
+
 -- traverse all 'leaf' statements in this function
 thisFunction :: Traversal' JStat JStat
 thisFunction f (IfStat e s1 s2) = IfStat e <$> thisFunction f s1
@@ -81,10 +99,37 @@ thisFunction f (BlockStat ss) = BlockStat <$> template (thisFunction f) ss
 thisFunction f (LabelStat l s) = LabelStat l <$> thisFunction f s
 thisFunction f s = f s
 
-localVars = thisFunction . _DeclStat . _1
+localVars :: JStat -> [Ident]
+localVars = universeOf subStats >=> getLocals
+  where
+    getLocals (DeclStat i _) = [i]
+    getLocals (ForInStat _ i _ _) = [i]
+    getLocals (TryStat _ i _ _) = [i]
+    getLocals _ = []
+
 localIdents = template . localFunctionVals . _JVar
 allIdents = template . functionVals . _JVar
 nestedFuns = template . localFunctionVals . _JFunc
+
+-- all idents not in expressions in this function, including in declarations
+nonExprLocalIdents :: Traversal' JStat Ident
+nonExprLocalIdents f (IfStat e s1 s2) = IfStat e <$> nonExprLocalIdents f s1
+                                                 <*> nonExprLocalIdents f s2
+nonExprLocalIdents f (DeclStat i e)   = DeclStat <$> f i <*> pure e
+nonExprLocalIdents f (WhileStat b e s) = WhileStat b e <$> nonExprLocalIdents f s
+nonExprLocalIdents f (ForInStat b i e s) = ForInStat b <$> f i
+                                                       <*> pure e
+                                                       <*> nonExprLocalIdents f s
+nonExprLocalIdents f (SwitchStat e es s) = SwitchStat e <$> (traverse . _2 . nonExprLocalIdents) f es
+                                                        <*> nonExprLocalIdents f s
+nonExprLocalIdents f (TryStat s1 i s2 s3) = TryStat <$> nonExprLocalIdents f s1
+                                                    <*> f i
+                                                    <*> nonExprLocalIdents f s2
+                                                    <*> nonExprLocalIdents f s3
+nonExprLocalIdents f (BlockStat ss) = BlockStat <$> (traverse . nonExprLocalIdents) f ss
+nonExprLocalIdents f (LabelStat l s) = LabelStat l <$> nonExprLocalIdents f s
+nonExprLocalIdents f s = pure s
+
 
 functionVals f (JList es)      = JList <$> template (functionVals f) es
 functionVals f (JHash m)       = JHash <$> template (functionVals f) m
@@ -97,7 +142,7 @@ localFunctionVals f v            = f v
 
 renameLocalsFun :: ([Ident], JStat) -> ([Ident], JStat)
 renameLocalsFun f = ( map renameVar args
-                    , s' & localIdents %~ renameVar & localVars %~ renameVar
+                    , s' & localIdents %~ renameVar & nonExprLocalIdents %~ renameVar
                     )
   where
     (_,   s')   = nestedFuns %~ renameGlobals rename $ (args, s)
@@ -106,31 +151,21 @@ renameLocalsFun f = ( map renameVar args
     rename      = M.fromList $ zip locals (filter (`S.notMember` globals) newLocals)
     globals     = idents S.\\ (S.fromList locals)
     idents      = S.fromList (s ^.. allIdents ++ args)
-    locals      = L.nub $ args ++ s ^.. localVars
+    locals      = L.nub $ localVars s -- args ++ s ^.. localVars
 
--- progragate renaming of variables global relative to this function body
+-- propagate renaming of variables global relative to this function body
 renameGlobals :: M.Map Ident Ident -> ([Ident],JStat) -> ([Ident],JStat)
 renameGlobals m f@(args,s) = (args, localIdents %~ renameVar $ s')
   where
     (_, s')     = nestedFuns %~ renameGlobals m' $ f
     renameVar i = fromMaybe i (M.lookup i m')
-    locals      = L.nub $ args ++ s ^.. localVars
+    locals      = L.nub $ args ++ localVars s
     m'          = m M.\\ (M.fromList $ zip locals (repeat (StrI "_")))
 
 
-------------------------------------------------------
--- simple forward propagation of constants and var assignments
-------------------------------------------------------
-
-propagateConstants :: JStat -> JStat
-propagateConstants = s & thisFunction . nestedFuns . _2 %~ propagateConstants'
-
-propagateConstants' :: JStat -> JStat
-propagateConstants' s = id
-
 -----------------------------------------------------
 -- dead variable elimination:
---  a dead var is a local variable that is never read
+--  a dead var is a local variable that is never read or assigned
 -----------------------------------------------------
 
 removeDeadVars s = s & thisFunction . nestedFuns . _2 %~ removeDeadVars'
@@ -139,22 +174,265 @@ removeDeadVars' :: JStat -> JStat
 removeDeadVars' s = transformOf subStats (removeDead dead) s
   where
     dead    = locals S.\\ nonDead
-    nonDead = S.fromList $ universeOf subStats s ^.. traverse . readVarsS
-    locals  = S.fromList $ s ^.. localVars
+    nonDead = S.fromList (universeOf subStats s ^.. traverse . liveVarsS)
+    locals  = S.fromList (localVars s)
 
 removeDead :: S.Set Ident -> JStat -> JStat
-removeDead dead (AssignStat (ValExpr (JVar i)) _)
-   | i `S.member` dead = mempty
 removeDead dead (DeclStat i _)
    | i `S.member` dead = mempty
 removeDead _ s = s
 
-readVarsS :: Traversal' JStat Ident
-readVarsS f (AssignStat v@(ValExpr {}) e) = AssignStat v <$> readVarsE f e
-readVarsS f s = (statExprs . readVarsE) f s
+liveVarsS :: Traversal' JStat Ident
+liveVarsS f s = (statExprs . liveVarsE) f s
 
-readVarsE :: Traversal' JExpr Ident
-readVarsE f (ValExpr (JVar i))     = ValExpr . JVar <$> f i
-readVarsE f v@(ValExpr (JFunc {})) = pure v
-readVarsE f e                      = template (readVarsE f) e
+liveVarsE :: Traversal' JExpr Ident
+liveVarsE f (ValExpr (JVar i))     = ValExpr . JVar <$> f i
+liveVarsE f v@(ValExpr (JFunc {})) = pure v
+liveVarsE f e                      = template (liveVarsE f) e
 
+----------------------------------------------------------
+dataflow :: JStat -> JStat
+dataflow = thisFunction . nestedFuns %~ f
+  where f (args,stat)     = g stat . liveness . constants $ (args, localVars stat, cfg stat)
+        g _ (args,_,cfg) = (args, unCfg cfg)
+--        g stat (args,_,cfg) = (args, unCfg cfg <> [j| return; |] <> stat)  -- append original, debug!
+
+-----------------------------------------------------------
+-- liveness: remove unnecessary assignments
+-----------------------------------------------------------
+
+type Liveness = Set Ident
+
+liveness :: ([Ident],[Ident],Graph) -> ([Ident],[Ident],Graph)
+liveness (args,locals,g) = (args,locals,g')
+  where
+    locals' = S.fromList locals
+    lf = livenessFacts g
+    g' = (nodes %~ IM.mapWithKey updNode) g
+    updNode :: NodeId -> Node -> Node
+    updNode nid (SimpleNode (AssignStat (ValExpr (JVar i)) e))
+      | Just live <- lookupFact nid 0 lf, i `S.notMember` live 
+         && not (mightHaveSideEffects e) 
+         && i `S.member` locals' = SequenceNode []
+    updNode _  n = n
+
+livenessFacts :: Graph -> Facts Liveness
+livenessFacts = foldBackward S.union f S.empty
+  where
+    f _ (SimpleNode (AssignStat (ValExpr (JVar i)) e)) m
+       = S.delete i m `S.union` (S.fromList (e ^.. template))
+    f _ n m = S.union (S.fromList (n ^.. template)) m
+
+-----------------------------------------------------------
+-- constants and assignment propagation
+--   removes unreachable branches and statements
+-----------------------------------------------------------
+
+type CVals = Map Ident JVal
+
+constants :: ([Ident],[Ident],Graph) -> ([Ident],[Ident],Graph)
+constants (args,locals,g) = (args, locals, g')
+  where
+    fs = constantsFacts g
+    g' = (nodes %~ IM.mapWithKey updNode) g
+
+    -- fact index 2 is what flows into the expression
+    nodeFact :: NodeId -> CVals
+    nodeFact nid = fromMaybe M.empty (lookupFact nid 2 fs)
+
+    updNode :: NodeId -> Node -> Node
+    updNode nid = rewriteNode nid . rewriteExprs (nodeFact nid)
+
+    rewriteExprs :: CVals -> Node -> Node
+    rewriteExprs cv = template %~ (foldExpr . propagateExpr cv) 
+
+    updExpr :: CVals -> JExpr -> JExpr
+    updExpr fact e = foldExpr . propagateExpr fact $ e
+
+    rewriteNode :: NodeId -> Node -> Node
+    rewriteNode nid _
+      | isNothing (lookupFact nid 0 fs) = SequenceNode [] -- unreachable code
+    rewriteNode nid (IfNode e s1 s2)
+      | Just True  <- c, not s = SequenceNode [s1] -- else branch unreachable
+      | Just False <- c, not s = SequenceNode [s2] -- if branch unreachable
+      where
+        s  = mightHaveSideEffects e'
+        c  = exprCond e'
+        e' = updExpr (nodeFact nid) e
+    rewriteNode nid (WhileNode e s1)  -- loop body unreachable
+      | Just False <- c, not (mightHaveSideEffects e') = SequenceNode []
+      where
+        c  = exprCond e'
+        e' = updExpr (nodeFact nid) e
+    rewriteNode  nid n = rewriteExprs (nodeFact nid) n
+
+    -- apply our facts to an expression
+    propagateExpr :: CVals -> JExpr -> JExpr
+    propagateExpr cv e = (template %~ f) e
+      where
+        f :: JVal -> JVal
+        f (JVar i) | Just v <- M.lookup i cv' = v
+        f x = x
+        cv' = maybe M.empty (`deleteConstants` cv) (mutated e)
+
+-- constant and variable assignment propagation
+constantsFacts :: Graph -> Facts CVals
+constantsFacts = foldForward combineConstants f0 M.empty
+  where
+    f0 :: Forward CVals
+    f0 = def { fIf      = removeMutated1t
+             , fWhile   = removeMutated1t
+             , fDoWhile = removeMutated1t
+             , fSwitch  = switched
+             , fReturn  = removeMutated1
+             , fForIn   = removeMutated3
+             , fSimple  = \_ s m -> simple s (removeMutated s m)
+             }
+    switched :: NodeId -> JExpr -> [JExpr] -> CVals -> ([CVals], CVals)
+    switched _ e es m = let m' = removeMutated e m in (replicate (length es) m', m')
+
+    simple (AssignStat (ValExpr (JVar i)) (ValExpr v@(JInt _)))    m = M.insert i v m
+    simple (AssignStat (ValExpr (JVar i)) (ValExpr v@(JDouble _))) m = M.insert i v m
+    simple (AssignStat (ValExpr (JVar i)) (ValExpr v@(JVar _)))    m = M.insert i v m
+    simple (AssignStat (ValExpr (JVar i)) _)                       m = M.delete i m
+    simple _ m = m
+    tup x = (x,x)
+    removeMutated1t _ s  = tup . removeMutated s
+    removeMutated1 _     = removeMutated
+    removeMutated3 _ _ _ = removeMutated
+    removeMutated s m = maybe M.empty (`deleteConstants` m) mut
+      where
+        mut = S.unions <$> sequence (Just S.empty : map mutated (s ^.. template))
+
+    -- propagate constants if we have the same from both branches
+    combineConstants :: CVals -> CVals -> CVals
+    combineConstants c1 c2 = M.filterWithKey f c1
+      where
+        f i v = M.lookup i c2 == Just v
+
+deleteConstants :: Set Ident -> CVals -> CVals
+deleteConstants s m = M.filterWithKey f m
+  where
+    f k _        | k `S.member` s = False
+    f _ (JVar i) | i `S.member` s = False
+    f _ _                         = True
+
+-- returns Nothing if it does things that we aren't sure of
+mutated :: JExpr -> Maybe (Set Ident)
+mutated expr = foldl' f (Just S.empty) (universeOf template expr)
+   where
+    f Nothing _                            = Nothing
+    f s (PPostExpr _ _ (ValExpr (JVar i))) = S.insert i <$> s
+    f s (ApplExpr (ValExpr (JVar i)) _)
+      | Just m <- knownMutated i           = S.union m <$> s
+    f s (SelExpr {})                       = s -- fixme might not be true with properties
+    f s (InfixExpr{})                      = s
+    f s (IdxExpr{})                        = s
+    f s (NewExpr{})                        = s
+    f s (ValExpr{})                        = s
+    f _ _                                  = Nothing
+    knownMutated (StrI i) | i `elem` knownPure = Just S.empty
+                          | Just s <- M.lookup i knownFuns = Just s
+    knownMutated _ = Nothing
+    -- known pure RTS functions
+    knownPure = map ("h$"++) ("c" : map (('c':).show) [(1::Int)..32])
+    -- RTS functions that only touch specific vars:
+    knownFuns = M.fromList pushes
+      where
+        pushes = map (\x -> ("h$p" ++ show x, sp)) [(1::Int)..32]
+        sp = S.fromList . map StrI $ ["h$sp", "h$stack"]
+
+mightHaveSideEffects :: JExpr -> Bool
+mightHaveSideEffects e = any f (universeOf template e)
+  where
+    f (ValExpr{})          = False
+    f (SelExpr{})          = False  -- might be wrong with defineProperty
+    f (IdxExpr{})          = False
+    f (InfixExpr{})        = False
+    f (PPostExpr _ "++" _) = True
+    f (PPostExpr _ "--" _) = True
+    f (PPostExpr{})        = False
+    f (IfExpr{})           = False
+    f (NewExpr{})          = False
+    f (ApplExpr{})         = True
+    f _                    = True
+
+-- constant folding and other bottom up rewrites
+foldExpr :: JExpr -> JExpr
+foldExpr = transformOf template f
+  where
+    f (InfixExpr "||" v1 v2) = lorOp v1 v2
+    f (InfixExpr "&&" v1 v2) = landOp v1 v2
+    f (InfixExpr op (ValExpr (JInt i1)) (ValExpr (JInt i2)))       = intInfixOp op i1 i2
+    f (InfixExpr op (ValExpr (JDouble d1)) (ValExpr (JDouble d2))) = doubleInfixOp op d1 d2
+    f (InfixExpr op (ValExpr (JInt x)) (ValExpr (JDouble d)))
+      | abs x < 10000 = doubleInfixOp op (fromIntegral x) d -- conservative estimate to prevent loss of precision?
+    f (InfixExpr op (ValExpr (JDouble d)) (ValExpr (JInt x)))
+      | abs x < 10000 = doubleInfixOp op d (fromIntegral x)
+    f (InfixExpr "+" (ValExpr (JStr s1)) (ValExpr (JStr s2))) = ValExpr (JStr (s1++s2))
+    f (PPostExpr True "-" (ValExpr (JInt i))) = ValExpr (JInt $ negate i)
+    f (PPostExpr True "-" (ValExpr (JDouble i))) = ValExpr (JDouble $ negate i)
+    f (PPostExpr True "!" e) | Just b <- exprCond e = if b then jFalse else jTrue
+    f e = e
+
+lorOp :: JExpr -> JExpr -> JExpr
+lorOp e1 e2 | Just b <- exprCond e1 = if b then jTrue else e2
+lorOp e1 e2 = InfixExpr "||" e1 e2
+
+landOp :: JExpr -> JExpr -> JExpr
+landOp e1 e2 | Just b <- exprCond e1 = if b then e2 else jFalse
+landOp e1 e2 = InfixExpr "&&" e1 e2
+
+-- if expression is used in a condition, can we statically determine its result?
+exprCond :: JExpr -> Maybe Bool
+exprCond (ValExpr (JInt x)) = Just (x /= 0)
+exprCond (ValExpr (JDouble x)) = Just (x /= 0)
+exprCond (ValExpr (JStr xs)) = Just (not $ null xs)
+exprCond (ValExpr (JVar (StrI "false"))) = Just False   -- fixme these need to be proper values in jmacro
+exprCond (ValExpr (JVar (StrI "true"))) = Just True
+exprCond (ValExpr (JVar (StrI "undefined"))) = Just False
+exprCond (ValExpr (JVar (StrI "null"))) = Just False
+exprCond _ = Nothing
+
+-- constant folding and other bottom up rewrites
+intInfixOp :: String -> Integer -> Integer -> JExpr
+intInfixOp "+" i1 i2 = ValExpr (JInt (i1+i2))
+intInfixOp "-" i1 i2 = ValExpr (JInt (i1-i2))
+intInfixOp "*" i1 i2 = ValExpr (JInt (i1*i2))
+intInfixOp "/" i1 i2
+  | i2 /= 0 && d * i2 == i1 = ValExpr (JInt d)
+  where
+    d = i1 `div` i2
+intInfixOp "%"   i1 i2 = ValExpr (JInt (i1 `mod` i2)) -- not rem?
+intInfixOp "&"   i1 i2 = bitwiseInt (.&.) i1 i2
+intInfixOp "|"   i1 i2 = bitwiseInt (.|.) i1 i2
+intInfixOp "^"   i1 i2 = bitwiseInt xor   i1 i2
+intInfixOp ">"   i1 i2 = jBool (i1 > i2)
+intInfixOp "<"   i1 i2 = jBool (i1 < i2)
+intInfixOp "<="  i1 i2 = jBool (i1 <= i2)
+intInfixOp ">="  i1 i2 = jBool (i1 >= i2)
+intInfixOp "===" i1 i2 = jBool (i1 == i2)
+intInfixOp "!==" i1 i2 = jBool (i1 /= i2)
+intInfixOp "=="  i1 i2 = jBool (i1 == i2)
+intInfixOp "!="  i1 i2 = jBool (i1 /= i2)
+intInfixOp op i1 i2 = InfixExpr op (ValExpr (JInt i1)) (ValExpr (JInt i2))
+
+doubleInfixOp :: String -> Double -> Double -> JExpr
+doubleInfixOp "+"   d1 d2 = ValExpr (JDouble (d1+d2))
+doubleInfixOp "-"   d1 d2 = ValExpr (JDouble (d1-d2))
+doubleInfixOp "*"   d1 d2 = ValExpr (JDouble (d1*d2))
+doubleInfixOp "/"   d1 d2 = ValExpr (JDouble (d1/d2)) -- is NaN handled correctly here?
+doubleInfixOp ">"   d1 d2 = jBool (d1 > d2)
+doubleInfixOp "<"   d1 d2 = jBool (d1 < d2)
+doubleInfixOp "<="  d1 d2 = jBool (d1 <= d2)
+doubleInfixOp ">="  d1 d2 = jBool (d1 >= d2)
+doubleInfixOp "===" d1 d2 = jBool (d1 == d2)
+doubleInfixOp "!==" d1 d2 = jBool (d1 /= d2)
+doubleInfixOp "=="  d1 d2 = jBool (d1 == d2)
+doubleInfixOp "!="  d1 d2 = jBool (d1 /= d2)
+doubleInfixOp op d1 d2 = InfixExpr op (ValExpr (JDouble d1)) (ValExpr (JDouble d2))
+
+bitwiseInt :: (Int32 -> Int32 -> Int32) -> Integer -> Integer -> JExpr
+bitwiseInt op i1 i2 =
+  let i = fromIntegral i1 `op` fromIntegral i2
+  in ValExpr (JInt $ fromIntegral i)

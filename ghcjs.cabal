@@ -1,6 +1,6 @@
 Name:           ghcjs
 Version:        0.1.0
-Description:    Haskell to Javascript translator
+Description:    Haskell to JavaScript compiler
 License:        MIT
 License-file:   LICENSE
 Author:         Victor Nazarov, Hamish Mackenzie, Luite Stegeman
@@ -40,6 +40,7 @@ Library
                      Gen2.Utils,
                      Gen2.StgAst,
                      Gen2.Optimizer,
+                     Gen2.Dataflow,
                      Gen2.Debug,
                      Gen2.GC,
                      Gen2.Printer,
@@ -61,7 +62,6 @@ Library
                    ghc-paths,
                    template-haskell,
                    syb            >= 0.4      && < 0.5,
-                   source-map     >= 0.1.0    && < 0.2,
                    bytestring     >= 0.9.2.1  && < 0.11,
                    attoparsec     >= 0.10.2.0 && < 0.11,
                    aeson          >= 0.6.0.2  && < 0.7,
@@ -78,7 +78,8 @@ Library
                    transformers,
                    split          >= 0.2      && < 0.3,
                    deepseq,
-                   vector         >= 0.10     && < 0.11
+                   vector         >= 0.10     && < 0.11,
+                   data-default   >= 0.5      && < 0.6
     exposed: True
     buildable: True
     hs-source-dirs: src
@@ -100,7 +101,6 @@ Executable ghcjs
                     bytestring          >= 0.9  && < 0.11,
                     Cabal
     GHC-Options:    -O -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
-    cpp-options:    -DGHCJS_PACKAGE_IMPORT
 
 Executable ghcjs-pkg
     if flag(compiler-only)

@@ -153,3 +153,14 @@ ve = ValExpr . JVar . StrI
 
 concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
 concatMapM f xs = mapM f xs >>= return . mconcat
+
+-- fixme these should be proper keywords in jmacro
+jTrue :: JExpr
+jTrue = ve "true"
+
+jFalse :: JExpr
+jFalse = ve "false"
+
+jBool :: Bool -> JExpr
+jBool True = jTrue
+jBool False = jFalse
