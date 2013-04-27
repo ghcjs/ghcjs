@@ -352,7 +352,7 @@ genPrim Int2AddrOp [a,o]   [i]       = PrimInline [j| `a` = []; `o` = `i`; |] --
 genPrim AddrGtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >  `o2`) ? `HTrue` : `HFalse`; |]
 genPrim AddrGeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >= `o2`) ? `HTrue` : `HFalse`; |]
 genPrim AddrEqOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? `HTrue` : `HFalse`; |]
-genPrim AddrNeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 0 : 1; |]
+genPrim AddrNeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? `HFalse` : `HTrue`; |]
 genPrim AddrLtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <  `o2`) ? `HTrue` : `HFalse`; |]
 genPrim AddrLeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <= `o2`) ? `HTrue` : `HFalse`; |]
 
