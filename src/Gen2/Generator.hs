@@ -92,7 +92,7 @@ generate df s m = flip evalState (initState df m) $ do
   let result = BL.toStrict $ TL.encodeUtf8 (TL.unlines p1)
   (deps, pkgs, funs) <- genMetaData d
   let depsBs = C.runPut $ Linker.serializeDeps pkgs funs deps
-  return (dumpAst s <> result, depsBs)
+  return ({- dumpAst s <> -} result, depsBs)
 
 dumpAst s = BL.toStrict . TL.encodeUtf8 . TL.pack $
   (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s))
@@ -1116,7 +1116,8 @@ genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) 
               ("h$" ++ (drop 2 $ dropWhile isDigit $ drop (length wrapperPrefix) cl))
           | otherwise = "h$" ++ cl
       wrapperPrefix = "ghczuwrapperZC"
-genForeignCall0 _ _ _ _ = panic "unsupported foreign call"
+genForeignCall0 (CCall (CCallSpec DynamicTarget conv safe)) t tgt args = return (mempty,False) -- fixme panic "unsupported foreign call"
+genForeignCall0 _ _ _ _ = panic "genForeignCall0: unsupported foreign call"
 
 {-
 -- fixme: what if the call returns a thunk?
@@ -1300,4 +1301,4 @@ makeIdent = do
   gsId += 1
   i <- use gsId
   mod <- use gsModule
-  return (StrI $ "h$" ++ zEncodeString (show mod) ++ "_" ++ show i)
+  return (StrI $ "h$" ++ zEncodeString (show mod) ++ "_" ++ encodeUnique i)

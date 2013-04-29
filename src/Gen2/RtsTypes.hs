@@ -20,6 +20,7 @@ import qualified Data.Set as S
 import           Data.Set (Set)
 import qualified Data.Map as M
 import           Data.Map (Map)
+import           Data.Array ((!), listArray)
 import           Control.Monad.State.Strict
 
 import           DynFlags
@@ -246,23 +247,34 @@ maxReg = regNum maxBound
 data GenState = GenState
   { _gsModule   :: Module    -- | the module we're compiling, used for generating names
   , _gsToplevel :: Maybe Id  -- | the top-level function group we're generating
-  , _gsScope    :: GenScope  -- | the current lexical environment
+--  , _gsScope    :: GenScope  -- | the current lexical environment
   , _gsId       :: Int       -- | integer for the id generator
   , _gsDynFlags :: DynFlags  -- | the DynFlags, used for prettyprinting etc
 --  , _gsSRTs     :: Map Id Int
   }
 
+encodeUnique :: Int -> String
+encodeUnique = reverse . go  -- reversed is more compressible
+  where
+    go n | n < 0  = '_' : encodeUnique (negate n)
+         | n > 61 = let (q,r) = n `quotRem` 62
+                          in  chars ! r : encodeUnique q
+               | otherwise = [chars ! n]
+
+    chars = listArray (0,61) (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
+
+{-
 -- | where can we find all Ids
 data GenScope = GenScope
   { _stableScope :: Map Id IdScope  -- | how to access an id 
   , _localScope  :: Set Id          -- | set of ids that have a local var binding
   } -- deriving (Eq, Monoid)
-
-emptyScope :: GenScope
-emptyScope = GenScope mempty mempty
+-}
+-- emptyScope :: GenScope
+-- emptyScope = GenScope mempty mempty
 
 initState :: DynFlags -> Module -> GenState
-initState df m = GenState m Nothing emptyScope 1 df
+initState df m = GenState m Nothing 1 df
 
 runGen :: DynFlags -> Module -> G a -> a
 runGen df m = flip evalState (initState df m)
@@ -289,7 +301,7 @@ data IdScope = Register !StgReg
                                          -- fixme: why not a direct stack-offset?
 
 makeLenses ''GenState
-makeLenses ''GenScope
+-- makeLenses ''GenScope
 
 currentModule :: G String
 currentModule = moduleNameString . moduleName <$> use gsModule
@@ -437,20 +449,6 @@ papArity tgt p = [j| `tgt` = 0;
                      `tgt` = (((fa>>8)-regs)<<8)|((fa&0xFF)-args);
                      `traceRts $ "pap arity: " |+ tgt`;
                    |]
-{-
-papArgs :: JExpr -> JExpr
-papArgs p = [je| `p`.f.a |]
--}
---papArity tgt p = [j| `tgt` = `p`.f.a |]
-
--- number of stored args in pap (fixme?)
-{-
-
-papArgs p = [je| `Heap`[`p`].a |]
--}
-
--- funTag :: JExpr -> JExpr
--- funTag c = [je| `c`.gtag |]
 
 -- some utilities do do something with a range of regs
 -- start or end possibly supplied as javascript expr
@@ -480,6 +478,8 @@ withRegsRE start end max fallthrough f =
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
 
 jsIdIdent :: Id -> Maybe Int -> String -> G Ident
+--jsIdIdent i Nothing suffix
+--   | not (isExportedId i) || isNothing (nameModule_maybe . getName) i = jsLocalIdIdent i suffix
 jsIdIdent i mn suffix = do
   (prefix, u) <- mkPrefixU
   StrI . (\x -> "h$"++prefix++x++mns++suffix++u) . zEncodeString <$> name
@@ -491,7 +491,7 @@ jsIdIdent i mn suffix = do
         | isExportedId i, Just x <- (nameModule_maybe . getName) i = do
            xstr <- showPpr' x
            return (zEncodeString xstr, "")
-        | otherwise = (,('_':) . show . getKey . getUnique $ i) . ('_':) . zEncodeString
+        | otherwise = (,('_':) . encodeUnique . getKey . getUnique $ i) . ('_':) . zEncodeString
                         <$> currentModulePkg
 
 jsVar :: String -> JExpr
