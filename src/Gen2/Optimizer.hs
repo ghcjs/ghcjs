@@ -164,6 +164,8 @@ renameGlobals m f@(args,s) = (args, localIdents %~ renameVar $ s')
     locals      = L.nub $ args ++ localVars s
     m'          = m M.\\ (M.fromList $ zip locals (repeat (StrI "_")))
 
+tup :: a -> (a,a)
+tup x = (x,x)
 
 -----------------------------------------------------
 -- dead variable elimination:
@@ -195,7 +197,7 @@ liveVarsE f e                      = template (liveVarsE f) e
 ----------------------------------------------------------
 dataflow :: JStat -> JStat
 dataflow = thisFunction . nestedFuns %~ f
-  where f (args,stat)     = g stat . liveness . constants . constants $ (args, localVars stat, cfg stat)
+  where f (args,stat)     = g stat . liveness . constants . constants . constants . propagateStack $ (args, localVars stat, cfg stat)
         g _ (args,_,cfg) = (args, unCfg cfg)
 --        g stat (args,_,cfg) = (args, unCfg cfg <> [j| return; |]  <> stat)  -- append original, debug!
 
@@ -259,10 +261,10 @@ constants (args,locals,g) = -- trace (show g) $ trace (show fs)
     updNode nid = rewriteNode nid . rewriteExprs (nodeFact nid)
 
     rewriteExprs :: CVals -> Node -> Node
-    rewriteExprs cv = template %~ (foldExpr . propagateExpr cv)
+    rewriteExprs cv = template %~ (normalize . propagateExpr cv)
 
     updExpr :: CVals -> JExpr -> JExpr
-    updExpr fact e = foldExpr . propagateExpr fact $ e
+    updExpr fact e = normalize . propagateExpr fact $ e
 
     rewriteNode :: NodeId -> Node -> Node
     rewriteNode nid _
@@ -279,16 +281,24 @@ constants (args,locals,g) = -- trace (show g) $ trace (show fs)
       where
         c  = exprCond e'
         e' = updExpr (nodeFact nid) e
-    rewriteNode  nid n = rewriteExprs (nodeFact nid) n
+    rewriteNode nid (SimpleNode (ApplStat s args)) = 
+      case propagateExpr (nodeFact nid) (ApplExpr s args) of
+        (ApplExpr s' args') -> SimpleNode (ApplStat s' args')
+        _ -> error "rewriteNode: not ApplyExpr"
+    rewriteNode nid n = rewriteExprs (nodeFact nid) n
 
     -- apply our facts to an expression
     propagateExpr :: CVals -> JExpr -> JExpr
-    propagateExpr cv e = transformOf template f e
+    propagateExpr cv e@(ApplExpr (ValExpr _) args) =
+      propagateExpr' (maybe M.empty (`deleteConstants` cv) (S.unions <$> mapM mutated args)) e
+    propagateExpr cv e = 
+      propagateExpr' (maybe M.empty (`deleteConstants` cv) (mutated e)) e
+    propagateExpr' :: CVals -> JExpr -> JExpr
+    propagateExpr' cv e = transformOf template f e
       where
         f :: JExpr -> JExpr
-        f (ValExpr (JVar i)) | Just (e,_) <- M.lookup i cv' = e
+        f (ValExpr (JVar i)) | Just (e,_) <- M.lookup i cv = e
         f x = x
-        cv' = maybe M.empty (`deleteConstants` cv) (mutated e)
 
 -- constant and variable assignment propagation
 constantsFacts :: Facts Liveness -> Graph -> Facts CVals
@@ -302,11 +312,12 @@ constantsFacts lfs g = foldForward combineConstants f0 M.empty g
              , fReturn  = removeMutated1
              , fForIn   = removeMutated3
              , fSimple  = \nid s m -> simple nid s (removeMutated s m)
+             , fTry     = \_ x -> x
              }
     usedOnce :: NodeId -> Ident -> Bool
     usedOnce nid ident = fromMaybe False $
       (== Once) <$> (M.lookup ident =<< lookupFact nid 0 lfs)
-    
+
     switched :: NodeId -> JExpr -> [JExpr] -> CVals -> ([CVals], CVals)
     switched _ e es m = let m' = removeMutated e m in (replicate (length es) m', m')
     simple :: NodeId -> JStat -> CVals -> CVals
@@ -374,14 +385,13 @@ mutated expr = foldl' f (Just S.empty) (universeOf template expr)
     f s (NewExpr{})                        = s
     f s (ValExpr{})                        = s
     f _ _                                  = Nothing
-    knownMutated i'@(StrI i) | isKnownPureFun i'              = Just S.empty
-                             | Just s <- M.lookup i knownFuns = Just s
+    knownMutated i
+      | isKnownPureFun i               = Just S.empty
+      | Just s <- M.lookup i knownFuns = Just s
     knownMutated _ = Nothing
-    -- RTS functions that only touch specific vars:
-    knownFuns = M.fromList pushes
-      where
-        pushes = map (\x -> ("h$p" ++ show x, sp)) [(1::Int)..32]
-        sp = S.fromList . map StrI $ ["h$sp", "h$stack"]
+
+mutated' :: Data a => a -> Maybe (Set Ident)
+mutated' a = S.unions <$> (mapM mutated $ a ^.. template)
 
 -- common RTS functions that we know touch only a few global variables
 knownFuns :: Map Ident (Set Ident)
@@ -392,7 +402,9 @@ knownFuns = M.fromList . map (StrI *** S.fromList . map StrI) $
 -- pure RTS functions that we know we can safely move around or remove
 isKnownPureFun :: Ident -> Bool
 isKnownPureFun (StrI i) = S.member i knownPure
-  where knownPure = S.fromList $ map ("h$"++) ("c" : map (('c':).show) [(1::Int)..32])
+  where knownPure = S.fromList . map ("h$"++) $
+          ("c" : map (('c':).show) [(1::Int)..32]) ++
+          map (('d':).show) [(1::Int)..32]
 
 
 mightHaveSideEffects :: JExpr -> Bool
@@ -423,10 +435,54 @@ foldExpr = removeNaN . transformOf template f
     f (InfixExpr op (ValExpr (JDouble d)) (ValExpr (JInt x)))
       | abs x < 10000 = doubleInfixOp op d (fromIntegral x)
     f (InfixExpr "+" (ValExpr (JStr s1)) (ValExpr (JStr s2))) = ValExpr (JStr (s1++s2))
+    f (InfixExpr "+" e (ValExpr (JInt i))) | i < 0 = InfixExpr "-" e (ValExpr (JInt $ negate i))
+    f (InfixExpr "-" e (ValExpr (JInt i))) | i < 0 = InfixExpr "+" e (ValExpr (JInt $ negate i))
     f (PPostExpr True "-" (ValExpr (JInt i))) = ValExpr (JInt $ negate i)
     f (PPostExpr True "-" (ValExpr (JDouble i))) = ValExpr (JDouble $ negate i)
     f (PPostExpr True "!" e) | Just b <- exprCond e = if b then jFalse else jTrue
     f e = e
+
+-- is expression a numeric or string constant?
+isConst :: JExpr -> Bool
+isConst (ValExpr (JDouble _)) = True
+isConst (ValExpr (JInt _)) = True
+isConst (ValExpr (JStr _)) = True
+isConst _ = False
+
+isVar :: JExpr -> Bool
+isVar (ValExpr (JVar _)) = True
+isVar _ = False
+
+isConstOrVar :: JExpr -> Bool
+isConstOrVar x = isConst x || isVar x
+
+normalize :: JExpr -> JExpr
+normalize = rewriteOf template assoc . rewriteOf template comm . foldExpr
+  where
+    comm :: JExpr -> Maybe JExpr
+    comm (InfixExpr op e1 e2)
+      |  commutes op && isConst e1 && not (isConst e2)
+      || commutes op && isVar e1 && not (isConstOrVar e2) = f (InfixExpr op e2 e1)
+    comm (InfixExpr op1 e1 (InfixExpr op2 e2 e3))
+      |   op1 == op2 && commutes op1 && isConst e1 && not (isConst e2) 
+      ||  op1 == op2 && commutes op1 && isVar e1 && not (isConstOrVar e2)
+      || commutes2a op1 op2 && isConst e1 && not (isConst e2)
+      || commutes2a op1 op2 && isVar e1 && not (isConstOrVar e2)
+          = f (InfixExpr op1 e2 (InfixExpr op2 e1 e3))
+    comm _ = Nothing
+    assoc :: JExpr -> Maybe JExpr
+    assoc (InfixExpr op1 (InfixExpr op2 e1 e2) e3)
+      | op1 == op2 && associates op1 = f (InfixExpr op1 e1 (cf $ InfixExpr op1 e2 e3))
+      | associates2a op1 op2 = f (InfixExpr op1 e1 (cf $ InfixExpr op2 e2 e3))
+      | associates2b op1 op2 = f (InfixExpr op2 e1 (cf $ InfixExpr op1 e2 e3))
+    assoc _ = Nothing
+    commutes   op  = op `elem` ["*", "+"]                            --  a * b       = b * a
+    commutes2a op1 op2 = (op1,op2) `elem` [("+","-"),("*", "/")]     --  a + (b - c) = b + (a - c)
+    associates op  = op `elem` ["*", "+"]                            -- (a * b) * c = a * (b * c)
+    associates2a op1 op2 = (op1,op2) `elem` [("+", "-"), ("*", "/")] -- (a + b) - c = a + (b - c)  -- (a*b)/c = a*(b/c)
+    associates2b op1 op2 = (op1,op2) `elem` [("-", "+"), ("/", "*")] -- (a - b) + c = a + (c - b)
+    cf = rewriteOf template comm . foldExpr
+    f  = Just . foldExpr
 
 -- JDouble NaN /= JDouble NaN prevents fixed point iteration from working, workaround until jmacro
 -- changes the Eq instance
@@ -498,3 +554,129 @@ bitwiseInt op i1 i2 =
   let i = fromIntegral i1 `op` fromIntegral i2
   in ValExpr (JInt $ fromIntegral i)
 
+-----------------------------------------------------------
+-- stack and stack pointer magic
+-----------------------------------------------------------
+
+
+ps :: JStat -> JStat
+ps = thisFunction . nestedFuns %~ f
+  where f (args,stat)     = g stat . propagateStack $ (args, localVars stat, cfg stat)
+        g _ (args,_,cfg) = (args, unCfg cfg)
+-- ps s = propagateStack ([],[],cfg s) ^. _3 . to unCfg
+
+
+type StackFacts = Maybe Integer  -- relative offset of h$sp if known
+
+-- rewrite only if: max 4 return statements stack is accessed
+propagateStack :: ([Ident],[Ident],Graph) -> ([Ident],[Ident],Graph)
+propagateStack (args,locals,g)
+ | length [() | (ReturnNode{}) <- IM.elems (g ^. nodes)] > 3 = (args, locals, g)
+ | otherwise = (args,locals,g')
+  where
+    sf = stackFacts g
+    g' :: Graph
+    g' = foldl' (\g (k,v) -> updNode k v g) g (IM.toList $ g^.nodes)
+    
+    updNode :: NodeId -> Node -> Graph -> Graph
+    updNode nid e@(IfNode _ n1 _) g
+      | known nid && unknown n1 = replace nid e g
+    updNode nid e@(WhileNode _ n1) g
+      | known nid && unknown n1 = replace nid e g
+    updNode nid e@(ForInNode _ _ _ n1) g
+      | known nid && unknown n1 = replace nid e g
+    updNode nid e@(SwitchNode _ _ n1) g
+      | known nid && unknown n1 = replace nid e g
+    updNode nid e@(TryNode _ _ _ _) g
+      | known nid = replace nid e g
+    updNode nid e@(ReturnNode{}) g
+      | known nid = replace nid e g
+    updNode nid e@(SimpleNode{}) g
+      | known nid && isNothing (join (lookupFact nid 1 sf)) = replace nid e g
+    updNode nid e@(SimpleNode{}) g
+      | Just (Just x) <- lookupFact nid 0 sf,
+        Just (Just y) <- lookupFact nid 1 sf,
+         x /= y = nodes %~ IM.insert nid (SequenceNode []) $ g
+    updNode nid n g = updExprs nid n g
+
+    updExprs :: NodeId -> Node -> Graph -> Graph
+    updExprs nid n g
+      | Just (Just offset) <- lookupFact nid 2 sf =
+         let n' =  (template %~ updExpr offset) n
+         in  nodes %~ IM.insert nid n' $ g
+      | otherwise = g
+        
+    updExpr :: Integer -> JExpr -> JExpr
+    updExpr 0 e = e
+    updExpr n e = transformOf template sp e
+      where
+        sp (ValExpr (JVar (StrI "h$sp"))) = [je|h$sp+`n`|]
+        sp e = e
+    
+    known :: NodeId -> Bool
+    known nid | Just (Just _) <- lookupFact nid 0 sf = True
+              | otherwise = False
+
+    unknown :: NodeId -> Bool
+    unknown = not . known
+
+    replace :: NodeId -> Node -> Graph -> Graph
+    replace nid n g
+      | Just (Just x) <- lookupFact nid 0 sf, x /= 0 =
+          let newId = g^.nodeid
+              sp = ValExpr (JVar (StrI "h$sp"))
+              newNodes = IM.fromList 
+                [ (nid,     SequenceNode [newId, newId+1])
+                , (newId,   SimpleNode (AssignStat sp (InfixExpr "+" sp (ValExpr (JInt x)))))
+                , (newId+1, n)
+                ]
+          in  (nodeid %~ (+2)) . (nodes %~ IM.union newNodes) $ g
+                    | otherwise = g
+
+stackFacts :: Graph -> Facts StackFacts
+stackFacts g = foldForward combineStack f0 (Just 0) g
+  where
+    f0 = def { fIf      = updSfT
+             , fWhile   = updSfT
+             , fDoWhile = updSfT
+             , fSwitch  = switched
+             , fReturn  = updSf1
+             , fForIn   = updSf3
+             , fSimple  = simple
+             , fTry     = \_ _ -> Nothing
+             }
+    updSfT _ e sf = tup (updSf e sf)
+    updSf1 _ = updSf
+    updSf3 _ _ _ = updSf
+    updSf :: JExpr -> StackFacts -> StackFacts
+    updSf e sf | Just m <- mutated e, (StrI "h$sp") `S.notMember` m = sf
+               | otherwise                                          = Nothing
+    updSf' :: JStat -> StackFacts -> StackFacts
+    updSf' s sf | Just m <- mutated' s, (StrI "h$sp") `S.notMember` m = sf
+                | otherwise                                           = Nothing
+
+    switched :: NodeId -> JExpr -> [JExpr] -> StackFacts -> ([StackFacts], StackFacts)
+    switched _ e es sf = let sf' = updSf e sf in (replicate (length es) sf', sf')
+
+    adjSf :: Integer -> StackFacts -> StackFacts
+    adjSf n = fmap (+n)
+
+    adjSfE :: JExpr -> StackFacts -> StackFacts
+    adjSfE e sf | (ValExpr (JVar (StrI "h$sp"))) <- e = sf
+                | (InfixExpr op (ValExpr (JVar (StrI "h$sp"))) (ValExpr (JInt x))) <- e =
+                   case op of
+                     "+" -> adjSf x sf
+                     "-" -> adjSf (-x) sf
+                     _   -> Nothing
+                | otherwise = Nothing
+      where e' = normalize e
+
+    simple :: NodeId -> JStat -> StackFacts -> StackFacts
+    simple nid (ApplStat e es) = updSf (ApplExpr e es)
+    simple nid (PPostStat _ "++" (ValExpr (JVar (StrI "h$sp")))) = adjSf 1
+    simple nid (PPostStat _ "--" (ValExpr (JVar (StrI "h$sp")))) = adjSf (-1)
+    simple nid (AssignStat (ValExpr (JVar (StrI "h$sp"))) e) = adjSfE e
+    simple nid s = updSf' s
+
+    combineStack x y | x == y    = x
+                     | otherwise = Nothing

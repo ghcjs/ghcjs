@@ -314,17 +314,17 @@ data Forward a =
           , fBreak    :: NodeId                            -> a -> a
           , fContinue :: NodeId                            -> a -> a
           , fReturn   :: NodeId -> JExpr                   -> a -> a
---          , fTry      :: NodeId ->
+          , fTry      :: NodeId                            -> a -> a
           , fForIn    :: NodeId -> Bool  -> Ident -> JExpr -> a -> a
           , fSwitch   :: NodeId -> JExpr -> [JExpr]        -> a -> ([a],a)
           }
 
 instance Default (Forward a) where
-  def = Forward c2tup c2tup c2tup fconst2 fconst fconst fconst2 fconst4 defSwitch
+  def = Forward c2tup c2tup c2tup fconst2 fconst fconst fconst2 fconst fconst4 defSwitch
 
 constForward :: a -> (Forward a)
 constForward z = Forward (const3 (z,z)) (const3 (z,z)) (const3 (z,z)) (const3 z)
-                         (const2 z) (const2 z) (const3 z) (const5 z) (zSwitch z)
+                         (const2 z) (const2 z) (const3 z) (const2 z) (const5 z) (zSwitch z)
 
 c2tup :: a -> b -> c -> (c,c)
 c2tup _ _ x = (x,x)
@@ -485,17 +485,17 @@ foldForward c f z g = fixed (goEntry $ g^.entry) noFacts
     go nid (ReturnNode e) x = do
       upds nid [0,2] x
       let x' = fReturn f nid e x
-      upd nid 2 x'
+      upd nid 3 x'
       return Nothing
     go nid (BreakNode{}) x = do
       upds nid [0,2] x
       let x'= fBreak f nid x
-      upd nid 2 x'
+      upd nid 3 x'
       return Nothing
     go nid (ContinueNode{}) x = do
       upds nid [0,2] x
       let x' = fContinue f nid x
-      upd nid 2 x'
+      upd nid 3 x'
       return Nothing
     go nid (LabelNode _ s) x = do
       upds nid [0,2] x
@@ -503,8 +503,9 @@ foldForward c f z g = fixed (goEntry $ g^.entry) noFacts
       upd' nid 1 x0
       return x0
     go nid (TryNode t _ c fin) x = do
-      upds nid [0,2] x
-      t' <- go' t x
+      upd nid 0 x
+      let x' = fTry f nid x
+      t' <- go' t x'
       upd' nid 2 t'
       c' <- go' c z
       upd' nid 3 c'
