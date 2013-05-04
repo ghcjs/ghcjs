@@ -357,7 +357,7 @@ constantsFacts lfs g = foldForward combineConstants f0 M.empty g
       where
         f i v = M.lookup i c2 == Just v
 
--- all variables referenced by var
+-- all variables referenced by expression
 exprDeps :: JExpr -> Set Ident
 exprDeps e = S.fromList $ (e ^.. template) >>= ids
   where
@@ -476,11 +476,11 @@ normalize = rewriteOf template assoc . rewriteOf template comm . foldExpr
       | associates2a op1 op2 = f (InfixExpr op1 e1 (cf $ InfixExpr op2 e2 e3))
       | associates2b op1 op2 = f (InfixExpr op2 e1 (cf $ InfixExpr op1 e2 e3))
     assoc _ = Nothing
-    commutes   op  = op `elem` ["*", "+"]                            --  a * b       = b * a
-    commutes2a op1 op2 = (op1,op2) `elem` [("+","-"),("*", "/")]     --  a + (b - c) = b + (a - c)
-    associates op  = op `elem` ["*", "+"]                            -- (a * b) * c = a * (b * c)
-    associates2a op1 op2 = (op1,op2) `elem` [("+", "-"), ("*", "/")] -- (a + b) - c = a + (b - c)  -- (a*b)/c = a*(b/c)
-    associates2b op1 op2 = (op1,op2) `elem` [("-", "+"), ("/", "*")] -- (a - b) + c = a + (c - b)
+    commutes   op  = op `elem` [] --["*", "+"]                            --  a * b       = b * a
+    commutes2a op1 op2 = (op1,op2) `elem` [] -- [("+","-"),("*", "/")]     --  a + (b - c) = b + (a - c)
+    associates op  = op `elem` [] -- ["*", "+"]                            -- (a * b) * cv = a * (b * c)
+    associates2a op1 op2 = (op1,op2) `elem` [] -- [("+", "-"), ("*", "/")] -- (a + b) - c  = a + (b - c)  -- (a*b)/c = a*(b/c)
+    associates2b op1 op2 = (op1,op2) `elem` [] -- [("-", "+"), ("/", "*")] -- (a - b) + c  = a + (c - b)
     cf = rewriteOf template comm . foldExpr
     f  = Just . foldExpr
 
@@ -558,26 +558,22 @@ bitwiseInt op i1 i2 =
 -- stack and stack pointer magic
 -----------------------------------------------------------
 
-
-ps :: JStat -> JStat
-ps = thisFunction . nestedFuns %~ f
-  where f (args,stat)     = g stat . propagateStack $ (args, localVars stat, cfg stat)
-        g _ (args,_,cfg) = (args, unCfg cfg)
--- ps s = propagateStack ([],[],cfg s) ^. _3 . to unCfg
-
-
 type StackFacts = Maybe Integer  -- relative offset of h$sp if known
 
--- rewrite only if: max 4 return statements stack is accessed
 propagateStack :: ([Ident],[Ident],Graph) -> ([Ident],[Ident],Graph)
 propagateStack (args,locals,g)
- | length [() | (ReturnNode{}) <- IM.elems (g ^. nodes)] > 3 = (args, locals, g)
- | otherwise = (args,locals,g')
+  | nrets > 4 || stackAccess < nrets - 1 || stackAccess == 0 = (args, locals, g)
+  | otherwise = (args,locals,g')
   where
+    allNodes = IM.elems (g ^. nodes)
+    nrets = length [() | (ReturnNode{}) <- allNodes]
+    stackAccess = length $ filter ((StrI "h$stack") `S.member`)
+                     (map exprDeps (allNodes ^.. template))
+
     sf = stackFacts g
     g' :: Graph
     g' = foldl' (\g (k,v) -> updNode k v g) g (IM.toList $ g^.nodes)
-    
+
     updNode :: NodeId -> Node -> Graph -> Graph
     updNode nid e@(IfNode _ n1 _) g
       | known nid && unknown n1 = replace nid e g
@@ -605,14 +601,14 @@ propagateStack (args,locals,g)
          let n' =  (template %~ updExpr offset) n
          in  nodes %~ IM.insert nid n' $ g
       | otherwise = g
-        
+
     updExpr :: Integer -> JExpr -> JExpr
     updExpr 0 e = e
     updExpr n e = transformOf template sp e
       where
         sp (ValExpr (JVar (StrI "h$sp"))) = [je|h$sp+`n`|]
         sp e = e
-    
+
     known :: NodeId -> Bool
     known nid | Just (Just _) <- lookupFact nid 0 sf = True
               | otherwise = False
@@ -631,7 +627,7 @@ propagateStack (args,locals,g)
                 , (newId+1, n)
                 ]
           in  (nodeid %~ (+2)) . (nodes %~ IM.union newNodes) $ g
-                    | otherwise = g
+      | otherwise = g
 
 stackFacts :: Graph -> Facts StackFacts
 stackFacts g = foldForward combineStack f0 (Just 0) g
