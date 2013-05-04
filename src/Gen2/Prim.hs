@@ -118,10 +118,8 @@ genPrim WordLtOp          [r] [x,y] =
   PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) < (`y`&1))) ? `HTrue` : `HFalse` |]
 genPrim WordLeOp          [r] [x,y] =
   PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) <= (`y`&1))) ? `HTrue` : `HFalse` |]
-#if __GLASGOW_HASKELL__ >= 707
 genPrim Word2DoubleOp     [r] [x] = PrimInline [j| `r` = (`x` & 0x7FFFFFFF) + (`x` >>> 31) * 2147483648 |]
 genPrim Word2FloatOp      [r] [x] = PrimInline [j| `r` = (`x` & 0x7FFFFFFF) + (`x` >>> 31) * 2147483648 |]
-#endif
 genPrim PopCnt8Op         [r] [x]   = PrimInline [j| `r` = h$popCntTab[`x` & 0xFF] |]
 genPrim PopCnt16Op        [r] [x]   =
   PrimInline [j| `r` = h$popCntTab[`x`&0xFF] +
@@ -316,13 +314,11 @@ genPrim CopyByteArrayOp [] [a1,o1,a2,o2,n] =
                  }
                |]
 genPrim CopyMutableByteArrayOp [] xs@[a1,o1,a2,o2,n] = genPrim CopyByteArrayOp [] xs
-#if __GLASGOW_HASKELL__ >= 707
 genPrim SetByteArrayOp [] [a,o,n,v] =
   PrimInline [j| for(var i=0;i<`n`;i++) {
                    `a`.setUint8(`o`+i,`v`);
                  }
                |]
-#endif
 genPrim NewArrayArrayOp [r] [n] =
   PrimInline [j| `r` = []; for(var i=0;i<`n`;i++) { `r`[i] = `r`; } |]
 genPrim SameMutableArrayArrayOp [r] [a1,a2] = PrimInline [j| `r` = (`a1` === `a2`) ? `HTrue` : `HFalse`; |]
@@ -498,8 +494,8 @@ genPrim IsEmptyMVarOp [r] [m]  =
   PrimInline [j| `r` = (`m`.val === null) ? 1 : 0; |]
 
 genPrim DelayOp [] [t] = PRPrimCall [j| return h$delayThread(`t`); |]
-genPrim WaitReadOp [] [fd] = PrimInline [j| h$waitRead(`fd`); |]
-genPrim WaitWriteOp [] [fd] = PrimInline [j| h$waitWrite(`fd`); |]
+genPrim WaitReadOp [] [fd] = PRPrimCall [j| return h$waitRead(`fd`); |]
+genPrim WaitWriteOp [] [fd] = PRPrimCall [j| return h$waitWrite(`fd`); |]
 genPrim ForkOp [tid] [x] = PrimInline [j| `tid` = h$fork(`x`); |]
 genPrim ForkOnOp [tid] [p,x] = PrimInline [j| `tid` = h$fork(`x`); |] -- ignore processor argument
 genPrim KillThreadOp [] [tid,ex] =
