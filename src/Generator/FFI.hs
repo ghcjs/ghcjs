@@ -17,6 +17,7 @@ import Javascript.Language as Js hiding(return)
 import qualified Javascript.Language as Js (return)
 import Generator.Helpers
 import Data.Monoid (mconcat)
+import Data.List (stripPrefix)
 
 returnForeignFunctionCallResult :: Javascript js => ForeignCall -> Stg.Unique -> [StgArg] -> Gen js
 returnForeignFunctionCallResult (CCall (CCallSpec target _ccallConv _safety)) _ args = do
@@ -49,7 +50,12 @@ declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _saf
 
 foreignCall :: Javascript js => String -> [Expression js] -> js
 foreignCall clabelString args =
-  Js.declare [("$ff", nativeFunctionCall (Js.var clabelString) (init args))]
+    Js.declare [("$ff", nativeFunctionCall (Js.var clabelString) (init args))]
+  where
+    fixedName =
+        case stripPrefix "ghc_wrapper_" clabelString of
+           Just rest ->  "ghc_wrapper" ++ dropWhile (/= '_') rest
+           Nothing   -> clabelString
 
 returnPrimitiveCallResult :: Javascript js => PrimCall -> [StgArg] -> Gen js
 returnPrimitiveCallResult (PrimCall clabelString _) args = do

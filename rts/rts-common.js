@@ -2389,10 +2389,7 @@ function read(fd, p, s) {
         return $hs_int(-1);
     return $hs_int(f.read(p, s));
 };
-function ghc_wrapper_d2fd_read(fd, p, s) {
-    return read(fd, p, s);
-};
-function ghc_wrapper_d2e8_read(fd, p, s) {
+function ghc_wrapper_read(fd, p, s) {
     return read(fd, p, s);
 };
 function write(fd, p, s) {
@@ -2402,10 +2399,7 @@ function write(fd, p, s) {
         return $hs_int(-1);
     return $hs_int(f.write(p, s));
 };
-function ghc_wrapper_d2eq_write(fd, p, s) {
-    return write(fd, p, s);
-};
-function ghc_wrapper_d2dl_write(fd, p, s) {
+function ghc_wrapper_write(fd, p, s) {
     return write(fd, p, s);
 };
 function __hsunix_long_path_size() {
@@ -2727,7 +2721,7 @@ function gettimeofday(tp, tzp) {
 function __hscore_gettimeofday(tp, tzp) {
     return gettimeofday(tp, tzp);
 };
-function ghc_wrapper_d1rx_getrusage(who, usage) {
+function ghc_wrapper_getrusage(who, usage) {
     var x = new Int32Array(usage[0], usage[1]);
     var t = new Date().getTime();
     if(WORD_SIZE_IN_BITS==32) {
@@ -2743,74 +2737,7 @@ function ghc_wrapper_d1rx_getrusage(who, usage) {
         return goog.math.Long.ZERO;
     }
 };
-function ghc_wrapper_d1rG_getrusage(who, usage) {
-    var x = new Int32Array(usage[0], usage[1]);
-    var t = new Date().getTime();
-    if(WORD_SIZE_IN_BITS==32) {
-        x[0] = (t/1000) | 0;
-        x[1] = ((t%1000)*1000) | 0;
-        return 0;
-    }
-    else {
-        x[0] = (t/1000) | 0;
-        x[1] = 0;
-        x[2] = ((t%1000)*1000) | 0;
-        x[3] = 0;
-        return goog.math.Long.ZERO;
-    }
-};
-function ghc_wrapper_d1s8_getrusage(who, usage) {
-    var x = new Int32Array(usage[0], usage[1]);
-    var t = new Date().getTime();
-    if(WORD_SIZE_IN_BITS==32) {
-        x[0] = (t/1000) | 0;
-        x[1] = ((t%1000)*1000) | 0;
-        return 0;
-    }
-    else {
-        x[0] = (t/1000) | 0;
-        x[1] = 0;
-        x[2] = ((t%1000)*1000) | 0;
-        x[3] = 0;
-        return goog.math.Long.ZERO;
-    }
-};
-function ghc_wrapper_d1nl_getrusage(who, usage) {
-    var x = new Int32Array(usage[0], usage[1]);
-    var t = new Date().getTime();
-    if(WORD_SIZE_IN_BITS==32) {
-        x[0] = (t/1000) | 0;
-        x[1] = ((t%1000)*1000) | 0;
-        return 0;
-    }
-    else {
-        x[0] = (t/1000) | 0;
-        x[1] = 0;
-        x[2] = ((t%1000)*1000) | 0;
-        x[3] = 0;
-        return goog.math.Long.ZERO;
-    }
-};
-function ghc_wrapper_d1mM_getrusage(who, usage) {
-    var x = new Int32Array(usage[0], usage[1]);
-    var t = new Date().getTime();
-    if(WORD_SIZE_IN_BITS==32) {
-        x[0] = (t/1000) | 0;
-        x[1] = ((t%1000)*1000) | 0;
-        return 0;
-    }
-    else {
-        x[0] = (t/1000) | 0;
-        x[1] = 0;
-        x[2] = ((t%1000)*1000) | 0;
-        x[3] = 0;
-        return goog.math.Long.ZERO;
-    }
-};
-function ghc_wrapper_d2jT_fcntl(a, b) {
-    return $hs_int(0);
-};
-function ghc_wrapper_d2jH_fcntl(a, b, c) {
+function ghc_wrapper_fcntl(a, b) {
     return $hs_int(0);
 };
 function g_object_ref(p) {
