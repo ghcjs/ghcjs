@@ -231,7 +231,6 @@ extraJsFiles file =
 runGhcjsResult :: TestOpts -> FilePath -> IO [((StdioResult, Integer), String)]
 runGhcjsResult opts file = do
   settings <- settingsFor file
-  putStrLn ("running with settings: " ++ show settings)
   let unopt = if disableUnopt opts || tsDisableUnopt settings then [] else [False]
       opt   = if tsDisableOpt settings then [] else [True]
       runs  = unopt ++ opt
