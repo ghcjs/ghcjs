@@ -35,11 +35,34 @@ import           Data.Default
 main = do
   args <- getArgs
   let args' = filter (/="--benchmark") args
+  checkRequiredPackages
   if any (=="--benchmark") args
     then (\bs -> defaultMainWithArgs bs args') =<< benchmarks
     else defaultMain =<< tests
 
--- fail if any of these are not installed
+benchmarks = do
+  nofib <- allTestsIn benchmark "test/nofib"
+  return [ testGroup "Benchmarks from nofib" nofib
+         ]
+
+tests = do
+  fay     <- allTestsIn test "test/fay"
+  ghc     <- allTestsIn test "test/ghc"
+  arith   <- allTestsIn test "test/arith"
+  integer <- allTestsIn test "test/integer"
+  pkg     <- allTestsIn test "test/pkg"
+  conc    <- allTestsIn test "test/conc"
+  ffi     <- allTestsIn test "test/ffi"
+  return [ testGroup "Tests from the Fay testsuite" fay
+         , testGroup "Tests from the GHC testsuite" ghc
+         , testGroup "Arithmetic" arith
+         , testGroup "Integer" integer
+         , testGroup "Concurrency" conc
+         , testGroup "JavaScript interaction through FFI" ffi
+         , testGroup "Tests imported from packages" pkg
+         ]
+
+-- warn if any of these are not installed
 requiredPackages :: [TL.Text]
 requiredPackages = [ "ghc-prim"
                    , "integer-gmp"
@@ -51,6 +74,10 @@ requiredPackages = [ "ghc-prim"
                    , "random"
                    , "syb"
                    , "transformers"
+                   , "text"
+                   , "ghcjs-base"
+                   , "quickcheck"
+                   , "old-time"
                    ]
 
 data TestOpts = TestOpts { disableUnopt :: Bool
@@ -80,29 +107,6 @@ instance FromJSON TestSettings where
                                       <*> o .:? "copyFiles"           .!= []
 
   parseJSON _ = mempty
-
-benchmarks = do
-  nofib <- allTestsIn benchmark "test/nofib"
-  return [ testGroup "Benchmarks from nofib" nofib
-         ]
-
-tests = do
-  checkRequiredPackages
-  fay     <- allTestsIn test "test/fay"
-  ghc     <- allTestsIn test "test/ghc"
-  arith   <- allTestsIn test "test/arith"
-  integer <- allTestsIn test "test/integer"
-  pkg     <- allTestsIn test "test/pkg"
-  conc    <- allTestsIn test "test/conc"
-  ffi     <- allTestsIn test "test/ffi"
-  return [ testGroup "Tests from the Fay testsuite" fay
-         , testGroup "Tests from the GHC testsuite" ghc
-         , testGroup "Arithmetic" arith
-         , testGroup "Integer" integer
-         , testGroup "Concurrency" conc
-         , testGroup "JavaScript interaction through FFI" ffi
-         , testGroup "Tests imported from packages" pkg
-         ]
 
 {-
   run all files in path as stdio tests
