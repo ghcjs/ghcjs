@@ -50,7 +50,7 @@ declareForeignFunctionCallResult binder (CCall (CCallSpec target _ccallConv _saf
 
 foreignCall :: Javascript js => String -> [Expression js] -> js
 foreignCall clabelString args =
-    Js.declare [("$ff", nativeFunctionCall (Js.var clabelString) (init args))]
+    Js.declare [("$ff", nativeFunctionCall (Js.var fixedName) (init args))]
   where
     fixedName =
         case stripPrefix "ghc_wrapper_" clabelString of
