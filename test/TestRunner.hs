@@ -2,18 +2,20 @@
 
 module Main where
 
+import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Data.Char (isLower, isDigit)
 import           Data.Maybe
 import           Data.Monoid
+import qualified Data.ByteString as B
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime, diffUTCTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import           Filesystem (removeTree, isFile, getWorkingDirectory, setWorkingDirectory)
+import           Filesystem (removeTree, isFile, getWorkingDirectory, setWorkingDirectory, copyFile)
 import           Filesystem.Path (replaceExtension, basename, directory, extension, addExtension, filename)
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
@@ -26,6 +28,9 @@ import           Test.Framework
 import           Test.Framework.Providers.HUnit (testCase)
 import           Test.HUnit.Base (assertBool, assertFailure, assertEqual, Assertion)
 import           Text.Read (readMaybe)
+import qualified Data.Yaml as Yaml
+import           Data.Yaml (FromJSON(..), Value(..), (.:?), (.!=))
+import           Data.Default
 
 main = do
   args <- getArgs
@@ -49,9 +54,32 @@ requiredPackages = [ "ghc-prim"
                    ]
 
 data TestOpts = TestOpts { disableUnopt :: Bool
-                               }
+                         }
 test = TestOpts False
 benchmark = TestOpts True
+
+-- settings for a single test
+data TestSettings = 
+  TestSettings { tsDisableNode         :: Bool
+               , tsDisableSpiderMonkey :: Bool
+               , tsDisableOpt          :: Bool
+               , tsDisableUnopt        :: Bool
+               , tsArguments           :: [String] -- ^ command line arguments
+               , tsCopyFiles           :: [String] -- ^ copy these files to the dir where the test is run
+               } deriving (Eq, Show)
+
+instance Default TestSettings where
+  def = TestSettings False False False False [] []
+
+instance FromJSON TestSettings where
+  parseJSON (Object o) = TestSettings <$> o .:? "disableNode"         .!= False
+                                      <*> o .:? "disableSpiderMonkey" .!= False
+                                      <*> o .:? "disableOpt"          .!= False
+                                      <*> o .:? "disableUnopt"        .!= False
+                                      <*> o .:? "arguments"           .!= []
+                                      <*> o .:? "copyFiles"           .!= []
+
+  parseJSON _ = mempty
 
 benchmarks = do
   nofib <- allTestsIn benchmark "test/nofib"
@@ -59,7 +87,7 @@ benchmarks = do
          ]
 
 tests = do
---  checkRequiredPackages
+  checkRequiredPackages
   fay     <- allTestsIn test "test/fay"
   ghc     <- allTestsIn test "test/ghc"
   arith   <- allTestsIn test "test/arith"
@@ -121,7 +149,7 @@ stdioAssertion testOpts file = do
   putStrLn ("running test: " ++ encodeString file)
   expected <- stdioExpected file
   actual <- runGhcjsResult testOpts file
-  assertBool "no test results, install node and/or SpiderMonkey" (not $ null actual)
+  when (null actual) (putStrLn "warning: no test results")
   forM_ actual $ \((a,t),d) -> do
     assertEqual (encodeString file ++ ": " ++ d) expected a
     putStrLn ("    " ++ (padTo 40 d) ++ " " ++ show t ++ "ms")
@@ -159,20 +187,30 @@ readFilesIfExists (x:xs) = do
     then return r
     else readFilesIfExists xs
 
--- command line args
-argsFor :: FilePath -> IO [String]
-argsFor file = do
-  r <- readFileIfExists (replaceExtension file "args")
-  case r of
-    Nothing -> return []
-    Just t  -> case T.lines t of
-                (x:_) -> return (map T.unpack $ T.words x)
-                _     -> return []
+-- test settings
+settingsFor :: FilePath -> IO TestSettings
+settingsFor file = do
+  e <- isFile settingsFile
+  case e of
+    False -> return def
+    True -> do
+      cfg <- B.readFile settingsFile'
+      case Yaml.decodeEither cfg of
+        Left err -> errDef
+        Right t  -> return t
+  where
+    errDef = do
+      putStrLn $ "error in test settings: " ++ settingsFile'
+      putStrLn "running test with default settings"
+      return def
+    settingsFile = replaceExtension file "settings"
+    settingsFile' = encodeString settingsFile
 
 runhaskellResult :: FilePath -> IO (Maybe (StdioResult, Integer))
 runhaskellResult file = do
   cd <- getWorkingDirectory
-  args <- argsFor file
+  settings <- settingsFor file
+  let args = tsArguments settings
   setWorkingDirectory (cd </> directory file)
   r <- runProcess "runhaskell" ([ includeOpt file
                                , encodeString $ filename file] ++ args) ""
@@ -191,33 +229,46 @@ extraJsFiles file =
 
 -- | gen2 only so far
 runGhcjsResult :: TestOpts -> FilePath -> IO [((StdioResult, Integer), String)]
-runGhcjsResult opts file = concat <$> mapM run runs
-  where
-    runs | disableUnopt opts = [True]
-         | otherwise         = [False, True]
-    run optimize = do
-      output <- outputPath
-      extra <- extraJsFiles file
-      cd <- getWorkingDirectory
-      args <- argsFor file
-      let outputG2 = addExtension output "jsexe"
-          outputRun = cd </> outputG2 </> ("all.js"::FilePath)
-          input  = encodeString file
-          desc = ", optimization: " ++ show optimize
-          inc = includeOpt file
-          compileOpts = if optimize
-                          then [inc, "-o", encodeString output, "-O2"] ++ [input] ++ extra
-                          else [inc, "-o", encodeString output] ++ [input] ++ extra
-      e <- liftIO $ runProcess "ghcjs" compileOpts ""
-      case e of
-        Nothing    -> assertFailure "cannot find ghcjs"
-        Just (r,_) -> assertEqual "compile error" ExitSuccess (stdioExit r)
-      setWorkingDirectory (cd </> directory file)
-      nodeResult <- fmap (,"node" ++ desc) <$> runProcess "node" (encodeString outputRun:args) ""
-      smResult   <- fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" (encodeString outputRun:args) ""
-      setWorkingDirectory cd
-      liftIO $ removeTree outputG2
-      return $ catMaybes [nodeResult, smResult]
+runGhcjsResult opts file = do
+  settings <- settingsFor file
+  putStrLn ("running with settings: " ++ show settings)
+  let unopt = if disableUnopt opts || tsDisableUnopt settings then [] else [False]
+      opt   = if tsDisableOpt settings then [] else [True]
+      runs  = unopt ++ opt
+  concat <$> mapM (run settings) runs
+    where
+      run settings optimize = do
+        output <- outputPath
+        extra <- extraJsFiles file
+        cd <- getWorkingDirectory
+        let outputG2 = addExtension output "jsexe"
+            outputRun = cd </> outputG2 </> ("all.js"::FilePath)
+            input  = encodeString file
+            desc = ", optimization: " ++ show optimize
+            inc = includeOpt file
+            compileOpts = if optimize
+                            then [inc, "-o", encodeString output, "-O2"] ++ [input] ++ extra
+                            else [inc, "-o", encodeString output] ++ [input] ++ extra
+            args = tsArguments settings
+        e <- liftIO $ runProcess "ghcjs" compileOpts ""
+        case e of
+          Nothing    -> assertFailure "cannot find ghcjs"
+          Just (r,_) -> assertEqual "compile error" ExitSuccess (stdioExit r)
+        forM_ (tsCopyFiles settings) $ \cfile ->
+          let cfile' = fromText (TL.pack cfile)
+          in  copyFile (directory file </> cfile') (cd </> outputG2 </> cfile')
+        setWorkingDirectory (cd </> outputG2)
+        nodeResult <-
+          case tsDisableNode settings of
+            False -> fmap (,"node" ++ desc) <$> runProcess "node" (encodeString outputRun:args) ""
+            True  -> return Nothing
+        smResult <-
+          case tsDisableSpiderMonkey settings of
+            False -> fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" (encodeString outputRun:args) ""
+            True  -> return Nothing
+        setWorkingDirectory cd
+        liftIO $ removeTree outputG2
+        return $ catMaybes [nodeResult, smResult]
 
 
 outputPath :: IO FilePath
@@ -266,5 +317,5 @@ checkRequiredPackages = shelly . silently $ do
   installedPackages <- TL.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
   forM_ requiredPackages $ \pkg -> do
     when (not $ any ((pkg <> "-") `TL.isPrefixOf`) installedPackages) $ do
-      echo ("package `" <> pkg <> "' is required by the test suite but is not installed")
-      liftIO exitFailure
+      echo ("warning: package `" <> pkg <> "' is required by the test suite but is not installed")
+--      liftIO exitFailure
