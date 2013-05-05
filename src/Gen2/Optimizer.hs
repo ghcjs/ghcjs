@@ -134,12 +134,12 @@ nonExprLocalIdents f s = pure s
 
 
 functionVals f (JList es)      = JList <$> template (functionVals f) es
-functionVals f (JHash m)       = JHash <$> template (functionVals f) m
+functionVals f (JHash m)       = JHash <$> tinplate (functionVals f) m
 functionVals f v@(JFunc as es) = JFunc as <$> template (functionVals f) es
 functionVals f v               = f v
 
 localFunctionVals f (JList es)   = JList <$> template (localFunctionVals f) es
-localFunctionVals f (JHash m)    = JHash <$> template (localFunctionVals f) m
+localFunctionVals f (JHash m)    = JHash <$> tinplate (localFunctionVals f) m  -- lens bug?
 localFunctionVals f v            = f v
 
 renameLocalsFun :: ([Ident], JStat) -> ([Ident], JStat)
