@@ -339,6 +339,8 @@ constantsFacts lfs g = foldForward combineConstants f0 M.empty g
     simple nid (AssignStat (ValExpr (JVar i)) e@(SelExpr (ValExpr (JVar j)) field)) m
        | usedOnce nid i = M.insert i (e, S.singleton j) m
     simple nid (AssignStat (ValExpr (JVar i)) _) m = dc i m
+    simple nid (AssignStat (IdxExpr (ValExpr (JVar i)) _) _) m = dc i m
+    simple nid (AssignStat (SelExpr (ValExpr (JVar i)) _) _) m = dc i m
     simple _ _ m = m
     tup x = (x,x)
     removeMutated1t _ s  = tup . removeMutated s
