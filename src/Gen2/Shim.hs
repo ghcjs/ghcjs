@@ -1,8 +1,8 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TupleSections #-}
 {-# LANGUAGE ScopedTypeVariables, FlexibleContexts #-}
 {-
-  Shims are non-haskell dependencies, organized in the
-  ghcjs-shims repository
+  Shims are non-Haskell dependencies, organized in the
+  shims repository
 
   example shim yaml:
 -}
@@ -80,9 +80,9 @@ instance FromJSON VersionRange where
   parseJSON (String t) = maybe mempty pure (parseVersionRange t)
   parseJSON _          = mempty
 
-collectShims :: FilePath          -- ^ the base path
-             -> [(Text, Version)] -- ^ packages being linked
-             -> IO (Text, Text)   -- ^ collected shims, to be included (before, after) rts
+collectShims :: FilePath                                    -- ^ the base path
+             -> [(Text, Version)]                           -- ^ packages being linked
+             -> IO ((Text, [FilePath]), (Text, [FilePath])) -- ^ collected shims, to be included (before, after) rts
 collectShims base pkgs = do
   files <- mapM (collectShim base) pkgs
   let files' = map (base </>) (concat files)
@@ -94,7 +94,7 @@ collectShims base pkgs = do
       splitFiles files = (before, map init after)
         where
           (after, before) = L.partition ("@" `L.isSuffixOf`) files
-      combineShims files = T.unlines <$> mapM tryReadFile (uniq files)
+      combineShims files = ((,files).T.unlines) <$> mapM tryReadFile (uniq files)
       uniq xs = let go (x:xs) s
                       | x `S.notMember` s = x : go xs (S.insert x s)
                       | otherwise         = go xs s

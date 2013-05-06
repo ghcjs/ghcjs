@@ -93,10 +93,12 @@ splitPath' = map (filter (`notElem` "/\\")) . splitPath
 getShims :: [FilePath] -> Set Fun -> (FilePath, FilePath) -> IO ()
 getShims extraFiles deps (fileBefore, fileAfter) = do
   base <- (</> "shims") <$> getGlobalPackageBase
-  (before, after) <- collectShims base pkgDeps
+  ((before, beforeFiles), (after, afterFiles)) <- collectShims base pkgDeps
   T.writeFile fileBefore before
+  writeFile (fileBefore <.> "files") (unlines beforeFiles)
   t' <- mapM T.readFile extraFiles
   T.writeFile fileAfter (T.unlines $ after : t')
+  writeFile (fileAfter <.> "files") (unlines $ afterFiles ++ extraFiles)
     where
       pkgDeps = map (\(Package n v) -> (n, fromMaybe [] $ parseVersion v))
                   (S.toList $ S.map funPackage deps)
