@@ -32,7 +32,7 @@ import           Filesystem.Path.CurrentOS (empty, stripPrefix, encodeString, de
 import           Prelude                   hiding (FilePath)
 import           Shelly
 
-import           Distribution.Simple.Utils (withTempDirectory)
+import           Distribution.Simple.Utils (withTempDirectory, installExecutableFile)
 import           Distribution.Verbosity    (normal)
 import           Network                   (withSocketsDo)
 import           System.Directory
@@ -187,6 +187,7 @@ installBootPackages settings = do
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePkgs
       installFakes
+      installUnlit
       cd p
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
 
@@ -449,3 +450,12 @@ mvNoOverwrite from to = do
   if e
     then rm from
     else mv from to
+
+installUnlit :: ShIO ()
+installUnlit = do
+  p <- pwd
+  base <- liftIO getGlobalPackageBase
+  liftIO $ installExecutableFile normal 
+             (encodeString $ p </> "inplace" </> "lib" </> "bin" </> "unlit")
+             (base ++ "/unlit")
+
