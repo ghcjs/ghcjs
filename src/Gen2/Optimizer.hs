@@ -361,7 +361,7 @@ constantsFacts lfs g = foldForward combineConstants f0 M.empty g
 
 -- all variables referenced by expression
 exprDeps :: JExpr -> Set Ident
-exprDeps e = S.fromList $ (e ^.. template) >>= ids
+exprDeps e = S.fromList $ (e ^.. tinplate) >>= ids
   where
     ids (JVar x) = [x]
     ids _        = []
@@ -375,7 +375,7 @@ deleteConstants s m = M.filterWithKey f m
 
 -- returns Nothing if it does things that we aren't sure of
 mutated :: JExpr -> Maybe (Set Ident)
-mutated expr = foldl' f (Just S.empty) (universeOf template expr)
+mutated expr = foldl' f (Just S.empty) (universeOf tinplate expr)
    where
     f Nothing _                            = Nothing
     f s (PPostExpr _ _ (ValExpr (JVar i))) = S.insert i <$> s
@@ -393,7 +393,7 @@ mutated expr = foldl' f (Just S.empty) (universeOf template expr)
     knownMutated _ = Nothing
 
 mutated' :: Data a => a -> Maybe (Set Ident)
-mutated' a = S.unions <$> (mapM mutated $ a ^.. template)
+mutated' a = S.unions <$> (mapM mutated $ a ^.. tinplate)
 
 -- common RTS functions that we know touch only a few global variables
 knownFuns :: Map Ident (Set Ident)
@@ -426,7 +426,7 @@ mightHaveSideEffects e = any f (universeOf template e)
 
 -- constant folding and other bottom up rewrites
 foldExpr :: JExpr -> JExpr
-foldExpr = removeNaN . transformOf template f
+foldExpr = transformOf template f
   where
     f (InfixExpr "||" v1 v2) = lorOp v1 v2
     f (InfixExpr "&&" v1 v2) = landOp v1 v2
@@ -486,14 +486,6 @@ normalize = rewriteOf template assoc . rewriteOf template comm . foldExpr
     cf = rewriteOf template comm . foldExpr
     f  = Just . foldExpr
 
--- JDouble NaN /= JDouble NaN prevents fixed point iteration from working, workaround until jmacro
--- changes the Eq instance
-removeNaN :: JExpr -> JExpr
-removeNaN = transformOf template f
-  where
-    f (ValExpr (JDouble v)) | isNaN v = InfixExpr "/" (ValExpr (JDouble 0)) (ValExpr (JDouble 0))
-    f e = e
-
 lorOp :: JExpr -> JExpr -> JExpr
 lorOp e1 e2 | Just b <- exprCond e1 = if b then jTrue else e2
 lorOp e1 e2 = InfixExpr "||" e1 e2
@@ -536,19 +528,19 @@ intInfixOp "=="  i1 i2 = jBool (i1 == i2)
 intInfixOp "!="  i1 i2 = jBool (i1 /= i2)
 intInfixOp op i1 i2 = InfixExpr op (ValExpr (JInt i1)) (ValExpr (JInt i2))
 
-doubleInfixOp :: String -> Double -> Double -> JExpr
-doubleInfixOp "+"   d1 d2 = ValExpr (JDouble (d1+d2))
-doubleInfixOp "-"   d1 d2 = ValExpr (JDouble (d1-d2))
-doubleInfixOp "*"   d1 d2 = ValExpr (JDouble (d1*d2))
-doubleInfixOp "/"   d1 d2 = ValExpr (JDouble (d1/d2))
-doubleInfixOp ">"   d1 d2 = jBool (d1 > d2)
-doubleInfixOp "<"   d1 d2 = jBool (d1 < d2)
-doubleInfixOp "<="  d1 d2 = jBool (d1 <= d2)
-doubleInfixOp ">="  d1 d2 = jBool (d1 >= d2)
-doubleInfixOp "===" d1 d2 = jBool (d1 == d2)
-doubleInfixOp "!==" d1 d2 = jBool (d1 /= d2)
-doubleInfixOp "=="  d1 d2 = jBool (d1 == d2)
-doubleInfixOp "!="  d1 d2 = jBool (d1 /= d2)
+doubleInfixOp :: String -> SaneDouble -> SaneDouble -> JExpr
+doubleInfixOp "+"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1+d2))
+doubleInfixOp "-"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1-d2))
+doubleInfixOp "*"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1*d2))
+doubleInfixOp "/"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1/d2))
+doubleInfixOp ">"   (SaneDouble d1) (SaneDouble d2) = jBool (d1 > d2)
+doubleInfixOp "<"   (SaneDouble d1) (SaneDouble d2) = jBool (d1 < d2)
+doubleInfixOp "<="  (SaneDouble d1) (SaneDouble d2) = jBool (d1 <= d2)
+doubleInfixOp ">="  (SaneDouble d1) (SaneDouble d2) = jBool (d1 >= d2)
+doubleInfixOp "===" (SaneDouble d1) (SaneDouble d2) = jBool (d1 == d2)
+doubleInfixOp "!==" (SaneDouble d1) (SaneDouble d2) = jBool (d1 /= d2)
+doubleInfixOp "=="  (SaneDouble d1) (SaneDouble d2) = jBool (d1 == d2)
+doubleInfixOp "!="  (SaneDouble d1) (SaneDouble d2) = jBool (d1 /= d2)
 doubleInfixOp op d1 d2 = InfixExpr op (ValExpr (JDouble d1)) (ValExpr (JDouble d2))
 
 bitwiseInt :: (Int32 -> Int32 -> Int32) -> Integer -> Integer -> JExpr
@@ -600,13 +592,13 @@ propagateStack (args,locals,g)
     updExprs :: NodeId -> Node -> Graph -> Graph
     updExprs nid n g
       | Just (Just offset) <- lookupFact nid 2 sf =
-         let n' =  (template %~ updExpr offset) n
+         let n' =  (tinplate %~ updExpr offset) n
          in  nodes %~ IM.insert nid n' $ g
       | otherwise = g
 
     updExpr :: Integer -> JExpr -> JExpr
     updExpr 0 e = e
-    updExpr n e = transformOf template sp e
+    updExpr n e = transformOf tinplate sp e
       where
         sp (ValExpr (JVar (StrI "h$sp"))) = [je|h$sp+`n`|]
         sp e = e
@@ -623,7 +615,7 @@ propagateStack (args,locals,g)
       | Just (Just x) <- lookupFact nid 0 sf, x /= 0 =
           let newId = g^.nodeid
               sp = ValExpr (JVar (StrI "h$sp"))
-              newNodes = IM.fromList 
+              newNodes = IM.fromList
                 [ (nid,     SequenceNode [newId, newId+1])
                 , (newId,   SimpleNode (AssignStat sp (InfixExpr "+" sp (ValExpr (JInt x)))))
                 , (newId+1, n)
