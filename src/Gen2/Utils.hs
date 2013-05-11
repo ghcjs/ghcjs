@@ -42,26 +42,9 @@ infix 7 .=
 instance ToJExpr JObj where
   toJExpr (JObj m) = ValExpr (JHash m)
 
--- jmacro wrappers for slightly less noisy macros, `c` instead of `(c)`
-j  = wrapQuoter replaceBackquotes jmacro
-je = wrapQuoter replaceBackquotes jmacroE
--- jm = <$>
-
-replaceBackquotes :: String -> String
-replaceBackquotes xs = go False xs
-  where
-    go _     []       = []
-    go False ('`':ys) = "`(" ++ go True  ys
-    go True  ('`':ys) = ")`" ++ go False ys
-    go b     (y:ys)   = y : go b ys
-
-wrapQuoter :: (String -> String) -> QuasiQuoter -> QuasiQuoter
-wrapQuoter f q = QuasiQuoter
-                   { quoteExp  = quoteExp  q . f
-                   , quotePat  = quotePat  q . f
-                   , quoteType = quoteType q . f
-                   , quoteDec  = quoteDec  q . f
-                   }
+-- shorter names for jmacro
+j  = jmacro
+je = jmacroE
 
 insertAt :: Int -> a -> [a] -> [a]
 insertAt 0 y xs             = y:xs
