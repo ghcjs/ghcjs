@@ -227,7 +227,7 @@ lval v                                     = error $ "lval: not an assignable va
 
 val :: JExpr -> Val
 val (ValExpr v) = toVal v
-    where toVal (JDouble d)     = DoubleV d
+    where toVal (JDouble (SaneDouble d))     = DoubleV d
           toVal (JInt i)        = IntV i
           toVal (JStr s)        = StrV s
           toVal (JVar (StrI i)) = IdV (Id i)
@@ -252,7 +252,7 @@ fromExpr (PropE e (Id i))         = SelExpr (fromExpr e) (StrI i)
 fromExpr (CondE ec et ef)         = IfExpr (fromExpr ec) (fromExpr et) (fromExpr ef)
 
 fromVal :: Val -> JVal
-fromVal (DoubleV d)  = JDouble d
+fromVal (DoubleV d)  = JDouble (SaneDouble d)
 fromVal (IntV i)     = JInt i
 fromVal (StrV s)     = JStr s
 fromVal (IdV (Id i)) = JVar (StrI i)
