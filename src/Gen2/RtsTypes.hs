@@ -38,19 +38,14 @@ import           Unique
 
 import           System.IO.Unsafe
 
-showPpr' :: Outputable a => a -> G String
-showSDoc' :: SDoc -> G String
-#if __GLASGOW_HASKELL__ >= 706
+-- showPpr' :: Outputable a => a -> G String
+-- showSDoc' :: SDoc -> G String
 showPpr' a = do
   df <- _gsDynFlags <$> get
   return (showPpr df a)
 showSDoc' a = do
   df <- _gsDynFlags <$> get
   return (showSDoc df a)
-#else
-showPpr' a = return (showPpr a)
-showSDoc' a = return (showSDoc a)
-#endif
 
 -- closure types
 data CType = Thunk | Fun | Pap | Con | Blackhole
@@ -118,8 +113,6 @@ isMatchable _       = False
 -- can this thing contain references to heap objects?
 isScannable :: VarType -> [Bool]
 isScannable PtrV = [True]
--- isScannable MVarV = [True]
--- isScannable TVarV = [True]
 isScannable ArrV = [True]
 isScannable x = replicate (varSize x) False
 
@@ -245,13 +238,61 @@ maxReg = regNum maxBound
 
 -- | the current code generator state
 data GenState = GenState
-  { _gsModule   :: Module    -- | the module we're compiling, used for generating names
-  , _gsToplevel :: Maybe Id  -- | the top-level function group we're generating
+  { _gsModule   :: Module      -- | the module we're compiling, used for generating names
+  , _gsToplevel :: Maybe Id    -- | the top-level function group we're generating
 --  , _gsScope    :: GenScope  -- | the current lexical environment
-  , _gsId       :: Int       -- | integer for the id generator
-  , _gsDynFlags :: DynFlags  -- | the DynFlags, used for prettyprinting etc
+  , _gsId       :: Int         -- | integer for the id generator
+  , _gsDynFlags :: DynFlags    -- | the DynFlags, used for prettyprinting etc
+  , _gsStack    :: [StackSlot] -- | what's currently on the stack, above SP
 --  , _gsSRTs     :: Map Id Int
   }
+
+type C   = State GenState JStat
+type G a = State GenState a
+
+data StackSlot = SlotId Id Int
+               | SlotUnknown
+  deriving (Eq, Ord, Show)
+
+makeLenses ''GenState
+
+dropSlots :: Int -> G ()
+dropSlots n = gsStack %= drop n
+
+addSlots :: [StackSlot] -> G ()
+addSlots xs = gsStack %= (xs++)
+
+resetSlots :: G a -> G a
+resetSlots m = do
+  s <- getSlots
+  setSlots []
+  a <- m
+  setSlots s
+  return a
+
+isolateSlots :: G a -> G a
+isolateSlots m = do
+  s <- getSlots
+  a <- m
+  setSlots s
+  return a
+
+setSlots :: [StackSlot] -> G ()
+setSlots xs = gsStack .= xs
+
+getSlots :: G [StackSlot]
+getSlots = use gsStack
+
+addUnknownSlots :: Int -> G ()
+addUnknownSlots n = addSlots (replicate n SlotUnknown)
+
+-- run the computation with the current stack slots, restore stack slots afterwards
+withStack :: G a -> G a
+withStack m = do
+  s <- getSlots
+  r <- m
+  setSlots s
+  return r
 
 encodeUnique :: Int -> String
 encodeUnique = reverse . go  -- reversed is more compressible
@@ -274,7 +315,7 @@ data GenScope = GenScope
 -- emptyScope = GenScope mempty mempty
 
 initState :: DynFlags -> Module -> GenState
-initState df m = GenState m Nothing 1 df
+initState df m = GenState m Nothing 1 df []
 
 runGen :: DynFlags -> Module -> G a -> a
 runGen df m = flip evalState (initState df m)
@@ -284,9 +325,6 @@ runGen df m = flip evalState (initState df m)
 runInit :: Module -> G a -> a
 runInit
 -}
-
-type C   = State GenState JStat
-type G a = State GenState a
 
 instance Monoid C where
   mappend = liftM2 (<>)
@@ -300,7 +338,6 @@ data IdScope = Register !StgReg
              | NoEscape Id !Int   -- | no-escape stack frame allocated by id
                                          -- fixme: why not a direct stack-offset?
 
-makeLenses ''GenState
 -- makeLenses ''GenScope
 
 currentModule :: G String
@@ -337,10 +374,36 @@ adjSpN e = [j| h$sp = h$sp  - `e`; |] -- [j| _sp = _sp - `e`; sp = _sp; |]
 preamble :: JStat
 preamble = mempty
 
-push :: [JExpr] -> JStat
-push [] = mempty
-push xs  
-   | rtsInlinePush || l > 32 || l < 2 = [j| `adjSp l`; `items`; |]
+-- optimized push that reuses existing values on stack
+-- slots are True if the right value is already there
+pushOptimized :: [(JExpr,Bool)] -> C
+pushOptimized [] = return mempty
+pushOptimized xs = dropSlots l >> return go
+  where
+    go
+     | rtsInlinePush               = inlinePush
+     | all snd xs                  = adjSp l
+     | all (not.snd) xs && l <= 32 =
+        ApplStat (toJExpr . StrI $ "h$p" ++ show l) (map fst xs)
+     | l <= 8 && not (snd $ last xs) =
+        ApplStat (toJExpr . StrI $ "h$pp" ++ show sig) [ e | (e,False) <- xs ]
+     | otherwise = inlinePush
+    l   = length xs
+    sig :: Integer
+    sig = L.foldl1' (.|.) $ zipWith (\(e,b) i -> if not b then bit i else 0) xs [0..]
+    inlinePush = adjSp l <> mconcat (zipWith pushSlot [1..] xs)
+    pushSlot i (e,False) = [j| `Stack`[`offset i`] = `e` |]
+    pushSlot _ _         = mempty
+    offset i | i == l    = [je| `Sp` |]
+             | otherwise = [je| `Sp` - `l-i` |]
+
+push :: [JExpr] -> C
+push xs = dropSlots (length xs) >> return (push' xs)
+
+push' :: [JExpr] -> JStat
+push' [] = mempty
+push' xs
+   | rtsInlinePush || l > 32 || l < 2 = adjSp l <> mconcat items
    | otherwise                        = ApplStat (toJExpr . StrI $ "h$p" ++ show l) xs
   where
     items = zipWith (\i e -> [j| `Stack`[`offset i`] = `e`; |]) [(1::Int)..] xs
@@ -348,14 +411,29 @@ push xs
              | otherwise = [je| `Sp` - `l-i` |]
     l = length xs
 
-pop :: [JExpr] -> JStat
+popUnknown :: [JExpr] -> C
+popUnknown xs = popSkipUnknown 0 xs
+
+popSkipUnknown :: Int -> [JExpr] -> C
+popSkipUnknown n xs = popSkip n (map (,SlotUnknown) xs)
+
+pop :: [(JExpr,StackSlot)] -> C
 pop = popSkip 0
 
 -- pop the expressions, but ignore the top n elements of the stack
-popSkip :: Int -> [JExpr] -> JStat
+popSkip :: Int -> [(JExpr,StackSlot)] -> C
 popSkip 0 [] = mempty
-popSkip n [] = adjSpN n
-popSkip n xs = [j| `loadSkip n xs`; `adjSpN $ length xs+n`; |]
+popSkip n [] = addUnknownSlots n >> return (adjSpN n)
+popSkip n xs = do
+  addUnknownSlots n
+  addSlots (map snd xs)
+  return (loadSkip n (map fst xs) <> adjSpN (length xs + n))
+
+-- pop things, don't upstate stack knowledge
+popSkip' :: Int -> [JExpr] -> JStat
+popSkip' 0 [] = mempty
+popSkip' n [] = adjSpN n
+popSkip' n xs = loadSkip n xs <> adjSpN (length xs + n)
 
 -- like popSkip, but without modifying sp
 loadSkip :: Int -> [JExpr] -> JStat
@@ -365,25 +443,31 @@ loadSkip n xs = mconcat items
       offset 0 = [je| `Sp` |]
       offset n = [je| `Sp` - `n` |]
 
-debugPop e@(ValExpr (JVar (StrI i))) offset = [j| log("popped: " + `i`  + " -> " + `e`) |]
-debugPop _ _ = mempty
+-- debugPop e@(ValExpr (JVar (StrI i))) offset = [j| log("popped: " + `i`  + " -> " + `e`) |]
+-- debugPop _ _ = mempty
 
 -- declare and pop
-popSkipI :: Int -> [Ident] -> JStat
+popSkipI :: Int -> [(Ident,StackSlot)] -> C
 popSkipI 0 [] = mempty
-popSkipI n [] = adjSpN n
-popSkipI n xs = [j| `loadSkipI n xs`; `adjSpN $ length xs+n`; |]
+popSkipI n [] = return (adjSpN n)
+popSkipI n xs = do
+  addUnknownSlots n
+  addSlots (map snd xs)
+  return (loadSkipI n (map fst xs) <> adjSpN (length xs + n))
 
 -- like popSkip, but without modifying sp
 loadSkipI :: Int -> [Ident] -> JStat
 loadSkipI n xs = mconcat items
     where
-      items = reverse $ zipWith (\i e -> [j| `decl e`; `iex e` = `Stack`[`offset (i+n)`]; |]) [(0::Int)..] (reverse xs)
+      items = reverse $ zipWith f [(0::Int)..] (reverse xs)
       offset 0 = [je| `Sp` |]
       offset n = [je| `Sp` - `n` |]
+      f i e = [j| `decl e`;
+                  `e` = `Stack`[`offset (i+n)`];
+                |]
 
-popn :: Int -> JStat
-popn n = adjSpN n
+popn :: Int -> C
+popn n = addUnknownSlots n >> return (adjSpN n)
 
 -- below: c argument is closure entry, p argument is (heap) pointer to entry
 
@@ -485,7 +569,6 @@ jsIdIdent i mn suffix = do
   StrI . (\x -> "h$"++prefix++x++mns++suffix++u) . zEncodeString <$> name
     where
       mns = maybe "" (('_':).show) mn
---      (prefix,u)
       name = fmap ('.':) . showPpr' . localiseName . getName $ i
       mkPrefixU
         | isExportedId i, Just x <- (nameModule_maybe . getName) i = do

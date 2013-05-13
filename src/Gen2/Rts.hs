@@ -56,7 +56,8 @@ closureConstructors =
                    in decl funName <> [j| `funName` = `fun` |]
 
 stackManip :: JStat
-stackManip = mconcat $ map mkPush [1..32]
+stackManip = mconcat (map mkPush [1..32]) <>
+             mconcat (map mkPpush [1..255]) 
   where
     mkPush :: Int -> JStat
     mkPush n = let funName = StrI ("h$p" ++ show n)
@@ -65,10 +66,30 @@ stackManip = mconcat $ map mkPush [1..32]
                              mconcat (zipWith (\i a -> [j| `Stack`[`Sp`- `n-i`] = `a`; |]) [1..] as)
                in decl funName <> [j| `funName` = `fun`; |]
 
+    -- | partial pushes, based on bitmap, increases Sp by highest bit
+    mkPpush :: Integer -> JStat
+    mkPpush sig | sig .&. (sig+1) == 0 = mempty -- already handled by h$p
+    mkPpush sig = let funName = StrI ("h$pp" ++ show sig)
+                      bits    = bitsIdx sig
+                      n       = length bits
+                      h       = last bits
+                      args    = map (StrI . ('x':) . show) [1..n]
+                      fun     = JFunc args $ [j| `Sp` = `Sp` + `h+1` |] <>
+                                mconcat (zipWith (\b a -> [j| `Stack`[`Sp`-`h-b`] = `a` |]) bits args)
+                   in decl funName <> [j| `funName` = `fun`; |]
+
+bitsIdx :: Integer -> [Int]
+bitsIdx n | n < 0 = error "bitsIdx: negative"
+          | otherwise = go n 0
+  where
+    go 0 _ = []
+    go m b | testBit m b = b : go (clearBit m b) (b+1)
+           | otherwise   = go (clearBit m b) (b+1)
+
 updateThunk :: JStat
 updateThunk
   | rtsInlineBlackhole =
-      [j| `push [toJExpr R1, jsv "h$upd_frame"]`;
+      [j| `push' [toJExpr R1, jsv "h$upd_frame"]`;
           `R1`.f = h$blackhole;
           `R1`.d1 = h$currentThread.tid;
           `R1`.d2 = null; // will be filled with waiters array
@@ -187,7 +208,7 @@ var !h$currentThread = null;
 `stackManip`;
 
 fun h$bh {
-  `push [toJExpr R1, jsv "h$upd_frame"]`;
+  `push' [toJExpr R1, jsv "h$upd_frame"]`;
   `R1`.f  = h$blackhole;
   `R1`.d1 = h$currentThread.tid;
   `R1`.d2 = null; // will be filled with waiters array
@@ -930,7 +951,7 @@ fun h$unmaskFrame {
   `adjSpN 1`;
   // back to scheduler to give us async exception if pending
   if(h$currentThread.excep.length > 0) {
-    `push [toJExpr R1, jsv "h$return"]`;
+    `push' [toJExpr R1, jsv "h$return"]`;
     return h$reschedule;
   } else {
     return `Stack`[`Sp`];

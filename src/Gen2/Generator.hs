@@ -7,7 +7,6 @@
 module Gen2.Generator (generate) where
 
 import           StgCmmClosure
--- import ClosureInfo hiding (ClosureInfo)
 import           ForeignCall
 import           Outputable hiding ((<>))
 import           FastString
@@ -37,6 +36,8 @@ import           Data.ByteString (ByteString)
 import qualified Data.Serialize as C
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
+import           Data.Either (partitionEithers)
+import           Data.Function (on)
 import qualified Data.IntMap.Strict as IM
 import           Data.Monoid
 import           Data.Maybe (isJust, fromMaybe)
@@ -45,7 +46,7 @@ import qualified Data.Map as M
 import           Data.Set (Set)
 import           Data.Foldable (fold)
 import qualified Data.Set as S
-import           Data.List (partition, intercalate, sort, find)
+import           Data.List (partition, intercalate, sort, sortBy, find)
 import qualified Data.List as L
 import           Data.List.Split (splitOn)
 import qualified Data.Text.Lazy as TL
@@ -197,7 +198,7 @@ lookupStaticRefs i xs = fromMaybe [] (lookup i xs)
 genToplevelDecl :: Id -> StgRhs -> C
 genToplevelDecl i rhs
 --  | isBoolId i = mempty   -- these are fixed on the heap
-  | otherwise = genToplevelConEntry i rhs <> genToplevelRhs i rhs
+  | otherwise = resetSlots (genToplevelConEntry i rhs) <> resetSlots (genToplevelRhs i rhs)
 
 genToplevelConEntry :: Id -> StgRhs -> C
 genToplevelConEntry i (StgRhsCon _cc con args)
@@ -329,12 +330,8 @@ might_be_a_function ty
 -- fixme: idArity x for a function with implicit args doesn't report those!
 genApp :: Bool -> Bool -> Id -> [StgArg] -> C
 genApp force mstackTop i a
-    | isPrimitiveType (idType i)
---          = [j| `R1` = `jsId i`; return `Stack`[`Sp`]; |] -- fixme: isPrimitiveType can have types bigger than r1
-            = r1 <>
-              return [j| return `Stack`[`Sp`]; |]
-    | isStrictType (idType i)
-          = r1 <> return [j| return `Stack`[`Sp`]; |]
+    | isPrimitiveType (idType i) || isStrictType (idType i)
+            = r1 <> return [j| return `Stack`[`Sp`]; |]
 --    | n == 0 && isBoolTy (idType i) -- simple bool tagging: remove one indirection
 --          = r1 <> return [j| if(`R1` === `HFalse` || `R1` === `HTrue`) { return `Stack`[`Sp`]; } else { return `R1`; } |]
 
@@ -395,8 +392,8 @@ pushCont as = do
   (app, spec) <- selectApply False as
   as' <- concatMapM genArg as
   if spec
-    then return (push $ reverse $ app : as')
-    else return (push $ reverse $ app : mkTag as' as : as')
+    then push $ reverse $ app : as'
+    else push $ reverse $ app : mkTag as' as : as'
   where
     mkTag rs ns = toJExpr ((length rs `shiftL` 8) .|. length ns)
 
@@ -412,7 +409,7 @@ genBind top bndr
 -- generate the entry function for a local closure
 genEntry :: Id -> Id -> StgRhs -> C
 genEntry top i (StgRhsCon _cc con args) = mempty -- panic "local data entry" -- mempty ??
-genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) = do
+genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) = resetSlots $ do
   upd <- genUpdFrame Updatable
   ll <- loadLiveFun live
   app <- genApp False True fun args
@@ -428,7 +425,7 @@ genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) =
              (fixedLayout $ map (uTypeVt.idType) live) et sr`;
        |]
 
-genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = do
+genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlots $ do
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
   body <- genBody top args body upd_flag i
@@ -465,24 +462,10 @@ genSetConInfo i d srt = do
 -- info table for the arguments that are heap pointers when this function is to be calledb
 -- cl == True means that the current closure in r1 is a heap object
 genArgInfo :: Bool -> [Type] -> [VarType] -- [StgReg]
-genArgInfo cl args = checkArgsList args xs -- map numReg (tbl 2 (map uTypeVt args))
+genArgInfo cl args = map uTypeVt args
     where
       xs = r1 <> map uTypeVt args
       r1 = if cl then [PtrV] else [IntV]
-
-checkArgsList :: [Type] -> [VarType] -> [VarType]
-checkArgsList args xs
-  | True = xs
---  | show args == "[GHC.Prim.State# s,a]"     = xs -- temp workaround to get ST to compile
-  | length (filter (==VoidV) xs) > 1         = panic ("too many void args " ++ show xs ++ " " ++ show args)
-  | not (null xs) && any (==VoidV) (init xs) = panic ("void arg in unexpected place: " ++ show xs ++ " " ++ show args)
-  | otherwise = xs
-{-
-           tbl n [] = []
-      tbl n (t:ts)
-          | isPtr t   = n : tbl (n + varSize t) ts
-          | otherwise = tbl (n + varSize t) ts
--}
 
 mkDataEntry :: JExpr
 mkDataEntry = ValExpr $ JFunc funArgs [j| `preamble`; return `Stack`[`Sp`]; |]
@@ -507,7 +490,7 @@ argSize :: [Type] -> Int
 argSize = sum . map (varSize . uTypeVt)
 
 genUpdFrame :: UpdateFlag -> C
-genUpdFrame Updatable = return updateThunk -- push [toJExpr R1,[je|stg_upd_frame|]]
+genUpdFrame Updatable = return updateThunk
 genUpdFrame _         = mempty
 
 -- allocate local closures
@@ -524,7 +507,7 @@ allocCls xs = do
     toCl (i, StgRhsCon _cc con ar) = Right <$> ((,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar)
 --    toCl (i, StgRhsClosure _cc _bi live Updatable _srt _args _body) =
 --        Right (jsIdI i, updateEntry live, map jsId live)
-    toCl (i, StgRhsClosure _cc _bi live upd_fag _srt _args _body) =
+    toCl (i, StgRhsClosure _cc _bi live upd_flag _srt _args _body) =
         Right <$> ((,,) <$> jsIdI i <*> jsEntryId i <*> concatMapM genIds live)
 
 -- bind result of case to bnd, final result to r
@@ -534,7 +517,7 @@ genCase top bnd (StgApp i []) at@(PrimAlt tc) alts l srt
   | isUnLiftedType (idType i) = do
     ibnd <- jsId bnd
     ii   <- jsId i
-    declIds bnd <> return [j| `ibnd` = `ii`; |] 
+    declIds bnd <> return [j| `ibnd` = `ii`; |]
       <> genInlinePrimCase top bnd (tyConVt tc) at alts
 
 genCase top bnd (StgOpApp (StgPrimOp SeqOp) [StgVarArg a, _] _) at alts l srt =
@@ -547,7 +530,7 @@ genCase top bnd (StgApp i xs) at@(AlgAlt tc) [alt] l =
   gen
 -}
 genCase top bnd (StgApp i xs) at alts l srt =
-  genRet top bnd at alts l srt {- <> push [jsId bnd] -} <> genApp True False i xs -- genApp (jsId bnd) i xs
+  genRet top bnd at alts l srt <> genApp True False i xs
 
 -- fixme?
 genCase top bnd x@(StgCase {}) at alts l srt =
@@ -569,7 +552,6 @@ genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt t
       parseFFIPattern False False ("h$" ++ unpackFS lbl) t ids args <>
       genAlts top bnd at alts
 
-
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) _ [(DataAlt{}, bndrs, _, e)] l srt = do
   ids <- concatMapM genIds bndrs
   concatMapM declIds bndrs <>
@@ -583,6 +565,7 @@ genCase top bnd (StgOpApp (StgPrimOp p) args t) at@(UbxTupAlt n) alts@[(DataAlt{
   case genPrim p ids args' of
       PrimInline s -> mconcat (map declIds bndrs) <> return s <> genExpr top e
       PRPrimCall s -> genRet top bnd at alts l srt <> return s
+
 -- other primop
 genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l srt = do
     args' <- concatMapM genArg args
@@ -591,7 +574,7 @@ genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l srt = do
       PrimInline s -> declIds bnd <> return s <> genInlinePrimCase top bnd (uTypeVt t) at alts
       PRPrimCall s -> genRet top bnd at alts l srt <> return s
 
-genCase top bnd x@(StgConApp c as) at {- @(UbxTupAlt n) -} [(DataAlt{}, bndrs, _, e)] l srt = do
+genCase top bnd x@(StgConApp c as) at [(DataAlt{}, bndrs, _, e)] l srt = do
   args' <- concatMapM genArg as
   ids   <- concatMapM genIds bndrs
   mconcat (map declIds bndrs) <> return (assignAll ids args') <> genExpr top e
@@ -626,28 +609,32 @@ genInlinePrimCase _ _ _ _ alt = panic ("unhandled primcase alt: " ++ show alt)
 
 
 genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
-genRet top e at as l srt = withNewIdent $ \ret -> pushRetArgs free (iex ret) <> f ret
+genRet top e at as l srt = withNewIdent f -- $ \ret -> pushRetArgs free (iex ret) <> f ret
   where
     f :: Ident -> C
     f r    =  do
-      fun' <- fun
+      free <- optimizeFree (uniqSetToList l)
+      pushRet <- pushRetArgs free (iex r)
+      fun' <- fun free
       topi <- jsIdI top
-      tce <- typeComment e
+      tc <- typeComment e
       sr <- genStaticRefs srt
-      return . toplevel $
-                tce -- is this correct?
-                <> (decl r)
-                <> [j| `r` = `fun'`;
+      return $
+        pushRet <> ( toplevel $
+                     tc -- is this correct?
+                 <> (decl r)
+                 <> [j| `r` = `fun'`;
                        `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
-                          (fixedLayout $ map (uTypeVt.idType) free) (CIFun regs regs) sr`;
+                          (fixedLayout $ map (uTypeVt.idType.fst3) free) (CIFun regs regs) sr`;
                      |]
-    free   = uniqSetToList l
+                   )
+    fst3 ~(x,_,_)  = x
     regs   = max 0 (typeSize (idType e) - 1)  -- number of active regs other than R1
 
     isBoxedAlt = case at of
                    PrimAlt {} -> False
                    _          -> True
-    fun    = do
+    fun free = resetSlots $ do
       l <- if isUnboxedTupleType (idType e)
              then return mempty
              else do
@@ -658,18 +645,42 @@ genRet top e at as l srt = withNewIdent $ \ret -> pushRetArgs free (iex ret) <> 
       alts <- genAlts top e at as
       return . ValExpr $ JFunc funArgs $ preamble <> l <> ras <> alts
 
--- push/pop args in reverse order: first arg has lowest offset (corresponds with gc info)
-pushRetArgs :: [Id] -> JExpr -> C
-pushRetArgs free fun = push . (++[fun]) <$> concatMapM genIdArg (reverse free)
+-- reorder the things we need to push to reuse existing stack values as much as possible
+-- True if already on the stack at that location
+optimizeFree :: [Id] -> G [(Id,Int,Bool)]
+optimizeFree ids = do
+  let ids' = concat $ map (\i -> map (i,) [1..varSize . uTypeVt . idType $ i]) ids
+      l    = length ids'
+  slots <- take l . (++repeat SlotUnknown) <$> getSlots
+  let slm                = M.fromList (zip slots [0..])
+      (remaining, fixed) = partitionEithers $ map (\inp@(i,n) -> maybe (Left inp) (\j -> Right (i,n,j,True)) (M.lookup (SlotId i n) slm)) ids'
+      takenSlots         = S.fromList (fixed ^.. traverse . _3)
+      freeSlots          = filter (`S.notMember` takenSlots) [0..l-1]
+      remaining'         = zipWith (\(i,n) j -> (i,n,j,False)) remaining freeSlots
+      allSlots           = sortBy (compare `on` \(_,_,x,_) -> x) (fixed ++ remaining')
+  return $ map (\(i,n,_,b) -> (i,n,b)) allSlots
 
-loadRetArgs :: [Id] -> C
-loadRetArgs free = popSkipI 1 <$> ids
+
+pushRetArgs :: [(Id,Int,Bool)] -> JExpr -> C
+pushRetArgs free fun = do
+  c <- comment . ("slots: " ++) . show <$> (mapM showSlot =<< getSlots)
+  p <- pushOptimized . (++[(fun,False)]) =<< mapM (\(i,n,b) -> (\es->(es!!(n-1),b)) <$> genIdArg i) free
+--  p <- push . (++[fun]) =<< mapM (\(i,n,b) -> (\es->es!!(n-1)) <$> genIdArg i) free
+  return ({- c <> -} p)
     where
-       ids = concatMapM genIdArgI (reverse free)
+      showSlot SlotUnknown = return "unknown"
+      showSlot (SlotId i n) = do
+        (StrI i') <- jsIdI i
+        return (i'++"("++show n ++ ")")
+
+loadRetArgs :: [(Id,Int,Bool)] -> C
+loadRetArgs free = popSkipI 1 =<< ids
+    where
+       ids = mapM (\(i,n,b) -> (!!(n-1)) <$> genIdStackArgI i) free
 
 genAlts :: Id -> Id -> AltType -> [StgAlt] -> C
 genAlts top e PolyAlt [alt] = snd <$> mkAlgBranch top e alt
-genAlts top e PolyAlt _ {- [(_, _, _, expr)] -} = panic "multiple polyalt"
+genAlts top e PolyAlt _ = panic "genAlts: multiple polyalt"
 genAlts top e (PrimAlt tc) [(_, bs, use, expr)] = do
   ie <- genIds e
 {-  loadParams ie bs use <> -}
@@ -684,7 +695,7 @@ genAlts top e (PrimAlt tc) alts = do
 -- genAlts r e (PrimAlt tc) alts = mkSwitch [je| heap[r1] |] (map (mkPrimBranch r e) alts)
 genAlts top e (UbxTupAlt n) [(_, bs, use, expr)] = loadUbxTup bs n <> genExpr top expr
 --genAlts r e (AlgAlt tc) [alt] = mkSwitch [snd (mkAlgBranch r e alt)
-genAlts top e (AlgAlt tc) [alt] | isUnboxedTupleTyCon tc = panic "wtf ubxtup"
+genAlts top e (AlgAlt tc) [alt] | isUnboxedTupleTyCon tc = panic "genAlts: unexpected unboxed tuple"
 genAlts top e (AlgAlt tc) [alt] = snd <$> mkAlgBranch top e alt
 genAlts top e (AlgAlt tc) alts
 --  | isBoolTy (idType e) = do
@@ -695,7 +706,7 @@ genAlts top e (AlgAlt tc) alts
       mkSwitch [je| `ei`.f.a |] <$> mapM (mkAlgBranch top e) alts
 genAlts top e a l = do
   ap <- showPpr' a
-  panic $ "unhandled case variant: " ++ ap ++ " (" ++ show (length l) ++ ")"
+  panic $ "genAlts: unhandled case variant: " ++ ap ++ " (" ++ show (length l) ++ ")"
 {-
 checkClosure :: Id -> JStat
 checkClosure i
@@ -718,11 +729,8 @@ checkAlgBranch ((DataAlt dc),_,_,_) i
                |] -}
   | otherwise = mempty
   where  expected = show dc
-#if __GLASGOW_HASKELL__ >= 707
          isTup = isTupleDataCon
-#else
-         isTup = isTupleCon
-#endif
+
 checkAlgBranch _ _ = mempty
 
 loadUbxTup :: [Id] -> Int -> C
@@ -743,10 +751,10 @@ mkSwitch e cases
     | [(Just c1,s1),(_,s2)] <- n, null d = checkIsCon e <> IfStat [je| `e` === `c1` |] s1 s2
     | null d        = checkIsCon e <> SwitchStat e (map addBreak (init n)) (snd $ last n)
     | [(_,d0)] <- d = checkIsCon e <> SwitchStat e (map addBreak n) d0
-    | otherwise     = panic "multiple default cases"
+    | otherwise     = panic "mkSwitch: multiple default cases"
     where
       addBreak (Just c,s) = (c, s) -- [j| `s`; break |]) -- fixme: rename, does not add break anymore
-      addBreak _          = panic "mkSwitch"
+      addBreak _          = panic "mkSwitch: addBreak"
       (n,d) = partition (isJust.fst) cases
 
 checkIsCon :: JExpr -> JStat
@@ -773,30 +781,27 @@ mkEq es1 es2
 
 
 mkAlgBranch :: Id -> Id -> StgAlt -> G (Maybe JExpr, JStat)
-mkAlgBranch top d alt@(a,bs,use,expr) = (caseCond a,) <$> b
+mkAlgBranch top d alt@(a,bs,use,expr) = isolateSlots $ (caseCond a,) <$> b
   where
     b = {- checkAlgBranch alt d <>  -} (jsId d >>= \idd -> loadParams idd bs use)
                                            <> genExpr top expr
 
 -- single-var prim
 mkPrimBranch :: Id -> VarType -> StgAlt -> G (Maybe JExpr, JStat)
-mkPrimBranch top vt (DEFAULT, bs, us, e) = (Nothing,) <$> genExpr top e
-mkPrimBranch top vt (cond,    bs, us, e) = (caseCond cond,) <$> genExpr top e
+mkPrimBranch top vt (DEFAULT, bs, us, e) = isolateSlots $ (Nothing,) <$> genExpr top e
+mkPrimBranch top vt (cond,    bs, us, e) = isolateSlots $ (caseCond cond,) <$> genExpr top e
 
 -- possibly multi-var prim
 -- fixme load binders?
 mkPrimIfBranch :: Id -> VarType -> StgAlt -> G (Maybe [JExpr], JStat)
-mkPrimIfBranch top vt (DEFAULT, bs, us, e) = do
+mkPrimIfBranch top vt (DEFAULT, bs, us, e) = isolateSlots $ do
 --  (Nothing,) <$> genExpr top e
   expr <- genExpr top e
   return (Nothing, expr)
-mkPrimIfBranch top vt (cond,    bs, us, e) = do
+mkPrimIfBranch top vt (cond,    bs, us, e) = isolateSlots $ do
   dec <- concatMapM declIds bs
   expr <- genExpr top e
   return (ifCond cond, expr) -- dec <> return (assignAll bs <> expr)
-
-
-dummyRet = [je| dummyRet |]
 
 ifCond :: AltCon -> Maybe [JExpr]
 ifCond (DataAlt da)
@@ -845,6 +850,13 @@ genPrimOp op args t = do
      PRPrimCall s -> return s
     where
       rs = map toJExpr $ take (typeSize t) (enumFrom R1)
+
+genStackArg :: StgArg -> G [(JExpr, StackSlot)]
+genStackArg a@(StgLitArg _) = map (,SlotUnknown) <$> genArg a
+genStackArg a@(StgVarArg i) = zipWith f [1..] <$> genArg a
+  where
+    f :: Int -> JExpr -> (JExpr, StackSlot)
+    f n e = (e, SlotId i n)
 
 genArg :: StgArg -> G [JExpr]
 genArg (StgLitArg l) = return (genLit l)
@@ -950,6 +962,12 @@ genIdArgI i
     where
       r = uTypeVt . idType $ i
 
+
+genIdStackArgI :: Id -> G [(Ident,StackSlot)]
+genIdStackArgI i = zipWith f [1..] <$> genIdArgI i
+  where
+    f :: Int -> Ident -> (Ident,StackSlot)
+    f n ident = (ident, SlotId i n)
 
 r2d :: Rational -> Double
 r2d = realToFrac
@@ -1089,12 +1107,14 @@ comment :: String -> JStat
 comment xs = PPostStat True ("// " ++ xs) (iex $ StrI "")
 
 typeComment :: Id -> C
-typeComment i = do
-  si <- sh i
-  sit <- sh (idType i)
-  return (comment $ si ++ " :: " ++ sit)
-  where
-    sh x = map (\x -> if x == '\n' then ' ' else x) <$> showPpr' x
+typeComment i
+  | not Gen2.RtsSettings.rtsDebug = return mempty
+  | otherwise = do
+      si <- sh i
+      sit <- sh (idType i)
+      return (comment $ si ++ " :: " ++ sit)
+        where
+          sh x = map (\x -> if x == '\n' then ' ' else x) <$> showPpr' x
 
 -- fixme: what if the call returns a thunk?
 genPrimCall :: PrimCall -> [StgArg] -> Type -> C
@@ -1124,7 +1144,6 @@ genForeignCall0 _ _ _ _ = panic "genForeignCall0: unsupported foreign call"
 -- fixme: deal with safety and calling conventions
 -}
 -- | generate the actual call
--- fixme if thing starts with &, what to do?
 {-
   parse FFI patterns:
    "&value         -> value
@@ -1302,3 +1321,4 @@ makeIdent = do
   i <- use gsId
   mod <- use gsModule
   return (StrI $ "h$" ++ zEncodeString (show mod) ++ "_" ++ encodeUnique i)
+

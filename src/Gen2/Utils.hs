@@ -35,9 +35,11 @@ instance ToJExpr Ident where
 -- easier building of javascript object literals
 newtype JObj = JObj (Map String JExpr) deriving (Monoid, Show, Eq)
 
+{-
 infix 7 .=
 (.=) :: (ToJExpr a) => String -> a -> JObj
 (.=) key val = JObj $ singleton key (toJExpr val)
+-}
 
 instance ToJExpr JObj where
   toJExpr (JObj m) = ValExpr (JHash m)

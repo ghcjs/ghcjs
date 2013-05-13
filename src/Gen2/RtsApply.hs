@@ -90,7 +90,7 @@ genericStackApply =
             `papArity parity (toJExpr R1)`;
             `funCase c parity`;
           case `Blackhole`:
-            `push [toJExpr R1, jsv "h$return"]`;
+            `push' [toJExpr R1, jsv "h$return"]`;
             return h$blockOnBlackhole(`R1`);
           default:
             throw "h$ap_gen: unexpected closure type";
@@ -169,7 +169,7 @@ genericFastApply =
           case `Blackhole`:
             `traceRts $ "h$ap_gen_fast: blackhole"`;
             `pushStackApply c tag`;
-            `push [toJExpr R1, jsv "h$return"]`;
+            `push' [toJExpr R1, jsv "h$return"]`;
             return h$blockOnBlackhole(`R1`);
           default:
             throw ("h$ap_gen_fast: unexpected closure type: " + c.t);
@@ -276,14 +276,14 @@ stackApply r n = [j| `decl func`;
                    `traceRts $ funcName |+ ": pap"`;
                    `papCase c`;
                  case `Blackhole`:
-                   `push [toJExpr R1, jsv "h$return"]`;
+                   `push' [toJExpr R1, jsv "h$return"]`;
                    return h$blockOnBlackhole(`R1`);
                  default:
                    throw (`"panic: " ++ funcName ++ ", unexpected closure type: "` + c.t);
                }
            |]
 
-    funExact c = popSkip 1 (reverse $ take r (map toJExpr $ enumFrom R2))
+    funExact c = popSkip' 1 (reverse $ take r (map toJExpr $ enumFrom R2))
                  <> [j| return `c`; |]
     stackArgs = map (\x -> [je| `Stack`[`Sp`-`x`] |]) [1..r]
 
@@ -418,12 +418,12 @@ fastApply r n =
                      `funCase c arity`;
                    case `Thunk`:
                      `traceRts $ (funName ++ ": thunk")`;
-                     `push $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
+                     `push' $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
                      return c;
                    case `Blackhole`:
                      `traceRts $ (funName ++ ": blackhole")`;
-                     `push $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
-                     `push [toJExpr R1, jsv "h$return"]`;
+                     `push' $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
+                     `push' [toJExpr R1, jsv "h$return"]`;
                      return h$blockOnBlackhole(`R1`);
                    default:
                      throw (`funName ++ ": unexpected closure type: "` + c.t);
@@ -473,7 +473,7 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
                   if(c.t === `Thunk`) {
                     return c;
                   } else if(c.t === `Blackhole`) {
-                    `push [toJExpr R1, jsv "h$return"]`;
+                    `push' [toJExpr R1, jsv "h$return"]`;
                     return h$blockOnBlackhole(`R1`);
                   } else {
                     `adjSpN 1`;
@@ -499,7 +499,7 @@ enter e = [j| var c = `e`.f;
                 case `Pap`:
                   return `Stack`[`Sp`];
                 case `Blackhole`:
-                  `push [jsv "h$ap_0_0", e, jsv "h$return"]`;
+                  `push' [jsv "h$ap_0_0", e, jsv "h$return"]`;
                   return h$blockOnBlackhole(`e`);
                 default:
                   return c;
@@ -513,7 +513,7 @@ enter' c = [j|
 -}
 
 enterv :: JStat
-enterv = push [jsv "h$ap_1_0"] <> enter (toJExpr R1)
+enterv = push' [jsv "h$ap_1_0"] <> enter (toJExpr R1)
 
 updates =
   [j|

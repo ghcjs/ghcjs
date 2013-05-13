@@ -399,7 +399,8 @@ mutated' a = S.unions <$> (mapM mutated $ a ^.. tinplate)
 knownFuns :: Map Ident (Set Ident)
 knownFuns = M.fromList . map (StrI *** S.fromList . map StrI) $
                [ ("h$bh", [ "h$r1" ])
-               ] ++ map (\n -> ("h$p" ++ show n, ["h$stack", "h$sp"])) [(1::Int)..32]
+               ] ++ map (\n -> ("h$p"  ++ show n, ["h$stack", "h$sp"])) [(1::Int)..32]
+                 ++ map (\n -> ("h$pp" ++ show n, ["h$stack", "h$sp"])) [(1::Int)..255]
 
 -- pure RTS functions that we know we can safely move around or remove
 isKnownPureFun :: Ident -> Bool
