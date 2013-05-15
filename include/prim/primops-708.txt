@@ -1,5 +1,3 @@
-
-
 -----------------------------------------------------------------------
 -- 
 -- (c) 2010 The University of Glasgow
@@ -54,13 +52,6 @@ defaults
 -- Currently, documentation is produced using latex, so contents of
 -- description fields should be legal latex. Descriptions can contain
 -- matched pairs of embedded curly brackets.
-
-
-
-
-
-
-
 
 
 
@@ -595,6 +586,17 @@ primop   IntQuotRemOp "quotRemInt#"    GenPrimOp
    Int# -> Int# -> (# Int#, Int# #)
    {Rounds towards zero.}
    with can_fail = True
+
+primop   AndIOp   "andI#"   Dyadic    Int# -> Int# -> Int#
+   with commutable = True
+
+primop   OrIOp   "orI#"     Dyadic    Int# -> Int# -> Int#
+   with commutable = True
+
+primop   XorIOp   "xorI#"   Dyadic    Int# -> Int# -> Int#
+   with commutable = True
+
+primop   NotIOp   "notI#"   Monadic   Int# -> Int#
 
 primop   IntNegOp    "negateInt#"    Monadic   Int# -> Int#
 primop   IntAddCOp   "addIntC#"    GenPrimOp   Int# -> Int# -> (# Int#, Int# #)
