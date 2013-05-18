@@ -8,7 +8,7 @@ import Module (ModuleName, PackageId)
 import HscTypes (ModSummary(..), CgGuts (..))
 import DynFlags (DynFlags(..))
 import qualified Data.ByteString as B
-#ifdef GHCJS_ENABLED
+-- #ifdef GHCJS_ENABLED
 import Module (ml_hi_file, moduleNameString, moduleName)
 import Distribution.Verbosity (normal)
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
@@ -28,17 +28,18 @@ import qualified Generator.Link as Js (link)
 import Compiler.Variants
        (variants, Variant(..))
 import Control.Monad (forM_)
-#endif
+-- #endif
 
-
-#ifndef GHCJS_ENABLED
+{-
+  #ifndef GHCJS_ENABLED
 writeJavaScriptModule :: DynFlags -> ModSummary -> CgGuts
         -> ([StgBinding], CollectedCCs) -> IO ()
 writeJavaScriptModule _ _ _ = return ()
 
 linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
 linkJavaScript dyflags o_files dep_packages pagesMods = return ()
-#else
+  #else
+-}
 writeJavaScriptModule :: DynFlags -> ModSummary -> CgGuts
         -> ([StgBinding], CollectedCCs) -> IO ()
 writeJavaScriptModule dyflags summary tidyCore (stg', _ccs) = do
@@ -106,4 +107,4 @@ jsexeFileName var dflags
 #endif
         ++ variantExeExtension var
 
-#endif
+-- #endif
