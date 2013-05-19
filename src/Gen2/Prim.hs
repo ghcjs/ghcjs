@@ -474,7 +474,7 @@ genPrim MaskUninterruptibleOp [r] [a] =
 genPrim UnmaskAsyncExceptionsOp [r] [a] =
   PRPrimCall [j| return h$unmaskAsync(`a`); |]
 
-genPrim MaskStatus [r] [] = PrimInline [j| `r` = h$currentThread.mask; |]
+genPrim MaskStatus [r] [] = PrimInline [j| `r` = h$maskStatus(); |]
 {-
 AtomicallyOp
 RetryOp
@@ -508,7 +508,7 @@ genPrim ForkOnOp [tid] [p,x] = PrimInline [j| `tid` = h$fork(`x`); |] -- ignore 
 genPrim KillThreadOp [] [tid,ex] =
   PRPrimCall [j| return h$killThread(`tid`,`ex`); |]
 genPrim YieldOp [] [] = PRPrimCall [j| return h$yield(); |]
-genPrim MyThreadIdOp [r] [] = PrimInline [j| `r` = h$currentThread.tid; |]
+genPrim MyThreadIdOp [r] [] = PrimInline [j| `r` = h$currentThread; |]
 genPrim LabelThreadOp [] [t,la,lo] = PrimInline [j| `t`.label = [la,lo]; |]
 genPrim IsCurrentThreadBoundOp [r] [] = PrimInline [j| `r` = 1; |]
 genPrim NoDuplicateOp [] [] = PrimInline mempty -- don't need to do anything as long as we have eager blackholing
@@ -538,10 +538,7 @@ genPrim ParOp [r] [a] = PrimInline [j| `r` = 0; |]
 {-
 SparkOp
 -}
-genPrim SeqOp [r] [e] = PRPrimCall [j| `R1` = `e`;
-                                       var ef = `e`.f;
-                                       return (`isThunk' ef`) ? ef : `Stack`[`Sp`];
-                                     |]
+genPrim SeqOp [r] [e] = PRPrimCall [j| return h$e(`e`); |]
 {-
 GetSparkOp
 -}
