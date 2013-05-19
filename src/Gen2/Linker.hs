@@ -321,8 +321,7 @@ rtsDeps :: Set Fun
 rtsDeps =
  let mkDep (p,m,s) = Fun (Package p "") m s
  in S.fromList $ map mkDep
-     [ ("ghc-prim", "GHC.Types",     "h$baseZCGHCziTypesziFalse")
-     , ("ghc-prim", "GHC.Types",     "h$baseZCGHCziTypesziTrue")
-     , ("base",     "GHC.Conc.Sync", "h$baseZCGHCziConcziSynczireportError")
+     [ ("base",     "GHC.Conc.Sync", "h$baseZCGHCziConcziSynczireportError")
+     , ("base",     "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )
      ]
 
