@@ -75,9 +75,11 @@ requiredPackages = [ "ghc-prim"
                    , "syb"
                    , "transformers"
                    , "text"
+                   , "parallel"
                    , "ghcjs-base"
-                   , "quickcheck"
+                   , "QuickCheck"
                    , "old-time"
+                   , "vector"
                    ]
 
 data TestOpts = TestOpts { disableUnopt :: Bool
@@ -91,18 +93,20 @@ data TestSettings =
                , tsDisableSpiderMonkey :: Bool
                , tsDisableOpt          :: Bool
                , tsDisableUnopt        :: Bool
+               , tsDisabled            :: Bool
                , tsArguments           :: [String] -- ^ command line arguments
                , tsCopyFiles           :: [String] -- ^ copy these files to the dir where the test is run
                } deriving (Eq, Show)
 
 instance Default TestSettings where
-  def = TestSettings False False False False [] []
+  def = TestSettings False False False False False [] []
 
 instance FromJSON TestSettings where
   parseJSON (Object o) = TestSettings <$> o .:? "disableNode"         .!= False
                                       <*> o .:? "disableSpiderMonkey" .!= False
                                       <*> o .:? "disableOpt"          .!= False
                                       <*> o .:? "disableUnopt"        .!= False
+                                      <*> o .:? "disabled"            .!= False
                                       <*> o .:? "arguments"           .!= []
                                       <*> o .:? "copyFiles"           .!= []
 
@@ -151,30 +155,37 @@ stdioTest testOpts file = testCase (encodeString file) (stdioAssertion testOpts 
 stdioAssertion :: TestOpts -> FilePath -> Assertion
 stdioAssertion testOpts file = do
   putStrLn ("running test: " ++ encodeString file)
-  expected <- stdioExpected file
-  actual <- runGhcjsResult testOpts file
-  when (null actual) (putStrLn "warning: no test results")
-  forM_ actual $ \((a,t),d) -> do
-    assertEqual (encodeString file ++ ": " ++ d) expected a
-    putStrLn ("    " ++ (padTo 40 d) ++ " " ++ show t ++ "ms")
+  mexpected <- stdioExpected file
+  case mexpected of
+    Nothing -> putStrLn "test disabled"
+    Just expected -> do
+      actual <- runGhcjsResult testOpts file
+      when (null actual) (putStrLn "warning: no test results")
+      forM_ actual $ \((a,t),d) -> do
+        assertEqual (encodeString file ++ ": " ++ d) expected a
+        putStrLn ("    " ++ (padTo 40 d) ++ " " ++ show t ++ "ms")
 
 padTo :: Int -> String -> String
 padTo n xs | l < n     = xs ++ replicate (n-l) ' '
            | otherwise = xs
   where l = length xs
 
-stdioExpected :: FilePath -> IO StdioResult
+stdioExpected :: FilePath -> IO (Maybe StdioResult)
 stdioExpected file = do
-  xs@[mex,mout,merr] <- mapM (readFilesIfExists.(map (replaceExtension file)))
-       [["exit"], ["stdout", "out"], ["stderr","err"]]
-  if any isJust xs
-    then return $ StdioResult (fromMaybe ExitSuccess $ readExitCode =<< mex)
-                     (fromMaybe "" mout) (fromMaybe "" merr)
+  settings <- settingsFor file
+  if tsDisabled settings
+    then return Nothing
     else do
-      mr <- runhaskellResult file
-      case mr of
-        Nothing    -> assertFailure "cannot run `runhaskell'" >> return undefined
-        Just (r,t) -> return r
+      xs@[mex,mout,merr] <- mapM (readFilesIfExists.(map (replaceExtension file)))
+             [["exit"], ["stdout", "out"], ["stderr","err"]]
+      if any isJust xs
+        then return . Just $ StdioResult (fromMaybe ExitSuccess $ readExitCode =<< mex)
+                               (fromMaybe "" mout) (fromMaybe "" merr)
+        else do
+          mr <- runhaskellResult settings file
+          case mr of
+            Nothing    -> assertFailure "cannot run `runhaskell'" >> return undefined
+            Just (r,t) -> return (Just r)
 
 readFileIfExists :: FilePath -> IO (Maybe Text)
 readFileIfExists file = do
@@ -210,16 +221,15 @@ settingsFor file = do
     settingsFile = replaceExtension file "settings"
     settingsFile' = encodeString settingsFile
 
-runhaskellResult :: FilePath -> IO (Maybe (StdioResult, Integer))
-runhaskellResult file = do
-  cd <- getWorkingDirectory
-  settings <- settingsFor file
-  let args = tsArguments settings
-  setWorkingDirectory (cd </> directory file)
-  r <- runProcess "runhaskell" ([ includeOpt file
-                               , encodeString $ filename file] ++ args) ""
-  setWorkingDirectory cd
-  return r
+runhaskellResult :: TestSettings -> FilePath -> IO (Maybe (StdioResult, Integer))
+runhaskellResult settings file = do
+    cd <- getWorkingDirectory
+    let args = tsArguments settings
+    setWorkingDirectory (cd </> directory file)
+    r <- runProcess "runhaskell" ([ includeOpt file, "-w"
+                                 , encodeString $ filename file] ++ args) ""
+    setWorkingDirectory cd
+    return r
 
 includeOpt :: FilePath -> String
 includeOpt fp = "-i" <> encodeString (directory fp)
@@ -231,14 +241,16 @@ extraJsFiles file =
     e <- isFile jsFile
     return $ if e then [encodeString jsFile] else []
 
--- | gen2 only so far
 runGhcjsResult :: TestOpts -> FilePath -> IO [((StdioResult, Integer), String)]
 runGhcjsResult opts file = do
   settings <- settingsFor file
-  let unopt = if disableUnopt opts || tsDisableUnopt settings then [] else [False]
-      opt   = if tsDisableOpt settings then [] else [True]
-      runs  = unopt ++ opt
-  concat <$> mapM (run settings) runs
+  if tsDisabled settings
+    then return []
+    else do
+      let unopt = if disableUnopt opts || tsDisableUnopt settings then [] else [False]
+          opt   = if tsDisableOpt settings then [] else [True]
+          runs  = unopt ++ opt
+      concat <$> mapM (run settings) runs
     where
       run settings optimize = do
         output <- outputPath
