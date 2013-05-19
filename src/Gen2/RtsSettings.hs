@@ -41,7 +41,7 @@ rtsTraceStack = rtsDebug -- False -- True
 
 -- trace all foreign calls
 rtsTraceForeign :: Bool
-rtsTraceForeign = False
+rtsTraceForeign = rtsDebug
 
 rtsHaveWeakMap :: Bool
 rtsHaveWeakMap = False
@@ -71,7 +71,7 @@ rtsInlinePush = False
 
 infixr 1 |+
 infixr 1 |-
-infixr 3 |.
+infixl 3 |.
 infixl 2 |!
 infixl 2 |!!
 

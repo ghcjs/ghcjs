@@ -253,8 +253,8 @@ fun h$data2_e { return `Stack`[`Sp`]; }
 
 
 fun h$con_e { return `Stack`[`Sp`]; };
-var !h$f = h$c0(h$false_e);
-var !h$t = h$c0(h$true_e);
+// var !h$f = h$c0(h$false_e);
+// var !h$t = h$c0(h$true_e);
 
 fun h$catch a handler {
   `preamble`;
@@ -389,12 +389,16 @@ fun h$throw e async {
   if(`Sp` > 0) {
     var maskStatus = `Stack`[`Sp` - 2];
     var handler = `Stack`[`Sp` - 1];
-    h$currentThread.mask = maskStatus;
     `R1` = handler;
     `R2` = e;
     if(`Sp` > 3) { // don't pop the top-level handler
       `adjSpN 3`;
     }
+    if(maskStatus === 0) {
+      `Stack`[`Sp`+1] = h$unmaskFrame;
+      `adjSp 1`;
+    }
+    h$currentThread.mask = 2;  // fixme do we need to preserve uninterruptible masks?
     return h$ap_2_1_fast();
   } else {
     throw "unhandled exception in haskell thread";
@@ -761,6 +765,7 @@ fun h$ascii s {
 }
 
 fun h$dumpStackTop stack start sp {
+        start = Math.max(start,0);
         for(var i=start;i<=sp;i++) {
            var s = stack[i];
            if(s && s.n) {
@@ -785,6 +790,9 @@ fun h$dumpStackTop stack start sp {
                log("stack[" + i + "] = IORef -> " + s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")");
              } else if(typeof s === 'object') {
                log("stack[" + i + "] = " + h$collectProps(s).substring(0,50));
+             } else if(typeof s === 'function') {
+               var re = new RegExp("([^\\n]+)\\n(.|\\n)*");
+               log("stack[" + i + "] = " + (""+s).substring(0,50).replace(re,"$1"));
              } else {
                log("stack[" + i + "] = " + (""+s).substring(0,50));
              }
@@ -929,24 +937,44 @@ fun h$suspendCurrentThread next {
   h$currentThread.sp = `Sp`;
 }
 
+// debug thing, insert on stack to dump current result
+fun h$dumpRes {
+  log("#######: result: " + `Stack`[`Sp`-1]);
+  log(`R1`);
+  log(h$collectProps(`R1`));
+  if(`R1`.f && `R1`.f.n) { log("name: " + `R1`.f.n); }
+  if(`R1`.hasOwnProperty('d1')) { log("d1: " + `R1`.d1); }
+  if(`R1`.hasOwnProperty('d2')) { log("d2: " + `R1`.d2); }
+  if(`R1`.f) {
+    var re = new RegExp("([^\\n]+)\\n(.|\\n)*");
+    log("function: " + (""+`R1`.f).substring(0,50).replace(re,"$1"));
+  }
+  log("######");
+  `adjSpN 2`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$dumpRes") [] "dumpRes" (CILayoutFixed 1 [ObjV]) CIThunk CINoStatic`;
+
 // resume an interrupted computation, the stack
 // we need to push is in d1, restore frame should
 // be there
 fun h$resume_e {
-  //log("resuming computation");
+  //h$logSched("resuming computation: " + `R1`.d2);
   //h$logStack();
   var s = `R1`.d1;
   `updateThunk`;
   for(var i=0;i<s.length;i++) {
     `Stack`[`Sp`+1+i] = s[i];
   }
+  //h$dumpStackTop(`Stack`,`Sp`,`Sp`+s.length);
   `Sp`=`Sp`+s.length;
-  //h$logStack();
+  `R1` = null;
   return `Stack`[`Sp`];
 }
 `ClosureInfo (jsv "h$resume_e") [] "resume" (CILayoutFixed 0 []) CIThunk CINoStatic`;
 
 fun h$unmaskFrame {
+  //log("h$unmaskFrame: " + h$threadString(h$currentThread));
   h$currentThread.mask = 0;
   `adjSpN 1`;
   // back to scheduler to give us async exception if pending
@@ -960,11 +988,20 @@ fun h$unmaskFrame {
 `ClosureInfo (jsv "h$unmaskFrame") [] "unmask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 fun h$maskFrame {
+  //log("h$maskFrame: " + h$threadString(h$currentThread));
   h$currentThread.mask = 2;
   `adjSpN 1`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo (jsv "h$maskFrame") [] "mask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+
+fun h$maskUnintFrame {
+  //log("h$maskUnintFrame: " + h$threadString(h$currentThread));
+  h$currentThread.mask = 1;
+  `adjSpN 1`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$maskUnintFrame") [] "maskUnint" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 // async ffi results are returned in R1 = { f: ... d1: [array of values], d2: null }
 fun h$unboxFFIResult {
@@ -976,6 +1013,22 @@ fun h$unboxFFIResult {
   return `Stack`[`Sp`];
 }
 `ClosureInfo (jsv "h$unboxFFIResult") [PtrV] "unboxFFI" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+
+// for non-strict things that are represented as an unboxed value:
+// 1. enumerations
+// 2. one-constructor types that have only one field that maps to a JS primitive
+fun h$unbox_e {
+  `R1` = `R1`.d1;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$unbox_e") [DoubleV] "unboxed value" (CILayoutFixed 1 [DoubleV]) CIThunk CINoStatic`;
+
+fun h$retryInterrupted {
+  var a = `Stack`[`Sp`-1];
+  `adjSpN 2`;
+  return a[0].apply(this, a.slice(1));
+}
+`ClosureInfo (jsv "h$retryInterrupted") [ObjV] "retry interrupted operation" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`;
 
 |]
 

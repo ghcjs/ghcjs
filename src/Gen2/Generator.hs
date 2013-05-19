@@ -219,7 +219,16 @@ genStaticRefs (SRT n e bmp) =
 getStaticRef = fmap head . genIdsI
 
 genToplevelRhs :: Id -> StgRhs -> C
-genToplevelRhs i (StgRhsCon _cc con args) =
+genToplevelRhs i (StgRhsCon _cc con args)
+  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 1 =
+      (\id -> [j| `id` = false; |]) <$> jsId i 
+  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 2 =
+      (\id -> [j| `id` = true;  |]) <$> jsId i
+  | [x] <- args, isUnboxableCon con = do
+      [a] <- genArg x
+      id  <- jsId i
+      return [j| `id` = `a` |]
+  | otherwise =
     typeComment i <>
     declIds i <> do
       id <- jsId i
@@ -504,7 +513,10 @@ allocCls xs = do
     toCl (i, StgRhsCon _cc con []) = do
       ii <- jsIdI i
       Left <$> allocCon ii con []
-    toCl (i, StgRhsCon _cc con ar) = Right <$> ((,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar)
+    toCl (i, StgRhsCon _cc con [a]) | isUnboxableCon con = do
+      ii <- jsIdI i
+      Left <$> (allocCon ii con =<< genArg a)
+    toCl (i, StgRhsCon _cc con ar) = Right <$> ((,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar)  -- fixme do we need to handle unboxed?
 --    toCl (i, StgRhsClosure _cc _bi live Updatable _srt _args _body) =
 --        Right (jsIdI i, updateEntry live, map jsId live)
     toCl (i, StgRhsClosure _cc _bi live upd_flag _srt _args _body) =
@@ -593,19 +605,29 @@ assignj x y = [j| `x` = `y` |]
 -- simple inline prim case, no return function needed
 genInlinePrimCase :: Id -> Id -> VarType -> AltType -> [StgAlt] -> C
 genInlinePrimCase top bnd tc _ [(DEFAULT, bs, used, e)] = genExpr top e
+genInlinePrimCase top bnd tc (AlgAlt dtc) alts@[(DataAlt dc,_,_,_),_]
+    | isEnumerationTyCon dtc && dataConTag dc == 2 = do
+        i <- jsId bnd
+        [b1,b2] <- mapM (fmap snd . mkPrimIfBranch top tc) alts
+        return [j| if(`i` === true) { `b1` } else { `b2` } |]
+    | isEnumerationTyCon dtc && dataConTag dc == 1 = do
+        i <- jsId bnd
+        [b1,b2] <- mapM (fmap snd . mkPrimIfBranch top tc) alts
+        return [j| if(`i` === false) { `b1` } else { `b2` } |]
+-- fixme more alts needed?ded
 genInlinePrimCase top bnd tc (AlgAlt dtc) alts
---    | isBoolTy (mkTyConTy dtc) = do
---      i <- jsId bnd
---      mkSwitch [je| `i` |] <$> mapM (mkPrimBranch top tc) alts
-    | otherwise                = do
-      i <- jsId bnd
-      mkSwitch [je| `i`.f.a |] <$> mapM (mkPrimBranch top tc) alts
+    | isEnumerationTyCon dtc = do
+        i <- jsId bnd
+        mkSwitch [je| (`i`===true)?2:((typeof `i` === 'object')?(`i`.f.a):1) |] <$> mapM (mkPrimBranch top tc) alts
+    | otherwise = do
+        i <- jsId bnd
+        mkSwitch [je| `i`.f.a |] <$> mapM (mkPrimBranch top tc) alts
 genInlinePrimCase top bnd tc (PrimAlt ptc) alts
     | isMatchable tc    = liftM2 mkSwitch (jsId bnd) (mapM (mkPrimBranch top tc) alts)
     | otherwise         = liftM2 mkIfElse (genIdArg bnd) (mapM (mkPrimIfBranch top tc) alts)
 -- genInlinePrimCase top bnd tc (UbxTupAlt n) [(DataAlt _, bndrs, _, body)] =
 --   genLoadUbxTup n bndrs <> genExpr top e
-genInlinePrimCase _ _ _ _ alt = panic ("unhandled primcase alt: " ++ show alt)
+genInlinePrimCase _ _ _ _ alt = panic ("genInlinePrimCase: unhandled alt: " ++ show alt)
 
 
 genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
@@ -625,10 +647,16 @@ genRet top e at as l srt = withNewIdent f -- $ \ret -> pushRetArgs free (iex ret
                  <> (decl r)
                  <> [j| `r` = `fun'`;
                        `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
-                          (fixedLayout $ map (uTypeVt.idType.fst3) free) (CIFun regs regs) sr`;
+                          (fixedLayout $ map (freeType . fst3) free) (CIFun regs regs) sr`;
                      |]
                    )
     fst3 ~(x,_,_)  = x
+
+    -- 2-var values might have been moved around separately, use DoubleV as substitute
+    freeType i | varSize otype == 1 = otype
+               | otherwise          = DoubleV
+      where otype = uTypeVt (idType i)
+
     regs   = max 0 (typeSize (idType e) - 1)  -- number of active regs other than R1
 
     isBoxedAlt = case at of
@@ -666,7 +694,7 @@ pushRetArgs free fun = do
   c <- comment . ("slots: " ++) . show <$> (mapM showSlot =<< getSlots)
   p <- pushOptimized . (++[(fun,False)]) =<< mapM (\(i,n,b) -> (\es->(es!!(n-1),b)) <$> genIdArg i) free
 --  p <- push . (++[fun]) =<< mapM (\(i,n,b) -> (\es->es!!(n-1)) <$> genIdArg i) free
-  return ({- c <> -} p)
+  return (c <> p)
     where
       showSlot SlotUnknown = return "unknown"
       showSlot (SlotId i n) = do
@@ -697,10 +725,20 @@ genAlts top e (UbxTupAlt n) [(_, bs, use, expr)] = loadUbxTup bs n <> genExpr to
 --genAlts r e (AlgAlt tc) [alt] = mkSwitch [snd (mkAlgBranch r e alt)
 genAlts top e (AlgAlt tc) [alt] | isUnboxedTupleTyCon tc = panic "genAlts: unexpected unboxed tuple"
 genAlts top e (AlgAlt tc) [alt] = snd <$> mkAlgBranch top e alt
+genAlts top e (AlgAlt tc) alts@[(DataAlt dc,_,_,_),_]
+  | isEnumerationTyCon tc && dataConTag dc == 2 = do
+      i <- jsId e
+      [b1,b2] <- mapM (fmap snd . mkAlgBranch top e) alts
+      return [j| if(`i` === true) { `b1` } else { `b2` } |]
+  | isEnumerationTyCon tc && dataConTag dc == 1 = do
+      i <- jsId e
+      [b1,b2] <- mapM (fmap snd . mkAlgBranch top e) alts
+      return [j| if(`i` === false) { `b1` } else { `b2` } |]
+-- fixme, add all alts
 genAlts top e (AlgAlt tc) alts
---  | isBoolTy (idType e) = do
---      ei <- jsId e
---      mkSwitch [je| `ei` |] <$> mapM (mkAlgBranch top e) alts
+  | isEnumerationTyCon tc = do
+      i <- jsId e
+      mkSwitch [je| (`i`===true)?2:((typeof `i` === 'object')?(`i`.f.a):1) |] <$> mapM (mkAlgBranch top e) alts
   | otherwise           = do
       ei <- jsId e
       mkSwitch [je| `ei`.f.a |] <$> mapM (mkAlgBranch top e) alts
@@ -762,7 +800,6 @@ checkIsCon e = assertRts [je| `e` !== undefined |] "unexpected undefined, expect
 
 -- mempty -- traceErrorCond [je| `e` === undefined |] "expected data constructor!"
 
-
 -- if/else for pattern matching on things that js cannot switch on
 mkIfElse :: [JExpr] -> [(Maybe [JExpr], JStat)] -> JStat
 mkIfElse e s = go (reverse $ sort s)
@@ -781,10 +818,15 @@ mkEq es1 es2
 
 
 mkAlgBranch :: Id -> Id -> StgAlt -> G (Maybe JExpr, JStat)
+mkAlgBranch top d (DataAlt dc,[b],_,expr)
+  | isUnboxableCon dc = isolateSlots $ do
+      idd   <- jsId d
+      [fld] <- genIdsI b
+      e     <- genExpr top expr
+      return (Nothing, decl fld <> [j| `fld` = `idd` |] <> e)
 mkAlgBranch top d alt@(a,bs,use,expr) = isolateSlots $ (caseCond a,) <$> b
   where
-    b = {- checkAlgBranch alt d <>  -} (jsId d >>= \idd -> loadParams idd bs use)
-                                           <> genExpr top expr
+    b = (jsId d >>= \idd -> loadParams idd bs use) <> genExpr top expr
 
 -- single-var prim
 mkPrimBranch :: Id -> VarType -> StgAlt -> G (Maybe JExpr, JStat)
@@ -1019,9 +1061,16 @@ enterDataCon :: DataCon -> G JExpr
 enterDataCon d = jsDcEntryId (dataConWorkId d)
 
 allocCon :: Ident -> DataCon -> [JExpr] -> C
-allocCon to con [] = do
-  i <- jsId (dataConWorkId con)
-  return [j| `JVar to` = `i`; |]
+allocCon to con []
+  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 1 =
+      return $ decl to <> [j| `to` = false; |]
+  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 2 =
+      return $ decl to <> [j| `to` = true;  |]
+  | otherwise = do
+      i <- jsId (dataConWorkId con)
+      return $ decl to <> [j| `to` = `i`; |]
+allocCon to con [x]
+  | isUnboxableCon con = return [j| `to` = `x` |]
 allocCon to con xs = do
   e <- enterDataCon con
   return $ allocDynamic False to e xs
@@ -1031,9 +1080,16 @@ nullaryConClosure tag = ValExpr (JVar . StrI $ "data_static_0_" ++ show tag ++ "
 -- allocConStatic cl f n = decl' cl [je| static_con(`f`,`n`) |]
 allocConStatic :: JExpr -> DataCon -> [JExpr] -> C
 -- allocConStatic to tag [] = [j| `to` = `nullaryConClosure tag`; |]
-allocConStatic to con [] = do
-  e <- enterDataCon con
-  return [j| `to` = { f: `e`, d1: null, d2: null }; |]
+allocConStatic to con []
+  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 1 =
+      return [j| `to` = false; |]
+  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 2 =
+      return [j| `to` = true;  |]
+  | otherwise = do
+      e <- enterDataCon con
+      return [j| `to` = { f: `e`, d1: null, d2: null }; |]
+allocConStatic to con [x]
+  | isUnboxableCon con = return [j| `to` = `x` |]
 allocConStatic to con xs = do
   e <- enterDataCon con
   return [j| `to` = { f: `e`, d1: null, d2: null };

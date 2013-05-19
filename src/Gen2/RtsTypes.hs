@@ -23,6 +23,7 @@ import           Data.Map (Map)
 import           Data.Array ((!), listArray)
 import           Control.Monad.State.Strict
 
+import           DataCon
 import           DynFlags
 import           Encoding
 import           Gen2.RtsSettings
@@ -73,13 +74,27 @@ data VarType = PtrV     -- pointer = heap index, one field (gc follows this)
              | AddrV    -- a pointer not to the heap: two fields, array + index
              | ObjV     -- some js object, does not contain heap pointers
              | ArrV     -- array of followable values
-             | MVarV    -- [value], [tsos waiting]
+             | MVarV    -- h$MVar object
 --             | TVarV
---             | MutVarV -- single element array, ArrV
+             | MutVarV -- h$MutVar object
              | WeakV
                deriving (Eq, Ord, Show, Enum, Bounded)
 
--- instance ToJExpr VarType where toJExpr = toJExpr . fromEnum
+-- can we unbox C x to x, only if x is represented as a Number
+isUnboxableCon :: DataCon -> Bool
+isUnboxableCon dc
+  | [t] <- dataConRepArgTys dc, [t1] <- typeVt t =
+       isUnboxable t1 &&
+       dataConTag dc == 1 &&
+       length (tyConDataCons $ dataConTyCon dc) == 1
+  | otherwise = False
+
+-- one-constructor types with one primitive field represented as a JS Number
+-- can be unboxed
+isUnboxable :: VarType -> Bool
+isUnboxable DoubleV = True
+isUnboxable IntV    = True -- includes Char#
+isUnboxable _       = False
 
 varSize :: VarType -> Int
 varSize VoidV = 0
@@ -360,8 +375,8 @@ data Special = Stack
 instance ToJExpr Special where
   toJExpr Stack  = [je| h$stack |]
   toJExpr Sp     = [je| h$sp    |]
-  toJExpr HTrue  = [je| h$t     |]
-  toJExpr HFalse = [je| h$f     |]
+  toJExpr HTrue  = [je| true    |]
+  toJExpr HFalse = [je| false   |]
 
 adjSp :: Int -> JStat
 adjSp e = [j| h$sp = h$sp + `e`; |] -- [j| _sp += `e`; sp = _sp; |]
@@ -580,21 +595,23 @@ jsIdIdent i mn suffix = do
 jsVar :: String -> JExpr
 jsVar v = ValExpr . JVar . StrI $ v
 
-isBoolId :: Id -> Bool
-isBoolId i = isTrueCon i || isFalseCon i
+-- isBoolId :: Id -> Bool
+-- isBoolId i = isTrueCon i || isFalseCon i
 
 -- fixme remove dependency on the Show instances
+{-
 isTrueCon :: Id -> Bool
 isTrueCon i = show (idName i) == "ghc-prim:GHC.Types.True"
 
 isFalseCon :: Id -> Bool
 isFalseCon i = show (idName i) == "ghc-prim:GHC.Types.False"
+-}
 
 -- regular id, shortcut for bools!
 jsId :: Id -> G JExpr
 jsId i
-  | isTrueCon i  = return $ toJExpr HTrue
-  | isFalseCon i = return $ toJExpr HFalse
+--  | isTrueCon i  = return $ toJExpr HTrue
+--  | isFalseCon i = return $ toJExpr HFalse
   | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
 
 -- entry id

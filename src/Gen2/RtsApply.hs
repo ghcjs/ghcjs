@@ -490,7 +490,14 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
 
 -- e may be a local var, but must've been copied to R1 before calling this
 enter :: JExpr -> JStat
-enter e = [j| var c = `e`.f;
+enter e = [j| if(typeof `e` !== 'object') {
+                return `Stack`[`Sp`];
+              }
+              var c = `e`.f;
+              if(c === h$unbox_e) {
+                `R1` = `e`.d1;
+                return `Stack`[`Sp`];
+              }
               switch(c.t) {
                 case `Con`:
                   `(mempty :: JStat)`;
@@ -505,12 +512,6 @@ enter e = [j| var c = `e`.f;
                   return c;
               }
             |]
-{-
-enter' :: JExpr -> JStat
-enter' c = [j|
-
-             |]
--}
 
 enterv :: JStat
 enterv = push' [jsv "h$ap_1_0"] <> enter (toJExpr R1)
@@ -528,9 +529,16 @@ updates =
           }
         }
         // overwrite the object
-        updatee.f = `R1`.f;
-        updatee.d1 = `R1`.d1;
-        updatee.d2 = `R1`.d2;
+        if(typeof `R1` === 'object') {
+          `traceRts $ "$upd_frame: boxed: " |+ ((R1|."f")|."n")`;
+          updatee.f = `R1`.f;
+          updatee.d1 = `R1`.d1;
+          updatee.d2 = `R1`.d2;
+        } else {
+          updatee.f = h$unbox_e;
+          updatee.d1 = `R1`;
+          updatee.d2 = null;
+        }
         `adjSpN 2`;
         `traceRts $ "h$upd_frame: updating: " |+ updatee |+ " -> " |+ R1`;
         return `Stack`[`Sp`];
