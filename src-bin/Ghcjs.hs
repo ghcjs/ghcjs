@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables, PackageImports, TupleSections #-}
+{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables, TupleSections #-}
 module Main where
 
 import           Paths_ghcjs
@@ -12,11 +12,13 @@ import           SimplStg (stg2stg)
 import           DynFlags
 import           Platform
 import           CorePrep (corePrepPgm)
-import           DriverPhases (HscSource (HsBootFile), Phase (..), isHaskellSrcFilename, isSourceFilename)
+import           DriverPhases (HscSource (HsBootFile), Phase (..),
+                               isHaskellSrcFilename, isSourceFilename)
 import           DriverPipeline (oneShot)
 import           DsMeta (templateHaskellNames)
 import           Exception
-import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..), NameCache (..), isBootSummary, mkSrcErr, ModGuts(..))
+import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..),
+                           NameCache (..), isBootSummary, mkSrcErr, ModGuts(..))
 import           IfaceEnv (initNameCache)
 import           LoadIface
 import           Outputable (showPpr)
@@ -34,7 +36,7 @@ import           Binary (fingerprintBinMem, openBinMem, put_)
 import           Constants (hiVersion)
 import           TcRnMonad (initIfaceCheck)
 import           Util (looksLikeModuleName)
-import           Outputable
+import           Outputable hiding ((<>))
 
 import           Control.Applicative
 import           Control.Monad
@@ -42,23 +44,20 @@ import           Data.Char (toLower)
 import           Data.IORef (modifyIORef, writeIORef)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Data.Maybe
+import           Data.Maybe
+import           Data.Monoid
 
 import           System.Environment (getArgs, getEnv)
 import           System.Exit(ExitCode(..), exitWith)
 
-#ifdef GHCJS_PACKAGE_IMPORT
-#define GHCJS "ghcjs"
-#else
-#define GHCJS "ghcjs"
-#endif
-
-import           GHCJS Compiler.Info
-import           GHCJS Compiler.Variants
-import qualified GHCJS GHCJSMain
+import           Compiler.Info
+import           Compiler.Variants
+import qualified GHCJSMain
 import           MonadUtils (MonadIO(..))
-import           System.FilePath (takeExtension, dropExtension, addExtension, replaceExtension, (</>))
-import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory, doesFileExist, copyFile)
+import           System.FilePath (takeExtension, dropExtension, addExtension,
+                                  replaceExtension, (</>))
+import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory,
+                                   doesFileExist, copyFile)
 import qualified Control.Exception as Ex
 
 import           Control.Monad (when, mplus, forM, forM_)
@@ -66,9 +65,13 @@ import           System.Exit (exitSuccess)
 import           System.Process (rawSystem)
 import           System.IO
 import           Data.Monoid (mconcat, First(..))
-import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub, intercalate, foldl')
+import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub,
+                            intercalate, foldl')
 import           Data.Maybe (isJust, fromMaybe, catMaybes, isNothing)
 
+import           Options.Applicative
+import           Options.Applicative.Types
+import           Options.Applicative.Builder.Internal
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8  as C8
@@ -80,35 +83,84 @@ import           Gen2.PrimIface as Gen2
 -- debug
 import           Finder
 import           PrelNames
-import FastString
+import           FastString
+
+data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
+                                   , gsNoNative          :: Bool
+                                   , gsNoJSExecutables   :: Bool
+                                   , gsLogCommandLine    :: Maybe FilePath
+                                   , gsGhc               :: Maybe FilePath
+                                   } deriving (Eq, Show)
+
+instance Monoid GhcjsSettings where
+  mempty = GhcjsSettings False False False Nothing Nothing
+  mappend (GhcjsSettings ne1 nn1 nj1 lc1 gh1)
+          (GhcjsSettings ne2 nn2 nj2 lc2 gh2) =
+          GhcjsSettings (ne1 || ne2) (nn1 || nn2) (nj1 || nj2) (lc1 <> lc2) (gh1 <> gh2)
+
+getGhcjsSettings :: [String] -> IO ([String], GhcjsSettings)
+getGhcjsSettings args
+  | Left failure <- p = do
+     hPutStrLn stderr =<< errMessage failure "ghcjs"
+     exitWith (errExitCode failure)
+  | Right gs1 <- p = do
+     gs2 <- envSettings
+     return (args', gs1 <> gs2)
+  where
+    (ga,args') = partition (\a -> any (`isPrefixOf` a) as) args
+    p = execParserPure (prefs mempty) optParser' ga
+    as = [ "--native-executables"
+         , "--no-native"
+         , "--no-js-executables"
+         , "--log-commandline="
+         , "--with-ghc="
+         ]
+    envSettings = GhcjsSettings <$> getEnvOpt "GHCJS_NATIVE_EXECUTABLES"
+                                <*> getEnvOpt "GHCJS_NO_NATIVE"
+                                <*> pure False
+                                <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
+                                <*> getEnvMay "GHCJS_WITH_GHC"
+
+optParser' :: ParserInfo GhcjsSettings
+optParser' = info (helper <*> optParser) fullDesc
+
+optParser :: Parser GhcjsSettings
+optParser = GhcjsSettings
+            <$> switch ( long "native-executables" )
+            <*> switch ( long "no-native" )
+            <*> switch ( long "no-js-executables" )
+            <*> optStr ( long "log-commandline" )
+            <*> optStr ( long "with-ghc" )
+
+optStr :: Mod OptionFields (Maybe String) -> Parser (Maybe String)
+optStr m = nullOption $ value Nothing <> reader (Right . str)  <> m
 
 main :: IO ()
 main =
-  do args0 <- getArgs
-     logCmd <- getEnvOpt "GHCJS_LOG_COMMANDLINE"
+  do args <- getArgs
+     (args0, settings) <- getGhcjsSettings args
+     logCmd <- (|| isJust (gsLogCommandLine settings)) <$>
+         getEnvOpt "GHCJS_LOG_COMMANDLINE"
      when logCmd $ do
          dir <- getAppUserDataDirectory "ghcjs"
          createDirectoryIfMissing True dir
-         filename <- fromMaybe "cmd.log" <$>
-                         getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
+         let filename = fromMaybe "cmd.log" (gsLogCommandLine settings)
          appendFile (dir </> filename) (intercalate " " args0 ++ "\n")
-
-     noNative <- getEnvOpt "GHCJS_NO_NATIVE"
-
-     let (minusB_args, args1) = partition ("-B" `isPrefixOf`) args0
+     let noNative = gsNoNative settings
+         (minusB_args, args1) = partition ("-B" `isPrefixOf`) args0
          oneshot = "-c" `elem` args1
          mbMinusB | null minusB_args = Nothing
                   | otherwise = Just . drop 2 . last $ minusB_args
-     handleCommandline args1 mbMinusB
+     handleCommandline settings args1 mbMinusB
      libDir <- getGlobalPackageBase
      when (isNothing mbMinusB) checkIsBooted
-     (argsS, _) <- parseStaticFlags $ map noLoc args1
+     (argsS, _) <- parseStaticFlags (map noLoc args1)
 
      if noNative
             then liftIO (putStrLn "skipping native code")
             else liftIO $ do
 --              putStrLn "generating native code"
-              generateNative oneshot argsS args1 mbMinusB
+              generateNative settings oneshot argsS args1 mbMinusB
      errorHandler
         fatalMessager
         defaultFlushOut
@@ -145,7 +197,7 @@ main =
               case mtargets of
                 Nothing      -> do
 --                          liftIO (putStrLn "falling back")
-                          when (not noNative) (liftIO $ fallbackGhc False False args1)
+                          when (not noNative) (liftIO $ fallbackGhc settings False False args1)
                 Just targets -> do
 --                          liftIO $ putStrLn "generating code myself"
                           setTargets targets
@@ -160,7 +212,9 @@ main =
                             else mapM_ compileModSummary mgraph
                           dflags3 <- getSessionDynFlags
                           case ghcLink sdflags of
-                            LinkBinary -> when (not oneshot && isJust (outputFile dflags3)) $ do
+                            LinkBinary -> when (        not oneshot
+                                               && isJust (outputFile dflags3)
+                                               && not (gsNoJSExecutables settings)) $ do
                               buildExecutable dflags3 jsArgs
 --                              touchOutputFile
                             LinkDynLib -> return ()
@@ -203,24 +257,25 @@ ignoreUnsupported =
       unsupPre = ["-H"]           -- remove arguments that start with these
 
 
-handleCommandline :: [String] -> Maybe String -> IO ()
-handleCommandline args minusBargs
-    | "-c" `elem` args      = handleOneShot args
+handleCommandline :: GhcjsSettings -> [String] -> Maybe String -> IO ()
+handleCommandline settings args minusBargs
+    | "-c" `elem` args      = handleOneShot settings args
     | Just act <- lookupAct = act >> exitSuccess
     | otherwise             = return ()
    where
      lookupAct = getFirst . mconcat . map (First . (`lookup` acts)) $ args
---     unsupported xs = putStrLn (xs ++ " is currently unsupported") >> exitFailure
      acts :: [(String, IO ())]
-     acts = [ ("--supported-languages", mapM_ putStrLn (supportedLanguagesAndExtensions++
-                                          ["JavaScriptFFI", "NoJavaScriptFFI"]))
+     acts = [ ("--supported-languages", 
+                mapM_ putStrLn (supportedLanguagesAndExtensions ++
+                  ["JavaScriptFFI", "NoJavaScriptFFI"]))
             , ("--version", printVersion)
             , ("--numeric-version", printNumericVersion)
-            , ("--numeric-ghc-version", putStrLn getGhcCompilerVersion) -- the ghc version this was compiled with
+                 -- the ghc version this was compiled with
+            , ("--numeric-ghc-version", putStrLn getGhcCompilerVersion)
             , ("--info", print =<< getCompilerInfo)
             , ("--print-libdir", putStrLn =<< getGlobalPackageInst)
             , ("--abi-hash", abiHash args minusBargs)
-            , ("-M", fallbackGhc False True args)
+            , ("-M", fallbackGhc settings False True args)
             , ("--print-rts", printRts)
             , ("--print-ji", printJi args)
             , ("--show-iface", printIface args)
@@ -228,8 +283,8 @@ handleCommandline args minusBargs
 
 printVersion :: IO ()
 printVersion = putStrLn $
-  "The Glorious Glasgow Haskell Compilation System for JavaScript, version " ++ getCompilerVersion ++
-    " (GHC " ++ getGhcCompilerVersion ++ ")"
+  "The Glorious Glasgow Haskell Compilation System for JavaScript, version " ++
+     getCompilerVersion ++ " (GHC " ++ getGhcCompilerVersion ++ ")"
 
 printNumericVersion :: IO ()
 printNumericVersion = do
@@ -237,9 +292,10 @@ printNumericVersion = do
   if booting then putStrLn getGhcCompilerVersion
              else putStrLn getCompilerVersion
 
-handleOneShot :: [String] -> IO ()
-handleOneShot args | fallback  = fallbackGhc True True args >> exitSuccess
-                   | otherwise = return ()
+handleOneShot :: GhcjsSettings -> [String] -> IO ()
+handleOneShot settings args
+  | fallback  = fallbackGhc settings True True args >> exitSuccess
+  | otherwise = return ()
     where
       fallback = any isFb (tails args)
       isFb ({- "-c": -} c:_) = any (`isSuffixOf` c) [".c", ".cmm"]
@@ -276,13 +332,13 @@ fatalMessager str = do
    if GHCJS_FALLBACK_PLAIN is set, all arguments are passed through verbatim
    to the fallback ghc, including -B
 -}
-fallbackGhc :: Bool -> Bool -> [String] -> IO ()
-fallbackGhc isNative nonHaskell args = do
+fallbackGhc :: GhcjsSettings -> Bool -> Bool -> [String] -> IO ()
+fallbackGhc settings isNative nonHaskell args = do
   pkgargs <- pkgConfArgs
-  ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
+  let ghc = fromMaybe "ghc" (gsGhc settings)
+      noNative = gsNoNative settings
   plain <- getEnvOpt "GHCJS_FALLBACK_PLAIN"
   args' <- if plain then getArgs else return args
-  noNative <- getEnvOpt "GHCJS_NO_NATIVE"
   if isNative
     then when (not noNative || nonHaskell) $ do
 --      putStrLn ("falling back with: " ++ intercalate " " (pkgargs ++ args'))
@@ -351,14 +407,6 @@ writeDesugaredModule mod =
     outputBase = dropExtension (ml_hi_file . ms_location $ mod_summary)
     name = moduleNameString . moduleName . ms_mod $ mod_summary
     dflags = ms_hspp_opts mod_summary
-{-
-cgGutsFromModGuts :: GhcMonad m => ModGuts -> m CgGuts
-cgGutsFromModGuts guts =
-  do hscEnv <- getSession
-     simplGuts <- liftIO $ hscSimplify hscEnv guts
-     (cgGuts, _) <- liftIO $ tidyProgram hscEnv simplGuts
-     return cgGuts
--}
 
 concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
 concreteJavascriptFromCgGuts dflags env core variant =
@@ -495,8 +543,8 @@ runGhcSession mbMinusB a = do
 
 -- also generate native code, compile with regular GHC settings, but make sure
 -- that generated files don't clash with ours
-generateNative :: Bool -> [Located String] -> [String] -> Maybe String -> IO ()
-generateNative oneshot argsS args1 mbMinusB =
+generateNative :: GhcjsSettings -> Bool -> [Located String] -> [String] -> Maybe String -> IO ()
+generateNative settings oneshot argsS args1 mbMinusB =
   runGhcSession mbMinusB $ do -- sourceErrorHandler $ do
        do   sdflags <- getSessionDynFlags
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
@@ -504,7 +552,8 @@ generateNative oneshot argsS args1 mbMinusB =
             (dflags2, _) <- liftIO (initPackages dflags1)
             setSessionDynFlags $
                                  dflags2 { ghcMode = if oneshot then OneShot else CompManager
-                                         , ghcLink = NoLink
+                                         , ghcLink = if gsNativeExecutables settings then ghcLink dflags2
+                                                                                     else NoLink
                                          }
             df <- getSessionDynFlags
             liftIO (writeIORef (canGenerateDynamicToo df) True)
@@ -519,7 +568,7 @@ generateNative oneshot argsS args1 mbMinusB =
                 case mtargets of
                   Nothing -> do
 --                    liftIO $ putStrLn "falling back for native"
-                    liftIO (fallbackGhc True False args1) -- fixme check status code
+                    liftIO (fallbackGhc settings True False args1) -- fixme check status code
                   Just targets -> do
 --                    liftIO $ putStrLn "generating native myself"
                     setTargets targets
