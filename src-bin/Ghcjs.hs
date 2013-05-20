@@ -19,7 +19,8 @@ import           DriverPipeline (oneShot)
 import           DsMeta (templateHaskellNames)
 import           Exception
 import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..),
-                           NameCache (..), isBootSummary, mkSrcErr, ModGuts(..))
+                           NameCache (..), isBootSummary, mkSrcErr, ModGuts(..),
+                           SourceError)
 import           IfaceEnv (initNameCache)
 import           LoadIface
 import           Outputable (showPpr)
@@ -571,7 +572,7 @@ runGhcSession mbMinusB a = do
 -- that generated files don't clash with ours
 generateNative :: GhcjsSettings -> Bool -> [Located String] -> [String] -> Maybe String -> IO ()
 generateNative settings oneshot argsS args1 mbMinusB =
-  runGhcSession mbMinusB $ do -- sourceErrorHandler $ do
+  runGhcSession mbMinusB $ do
        do   sdflags <- getSessionDynFlags
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
             dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
@@ -585,11 +586,11 @@ generateNative settings oneshot argsS args1 mbMinusB =
             liftIO (writeIORef (canGenerateDynamicToo df) True)
             let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
             if all isBootFilename fileargs
-              then do
+              then sourceErrorHandler $ do
 --                liftIO $ putStrLn "native one shot"
                 env <- getSession
                 liftIO $ oneShot env StopLn (map (,Nothing) fileargs)
-              else do
+              else sourceErrorHandler $ do
                 mtargets <- catchMaybe $ mapM (flip guessTarget Nothing) fileargs
                 case mtargets of
                   Nothing -> do
@@ -598,7 +599,8 @@ generateNative settings oneshot argsS args1 mbMinusB =
                   Just targets -> do
 --                    liftIO $ putStrLn "generating native myself"
                     setTargets targets
-                    _ <- load LoadAllTargets
+                    success <- load LoadAllTargets
+                    when (failed success) (throw (ExitFailure 1))
                     return ()
 
 -- replace primops in the name cache so that we get our correctly typed primops
