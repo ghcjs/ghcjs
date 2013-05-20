@@ -503,8 +503,8 @@ genPrim IsEmptyMVarOp [r] [m]  =
 genPrim DelayOp [] [t] = PRPrimCall [j| return h$delayThread(`t`); |]
 genPrim WaitReadOp [] [fd] = PRPrimCall [j| return h$waitRead(`fd`); |]
 genPrim WaitWriteOp [] [fd] = PRPrimCall [j| return h$waitWrite(`fd`); |]
-genPrim ForkOp [tid] [x] = PrimInline [j| `tid` = h$fork(`x`); |]
-genPrim ForkOnOp [tid] [p,x] = PrimInline [j| `tid` = h$fork(`x`); |] -- ignore processor argument
+genPrim ForkOp [tid] [x] = PrimInline [j| `tid` = h$fork(`x`, true); |]
+genPrim ForkOnOp [tid] [p,x] = PrimInline [j| `tid` = h$fork(`x`, true); |] -- ignore processor argument
 genPrim KillThreadOp [] [tid,ex] =
   PRPrimCall [j| return h$killThread(`tid`,`ex`); |]
 genPrim YieldOp [] [] = PRPrimCall [j| return h$yield(); |]
