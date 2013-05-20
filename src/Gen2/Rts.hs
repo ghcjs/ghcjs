@@ -391,14 +391,17 @@ fun h$throw e async {
     var handler = `Stack`[`Sp` - 1];
     `R1` = handler;
     `R2` = e;
-    if(`Sp` > 3) { // don't pop the top-level handler
+    if(`Sp` > 3) { // don't pop the toplevel handler
       `adjSpN 3`;
     }
-    if(maskStatus === 0) {
+    if(maskStatus === 0 && `Stack`[`Sp`] !== h$maskFrame && `Stack`[`Sp`] !== h$maskUnintFrame) {
       `Stack`[`Sp`+1] = h$unmaskFrame;
       `adjSp 1`;
+    } else if(maskStatus === 1) {
+      `Stack`[`Sp`+1] = h$maskUnintFrame;
+      `adjSp 1`;
     }
-    h$currentThread.mask = 2;  // fixme do we need to preserve uninterruptible masks?
+    h$currentThread.mask = 2;
     return h$ap_2_1_fast();
   } else {
     throw "unhandled exception in haskell thread";
