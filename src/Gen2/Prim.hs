@@ -475,18 +475,18 @@ genPrim UnmaskAsyncExceptionsOp [r] [a] =
   PRPrimCall [j| return h$unmaskAsync(`a`); |]
 
 genPrim MaskStatus [r] [] = PrimInline [j| `r` = h$maskStatus(); |]
-{-
-AtomicallyOp
-RetryOp
-CatchRetryOp
-CatchSTMOp
-Check
-NewTVarOp
-ReadTVarOp
-ReadTVarIOOp
-WriteTVarOp
-SameTVarOp
--}
+
+genPrim AtomicallyOp [r] [a] = PRPrimCall [j| return h$atomically(`a`); |]
+genPrim RetryOp [r] [] = PRPrimCall [j| return h$stmRetry(); |]
+genPrim CatchRetryOp [r] [a,b] = PRPrimCall [j| return h$stmCatchRetry(`a`,`b`); |]
+genPrim CatchSTMOp [r] [a,h] = PRPrimCall [j| return h$catchStm(`a`,`h`); |]
+genPrim Check [r] [a] = PrimInline [j| `r` = h$stmCheck(`a`); |]
+genPrim NewTVarOp [tv] [v] = PrimInline [j| `tv` = h$newTVar(`v`); |]
+genPrim ReadTVarOp [r] [tv] = PrimInline [j| `r` = h$readTVar(`tv`); |]
+genPrim ReadTVarIOOp [r] [tv] = PrimInline [j| `r` = h$readTVarIO(`tv`); |]
+genPrim WriteTVarOp [] [tv,v] = PrimInline [j| h$writeTVar(`tv`,`v`); |]
+genPrim SameTVarOp [r] [tv1,tv2] = PrimInline [j| `r` = h$sameTVar(`tv1`,`tv2`); |]
+
 genPrim NewMVarOp [r] []   = PrimInline [j| `r` = new h$MVar(); |]
 genPrim TakeMVarOp [r] [m] = PRPrimCall [j| return h$takeMVar(`m`); |]
 genPrim TryTakeMVarOp [v,r] [m] = PrimInline [j| `v` = h$tryTakeMVar(`m`);

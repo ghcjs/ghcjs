@@ -57,7 +57,7 @@ closureConstructors =
 
 stackManip :: JStat
 stackManip = mconcat (map mkPush [1..32]) <>
-             mconcat (map mkPpush [1..255]) 
+             mconcat (map mkPpush [1..255])
   where
     mkPush :: Int -> JStat
     mkPush n = let funName = StrI ("h$p" ++ show n)
@@ -253,8 +253,6 @@ fun h$data2_e { return `Stack`[`Sp`]; }
 
 
 fun h$con_e { return `Stack`[`Sp`]; };
-// var !h$f = h$c0(h$false_e);
-// var !h$t = h$c0(h$true_e);
 
 fun h$catch a handler {
   `preamble`;
@@ -333,20 +331,30 @@ fun h$select2_ret {
 }
 `ClosureInfo (jsv "h$select2_ret") [] "select2ret" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
-// throw an exception: walk the thread's stack until you find a handler
+// throw an exception: unwind the thread's stack until you find a handler
 fun h$throw e async {
   `preamble`;
   //log("throwing exception: " + async);
   //h$dumpStackTop(`Stack`,0,`Sp`);
   var origSp = `Sp`;
   var lastBh = null; // position of last blackhole frame
+  var f;
   while(`Sp` > 0) {
     //log("unwinding frame: " + `Sp`);
-    var f = `Stack`[`Sp`];
+    f = `Stack`[`Sp`];
     if(f === null || f === undefined) {
-      throw("panic: invalid object while unwinding stack");
+      throw("h$throw: invalid object while unwinding stack");
     }
     if(f === h$catch_e) break;
+    if(f === h$atomically_e) {
+      if(async) { // async exceptions always propagate
+        h$currentThread.transaction = null;
+      } else if(!h$stmValidateTransaction()) { // restart transaction if invalid, don't propagate exception
+        `push' [jsv "h$checkInvariants_e"]`;
+        return h$stmStartTransaction(`Stack`[`Sp`-2]);
+      }
+    }
+    if(f === h$catchStm_e && !async) break; // catchSTM only catches sync
     if(f === h$upd_frame) {
       var t = `Stack`[`Sp`-1];
       // wake up threads blocked on blackhole
@@ -389,19 +397,24 @@ fun h$throw e async {
   if(`Sp` > 0) {
     var maskStatus = `Stack`[`Sp` - 2];
     var handler = `Stack`[`Sp` - 1];
-    `R1` = handler;
-    `R2` = e;
-    if(`Sp` > 3) { // don't pop the toplevel handler
+    if(f === h$catchStm_e) {
+      h$currentThread.transaction = `Stack`[`Sp` - 3];
+      `adjSpN 4`;
+    } else if(`Sp` > 3) { // don't pop the toplevel handler
       `adjSpN 3`;
     }
-    if(maskStatus === 0 && `Stack`[`Sp`] !== h$maskFrame && `Stack`[`Sp`] !== h$maskUnintFrame) {
-      `Stack`[`Sp`+1] = h$unmaskFrame;
-      `adjSp 1`;
-    } else if(maskStatus === 1) {
-      `Stack`[`Sp`+1] = h$maskUnintFrame;
-      `adjSp 1`;
+    `R1` = handler;
+    `R2` = e;
+    if(f !== h$catchStm_e) {  // don't clobber mask in STM?
+      if(maskStatus === 0 && `Stack`[`Sp`] !== h$maskFrame && `Stack`[`Sp`] !== h$maskUnintFrame) {
+        `Stack`[`Sp`+1] = h$unmaskFrame;
+        `adjSp 1`;
+      } else if(maskStatus === 1) {
+        `Stack`[`Sp`+1] = h$maskUnintFrame;
+        `adjSp 1`;
+      }
+      h$currentThread.mask = 2;
     }
-    h$currentThread.mask = 2;
     return h$ap_2_1_fast();
   } else {
     throw "unhandled exception in haskell thread";
@@ -1032,6 +1045,90 @@ fun h$retryInterrupted {
   return a[0].apply(this, a.slice(1));
 }
 `ClosureInfo (jsv "h$retryInterrupted") [ObjV] "retry interrupted operation" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`;
+
+// STM support
+
+fun h$atomically_e {
+  if(h$stmValidateTransaction()) {
+    h$stmCommitTransaction();
+    `adjSpN 2`;
+    return `Stack`[`Sp`];
+  } else {
+    `push' [jsv "h$checkInvariants_e"]`;
+    return h$stmStartTransaction(`Stack`[`Sp`-2]);
+  }
+}
+`ClosureInfo (jsv "h$atomically_e") [PtrV] "atomic operation" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+
+fun h$checkInvariants_e {
+  `adjSpN 1`;
+  return h$stmCheckInvariants();
+}
+`ClosureInfo (jsv "h$checkInvariants_e") [] "check transaction invariants" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+
+fun h$stmCheckInvariantStart_e {
+  var t   = `Stack`[`Sp`-2];
+  var inv = `Stack`[`Sp`-1];
+  var m   = h$currentThread.mask;
+  `adjSpN 3`;
+  var t1 = new h$Transaction(inv.action, t);
+  t1.checkRead = new goog.structs.Set();
+  h$currentThread.transaction = t1;
+  `push' [t1, m, jsv "h$stmInvariantViolatedHandler", jsv "h$catchStm_e"]`;
+  `R1` = inv.action;
+  return h$ap_1_0_fast();
+}
+`ClosureInfo (jsv "h$stmCheckInvariantStart_e") [] "start checking invariant" (CILayoutFixed 2 [ObjV, ObjV]) (CIFun 0 0) CINoStatic`
+
+fun h$stmCheckInvariantResult_e {
+  var inv = `Stack`[`Sp`-1];
+  `adjSpN 2`;
+  // add all variables read by the check to the tvars
+  h$stmUpdateInvariantDependencies(inv);
+  h$stmAbortTransaction();
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$stmCheckInvariantResult_e") [] "finish checking invariant" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`
+
+// update invariant TVar dependencies and rethrow exception
+fun h$stmInvariantViolatedHandler_e {
+  if(`Stack`[`Sp`] !== h$stmCheckInvariantResult_e) {
+    throw "h$stmInvariantViolatedHandler_e: unexpected value on stack";
+  }
+  var inv = `Stack`[`Sp`-1];
+  `adjSpN 2`;
+  h$stmUpdateInvariantDependencies(inv);
+  h$stmAbortTransaction();
+  return h$throw(`R2`, false);
+}
+`ClosureInfo (jsv "h$stmInvariantViolatedHandler_e") [PtrV] "finish checking invariant" (CILayoutFixed 0 []) (CIFun 2 1) CINoStatic`;
+
+var !h$stmInvariantViolatedHandler = h$c(h$stmInvariantViolatedHandler_e);
+
+fun h$stmCatchRetry_e {
+  `adjSpN 2`;
+  h$stmCommitTransaction();
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$stmCatchRetry_e") [] "catch retry" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+
+fun h$catchStm_e {
+  `adjSpN 4`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo (jsv "h$catchStm_e") [] "STM catch" (CILayoutFixed 3 [ObjV,PtrV,ObjV]) (CIFun 0 0) CINoStatic`;
+
+fun h$stmResumeRetry_e {
+  if(`Stack`[`Sp`-2] !== h$atomically_e) {  // must be pushed just above atomically
+    throw("h$stmResumeRetry_e: unexpected value on stack");
+  }
+  var blocked = `Stack`[`Sp`-1];
+  `adjSpN 2`;
+  `push' [jsv "h$checkInvariants_e"]`;
+  h$stmRemoveBlockedThread(blocked, h$currentThread);
+  return h$stmStartTransaction(`Stack`[`Sp`-2]);
+}
+`ClosureInfo (jsv "h$stmResumeRetry_e") [] "resume retry" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 |]
 
