@@ -99,7 +99,8 @@ Executable ghcjs
                     directory,
                     filepath,
                     bytestring          >= 0.9  && < 0.11,
-                    Cabal
+                    Cabal,
+                    optparse-applicative >= 0.5 && < 0.6
     GHC-Options:    -O -fno-warn-orphans -rtsopts -with-rtsopts=-K256m
 
 Executable ghcjs-pkg
