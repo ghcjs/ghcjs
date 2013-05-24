@@ -417,7 +417,7 @@ writeDesugaredModule mod =
      (iface, no_change) <- ioMsgMaybe $ mkIface env mb_old_iface details mod_guts1
      liftIO $ writeIfaceFile dflags ifaceFile iface
      versions <- liftIO $ forM variants $ \variant -> do
-          (program, meta) <- liftIO $ concreteJavascriptFromCgGuts dflags env tidyCore variant
+          (program, meta) <- liftIO $ concreteJavascriptFromCgGuts (ms_mod mod_summary) dflags env tidyCore variant
           let outputFile = addExtension outputBase (variantExtension variant)
           putStrLn $ concat ["Writing module ", name, " (", outputFile, ")"]
           B.writeFile outputFile program
@@ -435,13 +435,13 @@ writeDesugaredModule mod =
     name = moduleNameString . moduleName . ms_mod $ mod_summary
     dflags = ms_hspp_opts mod_summary
 
-concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
-concreteJavascriptFromCgGuts dflags env core variant =
+concreteJavascriptFromCgGuts :: Module -> DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
+concreteJavascriptFromCgGuts mod dflags env core variant =
   do core_binds <- corePrepPgm dflags
                                env
                                (cg_binds core)
                                (cg_tycons $ core)
-     stg <- coreToStg dflags core_binds
+     stg <- coreToStg dflags mod core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
      return (variantRender variant dflags stg' (cg_module core))
 
