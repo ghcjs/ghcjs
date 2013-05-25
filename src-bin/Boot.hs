@@ -292,7 +292,7 @@ rtsConf incl lib = T.unlines
 
 -- | make fake, empty packages to keep the build system happy
 installFakes :: ShIO ()
-installFakes = do
+installFakes = silently $ do
   base <- T.pack <$> liftIO getGlobalPackageBase
   db   <- T.pack <$> liftIO getGlobalPackageDB
   installed <- T.words <$> run "ghc-pkg" ["list", "--simple-output"]
@@ -350,20 +350,20 @@ installPkg ghcjs ghcjspkg pkg = verbosely $ do
   base <- liftIO getGlobalPackageBase
   dest <- liftIO getGlobalPackageInst
   run_ "inplace/bin/ghc-cabal" [ "copy"
-                               , "strip"
                                , "libraries/" <> pkg
                                , "dist-install"
+                               , "strip"
                                , ""
                                , T.pack base
                                , T.pack dest
                                , T.pack base <> "/doc"
                                ]
   run_ "inplace/bin/ghc-cabal" [ "register"
+                               , "libraries/" <> pkg -- directory
+                               , "dist-install" -- distDir
                                , toTextIgnore ghcjs     -- ghc
                                , toTextIgnore ghcjspkg  -- ghcpkg
                                , T.pack dest -- topdir
-                               , "libraries/" <> pkg -- directory
-                               , "dist-install" -- distDir
                                , "" -- myDestDir
                                , T.pack base -- myPrefix
                                , T.pack dest -- myLibDir
