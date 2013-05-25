@@ -614,7 +614,7 @@ genInlinePrimCase top bnd tc (AlgAlt dtc) alts@[(DataAlt dc,_,_,_),_]
         i <- jsId bnd
         [b1,b2] <- mapM (fmap snd . mkPrimIfBranch top tc) alts
         return [j| if(`i` === false) { `b1` } else { `b2` } |]
--- fixme more alts needed?ded
+-- fixme more alts needed?
 genInlinePrimCase top bnd tc (AlgAlt dtc) alts
     | isEnumerationTyCon dtc = do
         i <- jsId bnd
@@ -1228,7 +1228,7 @@ parseFFIPattern True True pat t es as  = do
   stat <- parseFFIPattern' (Just (toJExpr cb)) True pat t es as
   return [j| `decl cb`;
              var x = { mv: null };
-             `cb` = h$mkForeignCallback(x); // fixme need unmarshalling code!
+             `cb` = h$mkForeignCallback(x);
              `stat`;
              if(x.mv === null) {
                x.mv = new h$MVar();
@@ -1258,7 +1258,7 @@ parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
 parseFFIPattern' callback javascriptCc pat t ret args
   | not javascriptCc = mkApply pat
   | otherwise =
-      case parseJME pat of
+      case parseFfiJME pat of
         Right (ValExpr (JVar (StrI ident))) -> mkApply pat
         Right expr | not async && length tgt < 2 -> do
           (statPre, ap) <- argPlaceholders args
@@ -1269,7 +1269,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
             else return $ statPre <> (everywhere (mkT $ replaceIdent env) (toStat expr))
         Right _ -> p $ "invalid expression FFI pattern. Expression FFI patterns can only be used for synchronous FFI " ++
                        " imports with result size 0 or 1.\n" ++ pat
-        Left _ -> case parseJM pat of
+        Left _ -> case parseFfiJM pat of
           Left err -> p (show err)
           Right stat -> do
             let rp = resultPlaceholders async t ret
@@ -1310,6 +1310,25 @@ parseFFIPattern' callback javascriptCc pat t ret args
     traceCall as
         | rtsTraceForeign = [j| h$traceForeign(`pat`, `as`); |]
         | otherwise       = mempty
+
+-- parse and saturate ffi splice
+parseFfiJME :: String -> Either P.ParseError JExpr
+parseFfiJME = fmap (jsSaturate (Just "ghcjs_ffi")) . parseJME
+
+-- parse and saturate ffi splice, check for unhygienic declarations
+parseFfiJM :: String -> Either P.ParseError JStat
+parseFfiJM xs = fmap (satCheck . jsSaturate (Just "ghcjs_ffi")) . parseJM $ xs
+  where
+    satCheck x
+      | all isValidDecl (listify isDecl x) = x
+      | otherwise  = error ("unhygienic declaration in FFI splice:\n" ++ xs)
+
+    isDecl (DeclStat{}) = True
+    isDecl _            = False
+    
+    isValidDecl (DeclStat (StrI xs) _)
+      | "ghcjs_ffi" `L.isPrefixOf` xs = True
+    isValidDecl _ = False
 
 -- $r for single, $r1,$r2 for dual
 -- $r1, $r2, etc for ubx tup, void args not counted
