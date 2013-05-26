@@ -455,7 +455,7 @@ installUnlit :: ShIO ()
 installUnlit = do
   p <- pwd
   base <- liftIO getGlobalPackageBase
-  liftIO $ installExecutableFile normal 
-             (encodeString $ p </> "inplace" </> "lib" </> "bin" </> "unlit")
+  liftIO $ installExecutableFile normal
+             (encodeString $ p </> "inplace" </> "lib" </> "unlit")
              (base ++ "/unlit")
 
