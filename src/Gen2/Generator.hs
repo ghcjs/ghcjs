@@ -1246,7 +1246,7 @@ parseFFIPattern True True pat t es as  = do
               (\r i -> [j| `r` = `d`[`i`]; |]) (enumFrom R1) [0..nrst-1]
 parseFFIPattern False javascriptCc pat t es as =
   parseFFIPattern' Nothing javascriptCc pat t es as
-parseFFIPattern _ _ _ _ _ _ = panic "parseFFIPattern: non javascript must be non-async"
+parseFFIPattern _ _ _ _ _ _ = panic "parseFFIPattern: non-JavaScript pattern must be synchronous"
 
 parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
                 -> Bool     -- ^ javascript calling convention used
@@ -1257,8 +1257,9 @@ parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
                 -> C
 parseFFIPattern' callback javascriptCc pat t ret args
   | not javascriptCc = mkApply pat
-  | otherwise =
-      case parseFfiJME pat of
+  | otherwise = do
+      u <- freshUnique
+      case parseFfiJME pat u of
         Right (ValExpr (JVar (StrI ident))) -> mkApply pat
         Right expr | not async && length tgt < 2 -> do
           (statPre, ap) <- argPlaceholders args
@@ -1269,7 +1270,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
             else return $ statPre <> (everywhere (mkT $ replaceIdent env) (toStat expr))
         Right _ -> p $ "invalid expression FFI pattern. Expression FFI patterns can only be used for synchronous FFI " ++
                        " imports with result size 0 or 1.\n" ++ pat
-        Left _ -> case parseFfiJM pat of
+        Left _ -> case parseFfiJM pat u of
           Left err -> p (show err)
           Right stat -> do
             let rp = resultPlaceholders async t ret
@@ -1312,12 +1313,12 @@ parseFFIPattern' callback javascriptCc pat t ret args
         | otherwise       = mempty
 
 -- parse and saturate ffi splice
-parseFfiJME :: String -> Either P.ParseError JExpr
-parseFfiJME = fmap (jsSaturate (Just "ghcjs_ffi")) . parseJME
+parseFfiJME :: String -> Int -> Either P.ParseError JExpr
+parseFfiJME xs u = fmap (saturateFFI u) . parseJME $ xs
 
 -- parse and saturate ffi splice, check for unhygienic declarations
-parseFfiJM :: String -> Either P.ParseError JStat
-parseFfiJM xs = fmap (satCheck . jsSaturate (Just "ghcjs_ffi")) . parseJM $ xs
+parseFfiJM :: String -> Int -> Either P.ParseError JStat
+parseFfiJM xs u = fmap (satCheck . saturateFFI u) . parseJM $ xs
   where
     satCheck x
       | all isValidDecl (listify isDecl x) = x
@@ -1325,10 +1326,13 @@ parseFfiJM xs = fmap (satCheck . jsSaturate (Just "ghcjs_ffi")) . parseJM $ xs
 
     isDecl (DeclStat{}) = True
     isDecl _            = False
-    
+
     isValidDecl (DeclStat (StrI xs) _)
       | "ghcjs_ffi" `L.isPrefixOf` xs = True
     isValidDecl _ = False
+
+saturateFFI :: JMacro a => Int -> a -> a
+saturateFFI u = jsSaturate (Just $ "ghcjs_ffi_" ++ show u)
 
 -- $r for single, $r1,$r2 for dual
 -- $r1, $r2, etc for ubx tup, void args not counted
@@ -1397,3 +1401,5 @@ makeIdent = do
   mod <- use gsModule
   return (StrI $ "h$" ++ zEncodeString (show mod) ++ "_" ++ encodeUnique i)
 
+freshUnique :: G Int
+freshUnique = gsId += 1 >> use gsId
