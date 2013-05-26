@@ -202,6 +202,9 @@
 /* The value of ENOTSOCK. */
 #define CONST_ENOTSOCK 38
 
+/* The value of ENOTSUP. */
+#define CONST_ENOTSUP 45
+
 /* The value of ENOTTY. */
 #define CONST_ENOTTY 25
 
@@ -591,6 +594,12 @@
 
 /* Define to the version of this package. */
 #define PACKAGE_VERSION "1.0"
+
+/* The size of `kev.filter', as computed by sizeof. */
+#define SIZEOF_KEV_FILTER 2
+
+/* The size of `kev.flags', as computed by sizeof. */
+#define SIZEOF_KEV_FLAGS 2
 
 /* The size of `struct MD5Context', as computed by sizeof. */
 #define SIZEOF_STRUCT_MD5CONTEXT 88
