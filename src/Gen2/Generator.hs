@@ -214,7 +214,7 @@ genStaticRefs (SRTEntries s) = do
   let xs = uniqSetToList s
   CIStaticRefs <$> mapM getStaticRef xs
 genStaticRefs (SRT n e bmp) =
-  panic "genStaticRefs: unexpected SRT"
+  error "genStaticRefs: unexpected SRT"
 
 getStaticRef = fmap head . genIdsI
 
@@ -311,17 +311,17 @@ genExpr top (StgOpApp (StgFCallOp f _) args t) =
    fst <$> genForeignCall0 f t (map toJExpr $ enumFrom R1) args
 genExpr top (StgOpApp (StgPrimOp op) args t) = genPrimOp op args t
 genExpr top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall c args t
-genExpr top (StgLam{}) = panic "StgLam"
+genExpr top (StgLam{}) = error "genExpr: StgLam"
 genExpr top (StgCase e live1 liveRhs b srt at alts) = genCase top b e at alts live1 srt -- check?
 genExpr top (StgLet b e) = genBind top b <> genExpr top e
 
-genExpr top (StgLetNoEscape l1 l2 b e) = panic "StgLetNoEscape"
+genExpr top (StgLetNoEscape l1 l2 b e) = error "genExpr: StgLetNoEscape"
 genExpr top (StgSCC cc b1 b2 e) = genExpr top e
 genExpr top (StgTick m n e) = genExpr top e
 
 getId :: JExpr -> Ident
 getId (ValExpr (JVar i)) = i
-getId _                  = panic "getId: expression is not a variable"
+getId _                  = error "getId: expression is not a variable"
 
 might_be_a_function :: Type -> Bool
 -- Return False only if we are *sure* it's a data type
@@ -417,7 +417,7 @@ genBind top bndr
 
 -- generate the entry function for a local closure
 genEntry :: Id -> Id -> StgRhs -> C
-genEntry top i (StgRhsCon _cc con args) = mempty -- panic "local data entry" -- mempty ??
+genEntry top i (StgRhsCon _cc con args) = mempty -- error "local data entry" -- mempty ??
 genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) = resetSlots $ do
   upd <- genUpdFrame Updatable
   ll <- loadLiveFun live
@@ -522,7 +522,6 @@ allocCls xs = do
     toCl (i, StgRhsClosure _cc _bi live upd_flag _srt _args _body) =
         Right <$> ((,,) <$> jsIdI i <*> jsEntryId i <*> concatMapM genIds live)
 
--- bind result of case to bnd, final result to r
 -- fixme CgCase has a reps_compatible check here
 genCase :: Id -> Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
 genCase top bnd (StgApp i []) at@(PrimAlt tc) alts l srt
@@ -541,6 +540,13 @@ genCase top bnd (StgOpApp (StgPrimOp SeqOp) [StgVarArg a, _] _) at alts l srt =
 genCase top bnd (StgApp i xs) at@(AlgAlt tc) [alt] l =
   gen
 -}
+
+genCase top bnd (StgLit lit) at@(PrimAlt tc) [(_,[],_,e)] l srt = do
+  ibnd <- genIdsI bnd
+  declIds bnd <>
+    return (mconcat $ zipWith (\b e -> [j| `b` = `e` |]) ibnd (genLit lit)) <>
+    genExpr top e
+
 genCase top bnd (StgApp i xs) at alts l srt =
   genRet top bnd at alts l srt <> genApp True False i xs
 
@@ -594,7 +600,7 @@ genCase top bnd x@(StgConApp c as) at [(DataAlt{}, bndrs, _, e)] l srt = do
 genCase top bnd expr at@PolyAlt alts l srt = do
    genRet top bnd at alts l srt <> genExpr top expr
 
-genCase _ _ x at alts _ _ = panic ("unhandled genCase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
+genCase _ _ x at alts _ _ = error ("unhandled genCase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
 assignAll xs ys = mconcat (zipWith assignj xs ys)
@@ -627,7 +633,7 @@ genInlinePrimCase top bnd tc (PrimAlt ptc) alts
     | otherwise         = liftM2 mkIfElse (genIdArg bnd) (mapM (mkPrimIfBranch top tc) alts)
 -- genInlinePrimCase top bnd tc (UbxTupAlt n) [(DataAlt _, bndrs, _, body)] =
 --   genLoadUbxTup n bndrs <> genExpr top e
-genInlinePrimCase _ _ _ _ alt = panic ("genInlinePrimCase: unhandled alt: " ++ show alt)
+genInlinePrimCase _ _ _ _ alt = error ("genInlinePrimCase: unhandled alt: " ++ show alt)
 
 
 genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
@@ -708,7 +714,7 @@ loadRetArgs free = popSkipI 1 =<< ids
 
 genAlts :: Id -> Id -> AltType -> [StgAlt] -> C
 genAlts top e PolyAlt [alt] = snd <$> mkAlgBranch top e alt
-genAlts top e PolyAlt _ = panic "genAlts: multiple polyalt"
+genAlts top e PolyAlt _ = error "genAlts: multiple polyalt"
 genAlts top e (PrimAlt tc) [(_, bs, use, expr)] = do
   ie <- genIds e
 {-  loadParams ie bs use <> -}
@@ -723,7 +729,7 @@ genAlts top e (PrimAlt tc) alts = do
 -- genAlts r e (PrimAlt tc) alts = mkSwitch [je| heap[r1] |] (map (mkPrimBranch r e) alts)
 genAlts top e (UbxTupAlt n) [(_, bs, use, expr)] = loadUbxTup bs n <> genExpr top expr
 --genAlts r e (AlgAlt tc) [alt] = mkSwitch [snd (mkAlgBranch r e alt)
-genAlts top e (AlgAlt tc) [alt] | isUnboxedTupleTyCon tc = panic "genAlts: unexpected unboxed tuple"
+genAlts top e (AlgAlt tc) [alt] | isUnboxedTupleTyCon tc = error "genAlts: unexpected unboxed tuple"
 genAlts top e (AlgAlt tc) [alt] = snd <$> mkAlgBranch top e alt
 genAlts top e (AlgAlt tc) alts@[(DataAlt dc,_,_,_),_]
   | isEnumerationTyCon tc && dataConTag dc == 2 = do
@@ -744,7 +750,7 @@ genAlts top e (AlgAlt tc) alts
       mkSwitch [je| `ei`.f.a |] <$> mapM (mkAlgBranch top e) alts
 genAlts top e a l = do
   ap <- showPpr' a
-  panic $ "genAlts: unhandled case variant: " ++ ap ++ " (" ++ show (length l) ++ ")"
+  error $ "genAlts: unhandled case variant: " ++ ap ++ " (" ++ show (length l) ++ ")"
 {-
 checkClosure :: Id -> JStat
 checkClosure i
@@ -789,10 +795,10 @@ mkSwitch e cases
     | [(Just c1,s1),(_,s2)] <- n, null d = checkIsCon e <> IfStat [je| `e` === `c1` |] s1 s2
     | null d        = checkIsCon e <> SwitchStat e (map addBreak (init n)) (snd $ last n)
     | [(_,d0)] <- d = checkIsCon e <> SwitchStat e (map addBreak n) d0
-    | otherwise     = panic "mkSwitch: multiple default cases"
+    | otherwise     = error "mkSwitch: multiple default cases"
     where
       addBreak (Just c,s) = (c, s) -- [j| `s`; break |]) -- fixme: rename, does not add break anymore
-      addBreak _          = panic "mkSwitch: addBreak"
+      addBreak _          = error "mkSwitch: addBreak"
       (n,d) = partition (isJust.fst) cases
 
 checkIsCon :: JExpr -> JStat
@@ -811,7 +817,7 @@ mkIfElse e s = go (reverse $ sort s)
 mkEq :: [JExpr] -> [JExpr] -> JExpr
 mkEq es1 es2
   | length es1 == length es2 = foldl1 and (zipWith eq es1 es2)
-  | otherwise                = panic "mkEq: incompatible expressions"
+  | otherwise                = error "mkEq: incompatible expressions"
     where
       and e1 e2 = [je| `e1` && `e2`  |]
       eq  e1 e2 = [je| `e1` === `e2` |]
@@ -917,7 +923,7 @@ genFFIArg :: StgArg -> G (JStat, [JExpr])
 genFFIArg (StgLitArg (MachStr str)) =
   case T.decodeUtf8' str of
     Right t -> return (mempty, [toJExpr $ T.unpack t])
-    Left  _ -> panic "cannot encode FFI string literal"
+    Left  _ -> error "cannot encode FFI string literal"
 genFFIArg (StgLitArg l) = return (mempty, genLit l)
 genFFIArg a@(StgVarArg i)
     | isVoid r                  = return (mempty, [])
@@ -1040,7 +1046,7 @@ toSigned i | testBit i 31 = complement (0x7FFFFFFF `xor` (i.&.0x7FFFFFFF))
 genSingleLit :: Literal -> JExpr
 genSingleLit l
     | [lit] <- genLit l = lit
-    | otherwise         = panic "genSingleLit: expected single-variable literal"
+    | otherwise         = error "genSingleLit: expected single-variable literal"
 
 genCon :: DataCon -> [JExpr] -> C
 genCon con args
@@ -1193,7 +1199,7 @@ genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) 
           | otherwise = "h$" ++ cl
       wrapperPrefix = "ghczuwrapperZC"
 genForeignCall0 (CCall (CCallSpec DynamicTarget conv safe)) t tgt args = return (mempty,False) -- fixme panic "unsupported foreign call"
-genForeignCall0 _ _ _ _ = panic "genForeignCall0: unsupported foreign call"
+genForeignCall0 _ _ _ _ = error "genForeignCall0: unsupported foreign call"
 
 {-
 -- fixme: what if the call returns a thunk?
@@ -1246,7 +1252,7 @@ parseFFIPattern True True pat t es as  = do
               (\r i -> [j| `r` = `d`[`i`]; |]) (enumFrom R1) [0..nrst-1]
 parseFFIPattern False javascriptCc pat t es as =
   parseFFIPattern' Nothing javascriptCc pat t es as
-parseFFIPattern _ _ _ _ _ _ = panic "parseFFIPattern: non-JavaScript pattern must be synchronous"
+parseFFIPattern _ _ _ _ _ _ = error "parseFFIPattern: non-JavaScript pattern must be synchronous"
 
 parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
                 -> Bool     -- ^ javascript calling convention used
@@ -1301,12 +1307,12 @@ parseFFIPattern' callback javascriptCc pat t ret args
          return $ traceCall as <> mconcat stats <> ApplStat f' (concat as)
         where f' = toJExpr (StrI f)
     copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs
-    p e = panic ("parse error in ffi pattern: " ++ pat ++ "\n" ++ e)
+    p e = error ("parse error in ffi pattern: " ++ pat ++ "\n" ++ e)
     replaceIdent :: Map Ident JExpr -> JExpr -> JExpr
     replaceIdent env e@(ValExpr (JVar i@(StrI xs)))
       | isFFIPlaceholder i = fromMaybe err (M.lookup i env)
       | otherwise = e
-        where err = panic (pat ++ ": invalid placeholder, check function type: " ++ xs)
+        where err = error (pat ++ ": invalid placeholder, check function type: " ++ xs)
     replaceIdent _ e = e
     traceCall as
         | rtsTraceForeign = [j| h$traceForeign(`pat`, `as`); |]
