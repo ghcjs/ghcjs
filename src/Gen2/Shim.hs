@@ -29,6 +29,7 @@ module Gen2.Shim where
 import Prelude hiding (catch)
 import Control.Exception (SomeException, catch)
 import Control.Applicative hiding ((<|>))
+import Control.Monad
 import qualified Data.Yaml as Yaml
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -108,6 +109,7 @@ tryReadFile file = T.readFile file `catch` \(_::SomeException) -> do
 
 collectShim :: FilePath -> (Pkg, Version) -> IO [FilePath]
 collectShim base (pkgName, pkgVer) = do
+  checkShimsInstallation base
   let configFile = base </> T.unpack pkgName <.> "yaml"
   e <- doesFileExist configFile
   if e then do
@@ -118,6 +120,11 @@ collectShim base (pkgName, pkgVer) = do
              return mempty
            Right shim -> return (foldShim pkgName pkgVer shim)
        else return mempty
+
+checkShimsInstallation :: FilePath -> IO ()
+checkShimsInstallation base = do
+  e <- doesFileExist (base </> "base.yaml")
+  when (not e) (error $ "Shims repository not found in `" ++ base ++ "'.")
 
 foldShim :: Pkg -> Version -> Shim -> [FilePath]
 foldShim pkg ver sh

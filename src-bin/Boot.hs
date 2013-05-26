@@ -189,6 +189,7 @@ installBootPackages settings = do
       installFakes
       installUnlit
       cd p
+      checkShims
     _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
 
 -- when rebooting, we replay the log of ghcjs calls
@@ -308,6 +309,15 @@ installFakes = silently $ do
             let conf = fakeConf base base pkg version pkgId
             writefile (db </> (pkgId <.> "conf")) conf
   run_ "ghcjs-pkg" ["recache", "--global"]
+
+checkShims :: ShIO ()
+checkShims = do
+  base <- T.pack <$> liftIO getGlobalPackageBase
+  e <- liftIO $ isFile (base </> "shims" </> "base" <.> "yaml")
+  when (not e) $ do
+    echo "GHCJS has been booted, but the shims repository is still missing, to install:"
+    echo ("cd " <> base)
+    echo "git clone https://github.com/ghcjs/shims.git"
 
 findPkgId:: [Text] -> Text -> Text -> Maybe Text
 findPkgId dump pkg version =
