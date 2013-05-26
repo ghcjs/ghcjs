@@ -185,7 +185,6 @@ main =
                        , ways       = [way]
                        , outputFile = fmap mkGhcjsOutput (outputFile dflags2)
                        , outputHi   = fmap mkGhcjsOutput (outputHi dflags2)
-                       , hscOutName = mkGhcjsOutput (hscOutName dflags2)
                        }
           let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
           fixNameCache
@@ -417,7 +416,7 @@ writeDesugaredModule mod =
      (iface, no_change) <- ioMsgMaybe $ mkIface env mb_old_iface details mod_guts1
      liftIO $ writeIfaceFile dflags ifaceFile iface
      versions <- liftIO $ forM variants $ \variant -> do
-          (program, meta) <- liftIO $ concreteJavascriptFromCgGuts (ms_mod mod_summary) dflags env tidyCore variant
+          (program, meta) <- liftIO $ concreteJavascriptFromCgGuts dflags env tidyCore variant
           let outputFile = addExtension outputBase (variantExtension variant)
           putStrLn $ concat ["Writing module ", name, " (", outputFile, ")"]
           B.writeFile outputFile program
@@ -435,23 +434,19 @@ writeDesugaredModule mod =
     name = moduleNameString . moduleName . ms_mod $ mod_summary
     dflags = ms_hspp_opts mod_summary
 
-concreteJavascriptFromCgGuts :: Module -> DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
-concreteJavascriptFromCgGuts mod dflags env core variant =
+concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
+concreteJavascriptFromCgGuts dflags env core variant =
   do core_binds <- corePrepPgm dflags
                                env
                                (cg_binds core)
                                (cg_tycons $ core)
-     stg <- coreToStg dflags mod core_binds
+     stg <- coreToStg dflags (cg_module core) core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
      return (variantRender variant dflags stg' (cg_module core))
 
 {-
   with -o x, ghcjs links all required functions into an executable
   bundle, which is a directory x.jsexe, rather than a filename
-
-  if the executable is built with cabal, it also writes
-  the file, and the executable bundle to the cache, so that
-  cabaljs can install the executable
 -}
 
 buildExecutable :: GhcMonad m => DynFlags -> [FilePath] -> m ()
@@ -577,11 +572,12 @@ generateNative settings oneshot argsS args1 mbMinusB =
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
             dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
             (dflags2, _) <- liftIO (initPackages dflags1)
-            setSessionDynFlags $
-                                 dflags2 { ghcMode = if oneshot then OneShot else CompManager
-                                         , ghcLink = if gsNativeExecutables settings then ghcLink dflags2
-                                                                                     else NoLink
-                                         }
+            let dflags2' = dflags2 { ghcMode = if oneshot then OneShot else CompManager }
+            if gsNativeExecutables settings
+              then setSessionDynFlags dflags2'
+              else setSessionDynFlags $ dflags2' { ghcLink = NoLink
+                                                 , outputFile = Nothing
+                                                 }
             df <- getSessionDynFlags
             liftIO (writeIORef (canGenerateDynamicToo df) True)
             let (jsArgs, fileargs) = partition isJsFile (map unLoc fileargs')
