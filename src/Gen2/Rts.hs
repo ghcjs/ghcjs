@@ -287,6 +287,27 @@ fun h$ap1_e {
 }
 `ClosureInfo (jsv "h$ap1_e") [] "apply1" (CILayoutFixed 2 [PtrV, PtrV]) CIThunk CINoStatic`;
 
+// function application to one argument
+fun h$ap2_e {
+  var c = `R1`;
+  `R1` = c.d1;
+  `R2` = c.d2.d1;
+  `R3` = c.d2.d2;
+  return h$ap_2_2_fast();
+}
+`ClosureInfo (jsv "h$ap2_e") [] "apply2" (CILayoutFixed 3 [PtrV, PtrV, PtrV]) CIThunk CINoStatic`;
+
+// function application to three arguments
+fun h$ap3_e {
+  var c = `R1`;
+  `R1` = c.d1;
+  `R2` = c.d2.d1;
+  `R3` = c.d2.d2;
+  `R4` = c.d2.d3;
+  return h$ap_3_3_fast();
+}
+`ClosureInfo (jsv "h$ap3_e") [] "apply3" (CILayoutFixed 4 [PtrV, PtrV, PtrV, PtrV]) CIThunk CINoStatic`;
+
 // select first field
 fun h$select1_e {
   var t = `R1`.d1;
