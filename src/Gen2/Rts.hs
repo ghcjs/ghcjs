@@ -27,7 +27,7 @@ import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
 import           Encoding
 
 {-
-  use h$c1, h$c2, h$c3, ... h$c24 instead of making objects manually
+          use h$c1, h$c2, h$c3, ... h$c24 instead of making objects manually
   so layouts and fields can be changed more easily
  -}
 closureConstructors :: JStat
@@ -102,7 +102,7 @@ declRegs = [j| var !h$regs = []; |]
         <> mconcat (map declReg (enumFromTo R1 R32))
         <> regGettersSetters
     where
-      declReg r = (decl . StrI . map toLower . show) r <> [j| `r` = 0; |]
+      declReg r = (decl . StrI . ("h$"++) . map toLower . show) r <> [j| `r` = 0; |]
 
 regGettersSetters :: JStat
 regGettersSetters =
