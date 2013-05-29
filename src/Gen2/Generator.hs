@@ -112,12 +112,13 @@ pass1 df m ss = sequence (zipWith generateBlock ss [(1::Int)..])
       generateBlock :: StgBinding -> Int -> G (TL.Text,([Id], [Id]))
       generateBlock decl n = do
           tl <- genToplevel (removeNoEscape decl)
+          extraTl <- use gsToplevelStats
+          resetToplevel
           let allDeps = collectIds decl
               topDeps = collectTopIds decl
           tl' <- delimitBlock m topDeps
                           . O.optimize
-                          . floatTop
-                          . jsSaturate (Just $ modulePrefix m n) $ tl
+                          . jsSaturate (Just $ modulePrefix m n) $ (tl <> mconcat (reverse extraTl))
           let tltxt   = displayT . renderPretty 0.8 150 . pretty $ tl'
           rnf tltxt `seq` return (tltxt,(topDeps,allDeps))
 
@@ -188,7 +189,7 @@ modulePackageText m = Linker.Package n v
   where
     (n,v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
 
-genToplevel :: StgBinding -> C -- (StgBinding, [(Id, [Id])]) -> C
+genToplevel :: StgBinding -> C
 genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs -- (lookupStaticRefs bndr srts)
 genToplevel (StgRec bs)          = mconcat $ map (\(bndr, rhs) -> genToplevelDecl bndr rhs) bs
 
@@ -236,8 +237,7 @@ genToplevelRhs i (StgRhsCon _cc con args)
       as <- mapM genArg args
       ec <- enterDataCon con
       return (decl eid <> [j| `eid` = `ec` |]) <> (allocConStatic id con . concat $ as)
-genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) =
-  toplevel <$> do
+genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) = do
         eid <- jsEnIdI i
         eid' <- jsEnId i
         idi <- jsIdI i
@@ -253,8 +253,7 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) =
                    `decl id`;
                    `id` = h$static_thunk(`eid`);
                  |]
-genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) =
-  toplevel <$> do
+genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
         eid <- jsEnIdI i
         eid' <- jsEnId i
         idi <- jsIdI   i
@@ -271,7 +270,6 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) =
                    `decl idi`;
                    `id` = h$static_fun(`eid`);
                  |]
-
 
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
@@ -303,9 +301,11 @@ loadArgs args = do
 
 genExpr :: Id -> StgExpr -> C
 genExpr top (StgApp f args)      = genApp False True f args
-genExpr top (StgLit l)           = return $ (mconcat (zipWith assign (enumFrom R1) (genLit l)) <>
-                                            [j| return `Stack`[`Sp`]; |])
-  where assign r v = [j| `r` = `v`; |]
+genExpr top (StgLit l)           = do
+  es <- genLit l
+  return $ (mconcat (zipWith assign (enumFrom R1) es) <>
+              [j| return `Stack`[`Sp`]; |])
+    where assign r v = [j| `r` = `v`; |]
 genExpr top (StgConApp con args) = genCon con =<< concatMapM genArg args
 genExpr top (StgOpApp (StgFCallOp f _) args t) =
    fst <$> genForeignCall0 f t (map toJExpr $ enumFrom R1) args
@@ -315,7 +315,7 @@ genExpr top (StgLam{}) = error "genExpr: StgLam"
 genExpr top (StgCase e live1 liveRhs b srt at alts) = genCase top b e at alts live1 srt -- check?
 genExpr top (StgLet b e) = genBind top b <> genExpr top e
 
-genExpr top (StgLetNoEscape l1 l2 b e) = error "genExpr: StgLetNoEscape"
+genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
 genExpr top (StgSCC cc b1 b2 e) = genExpr top e
 genExpr top (StgTick m n e) = genExpr top e
 
@@ -394,12 +394,12 @@ genApp force mstackTop i a
 --    fr1 = if hasFree then r1 else mempty
     ji = jsId i
     n = length a
-    b = mapM genArg a
+
 
 pushCont :: [StgArg] -> C
 pushCont as = do
-  (app, spec) <- selectApply False as
   as' <- concatMapM genArg as
+  (app, spec) <- selectApply False (as,as')
   if spec
     then push $ reverse $ app : as'
     else push $ reverse $ app : mkTag as' as : as'
@@ -409,15 +409,15 @@ pushCont as = do
 -- regular let binding: allocate heap object
 genBind :: Id -> StgBinding -> C
 genBind top bndr
- | (StgNonRec b r) <- bndr = assign b r <> allocCls [(b,r)]
- | (StgRec bs)     <- bndr = mconcat (map (uncurry assign) bs) <> allocCls bs
+ | (StgNonRec b r) <- bndr = assign b r >> allocCls [(b,r)]
+ | (StgRec bs)     <- bndr = mapM_ (uncurry assign) bs >> allocCls bs
  where
-   assign :: Id -> StgRhs -> C
+   assign :: Id -> StgRhs -> G ()
    assign b r = genEntry top b r
 
 -- generate the entry function for a local closure
-genEntry :: Id -> Id -> StgRhs -> C
-genEntry top i (StgRhsCon _cc con args) = mempty -- error "local data entry" -- mempty ??
+genEntry :: Id -> Id -> StgRhs -> G ()
+genEntry top i (StgRhsCon _cc con args) = return () -- mempty -- error "local data entry" -- mempty ??
 genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) = resetSlots $ do
   upd <- genUpdFrame Updatable
   ll <- loadLiveFun live
@@ -427,7 +427,7 @@ genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) =
   et <- genEntryType []
   sr <- genStaticRefs srt
 -- fixme args correct here?
-  return $ toplevel
+  emitToplevel
      [j| `decl ie`;
          `iex ie` = `f`;
          `ClosureInfo (iex ie) (genArgInfo True []) (istr ie ++ " ," ++ show i)
@@ -442,7 +442,7 @@ genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlo
   ei <- jsEntryIdI i
   et <- genEntryType args
   sr <- genStaticRefs srt
-  return $ toplevel
+  emitToplevel
              [j| `decl ei`;
                  `iex ei` = `f`;
                  `ClosureInfo (iex ei) (genArgInfo True $ map idType args) (istr ei ++ "," ++ show i)
@@ -543,8 +543,9 @@ genCase top bnd (StgApp i xs) at@(AlgAlt tc) [alt] l =
 
 genCase top bnd (StgLit lit) at@(PrimAlt tc) [(_,[],_,e)] l srt = do
   ibnd <- genIdsI bnd
+  ls <- genLit lit
   declIds bnd <>
-    return (mconcat $ zipWith (\b e -> [j| `b` = `e` |]) ibnd (genLit lit)) <>
+    return (mconcat $ zipWith (\b e -> [j| `b` = `e` |]) ibnd ls) <>
     genExpr top e
 
 genCase top bnd (StgApp i xs) at alts l srt =
@@ -647,15 +648,14 @@ genRet top e at as l srt = withNewIdent f -- $ \ret -> pushRetArgs free (iex ret
       topi <- jsIdI top
       tc <- typeComment e
       sr <- genStaticRefs srt
-      return $
-        pushRet <> ( toplevel $
-                     tc -- is this correct?
-                 <> (decl r)
-                 <> [j| `r` = `fun'`;
-                       `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
-                          (fixedLayout $ map (freeType . fst3) free) (CIFun regs regs) sr`;
-                     |]
-                   )
+      emitToplevel $
+         tc -- is this correct?
+         <> (decl r)
+         <> [j| `r` = `fun'`;
+                `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
+                   (fixedLayout $ map (freeType . fst3) free) (CIFun regs regs) sr`;
+              |]
+      return pushRet
     fst3 ~(x,_,_)  = x
 
     -- 2-var values might have been moved around separately, use DoubleV as substitute
@@ -830,14 +830,17 @@ mkAlgBranch top d (DataAlt dc,[b],_,expr)
       [fld] <- genIdsI b
       e     <- genExpr top expr
       return (Nothing, decl fld <> [j| `fld` = `idd` |] <> e)
-mkAlgBranch top d alt@(a,bs,use,expr) = isolateSlots $ (caseCond a,) <$> b
-  where
-    b = (jsId d >>= \idd -> loadParams idd bs use) <> genExpr top expr
+mkAlgBranch top d alt@(a,bs,use,expr) = isolateSlots $ 
+  (,) <$> caseCond a <*> b
+    where
+      b = (jsId d >>= \idd -> loadParams idd bs use) <> genExpr top expr
 
 -- single-var prim
 mkPrimBranch :: Id -> VarType -> StgAlt -> G (Maybe JExpr, JStat)
-mkPrimBranch top vt (DEFAULT, bs, us, e) = isolateSlots $ (Nothing,) <$> genExpr top e
-mkPrimBranch top vt (cond,    bs, us, e) = isolateSlots $ (caseCond cond,) <$> genExpr top e
+mkPrimBranch top vt (DEFAULT, bs, us, e) = isolateSlots $
+  (Nothing,) <$> genExpr top e
+mkPrimBranch top vt (cond,    bs, us, e) = isolateSlots $ do
+  (,) <$> caseCond cond <*> genExpr top e
 
 -- possibly multi-var prim
 -- fixme load binders?
@@ -847,23 +850,20 @@ mkPrimIfBranch top vt (DEFAULT, bs, us, e) = isolateSlots $ do
   expr <- genExpr top e
   return (Nothing, expr)
 mkPrimIfBranch top vt (cond,    bs, us, e) = isolateSlots $ do
-  dec <- concatMapM declIds bs
-  expr <- genExpr top e
-  return (ifCond cond, expr) -- dec <> return (assignAll bs <> expr)
+--  dec <- concatMapM declIds bs -- do we need this?
+  (,) <$> ifCond cond <*> genExpr top e
 
-ifCond :: AltCon -> Maybe [JExpr]
-ifCond (DataAlt da)
---    | isBoolTy (mkTyConTy (dataConTyCon da)) = Just [[je| `dataConTag da - 1` |]]
-    | otherwise                              = Just [[je| `dataConTag da` |]]
-ifCond (LitAlt l)   = Just (genLit l)
-ifCond DEFAULT      = Nothing
 
-caseCond :: AltCon -> Maybe JExpr
-caseCond (DataAlt da)
---    | isBoolTy (mkTyConTy (dataConTyCon da)) = Just [je| `dataConTag da - 1` |]
-    | otherwise                              = Just [je| `dataConTag da` |]
-caseCond (LitAlt l)   = Just (genSingleLit l)
-caseCond DEFAULT      = Nothing
+-- fixme are bool things always checked correctly here?
+ifCond :: AltCon -> G (Maybe [JExpr])
+ifCond (DataAlt da) = return $ Just [[je| `dataConTag da` |]]
+ifCond (LitAlt l)   = Just <$> genLit l
+ifCond DEFAULT      = return Nothing
+
+caseCond :: AltCon -> G (Maybe JExpr)
+caseCond (DataAlt da) = return $ Just [je| `dataConTag da` |]
+caseCond (LitAlt l)   = Just <$> genSingleLit l
+caseCond DEFAULT      = return Nothing
 
 fourth (_,_,_,x) = x
 
@@ -907,7 +907,7 @@ genStackArg a@(StgVarArg i) = zipWith f [1..] <$> genArg a
     f n e = (e, SlotId i n)
 
 genArg :: StgArg -> G [JExpr]
-genArg (StgLitArg l) = return (genLit l)
+genArg (StgLitArg l) = genLit l
 genArg a@(StgVarArg i)
     | isVoid r     = return []
     | isMultiVar r = mapM (jsIdN i) [1..varSize r]
@@ -924,7 +924,7 @@ genFFIArg (StgLitArg (MachStr str)) =
   case T.decodeUtf8' str of
     Right t -> return (mempty, [toJExpr $ T.unpack t])
     Left  _ -> error "cannot encode FFI string literal"
-genFFIArg (StgLitArg l) = return (mempty, genLit l)
+genFFIArg (StgLitArg l) = (mempty,) <$> genLit l
 genFFIArg a@(StgVarArg i)
     | isVoid r                  = return (mempty, [])
     | Just x <- marshalFFIArg a = x
@@ -1020,33 +1020,43 @@ genIdStackArgI i = zipWith f [1..] <$> genIdArgI i
 r2d :: Rational -> Double
 r2d = realToFrac
 
-genLit :: Literal -> [JExpr]
-genLit (MachChar c)      = [ [je| `ord c` |] ]
+genLit :: Literal -> G [JExpr]
+genLit (MachChar c)      = return [ [je| `ord c` |] ]
 genLit (MachStr  str)    =
   case T.decodeUtf8' str of
-    Right t -> [ [je| h$encodeUtf8(`T.unpack t`) |], [je| 0 |] ]
-    Left  _ -> [ [je| h$rawStringData(`map toInteger (B.unpack str)`) |], [je| 0 |] ]
-genLit MachNullAddr      = [ [je| null |], [je| 0 |] ]
-genLit (MachInt i)       = [ [je| `i` |] ]
-genLit (MachInt64 i)     = [ [je| `shiftR i 32` |] , [je| `toSigned i` |] ]
-genLit (MachWord w)      = [ [je| `toSigned w` |] ]
-genLit (MachWord64 w)    = [ [je| `toSigned (shiftR w 32)` |] , [je| `toSigned w` |] ]
-genLit (MachFloat r)     = [ [je| `r2d r` |] ]
-genLit (MachDouble r)    = [ [je| `r2d r` |] ]
+    Right t -> withNewIdent $ \ident -> do
+      emitToplevel [j| `decl ident`;
+                       `ident` = h$str(`T.unpack t`);
+                     |]
+      return [ [je| `ident`() |], [je| 0 |] ]
+    Left  _ -> withNewIdent $ \ident -> do
+      emitToplevel [j| `decl ident`;
+                       `ident` = h$rstr(`map toInteger (B.unpack str)`);
+                     |]
+      return [ [je| `ident`() |], [je| 0 |] ]
+genLit MachNullAddr      = return [ [je| null |], [je| 0 |] ]
+genLit (MachInt i)       = return [ [je| `i` |] ]
+genLit (MachInt64 i)     = return [ [je| `shiftR i 32` |] , [je| `toSigned i` |] ]
+genLit (MachWord w)      = return [ [je| `toSigned w` |] ]
+genLit (MachWord64 w)    = return [ [je| `toSigned (shiftR w 32)` |] , [je| `toSigned w` |] ]
+genLit (MachFloat r)     = return [ [je| `r2d r` |] ]
+genLit (MachDouble r)    = return [ [je| `r2d r` |] ]
 genLit (MachLabel name size fod)
-  | fod == IsFunction = [ [je| h$mkFunctionPtr(`StrI ("h$" ++ unpackFS name)`) |], [je| 0 |] ]
-  | otherwise         = [ iex (StrI $ "h$" ++ unpackFS name), [je| 0 |] ]
-genLit (LitInteger i id) = [ [je| `i` |] ] -- fixme, convert to bytes and JSBN int?
+  | fod == IsFunction = return [ [je| h$mkFunctionPtr(`StrI ("h$" ++ unpackFS name)`) |], [je| 0 |] ]
+  | otherwise         = return [ iex (StrI $ "h$" ++ unpackFS name), [je| 0 |] ]
+genLit (LitInteger i id) = return [ [je| `i` |] ] -- fixme, convert to bytes and JSBN int?
 
 -- make a signed 32 bit int from this unsigned one, lower 32 bits
 toSigned :: Integer -> Integer
 toSigned i | testBit i 31 = complement (0x7FFFFFFF `xor` (i.&.0x7FFFFFFF))
            | otherwise    = i.&.0xFFFFFFFF
 
-genSingleLit :: Literal -> JExpr
-genSingleLit l
-    | [lit] <- genLit l = lit
-    | otherwise         = error "genSingleLit: expected single-variable literal"
+genSingleLit :: Literal -> G JExpr
+genSingleLit l = do
+  es <- genLit l
+  case es of
+    [e] -> return e
+    _   -> error "genSingleLit: expected single-variable literal"
 
 genCon :: DataCon -> [JExpr] -> C
 genCon con args
@@ -1124,8 +1134,8 @@ jumpTo' fun args = mconcat ra <> [j| return `fun`(); |]
 
 jumpToFast :: [StgArg] -> C
 jumpToFast as = do
-  (fun, spec) <- selectApply True as
   regs <- concatMapM genArg as
+  (fun, spec) <- selectApply True (as,regs)
   if spec
     then return $ mconcat (ra regs) <> [j| return `fun`(); |]
     else return $ mconcat (ra regs) <> [j| return `fun`(`mkTag regs as`); |]
@@ -1136,20 +1146,15 @@ jumpToFast as = do
 
 -- find a specialized application path if there is one
 selectApply :: Bool     ->    -- ^ true for fast apply, false for stack apply
-               [StgArg] ->    -- ^ arguments
+               ([StgArg], [JExpr]) ->    -- ^ arguments
                G (JExpr,Bool) -- ^ the function to call, true if specialized path
-selectApply fast args = do
-  as <- concat <$> mapM genArg args
+selectApply fast (args, as) = do
   case specApply fast (length args) (length as) of
     Just e  -> return (e, True)
     Nothing -> return (jsv $ "h$ap_gen" ++ fastSuff, False)
   where
     fastSuff | fast      = "_fast"
              | otherwise = ""
-
--- insert a toplevel statement (by labeling it toplevel, see Floater)
-toplevel :: JStat -> JStat
-toplevel = LabelStat "toplevel"
 
 -- insert delimiters around block so linker can extract this efficiently
 -- abuses PPostStat to insert a comment!

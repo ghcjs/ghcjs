@@ -254,8 +254,9 @@ maxReg = regNum maxBound
 -- | the current code generator state
 data GenState = GenState
   { _gsModule   :: Module      -- | the module we're compiling, used for generating names
-  , _gsToplevel :: Maybe Id    -- | the top-level function group we're generating
+  , _gsToplevel :: Maybe Id    -- | the toplevel function group we're generating
 --  , _gsScope    :: GenScope  -- | the current lexical environment
+  , _gsToplevelStats :: [JStat] -- | extra toplevel statements that our current function emits
   , _gsId       :: Int         -- | integer for the id generator
   , _gsDynFlags :: DynFlags    -- | the DynFlags, used for prettyprinting etc
   , _gsStack    :: [StackSlot] -- | what's currently on the stack, above SP
@@ -270,6 +271,12 @@ data StackSlot = SlotId Id Int
   deriving (Eq, Ord, Show)
 
 makeLenses ''GenState
+
+emitToplevel :: JStat -> G ()
+emitToplevel s = gsToplevelStats %= (s:)
+
+resetToplevel :: G ()
+resetToplevel = gsToplevelStats .= []
 
 dropSlots :: Int -> G ()
 dropSlots n = gsStack %= drop n
@@ -330,7 +337,7 @@ data GenScope = GenScope
 -- emptyScope = GenScope mempty mempty
 
 initState :: DynFlags -> Module -> GenState
-initState df m = GenState m Nothing 1 df []
+initState df m = GenState m Nothing [] 1 df []
 
 runGen :: DynFlags -> Module -> G a -> a
 runGen df m = flip evalState (initState df m)
