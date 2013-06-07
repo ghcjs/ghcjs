@@ -14,12 +14,12 @@ $hs_a = function() {
 -}
 module Gen2.Floater where
 
-import Language.Javascript.JMacro
-import Data.Maybe (catMaybes)
-import Data.Monoid
-import Data.List (isSuffixOf, partition)
-import Data.Generics.Aliases
-import Data.Generics.Schemes
+import           Data.Generics.Aliases
+import           Data.Generics.Schemes
+import           Data.List                  (isSuffixOf, partition)
+import           Data.Maybe                 (catMaybes)
+import           Data.Monoid
+import           Language.Javascript.JMacro
 
 floatTop :: JStat -> JStat
 floatTop ast = mconcat (collectTop ast) <> removeTop ast
@@ -44,4 +44,5 @@ unlabel x               = x
 isToplevelStatement :: JStat -> Bool
 isToplevelStatement (LabelStat "toplevel" _) = True
 isToplevelStatement _                        = False
+
 

@@ -1,0 +1,4 @@
+primOpStrictness RaiseOp =  \ _arity -> mkStrictSig (mkTopDmdType [topDmd] botRes) 
+primOpStrictness RaiseIOOp =  \ _arity -> mkStrictSig (mkTopDmdType [topDmd, topDmd] botRes) 
+primOpStrictness DataToTagOp =  \ _arity -> mkStrictSig (mkTopDmdType [evalDmd] topRes) 
+primOpStrictness _ =  \ arity -> mkStrictSig (mkTopDmdType (replicate arity topDmd) topRes) 

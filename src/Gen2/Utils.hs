@@ -4,15 +4,26 @@
 
 module Gen2.Utils where
 
-import           Language.Haskell.TH.Quote
-import           Language.Javascript.JMacro
+import Language.Haskell.TH.Quote
+import Language.Javascript.JMacro
 
-import           Control.Monad.State.Strict
-import           Data.Monoid
+import Control.Applicative
+import Control.Lens
+import Control.Monad.State.Strict
+import Data.Monoid
 
-import           Data.Char                  (isSpace)
-import           Data.List                  (isPrefixOf)
-import           Data.Map                   (Map, singleton)
+import Data.Char                  (isSpace)
+import Data.List                  (isPrefixOf)
+import Data.Map                   (Map, singleton)
+
+makeLenses ''JStat
+makePrisms ''JStat
+makeLenses ''JExpr
+makePrisms ''JExpr
+makeLenses ''JVal
+makePrisms ''JVal
+makeLenses ''Ident
+makePrisms ''Ident
 
 -- missing instances, todo: add to jmacro
 instance ToJExpr Ident where
@@ -24,33 +35,18 @@ instance ToJExpr Ident where
 -- easier building of javascript object literals
 newtype JObj = JObj (Map String JExpr) deriving (Monoid, Show, Eq)
 
+{-
 infix 7 .=
 (.=) :: (ToJExpr a) => String -> a -> JObj
 (.=) key val = JObj $ singleton key (toJExpr val)
+-}
 
 instance ToJExpr JObj where
   toJExpr (JObj m) = ValExpr (JHash m)
 
--- jmacro wrappers for slightly less noisy macros, `c` instead of `(c)`
-j  = wrapQuoter replaceBackquotes jmacro
-je = wrapQuoter replaceBackquotes jmacroE
-
-
-replaceBackquotes :: String -> String
-replaceBackquotes xs = go False xs
-  where
-    go _     []       = []
-    go False ('`':ys) = "`(" ++ go True  ys
-    go True  ('`':ys) = ")`" ++ go False ys
-    go b     (y:ys)   = y : go b ys
-
-wrapQuoter :: (String -> String) -> QuasiQuoter -> QuasiQuoter
-wrapQuoter f q = QuasiQuoter
-                   { quoteExp  = quoteExp  q . f
-                   , quotePat  = quotePat  q . f
-                   , quoteType = quoteType q . f
-                   , quoteDec  = quoteDec  q . f
-                   }
+-- shorter names for jmacro
+j  = jmacro
+je = jmacroE
 
 insertAt :: Int -> a -> [a] -> [a]
 insertAt 0 y xs             = y:xs
@@ -94,6 +90,14 @@ identBoth s1 s2 = UnsatBlock . IS $ do
 withIdent :: (Ident -> JStat) -> JStat
 withIdent s = UnsatBlock . IS $ newIdent >>= return . s
 
+{-
+withIdentM :: Monad m => (Ident -> m JStat) -> m JStat
+withIdentM s = do
+  x <- newIdent
+--   mr <- s x
+  (s x >>= return . UnsatBlock . IS)
+-}
+
 -- declare a new var and use it in statement
 withVar :: (JExpr -> JStat) -> JStat
 withVar s = withIdent (\i -> decl i <> s (ValExpr . JVar $ i))
@@ -129,3 +133,19 @@ showIndent x = unlines . runIndent 0 . map trim . lines . replaceParens . show $
 trim :: String -> String
 trim = let f = dropWhile isSpace . reverse in f . f
 
+ve :: String -> JExpr
+ve = ValExpr . JVar . StrI
+
+concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
+concatMapM f xs = mapM f xs >>= return . mconcat
+
+-- fixme these should be proper keywords in jmacro
+jTrue :: JExpr
+jTrue = ve "true"
+
+jFalse :: JExpr
+jFalse = ve "false"
+
+jBool :: Bool -> JExpr
+jBool True = jTrue
+jBool False = jFalse

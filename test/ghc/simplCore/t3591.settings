@@ -1,0 +1,4 @@
+disableSpiderMonkey: true
+disableUnopt: true
+disableOpt: true
+

@@ -13,7 +13,7 @@ import           Language.Javascript.JMacro
 
 -- trace/debug messages from the garbage collector
 gcDebug :: Bool
-gcDebug = False
+gcDebug = True
 
 -- timing measurements for the garbage collector
 gcTiming :: Bool
@@ -21,7 +21,7 @@ gcTiming = True
 
 -- extra checks from the gc for consistency, usually shouldn't print, but make it a little slower
 gcChecks :: Bool
-gcChecks = False
+gcChecks = True
 
 -- extra rts assertions/checks
 rtsChecks :: Bool
@@ -29,15 +29,38 @@ rtsChecks = rtsDebug
 
 -- rts tracing/debugging
 rtsDebug :: Bool
-rtsDebug = True
+rtsDebug = False
 
--- trace calls from the trampoline
+-- Trace calls from the trampoline
 rtsTraceCalls :: Bool
 rtsTraceCalls = rtsDebug -- False -- True
 
 -- print top stack frame before each call
 rtsTraceStack :: Bool
 rtsTraceStack = rtsDebug -- False -- True
+
+-- trace all foreign calls
+rtsTraceForeign :: Bool
+rtsTraceForeign = rtsDebug
+
+rtsHaveWeakMap :: Bool
+rtsHaveWeakMap = False
+
+-- inline all allocations, usually small allocations are done through
+-- h$cN, h$dN to save some code size, these small functions are expected
+-- to be inlined by the JS engine
+rtsInlineAlloc :: Bool
+rtsInlineAlloc = False
+
+-- inline h$r1.f = h$blackhole; ... things
+rtsInlineBlackhole :: Bool
+rtsInlineBlackhole = False
+
+rtsInlineEnter :: Bool
+rtsInlineEnter = False
+
+rtsInlinePush :: Bool
+rtsInlinePush = False
 
 ------------------------------------------------------------------------------
 -- end of settings
@@ -48,7 +71,7 @@ rtsTraceStack = rtsDebug -- False -- True
 
 infixr 1 |+
 infixr 1 |-
-infixr 3 |.
+infixl 3 |.
 infixl 2 |!
 infixl 2 |!!
 
@@ -91,6 +114,9 @@ infixl 2 |!!
 
 (|===) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
 (|===) a b = [je| `a` === `b` |]
+
+(|!==) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|!==) a b = [je| `a` !== `b` |]
 
 -- trace a gc-related messages if gc debug is enabled
 traceGc :: ToJExpr a => a -> JStat
@@ -137,7 +163,7 @@ clName :: JExpr -> JExpr
 clName c = [je| `c`.n |]
 
 clTypeName :: JExpr -> JExpr
-clTypeName c = [je| closureTypeName(`c`.t) |]
+clTypeName c = [je| h$closureTypeName(`c`.t) |]
 
 notUndef :: ToJExpr a => a -> JExpr
 notUndef e = [je| `e` !== undefined |]

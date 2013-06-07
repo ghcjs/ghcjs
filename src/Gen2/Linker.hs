@@ -1,7 +1,7 @@
 {-
   GHCJS linker, manages dependencies with
-    modulename.gen2.ji files, which contain function-level dependencies
-    the source files (gen2.js) contain function groups delimited by
+    modulename.ji files, which contain function-level dependencies
+    the source files (.js) contain function groups delimited by
     special markers
 -}
 {-# LANGUAGE DefaultSignatures #-}
@@ -11,6 +11,7 @@
 module Gen2.Linker where
 
 import           Control.Applicative
+import           Control.Monad
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
@@ -20,18 +21,20 @@ import           Data.Maybe               (fromMaybe)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
+import qualified Data.Vector              as V
 
 import Data.Char (isDigit)
 import qualified Data.Foldable            as F
+import Data.List (partition, isSuffixOf, isPrefixOf)
 import           Data.Serialize
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.IO             as T
 import qualified Data.Text.Encoding       as TE
 import qualified Data.Text.Encoding.Error as TE
-import           System.FilePath (dropExtension, takeFileName, (<.>), (</>))
-import           System.Directory (createDirectoryIfMissing)
-
+import           System.FilePath (dropExtension, splitPath, (<.>), (</>))
+import           System.Directory (createDirectoryIfMissing, doesFileExist)
+import           Config
 import           Module                   (ModuleName, moduleNameString)
 
 import           Gen2.StgAst
@@ -51,18 +54,25 @@ link :: String       -- ^ output file/directory
      -> [ModuleName] -- ^ modules to use as roots (include all their functions and deps)
      -> IO [String]  -- ^ arguments for the closure compiler to minify our result
 link out searchPath objFiles pageModules = do
-  metas <- mapM (readDeps . metaFile) objFiles
+  let (objFiles', extraFiles) = partition (".js" `isSuffixOf`) objFiles
+  metas <- mapM (readDeps . metaFile) objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
-  T.putStrLn ("linking: " <> T.intercalate ", " (map depsModule roots))
-  (allDeps, src) <- collectDeps (lookup metas) (S.fromList $ concatMap modFuns roots)
+  T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
+  (allDeps, src) <- collectDeps (lookup metas) (S.union rtsDeps (S.fromList $ concatMap modFuns roots))
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (BL.fromChunks src)
   writeFile (out </> "rts.js") rtsStr
-  getShims allDeps (out </> "lib.js")
+  getShims extraFiles allDeps (out </> "lib.js", out </> "lib1.js")
+  writeHtml out
+  combineFiles out
   return []
   where
     mods = map (T.pack . moduleNameString) pageModules
-    pkgLookup       = M.fromList (map (\p -> (T.pack . takeFileName $ p, p)) searchPath)
+    pkgLookup       = M.fromList (map (\p -> (pkgFromPath p, p)) searchPath)
+    -- pkg name-version is last path element, except when there's a ghc-version path element after
+    pkgFromPath path | (a:b:_) <- reverse (splitPath' path) =
+      if (("ghc-"++cProjectVersion) `isPrefixOf` a) then T.pack b else T.pack a
+    pkgFromPath _ = mempty
     pkgLookupNoVer  = M.mapKeys dropVersion pkgLookup
     localLookup metas  =
       M.fromList $ zipWith (\m o -> (depsModule m, dropExtension o)) metas objFiles
@@ -75,17 +85,56 @@ link out searchPath objFiles pageModules = do
       | otherwise = return $ maybe ("." </> modPath) (<.> ext)
                              (M.lookup (funModule fun) (localLookup metas))
       where
-        modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> "gen2" <.> ext
+        modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> ext
 
-getShims :: Set Fun -> FilePath -> IO ()
-getShims deps file = do
+splitPath' :: FilePath -> [FilePath]
+splitPath' = map (filter (`notElem` "/\\")) . splitPath
+
+getShims :: [FilePath] -> Set Fun -> (FilePath, FilePath) -> IO ()
+getShims extraFiles deps (fileBefore, fileAfter) = do
   base <- (</> "shims") <$> getGlobalPackageBase
-  t <- collectShims base pkgDeps
-  T.writeFile file t
+  ((before, beforeFiles), (after, afterFiles)) <- collectShims base pkgDeps
+  T.writeFile fileBefore before
+  writeFile (fileBefore <.> "files") (unlines beforeFiles)
+  t' <- mapM T.readFile extraFiles
+  T.writeFile fileAfter (T.unlines $ after : t')
+  writeFile (fileAfter <.> "files") (unlines $ afterFiles ++ extraFiles)
     where
       pkgDeps = map (\(Package n v) -> (n, fromMaybe [] $ parseVersion v))
                   (S.toList $ S.map funPackage deps)
 
+-- convenience: combine lib.js, rts.js, lib1.js, out.js to all.js that can be run
+-- directly with node or spidermonkey
+combineFiles :: FilePath -> IO ()
+combineFiles fp = do
+  files <- mapM (T.readFile.(fp</>)) ["lib.js", "rts.js", "lib1.js", "out.js"]
+  T.writeFile (fp</>"all.js") (mconcat (files ++ [runMain]))
+
+runMain :: Text
+runMain = "\nh$main(h$mainZCMainzimain);\n"
+
+basicHtml :: Text
+basicHtml = "<!DOCTYPE html>\n\
+            \<html>\n\
+            \  <head>\n\
+            \    <script language=\"javascript\" src=\"lib.js\"></script>\n\
+            \    <script language=\"javascript\" src=\"rts.js\"></script>\n\
+            \    <script language=\"javascript\" src=\"lib1.js\"></script>\n\
+            \    <script language=\"javascript\" src=\"out.js\"></script>\n\
+            \  </head>\n\
+            \  <body>\n\
+            \  </body>\n\
+            \  <script language=\"javascript\">\n\
+            \    " <> runMain <> "\n\
+            \  </script>\n\
+            \</html>\n"
+
+writeHtml :: FilePath -> IO ()
+writeHtml out = do
+  e <- doesFileExist htmlFile
+  when (not e) (T.writeFile htmlFile basicHtml)
+  where
+    htmlFile = out </> "index" <.> "html"
 
 -- get the ji file for a js file
 metaFile :: FilePath -> FilePath
@@ -99,7 +148,7 @@ dropVersion = fst . splitVersion
 
 splitVersion :: Text -> (Text, Text)
 splitVersion t
-  | T.null ver || T.any (`notElem` "1234567890.") ver 
+  | T.null ver || T.any (`notElem` "1234567890.") ver
       = (t, mempty)
   | T.null name = (mempty, mempty)
   | otherwise   = (T.reverse (T.tail name), T.reverse ver)
@@ -110,12 +159,12 @@ splitVersion t
 -- | dependencies for a single module
 data Deps = Deps { depsPackage :: !Package
                  , depsModule  :: !Text
-                 , depsDeps    :: Map Text (Set Fun)
+                 , depsDeps    :: Map Fun (Set Fun)
                  }
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
-modFuns (Deps p m d) = map (Fun p m . fst) (M.toList d)
+modFuns (Deps p m d) = map fst (M.toList d)
 
 data Package = Package { packageName :: !Text
                        , packageVersion :: !Text
@@ -130,16 +179,44 @@ data Fun = Fun { funPackage :: !Package
                , funSymbol  :: !Text
                } deriving (Eq, Ord, Show)
 
-instance Serialize Deps where
-  get = Deps <$> get
-             <*> getText
-             <*> getMapOf getText (getSetOf get)
-  put (Deps p m d) = put p >> putText m >> putMapOf putText (putSetOf put) d
+data IndexedFun = IndexedFun { ifunPackage :: !Int
+                             , ifunModule  :: !Text
+                             , ifunSymbol  :: !Text
+                             }
 
+instance Serialize IndexedFun where
+  get             = IndexedFun <$> get <*> getText <*> getText
+  put (IndexedFun p m s) = put p >> mapM_ putText [m,s]
 
-instance Serialize Fun where
-  get             = Fun <$> get <*> getText <*> getText
-  put (Fun p m s) = put p >> mapM_ putText [m,s]
+toIndexedFun :: Map Package Int -> Fun -> IndexedFun
+toIndexedFun pkgs (Fun p m s) = (IndexedFun idx m s)
+  where
+    idx = fromMaybe (error $ "missing package in deps set: " ++ show p) (M.lookup p pkgs)
+
+fromIndexedFun :: V.Vector Package -> IndexedFun -> Fun
+fromIndexedFun pkgs (IndexedFun pi m s) = (Fun (pkgs V.! pi) m s)
+
+-- set of packages and set of funs must contain at least everything in Deps
+serializeDeps :: Set Package -> Set Fun -> Putter Deps --  -> Putter ByteString
+serializeDeps pkgs funs (Deps p m d) = do
+  put p
+  putText m
+  put (S.toAscList pkgs)
+  let pkgs' = M.fromList $ zip (S.toAscList pkgs) [(0::Int)..]
+      funs' = M.fromList $ zip (S.toAscList funs) [(0::Int)..]
+  put $ map (toIndexedFun pkgs') (S.toAscList funs)
+  let depIndex d = fromMaybe (error $ "missing symbol in deps set: " ++ show d) (M.lookup d funs')
+  put $ map (\(d,ds) -> (depIndex d, map depIndex $ S.toList ds)) (M.toAscList d)
+
+-- reads back a deps file, uses sharing for efficiency so be careful with the result
+unserializeDeps :: Get Deps
+unserializeDeps = do
+  p    <- get
+  m    <- getText
+  pkgs <- V.fromList <$> get
+  funs <- V.fromList . map (fromIndexedFun pkgs) <$> get
+  deps <- M.fromList . map (\(d,ds) -> (funs V.! d, S.fromList $ map (funs V.!) ds)) <$> get
+  return (Deps p m deps)
 
 -- | get all dependencies for a given set of roots
 getDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun)
@@ -153,7 +230,7 @@ getDeps lookup fun = go S.empty M.empty (S.toList fun)
             Nothing -> lookup "ji" f >>= readDeps >>=
                            \d -> go result (M.insert key d deps) ffs
             Just (Deps _ _ d)  -> let ds = filter (`S.notMember` result)
-                                           (maybe [] S.toList $ M.lookup (funSymbol f) d)
+                                           (maybe [] S.toList $ M.lookup f d)
                               in  go (S.insert f result) deps (ds++fs)
 
 -- | get all modules used by the roots and deps
@@ -169,7 +246,7 @@ collectDeps lookup roots = do
   (allDeps, srcs) <- getDepsSources lookup roots
   srcs' <- mapM (uncurry extractDeps) srcs
   return (allDeps, srcs')
-  
+
 extractDeps :: FilePath -> Set Fun -> IO ByteString
 extractDeps file funs = do
   blocks <- collectBlocks <$> T.readFile file
@@ -211,14 +288,10 @@ putText t =
   let bs = TE.encodeUtf8 t
   in  putWord32le (fromIntegral $ B.length bs) >> putByteString bs
 
--- | write module dependencies file
-writeDeps :: FilePath -> Deps -> IO ()
-writeDeps file = B.writeFile file . runPut . put
-
--- | read the modulename.gen2.ji file
+-- | read the modulename.ji file
 readDeps :: FilePath -> IO Deps
 readDeps file = do
-  either error id . runGet get <$> B.readFile file
+  either error id . runGet unserializeDeps <$> B.readFile file
 
 dumpDeps :: Deps -> String
 dumpDeps (Deps p m d) = T.unpack $
@@ -226,8 +299,8 @@ dumpDeps (Deps p m d) = T.unpack $
   "module: " <> m <> "\n" <>
   "deps:\n" <> T.unlines (map (uncurry dumpDep) (M.toList d))
   where
-    dumpDep s ds = s <> " -> \n" <>
-      F.foldMap (\(Fun fp fm fs) -> "   " 
+    dumpDep s ds = funSymbol s <> " -> \n" <>
+      F.foldMap (\(Fun fp fm fs) -> "   "
         <> showPkg fp <> ":" <> fm <> "." <> fs <> "\n") ds
 
 showPkg :: Package -> Text
@@ -242,3 +315,13 @@ funPkgTxt = showPkg . funPackage
 -- Fun -> packagename
 funPkgTxtNoVer :: Fun -> Text
 funPkgTxtNoVer = packageName . funPackage
+
+-- dependencies for the RTS, these need to be always linked
+rtsDeps :: Set Fun
+rtsDeps =
+ let mkDep (p,m,s) = Fun (Package p "") m s
+ in S.fromList $ map mkDep
+     [ ("base",     "GHC.Conc.Sync", "h$baseZCGHCziConcziSynczireportError")
+     , ("base",     "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )
+     ]
+

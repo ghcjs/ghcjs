@@ -8,13 +8,13 @@ import Module (ModuleName, PackageId)
 import HscTypes (ModSummary(..), CgGuts (..))
 import DynFlags (DynFlags(..))
 import qualified Data.ByteString as B
-#ifdef GHCJS_ENABLED
+-- #ifdef GHCJS_ENABLED
 import Module (ml_hi_file, moduleNameString, moduleName)
 import Distribution.Verbosity (normal)
 import Distribution.Simple.Utils (createDirectoryIfMissingVerbose)
 import Module (mkModuleName)
 import System.FilePath
-       (takeBaseName, replaceExtension, dropExtension, (</>), (<.>))
+       (takeBaseName, takeExtension, replaceExtension, dropExtension, (</>), (<.>))
 import System.Directory (doesFileExist)
 import Packages (getPreloadPackagesAnd, PackageConfig, importDirs)
 import Data.List (nub)
@@ -28,26 +28,28 @@ import qualified Generator.Link as Js (link)
 import Compiler.Variants
        (variants, Variant(..))
 import Control.Monad (forM_)
-#endif
+-- #endif
 
-#ifndef GHCJS_ENABLED
-writeJavaScriptModule :: ModSummary -> CgGuts
-        -> ([(StgBinding,[(Id,[Id])])], CollectedCCs) -> IO ()
+{-
+  #ifndef GHCJS_ENABLED
+writeJavaScriptModule :: DynFlags -> ModSummary -> CgGuts
+        -> ([StgBinding], CollectedCCs) -> IO ()
 writeJavaScriptModule _ _ _ = return ()
 
 linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
 linkJavaScript dyflags o_files dep_packages pagesMods = return ()
-#else
-writeJavaScriptModule :: ModSummary -> CgGuts
-        -> ([(StgBinding,[(Id,[Id])])], CollectedCCs) -> IO ()
-writeJavaScriptModule summary tidyCore (stg', _ccs) = do
+  #else
+-}
+writeJavaScriptModule :: DynFlags -> ModSummary -> CgGuts
+        -> ([StgBinding], CollectedCCs) -> IO ()
+writeJavaScriptModule dyflags summary tidyCore (stg', _ccs) = do
     forM_ variants $ \variant -> do
-        writeJavaScriptModule' variant summary tidyCore (stg', _ccs)
+        writeJavaScriptModule' dyflags variant summary tidyCore (stg', _ccs)
 
-writeJavaScriptModule' :: Variant -> ModSummary -> CgGuts
-        -> ([(StgBinding,[(Id,[Id])])], CollectedCCs) -> IO ()
-writeJavaScriptModule' var summary _tidyCore (stg', _ccs) =
-  do let (program, meta) = variantRender var stg' (ms_mod summary)
+writeJavaScriptModule' :: DynFlags -> Variant -> ModSummary -> CgGuts
+        -> ([StgBinding], CollectedCCs) -> IO ()
+writeJavaScriptModule' dyflags var summary _tidyCore (stg', _ccs) =
+  do let (program, meta) = variantRender var dyflags stg' (ms_mod summary)
      putStrLn $ concat ["Writing module ", name, " (to ", outputFile vext, ")"]
      B.writeFile (outputFile vext) program
      case variantMetaExtension var of
@@ -70,8 +72,8 @@ linkJavaScript' var dyflags o_files dep_packages pagesMods = do
     debugTraceMsg dyflags 1 (ptext (sLit "JavaScript Linking") <+> text jsexe
                              <+> text "...")
     createDirectoryIfMissingVerbose normal False jsexe
-    mbJsFiles <- mapM (mbFile . (flip replaceExtension ext)) o_files
-    let jsFiles = catMaybes mbJsFiles
+    mbJsFiles <- mapM (mbFile . (flip replaceExtension ext)) (filter ((/=".js").takeExtension) o_files)
+    let jsFiles = catMaybes mbJsFiles ++ filter ((==".js").takeExtension) o_files
         pagesMods' = case pagesMods of
                         [] | any ((=="JSMain") . takeBaseName) jsFiles -> [mkModuleName "JSMain"]
                         []                                             -> [mkModuleName "Main"]
@@ -105,4 +107,4 @@ jsexeFileName var dflags
 #endif
         ++ variantExeExtension var
 
-#endif
+-- #endif

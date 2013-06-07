@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, TupleSections, CPP #-}
 module Gen2.RtsTypes where
 
 import           Language.Javascript.JMacro
@@ -10,29 +10,46 @@ import           Gen2.StgAst
 import           Gen2.Utils
 
 import           Data.Char                        (toLower)
-
+import           Control.Lens
 import           Data.Bits
 import qualified Data.List                        as L
 import           Data.Maybe                       (fromMaybe)
 import           Data.Monoid
 
+import qualified Data.Set as S
+import           Data.Set (Set)
+import qualified Data.Map as M
+import           Data.Map (Map)
+import           Data.Array ((!), listArray)
+import           Control.Monad.State.Strict
+
+import           DataCon
+import           DynFlags
 import           Encoding
+import           Gen2.RtsSettings
 import           Id
+import           Module
+import           Name
+import           Outputable hiding ((<>))
+import           Panic
 import           StgSyn
 import           TyCon
 import           Type
 import           Unique
-import Module
-import Name
-import Panic
-import           Gen2.RtsSettings
 
 import           System.IO.Unsafe
 
-
+-- showPpr' :: Outputable a => a -> G String
+-- showSDoc' :: SDoc -> G String
+showPpr' a = do
+  df <- _gsDynFlags <$> get
+  return (showPpr df a)
+showSDoc' a = do
+  df <- _gsDynFlags <$> get
+  return (showSDoc df a)
 
 -- closure types
-data CType = Thunk | Fun | Pap | Con | Ind | Blackhole
+data CType = Thunk | Fun | Pap | Con | Blackhole
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 --
@@ -41,7 +58,7 @@ ctNum Fun       = 1
 ctNum Con       = 2
 ctNum Thunk     = 0 -- 4
 ctNum Pap       = 3 -- 8
-ctNum Ind       = 4 -- 16
+-- ctNum Ind       = 4 -- 16
 ctNum Blackhole = 5 -- 32
 
 instance ToJExpr CType where
@@ -56,9 +73,28 @@ data VarType = PtrV     -- pointer = heap index, one field (gc follows this)
              | LongV    -- two fields
              | AddrV    -- a pointer not to the heap: two fields, array + index
              | ObjV     -- some js object, does not contain heap pointers
-             | JSArrV   -- array of followable values
---             | UbxTupV [VarType]
+             | ArrV     -- array of followable values
+             | MVarV    -- h$MVar object
+--             | TVarV
+             | MutVarV -- h$MutVar object
+             | WeakV
                deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- can we unbox C x to x, only if x is represented as a Number
+isUnboxableCon :: DataCon -> Bool
+isUnboxableCon dc
+  | [t] <- dataConRepArgTys dc, [t1] <- typeVt t =
+       isUnboxable t1 &&
+       dataConTag dc == 1 &&
+       length (tyConDataCons $ dataConTyCon dc) == 1
+  | otherwise = False
+
+-- one-constructor types with one primitive field represented as a JS Number
+-- can be unboxed
+isUnboxable :: VarType -> Bool
+isUnboxable DoubleV = True
+isUnboxable IntV    = True -- includes Char#
+isUnboxable _       = False
 
 varSize :: VarType -> Int
 varSize VoidV = 0
@@ -89,6 +125,12 @@ isMatchable DoubleV = True
 isMatchable IntV    = True
 isMatchable _       = False
 
+-- can this thing contain references to heap objects?
+isScannable :: VarType -> [Bool]
+isScannable PtrV = [True]
+isScannable ArrV = [True]
+isScannable x = replicate (varSize x) False
+
 -- go through PrimRep, not CgRep to make Int -> IntV instead of LongV
 tyConVt :: TyCon -> VarType
 tyConVt = primRepVt . tyConPrimRep
@@ -105,40 +147,43 @@ uTypeVt ut
   | otherwise          = primRepVt . typePrimRep $ ut
 
 primTypeVt :: Type -> VarType
-primTypeVt t
-  | st  == "GHC.Prim.Addr#" = AddrV
-  | st  == "GHC.Prim.Int#"  = IntV
-  | st  == "GHC.Prim.Int64#" = LongV
-  | st  == "GHC.Prim.Char#" = IntV
-  | st  == "GHC.Prim.Word#" = IntV
-  | st  == "GHC.Prim.Word64#" = LongV
-  | st  == "GHC.Prim.Double#" = DoubleV
-  | st  == "GHC.Prim.Float#" = DoubleV
-  | st' == "GHC.Prim.Array#" = JSArrV
-  | st' == "GHC.Prim.MutableArray#" = JSArrV
-  | st  == "GHC.Prim.ByteArray#" = ObjV
-  | st' == "GHC.Prim.MutableByteArray#" = ObjV
-  | st  == "GHC.Prim.ArrayArray#" = JSArrV
-  | st' == "GHC.Prim.MutableArrayArray#" = JSArrV
-  | st' == "GHC.Prim.MutVar#" = JSArrV -- one scannable thing
-  | st' == "GHC.Prim.TVar#" = JSArrV -- one scannable thing, can be null
-  | st' == "GHC.Prim.MVar#" = JSArrV -- one scannable thing, can be null
-  | st' == "GHC.Prim.State#" = VoidV
-  | st  == "GHC.Prim.RealWorld" = VoidV
-  | st  == "GHC.Prim.ThreadId#" = IntV
-  | st' == "GHC.Prim.Weak#" = JSArrV
-  | st' == "GHC.Prim.StablePtr#" = JSArrV
-  | st' == "GHC.Prim.StableName#" = JSArrV
-  | st' == "GHC.Prim.MutVar#" = JSArrV
-  | st  == "GHC.Prim.BCO#" = ObjV -- fixme what do we need here?
-  | st' == "(GHC.Prim.~#)" = ObjV -- ???
-  | st' == "GHC.Prim.Any" = PtrV
-  | st  == "Data.Dynamic.Obj" = PtrV -- ?
-  | otherwise = panic ("primTypeVt: unrecognized primitive type: " ++ st)
-   where
-    st | UnaryRep ut <- repType t = showPpr' ut
-       | otherwise                = panic "primTypeVt: non-unary type found"
-    st' = trim $ takeWhile (/=' ') st
+primTypeVt t = case repType t of
+                 UnaryRep ut -> case tyConAppTyCon_maybe ut of
+                                   Nothing -> panic "primTypeVt: not a TyCon"
+                                   Just tc -> go (show tc)
+                 _ -> panic "primTypeVt: non-unary type found"
+  where
+   pr xs = "ghc-prim:GHC.Prim." ++ xs
+   go st
+    | st == pr "Addr#" = AddrV
+    | st == pr "Int#"  = IntV
+    | st == pr "Int64#" = LongV
+    | st == pr "Char#" = IntV
+    | st == pr "Word#" = IntV
+    | st == pr "Word64#" = LongV
+    | st == pr "Double#" = DoubleV
+    | st == pr "Float#" = DoubleV
+    | st == pr "Array#" = ArrV
+    | st == pr "MutableArray#" = ArrV
+    | st == pr "ByteArray#" = ObjV
+    | st == pr "MutableByteArray#" = ObjV
+    | st == pr "ArrayArray#" = ArrV
+    | st == pr "MutableArrayArray#" = ArrV
+    | st == pr "MutVar#" = ObjV
+    | st == pr "TVar#" = ObjV
+    | st == pr "MVar#" = ObjV
+    | st == pr "State#" = VoidV
+    | st == pr "RealWorld" = VoidV
+    | st == pr "ThreadId#" = ObjV
+    | st == pr "Weak#" = WeakV
+    | st == pr "StablePtr#" = AddrV
+    | st == pr "StableName#" = ObjV
+    | st == pr "MutVar#" = ArrV -- MutVarV
+    | st == pr "BCO#" = ObjV -- fixme what do we need here?
+    | st == pr "~#" = VoidV -- coercion token?
+    | st == pr "Any" = PtrV
+    | st == "Data.Dynamic.Obj" = PtrV -- ?
+    | otherwise = panic ("primTypeVt: unrecognized primitive type: " ++ st)
 
 argVt :: StgArg -> VarType
 argVt = uTypeVt . stgArgType
@@ -184,11 +229,12 @@ data StgRet = Ret1 | Ret2 | Ret3 | Ret4 | Ret5 | Ret6 | Ret7 | Ret8 | Ret9 | Ret
 
 instance ToJExpr StgReg where
   toJExpr r
-    | fromEnum r <= 32 = ve . {- ("r."++) . -} map toLower . show $ r
-    | otherwise   = [je| regs[`fromEnum r-32`] |]
+    | fromEnum r <= 32 = ve . ("h$"++) . map toLower . show $ r
+    | otherwise   = [je| h$regs[`fromEnum r-32`] |]
+
 
 instance ToJExpr StgRet where
-  toJExpr = ve . map toLower . show
+  toJExpr = ve . ("h$"++) . map toLower . show
 
 regName :: StgReg -> String
 regName = map toLower . show
@@ -205,90 +251,211 @@ minReg = regNum minBound
 maxReg :: Int
 maxReg = regNum maxBound
 
+-- | the current code generator state
+data GenState = GenState
+  { _gsModule   :: Module      -- | the module we're compiling, used for generating names
+  , _gsToplevel :: Maybe Id    -- | the toplevel function group we're generating
+--  , _gsScope    :: GenScope  -- | the current lexical environment
+  , _gsToplevelStats :: [JStat] -- | extra toplevel statements that our current function emits
+  , _gsId       :: Int         -- | integer for the id generator
+  , _gsDynFlags :: DynFlags    -- | the DynFlags, used for prettyprinting etc
+  , _gsStack    :: [StackSlot] -- | what's currently on the stack, above SP
+--  , _gsSRTs     :: Map Id Int
+  }
+
+type C   = State GenState JStat
+type G a = State GenState a
+
+data StackSlot = SlotId Id Int
+               | SlotUnknown
+  deriving (Eq, Ord, Show)
+
+makeLenses ''GenState
+
+emitToplevel :: JStat -> G ()
+emitToplevel s = gsToplevelStats %= (s:)
+
+resetToplevel :: G ()
+resetToplevel = gsToplevelStats .= []
+
+dropSlots :: Int -> G ()
+dropSlots n = gsStack %= drop n
+
+addSlots :: [StackSlot] -> G ()
+addSlots xs = gsStack %= (xs++)
+
+resetSlots :: G a -> G a
+resetSlots m = do
+  s <- getSlots
+  setSlots []
+  a <- m
+  setSlots s
+  return a
+
+isolateSlots :: G a -> G a
+isolateSlots m = do
+  s <- getSlots
+  a <- m
+  setSlots s
+  return a
+
+setSlots :: [StackSlot] -> G ()
+setSlots xs = gsStack .= xs
+
+getSlots :: G [StackSlot]
+getSlots = use gsStack
+
+addUnknownSlots :: Int -> G ()
+addUnknownSlots n = addSlots (replicate n SlotUnknown)
+
+-- run the computation with the current stack slots, restore stack slots afterwards
+withStack :: G a -> G a
+withStack m = do
+  s <- getSlots
+  r <- m
+  setSlots s
+  return r
+
+encodeUnique :: Int -> String
+encodeUnique = reverse . go  -- reversed is more compressible
+  where
+    go n | n < 0  = '_' : encodeUnique (negate n)
+         | n > 61 = let (q,r) = n `quotRem` 62
+                          in  chars ! r : encodeUnique q
+               | otherwise = [chars ! n]
+
+    chars = listArray (0,61) (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
+
+{-
+-- | where can we find all Ids
+data GenScope = GenScope
+  { _stableScope :: Map Id IdScope  -- | how to access an id 
+  , _localScope  :: Set Id          -- | set of ids that have a local var binding
+  } -- deriving (Eq, Monoid)
+-}
+-- emptyScope :: GenScope
+-- emptyScope = GenScope mempty mempty
+
+initState :: DynFlags -> Module -> GenState
+initState df m = GenState m Nothing [] 1 df []
+
+runGen :: DynFlags -> Module -> G a -> a
+runGen df m = flip evalState (initState df m)
+
+{-
+-- | run an action in the initial state, useful for making one-off 
+runInit :: Module -> G a -> a
+runInit
+-}
+
+instance Monoid C where
+  mappend = liftM2 (<>)
+  mempty  = return mempty
+
+-- | where can we find a single Id
+data IdScope = Register !StgReg
+             | HeapPtr Id !Int    -- | it's in the heap object for Id, offset Int
+--              | StackOffset !Int
+             | StackFrame !Int    -- | current stack frame, offset
+             | NoEscape Id !Int   -- | no-escape stack frame allocated by id
+                                         -- fixme: why not a direct stack-offset?
+
+-- makeLenses ''GenScope
+
+currentModule :: G String
+currentModule = moduleNameString . moduleName <$> use gsModule
+
+currentModulePkg :: G String
+currentModulePkg = showPpr' =<< use gsModule
+
+
 -- arguments that the trampoline calls our funcs with
 funArgs :: [Ident]
 funArgs = [] -- [StrI "o"] -- [StrI "_heap", StrI "_stack"] -- [] -- [StrI "r", StrI "heap", StrI "stack"]
 
-data Special = Stack | Sp | Heap | Hp deriving (Show, Eq)
+data Special = Stack
+             | Sp
+             | HTrue
+             | HFalse
+     deriving (Show, Eq)
 
 instance ToJExpr Special where
-  toJExpr Stack = [je| stack |] -- [je| _stack |]
-  toJExpr Sp    = [je| sp    |] -- [je| _sp    |]
-  toJExpr Heap  = [je| heap  |] -- [je| _heap  |]
-  toJExpr Hp    = [je| hp    |]
-
-
-adjHp :: Int -> JStat
-adjHp e = [j| hp+=`e`; |] -- [j| `jsv "hp = _hp"` = _hp + `e` |]
-
-adjHpN :: Int -> JStat
-adjHpN e = [j| hp=hp-`e`; |] -- [j| `jsv "hp = _hp"` = _hp - `e` |]
+  toJExpr Stack  = [je| h$stack |]
+  toJExpr Sp     = [je| h$sp    |]
+  toJExpr HTrue  = [je| true    |]
+  toJExpr HFalse = [je| false   |]
 
 adjSp :: Int -> JStat
-adjSp e = [j| sp = sp + `e`; |] -- [j| _sp += `e`; sp = _sp; |]
+adjSp e = [j| h$sp = h$sp + `e`; |] -- [j| _sp += `e`; sp = _sp; |]
 
 adjSpN :: Int -> JStat
-adjSpN e = [j| sp = sp  - `e`; |] -- [j| _sp = _sp - `e`; sp = _sp; |]
+adjSpN e = [j| h$sp = h$sp  - `e`; |] -- [j| _sp = _sp - `e`; sp = _sp; |]
 
 -- stuff that functions are supposed to execute at the start of the body
 -- (except very simple functions)
 preamble :: JStat
-preamble = mempty -- [j| var !_stack = stack; var !_heap = heap; var !_sp = sp; |] -- var !_heap = heap; |] -- var !_sp = sp; |]
--- [j| var th = `jsv "('x',eval)"`('this'); var !_stack = th.stack; var !_heap = th.heap; var !_sp = th.sp; |]
-ve :: String -> JExpr
-ve = ValExpr . JVar . StrI
+preamble = mempty
 
--- setClosureInfo -- fixme
+-- optimized push that reuses existing values on stack
+-- slots are True if the right value is already there
+pushOptimized :: [(JExpr,Bool)] -> C
+pushOptimized [] = return mempty
+pushOptimized xs = dropSlots l >> return go
+  where
+    go
+     | rtsInlinePush               = inlinePush
+     | all snd xs                  = adjSp l
+     | all (not.snd) xs && l <= 32 =
+        ApplStat (toJExpr . StrI $ "h$p" ++ show l) (map fst xs)
+     | l <= 8 && not (snd $ last xs) =
+        ApplStat (toJExpr . StrI $ "h$pp" ++ show sig) [ e | (e,False) <- xs ]
+     | otherwise = inlinePush
+    l   = length xs
+    sig :: Integer
+    sig = L.foldl1' (.|.) $ zipWith (\(e,b) i -> if not b then bit i else 0) xs [0..]
+    inlinePush = adjSp l <> mconcat (zipWith pushSlot [1..] xs)
+    pushSlot i (e,False) = [j| `Stack`[`offset i`] = `e` |]
+    pushSlot _ _         = mempty
+    offset i | i == l    = [je| `Sp` |]
+             | otherwise = [je| `Sp` - `l-i` |]
 
--- set fields used by the gc to follow pointers
--- gc info fields:
--- .gtag -> gtag & 0xFF = size, other bits indicate  offsets of pointers, gtag === 0 means tag invalid, use list
--- .gi   -> info list, [size, offset1, offset2, offset3, ...]
-{-
-gcInfo :: Int   -> -- ^ size of closure in array indices, including entry
-         [Int]  -> -- ^ offsets from entry where pointers are found
-          JObj
-gcInfo size offsets =
-  "gi"   .= infolist <>
-  "gtag" .= tag
-      where
-        tag | maximum (0:offsets) < 25 && minimum (1:offsets) >= 0 && size <= 255 =
-                size .|. (L.foldl' (.|.) 0 $ map (\x -> 1 `shiftL` (8+x)) offsets)
-            | otherwise = 0
-        infolist = size : L.sort offsets
--}
--- set fields to indicate that object layout is stored  inside the object in the second index
--- objects with embedded layout info have gtag == -1
-{-
-gcEmbedded :: JObj
-gcEmbedded =
-    "gi"   .= [ji (-1)] <>
-    "gtag" .= ji (-1)
--}
--- a pap has a special gtag, pap object size n (n-2 arguments), we hve gtag = -n-1
-{-
-gcPap :: Int -> JObj
-gcPap n =
-    "gi"   .= [n] <>
-    "gtag" .= ji (-n-1)
--}
-push :: [JExpr] -> JStat
-push [] = mempty
-push xs = [j| `adjSp l`; `items`; |]
+push :: [JExpr] -> C
+push xs = dropSlots (length xs) >> return (push' xs)
+
+push' :: [JExpr] -> JStat
+push' [] = mempty
+push' xs
+   | rtsInlinePush || l > 32 || l < 2 = adjSp l <> mconcat items
+   | otherwise                        = ApplStat (toJExpr . StrI $ "h$p" ++ show l) xs
   where
     items = zipWith (\i e -> [j| `Stack`[`offset i`] = `e`; |]) [(1::Int)..] xs
     offset i | i == l    = [je| `Sp` |]
              | otherwise = [je| `Sp` - `l-i` |]
     l = length xs
 
-pop :: [JExpr] -> JStat
+popUnknown :: [JExpr] -> C
+popUnknown xs = popSkipUnknown 0 xs
+
+popSkipUnknown :: Int -> [JExpr] -> C
+popSkipUnknown n xs = popSkip n (map (,SlotUnknown) xs)
+
+pop :: [(JExpr,StackSlot)] -> C
 pop = popSkip 0
 
 -- pop the expressions, but ignore the top n elements of the stack
-popSkip :: Int -> [JExpr] -> JStat
+popSkip :: Int -> [(JExpr,StackSlot)] -> C
 popSkip 0 [] = mempty
-popSkip n [] = adjSpN n
-popSkip n xs = [j| `loadSkip n xs`; `adjSpN $ length xs+n`; |]
+popSkip n [] = addUnknownSlots n >> return (adjSpN n)
+popSkip n xs = do
+  addUnknownSlots n
+  addSlots (map snd xs)
+  return (loadSkip n (map fst xs) <> adjSpN (length xs + n))
+
+-- pop things, don't upstate stack knowledge
+popSkip' :: Int -> [JExpr] -> JStat
+popSkip' 0 [] = mempty
+popSkip' n [] = adjSpN n
+popSkip' n xs = loadSkip n xs <> adjSpN (length xs + n)
 
 -- like popSkip, but without modifying sp
 loadSkip :: Int -> [JExpr] -> JStat
@@ -298,55 +465,76 @@ loadSkip n xs = mconcat items
       offset 0 = [je| `Sp` |]
       offset n = [je| `Sp` - `n` |]
 
-debugPop e@(ValExpr (JVar (StrI i))) offset = [j| log("popped: " + `i`  + " -> " + `e`) |]
-debugPop _ _ = mempty
+-- debugPop e@(ValExpr (JVar (StrI i))) offset = [j| log("popped: " + `i`  + " -> " + `e`) |]
+-- debugPop _ _ = mempty
 
 -- declare and pop
-popSkipI :: Int -> [Ident] -> JStat
+popSkipI :: Int -> [(Ident,StackSlot)] -> C
 popSkipI 0 [] = mempty
-popSkipI n [] = adjSpN n
-popSkipI n xs = [j| `loadSkipI n xs`; `adjSpN $ length xs+n`; |]
+popSkipI n [] = return (adjSpN n)
+popSkipI n xs = do
+  addUnknownSlots n
+  addSlots (map snd xs)
+  return (loadSkipI n (map fst xs) <> adjSpN (length xs + n))
 
 -- like popSkip, but without modifying sp
 loadSkipI :: Int -> [Ident] -> JStat
 loadSkipI n xs = mconcat items
     where
-      items = reverse $ zipWith (\i e -> [j| `decl e`; `iex e` = `Stack`[`offset (i+n)`]; |]) [(0::Int)..] (reverse xs)
+      items = reverse $ zipWith f [(0::Int)..] (reverse xs)
       offset 0 = [je| `Sp` |]
       offset n = [je| `Sp` - `n` |]
+      f i e = [j| `decl e`;
+                  `e` = `Stack`[`offset (i+n)`];
+                |]
 
-popn :: Int -> JStat
-popn n = adjSpN n
+popn :: Int -> C
+popn n = addUnknownSlots n >> return (adjSpN n)
 
 -- below: c argument is closure entry, p argument is (heap) pointer to entry
 
 closureType :: JExpr -> JExpr
-closureType c = [je| `c`.t |]
+closureType c = [je| `c`.f.t |]
 
 isThunk :: JExpr -> JExpr
-isThunk c = [je| `closureType c` === `Thunk` |]
+isThunk c = [je| `c`.f.t === `Thunk` |]
+isThunk' f = [je| `f`.t === `Thunk` |]
 
 isFun :: JExpr -> JExpr
-isFun c = [je| `closureType c` === `Fun` |]
+isFun c = [je| `c`.f.t === `Fun` |]
+
+isFun' :: JExpr -> JExpr
+isFun' f = [je| `f`.t === `Fun` |]
 
 isPap :: JExpr -> JExpr
-isPap c = [je| `closureType c` === `Pap` |]
+isPap c = [je| `c`.f.t === `Pap` |]
+
+isPap' :: JExpr -> JExpr
+isPap' f = [je| `f`.t === `Pap` |]
 
 isCon :: JExpr -> JExpr
-isCon c = [je| `closureType c` === `Con` |]
+isCon c = [je| `c`.f.t === `Con` |]
 
-isInd :: JExpr -> JExpr
-isInd c = [je| `closureType c` === `Ind` |]
+isCon' :: JExpr -> JExpr
+isCon' f = [je| `f`.t === `Con` |]
+
+-- no ind anymore
+-- isInd :: JExpr -> JExpr
+-- isInd c = [je| `closureType c` === `Ind` |]
 
 conTag :: JExpr -> JExpr
-conTag c = [je| `c`.a |]
+conTag c = [je| `c`.f.a |]
+conTag' f = [je| `f`.a |]
 
 entry :: JExpr -> JExpr
-entry p = [je| `Heap`[`p`] |]
+entry p = [je| `p`.f |]
 
--- number of  arguments (arity & 0xff = arguments, arity >> 8 = number of trailing void args)
+-- number of  arguments (arity & 0xff = arguments, arity >> 8 = number of registers)
 funArity :: JExpr -> JExpr
-funArity c = [je| `c`.a |]
+funArity c = [je| `c`.f.a |]
+
+funArity' :: JExpr -> JExpr
+funArity' f = [je| `f`.a |]
 
 -- expects heap pointer to entry (fixme document this better or make typesafe)
 -- arity & 0xff = real number of arguments
@@ -354,20 +542,19 @@ funArity c = [je| `c`.a |]
 papArity :: JExpr -> JExpr -> JStat
 papArity tgt p = [j| `tgt` = 0;
                      var cur = `p`;
+                     var args = 0;
+                     var regs = 0;
                      do {
-                       `tgt` = `tgt`-`papArgs cur`;
-                       cur = `Heap`[cur+1];
-                     } while(`Heap`[cur].t === `Pap`);
-                     `tgt` += `Heap`[cur].a;
+                       regs += cur.f.a;
+                       args += cur.d2.d1;
+                       `traceRts $ "pap: " |+ regs |+ " " |+ args`;
+                       cur = cur.d1;
+                     } while(cur.f.t === `Pap`);
+                     var fa = cur.f.a;
+                     `traceRts $ "pap base: " |+ fa`;
+                     `tgt` = (((fa>>8)-regs)<<8)|((fa&0xFF)-args);
+                     `traceRts $ "pap arity: " |+ tgt`;
                    |]
-
--- number of stored args in pap (fixme?)
-papArgs :: JExpr -> JExpr
--- papArgs p = [je| (`Heap`[`p`].gtag & 0xff) - 1 |] -- [je| (-3) - `Heap`[`p`].gtag |]
-papArgs p = [je| `Heap`[`p`].a |]
-
-funTag :: JExpr -> JExpr
-funTag c = [je| `c`.gtag |]
 
 -- some utilities do do something with a range of regs
 -- start or end possibly supplied as javascript expr
@@ -396,109 +583,111 @@ withRegsRE start end max fallthrough f =
           | otherwise   = [j| break; |]
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
 
-
--- fixme package disambig, some exported ids have no module/pkg?
-jsIdIdent :: Id -> Maybe Int -> String -> Ident
-jsIdIdent i mn suffix = StrI . (\x -> "$hs_"++prefix++x++mns++suffix++u) . zEncodeString . showPpr' . idName $ i
+jsIdIdent :: Id -> Maybe Int -> String -> G Ident
+--jsIdIdent i Nothing suffix
+--   | not (isExportedId i) || isNothing (nameModule_maybe . getName) i = jsLocalIdIdent i suffix
+jsIdIdent i mn suffix = do
+  (prefix, u) <- mkPrefixU
+  StrI . (\x -> "h$"++prefix++x++mns++suffix++u) . zEncodeString <$> name
     where
       mns = maybe "" (('_':).show) mn
-      (prefix,u)
-        | isExportedId i, Just x <- (nameModule_maybe . getName) i = ("","")
-        | otherwise = ("INTERNAL_", '_' : (show . getKey . getUnique $ i))
-
-{-
-        | isExportedId i = "_" ++ (show . isInternalName . getName $ i ) ++ "_"
-                               ++ (show . isSystemName . getName $ i ) ++ "_"
-                               ++ (showPpr' . getSrcLoc $ i )
-        | otherwise      = '_' : (show . getKey . getUnique $ i)
--}
-
-           {-
-      | isLocalId i = '_' : (show . getKey . getUnique $ i)
-         | (not . isExportedId) i = "_nexp"
-         | otherwise   = ""
--}
---        "_" ++ (moduleNameString . moduleName $ x) 
+      name = fmap ('.':) . showPpr' . localiseName . getName $ i
+      mkPrefixU
+        | isExportedId i, Just x <- (nameModule_maybe . getName) i = do
+           xstr <- showPpr' x
+           return (zEncodeString xstr, "")
+        | otherwise = (,('_':) . encodeUnique . getKey . getUnique $ i) . ('_':) . zEncodeString
+                        <$> currentModulePkg
 
 jsVar :: String -> JExpr
 jsVar v = ValExpr . JVar . StrI $ v
 
+-- isBoolId :: Id -> Bool
+-- isBoolId i = isTrueCon i || isFalseCon i
+
+-- fixme remove dependency on the Show instances
+{-
+isTrueCon :: Id -> Bool
+isTrueCon i = show (idName i) == "ghc-prim:GHC.Types.True"
+
+isFalseCon :: Id -> Bool
+isFalseCon i = show (idName i) == "ghc-prim:GHC.Types.False"
+-}
+
 -- regular id, shortcut for bools!
-jsId :: Id -> JExpr
-jsId i | n == "GHC.Types.True"  = toJExpr (1::Int)
-       | n == "GHC.Types.False" = toJExpr (0::Int)
-       | otherwise = ValExpr (JVar $ jsIdIdent i Nothing "")
-    where
-      n = showPpr' . idName $ i
+jsId :: Id -> G JExpr
+jsId i
+--  | isTrueCon i  = return $ toJExpr HTrue
+--  | isFalseCon i = return $ toJExpr HFalse
+  | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
 
 -- entry id
-jsEnId :: Id -> JExpr
-jsEnId i = ValExpr (JVar $ jsEnIdI i)
+jsEnId :: Id -> G JExpr
+jsEnId i = ValExpr . JVar <$> jsEnIdI i
 
-jsEnIdI :: Id -> Ident
+jsEnIdI :: Id -> G Ident
 jsEnIdI i = jsIdIdent i Nothing "_e"
 
-jsEntryId :: Id -> JExpr
-jsEntryId i = ValExpr (JVar $ jsEntryIdI i)
+jsEntryId :: Id -> G JExpr
+jsEntryId i = ValExpr . JVar <$> jsEntryIdI i
 
-jsEntryIdI :: Id -> Ident
+jsEntryIdI :: Id -> G Ident
 jsEntryIdI i = jsIdIdent i Nothing "_e"
 
 -- datacon entry, different name than the wrapper
-jsDcEntryId :: Id -> JExpr
-jsDcEntryId i = ValExpr (JVar $ jsDcEntryIdI i)
+jsDcEntryId :: Id -> G JExpr
+jsDcEntryId i = ValExpr . JVar <$> jsDcEntryIdI i
 
-jsDcEntryIdI :: Id -> Ident
+jsDcEntryIdI :: Id -> G Ident
 jsDcEntryIdI i = jsIdIdent i Nothing "_con_e"
 
-jsIdV :: Id -> JVal
-jsIdV i = JVar $ jsIdIdent i Nothing ""
+jsIdV :: Id -> G JVal
+jsIdV i = JVar <$> jsIdIdent i Nothing ""
 
-jsIdI :: Id -> Ident
+jsIdI :: Id -> G Ident
 jsIdI i = jsIdIdent i Nothing ""
 
 -- some types, Word64, Addr#, unboxed tuple have more than one javascript var
-jsIdIN :: Id -> Int -> Ident
+jsIdIN :: Id -> Int -> G Ident
 jsIdIN i n = jsIdIdent i (Just n) ""
 
-jsIdN :: Id -> Int -> JExpr
-jsIdN i n = ValExpr (JVar $ jsIdIdent i (Just n) "")
+jsIdN :: Id -> Int -> G JExpr
+jsIdN i n = ValExpr . JVar <$> jsIdIdent i (Just n) ""
 
 
 
 data ClosureInfo = ClosureInfo
-     { ciVar    :: JExpr    -- ^ object being infod
-     , ciRegs   :: [StgReg] -- ^ registers with pointers
-     , ciName   :: String   -- ^ friendly name for printing
-     , ciLayout :: CILayout -- ^ heap/stack layout of the object
-     , ciType   :: CIType   -- ^ type of the object, with extra info where required
-     , ciStatic :: CIStatic -- ^ static references of this object
+     { ciVar    :: JExpr     -- ^ object being infod
+     , ciRegs   :: [VarType] -- ^ things in registers
+     , ciName   :: String    -- ^ friendly name for printing
+     , ciLayout :: CILayout  -- ^ heap/stack layout of the object
+     , ciType   :: CIType    -- ^ type of the object, with extra info where required
+     , ciStatic :: CIStatic  -- ^ static references of this object
      }
 
-data CIType = CIFun { citArity :: Int  -- | number of arguments (double arguments are counted double)
-                    , citNVoid :: Int  -- | number of trailing void args
+data CIType = CIFun { citArity :: Int  -- | function arity
+                    , citRegs  :: Int  -- | number of registers for the args
                     }
             | CIThunk
             | CICon { citConstructor :: Int }
             | CIPap { citSize :: Int } -- fixme is this ok?
             | CIBlackhole
-            | CIInd
+  --          | CIInd
 
-data CIStatic = CIStaticParent { staticParent :: Id } -- ^ static refs are stored in parent in fungroup
-              | CIStaticRefs   { staticRefs :: [Id] } -- ^ list of refs that need to be kept alive
+data CIStatic = -- CIStaticParent { staticParent :: Ident } -- ^ static refs are stored in parent in fungroup
+                CIStaticRefs   { staticRefs :: [Ident] } -- ^ list of refs that need to be kept alive
               | CINoStatic
 
 -- | static refs: array = references, single var = follow parent link, null = nothing to report
 instance ToJExpr CIStatic where
   toJExpr CINoStatic         = [je| null |]
-  toJExpr (CIStaticParent p) = jsId p
+--  toJExpr (CIStaticParent p) = iex p -- jsId p
   toJExpr (CIStaticRefs [])  = [je| null |]
-  toJExpr (CIStaticRefs rs)  = toJExpr (map idStr rs)
-          where
-            idStr i = let (StrI xs) = jsIdI i in [je| `xs` |]
+  toJExpr (CIStaticRefs rs)  = [je| \ -> `toJExpr rs` |] --- (map istr rs) -- (map idStr rs)
+
 
 data CILayout = CILayoutVariable -- layout stored in object itself, first position from the start
-              | CILayoutPtrs     -- size and pointer offsets known
+              | CILayoutPtrs     -- size and pointer offsets known, no other primitive things (like IORef, MVar, Array) inside
                   { layoutSize :: !Int
                   , layoutPtrs :: [Int] -- offsets of pointer fields
                   }
@@ -507,18 +696,23 @@ data CILayout = CILayoutVariable -- layout stored in object itself, first positi
                   , layout     :: [VarType]
                   }
 
--- standard fixed layout: entry fun + payload
+-- standard fixed layout: payload size
 fixedLayout :: [VarType] -> CILayout
-fixedLayout vts = CILayoutFixed (1 + sum (map varSize vts)) vts
+fixedLayout vts = CILayoutFixed (sum (map varSize vts)) vts
 
 -- a gi gai i
 instance ToStat ClosureInfo where
-  toStat (ClosureInfo obj rs name layout CIThunk srefs)       = setObjInfoL obj rs layout Thunk name 0 srefs
-  toStat (ClosureInfo obj rs name layout (CIFun arity nvoid) srefs) = setObjInfoL obj rs layout Fun name (mkArityTag arity nvoid) srefs
-  toStat (ClosureInfo obj rs name layout (CICon con) srefs)   = setObjInfoL obj rs layout Con name con srefs
-  toStat (ClosureInfo obj rs name layout CIInd srefs)         = setObjInfoL obj rs layout Ind name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
-  toStat (ClosureInfo obj rs name layout CIBlackhole srefs)   = setObjInfoL obj rs layout Blackhole name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
-  
+  toStat (ClosureInfo obj rs name layout CIThunk srefs)       =
+    setObjInfoL obj rs layout Thunk name 0 srefs
+  toStat (ClosureInfo obj rs name layout (CIFun arity nregs) srefs) =
+    setObjInfoL obj rs layout Fun name (mkArityTag arity nregs) srefs
+  toStat (ClosureInfo obj rs name layout (CICon con) srefs)   =
+    setObjInfoL obj rs layout Con name con srefs
+--  toStat (ClosureInfo obj rs name layout CIInd srefs)         =
+--    setObjInfoL obj rs layout Ind name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
+  toStat (ClosureInfo obj rs name layout CIBlackhole srefs)   =
+    setObjInfoL obj rs layout Blackhole name 0 srefs
+
   -- pap have a special gtag for faster gc ident (only need to access gtag field)
   toStat (ClosureInfo obj rs name layout (CIPap size) srefs)  =
     setObjInfo obj Pap name [] size (toJExpr $ -3-size) rs srefs
@@ -528,28 +722,48 @@ instance ToStat ClosureInfo where
 mkArityTag :: Int -> Int -> Int
 mkArityTag arity trailingVoid = arity .|. (trailingVoid `shiftL` 8)
 
+-- tag repurposed as size
 setObjInfoL :: JExpr     -- ^ the object
-            -> [StgReg]  -- ^ registers with pointers
+            -> [VarType] -- ^ things in registers
             -> CILayout  -- ^ layout of the object
             -> CType     -- ^ closure type
             -> String    -- ^ object name, for printing
             -> Int       -- ^ `a' argument, depends on type (arity, conid, size)
             -> CIStatic  -- ^ static refs
             -> JStat
-setObjInfoL obj rs CILayoutVariable t n a            = setObjInfo obj t n [] a (toJExpr (-1 :: Int)) rs
-setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    = setObjInfo obj t n [] a (mkGcTag t size ptrs) rs
-setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n l' a (mkGcTag t size ptrs) rs
+setObjInfoL obj rs CILayoutVariable t n a            =
+  setObjInfo obj t n [] a (toJExpr (-1 :: Int)) rs
+setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    =
+  setObjInfo obj t n xs a tag rs
   where
-    ptrs = ptrOffsets 0 layout
-    l'   = map fromEnum layout
+    tag = toJExpr size  -- mkGcTagPtrs t size ptrs
+    xs -- | tag /= 0  = []
+       = map (\i -> fromEnum $ if i `elem` ptrs then PtrV else ObjV) [1..size-1]
+setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n xs a tag rs
+  where
+    tag  = toJExpr size -- mkGcTag t size layout
+    xs   = toTypeList layout
+       {-
+       | tag /= 0 = []
+       | otherwise = toTypeList layout
+       -}
+mkGcTag :: CType -> Int -> [VarType] -> JExpr
+mkGcTag t size vs = mkGcTagPtrs t size (scannableOffsets 0 vs)
+{-
+   | any (\v -> isScannable v && not (v==PtrV)) vs = 0
+  | otherwise = 
+-}
+
+toTypeList :: [VarType] -> [Int]
+toTypeList = concatMap (\x -> replicate (varSize x) (fromEnum x))
 
 -- the tag thingie, will be 0 if info cannot be read from the tag
-mkGcTag :: CType -> Int -> [Int] -> JExpr
-mkGcTag t objSize ptrs = fromMaybe fallback $
-                         toJExpr . (.|. objSize') <$> ptrTag (map (+8) ptrs)
+mkGcTagPtrs :: CType -> Int -> [Int] -> JExpr
+mkGcTagPtrs t objSize ptrs = fromMaybe fallback $
+                           toJExpr . (.|. objSize') <$> ptrTag (map (+8) ptrs)
   where
-    -- if tag bits don't fit in an integer, use a list
-    fallback = toJExpr (objSize' : ptrs)
+    -- if tag bits don't fit in an integer, set tag to 0, gc will use the info list
+    fallback = toJExpr (0::Int) -- (objSize' : ptrs)
     objSize' = if t == Thunk then max 2 objSize else objSize
 
 setObjInfo :: JExpr      -- ^ the thing to modify
@@ -558,18 +772,27 @@ setObjInfo :: JExpr      -- ^ the thing to modify
            -> [Int]      -- ^ list of item types in the object, if known (free variables, datacon fields)
            -> Int        -- ^ extra 'a' parameter, for constructor tag or arity
            -> JExpr      -- ^ tag for the garbage collector
-           -> [StgReg]   -- ^ pointers in registers
+           -> [VarType]  -- ^ things in registers
            -> CIStatic   -- ^ static refs
            -> JStat
-setObjInfo obj t name fields a gctag argptrs static =
-  [j| _setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `map regNum argptrs`, `static`);  |]
+setObjInfo obj t name fields a gctag argptrs static
+  | rtsDebug  = [j| h$setObjInfo(`obj`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
+  | otherwise = [j| h$o(`obj`,`t`,`a`,`gctag`,`nregs`,`static`); |]
+  where
+    nregs = sum $ map varSize argptrs
+
+scannableOffsets :: Int -> [VarType] -> [Int]
+scannableOffsets start ts =
+  [o | (o,True) <- zip [start..] (concatMap isScannable ts) ]
 
 -- generates a list of pointer locations for a list of variable locations starting at start
+{-
 ptrOffsets :: Int -> [VarType] -> [Int]
 ptrOffsets start [] = []
 ptrOffsets start (t:ts)
     | isPtr t = start : ptrOffsets (start + varSize t) ts
     | otherwise = ptrOffsets (start + varSize t) ts
+-}
 
 ptrTag :: [Int] -> Maybe Int
 ptrTag ptrs
@@ -580,29 +803,29 @@ shiftedPtrTag :: Int -> [Int] -> Maybe Int
 shiftedPtrTag shift = ptrTag . map (subtract shift)
 
 -- | generate all js vars for the ids (can be multiple per var)
-genIds :: Id -> [JExpr]
+genIds :: Id -> G [JExpr]
 genIds i
-  | s == 0    = mempty
-  | s == 1    = [jsId i]
-  | otherwise = map (jsIdN i) [1..s]
+  | s == 0    = return mempty
+  | s == 1    = (:[]) <$> jsId i
+  | otherwise = mapM (jsIdN i) [1..s]
   where
     s  = varSize vt
     vt = uTypeVt . idType $ i
 
 -- | get all idents for an id
-genIdsI :: Id -> [Ident]
+genIdsI :: Id -> G [Ident]
 genIdsI i
-  | s == 1    = [jsIdI i]
-  | otherwise = map (jsIdIN i) [1..s]
+  | s == 1    = (:[]) <$> jsIdI i
+  | otherwise = mapM (jsIdIN i) [1..s]
         where
           s = varSize . uTypeVt . idType $ i
 
--- | declare all js vars for the id
-declIds :: Id -> JStat
+-- | declare all js vars for the id, cannot be an unboxed tuple
+declIds :: Id -> C
 declIds  i
-  | s == 0    = mempty
-  | s == 1    = decl (jsIdI i)
-  | otherwise = mconcat $ map (\n -> decl (jsIdIN i n)) [1..s]
+  | s == 0    = return mempty
+  | s == 1    = decl <$> jsIdI i
+  | otherwise = mconcat <$> mapM (\n -> decl <$> jsIdIN i n) [1..s]
   where
     s  = varSize vt
     vt = uTypeVt . idType $ i

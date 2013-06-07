@@ -10,48 +10,79 @@
 module Gen2.StgAst where
 
 import           BasicTypes
+import           Control.Lens
 import           CoreSyn
 import           CostCentre
+import           Data.Char (isSpace)
+import qualified Data.Foldable as F
+import qualified Data.List      as L
+import           Data.Monoid
+import           Data.Set      (Set)
+import qualified Data.Set      as S
 import           DataCon
 import           DynFlags
 import           ForeignCall
 import           Id
 import           Literal
 import           Module
+import           Name
 import           Outputable    hiding ((<>))
 import           PrimOp
 import           StgSyn
+import           SysTools (initSysTools)
+import           TyCon
 import           Type
 import           UniqFM
 import           UniqSet
+import qualified Var
 
-import           Control.Lens
-import qualified Data.Foldable as F
-import           Data.Monoid
-import           Data.Set      (Set)
-import qualified Data.Set      as S
+import           Compiler.Info
 
-#if __GLASGOW_HASKELL__ >= 706
-showPpr' a = showPpr (defaultDynFlags undefined) a
-showSDoc' a = showSDoc (defaultDynFlags undefined) a
-#else
-showPpr' a = showPpr a
-showSDoc' a = showSDoc a
-#endif
+import           Control.Monad
+import           System.Environment (getArgs)
+import           System.IO.Unsafe
 
+-- this is a hack to be able to use pprShow in a Show instance, should be removed
+{-# NOINLINE hackPprDflags #-}
+hackPprDflags :: DynFlags
+hackPprDflags = unsafePerformIO $ do
+  args <- getArgs
+  let (minusB_args, args1) = L.partition ("-B" `L.isPrefixOf`) args
+      mbMinusB | null minusB_args = Nothing
+               | otherwise = Just . drop 2 . last $ minusB_args
+  libDir <- getGlobalPackageBase
+  mySettings <- initSysTools (mbMinusB `mplus` Just libDir)
+  initDynFlags (defaultDynFlags mySettings)
+
+fixSpace :: String -> String
+fixSpace xs = map f xs
+  where
+    f c | isSpace c = ' '
+        | otherwise = c
+
+
+-- fixme make this more informative
+instance Show Type where
+  show ty = fixSpace (showPpr hackPprDflags ty)
 instance Show CostCentre where show _ = "CostCentre"
 instance Show CostCentreStack where show _ = "CostCentreStack"
 instance Show StgBinderInfo where show _ = "StgBinderInfo"
-instance Show Module where show = showPpr'
-instance Show (UniqFM a) where show _ = "UniqSet"
-instance Show Type where show = showPpr'
-instance Show AltType where show = showPpr'
-instance Show SRT where show _ = "SRT"
-instance Show PrimCall where show = showPpr'
-instance Show ForeignCall where show = showPpr'
+instance Show Module where show m = packageIdString (modulePackageId m) ++ ":" ++ moduleNameString (moduleName m)
+instance Show (UniqFM Id) where show u = "[" ++ show (uniqSetToList u) ++ "]"
+instance Show TyCon where show = show . tyConName
+instance Show SRT where
+  show NoSRT = "SRT:NO"
+  show (SRTEntries e) = "SRT:" ++ show e
+  show (SRT i j b) = "SRT:BMP" ++ show [i,j]
+instance Show PackageId where show = packageIdString
+instance Show Name where
+  show n = case nameModule_maybe n of
+                  Nothing -> show (nameOccName n)
+                  Just m  -> show m ++ "." ++ show (nameOccName n)
+instance Show OccName where show = occNameString
 #if __GLASGOW_HASKELL__ >= 706
-instance Show DataCon where show = showPpr'
-instance Show Var where show = showPpr'
+instance Show DataCon where show d = show (dataConName d)
+instance Show Var where show v = "(" ++ show (Var.varName v) ++ " :: " ++ show (Var.varType v) ++ ")"
 #endif
 
 deriving instance Show UpdateFlag
@@ -61,6 +92,12 @@ deriving instance Show Literal
 deriving instance Show PrimOp
 deriving instance Show AltCon
 #endif
+deriving instance Show AltType
+deriving instance Show PrimCall
+deriving instance Show ForeignCall
+deriving instance Show CCallTarget
+deriving instance Show CCallSpec
+deriving instance Show CCallConv
 deriving instance Show FunctionOrData
 deriving instance Show StgExpr
 deriving instance Show StgBinding
@@ -100,4 +137,75 @@ exprRefs (StgTick _ _ expr) = exprRefs expr
 argRefs :: StgArg -> Set Id
 argRefs (StgVarArg id) = s id
 argRefs _ = mempty
+
+
+{-
+   Remove all LetNoEscape because we cannot (yet?) generate code for that.
+   This means updating the live variables lists everywhere
+ -}
+removeNoEscape :: StgBinding -> StgBinding
+removeNoEscape (StgNonRec b rhs) =
+  StgNonRec b $ fst (removeNoEscapeR mempty rhs)
+removeNoEscape (StgRec bs) =
+  StgRec $ map (\(b,r) -> (b, fst (removeNoEscapeR mempty r))) bs
+
+removeNoEscapeR :: Set Id -> StgRhs -> (StgRhs, Set Id)
+removeNoEscapeR i (StgRhsClosure ccs bi live upd srt bs body) =
+  let (body', bodyrefs) = removeNoEscapeE i body
+      live' = L.nub $ live ++ (S.toList $ S.intersection i bodyrefs)
+  in (StgRhsClosure ccs bi live' upd srt bs body', bodyrefs)
+removeNoEscapeR i con@(StgRhsCon _ _ args)  =
+  (con, S.unions $ map argRefs args)
+
+removeNoEscapeE :: Set Id -> StgExpr -> (StgExpr, Set Id)
+removeNoEscapeE i (StgLetNoEscape l1 l2 (StgNonRec b rhs) expr) =
+  let i' = S.union i (S.fromList $ uniqSetToList l1 ++ uniqSetToList l2) -- S.insert b i
+      (expr', exprrefs) = removeNoEscapeE i' expr
+      (rhs', rhsrefs)   = removeNoEscapeR i' rhs
+  in  (StgLet (StgNonRec b rhs') expr', rhsrefs `S.union` exprrefs)
+removeNoEscapeE i (StgLetNoEscape l1 l2 (StgRec bs) expr) =
+  let i' = S.union i (S.fromList $ uniqSetToList l1 ++ uniqSetToList l2) -- map fst bs)
+      (expr', exprrefs) = removeNoEscapeE i' expr
+      (bs', bsrefs) = unzip $ map (\(b,r) -> let (r', refs) = removeNoEscapeR i' r
+                                             in ((b,r'), refs)
+                                  ) bs
+  in (StgLet (StgRec bs') expr', S.unions (exprrefs:bsrefs))
+removeNoEscapeE i (StgLet (StgNonRec b rhs) expr) =
+  let (rhs', rhsrefs)   = removeNoEscapeR i rhs
+      (expr', exprrefs) = removeNoEscapeE i expr
+  in (StgLet (StgNonRec b rhs') expr', rhsrefs `S.union` exprrefs)
+removeNoEscapeE i (StgLet (StgRec bs) expr) =
+  let (expr', exprrefs) = removeNoEscapeE i expr
+      (bs', bsrefs)     = unzip $ map (\(b,r) ->
+                                        let (r', refs) = removeNoEscapeR i r
+                                        in  ((b,r'),refs)
+                                      ) bs
+  in (StgLet (StgRec bs') expr', S.unions (exprrefs:bsrefs))
+removeNoEscapeE i (StgSCC cc b c expr) =
+  let (expr', refs) = removeNoEscapeE i expr 
+  in  (StgSCC cc b c expr', refs)
+removeNoEscapeE i (StgTick m n expr) = 
+  let (expr', refs) = removeNoEscapeE i expr
+  in  (StgTick m n expr', refs)
+removeNoEscapeE i (StgCase e live1 live2 b srt at alts) = 
+  let (alts', altrefs) = unzip (map f alts)
+      (e', exprrefs)   = removeNoEscapeE i e
+--      newLiveAlts      = S.toList $ S.intersection i (S.unions altrefs)
+--      newLiveExpr      = S.toList $ S.intersection i exprrefs
+      unused1          = i S.\\ S.unions (exprrefs:altrefs)
+      unused2          = i S.\\ S.unions altrefs
+      live1' = delListFromUniqSet live1 (S.toList unused1)
+      live2' = delListFromUniqSet live2 (S.toList unused2)    
+--      live1' = addListToUniqSet live1 (newLiveAlts ++ newLiveExpr)
+--      live2' = addListToUniqSet live2 newLiveAlts
+      f :: StgAlt -> (StgAlt, Set Id)
+      f (ac, live, liveactive, expr) =
+        let  (expr', exprrefs) = removeNoEscapeE i expr
+--             newlive = S.toList (S.intersection i exprrefs)
+--             active' = replicate (length newlive) True ++ liveactive
+--        in ((ac, newlive++live, active', expr'), exprrefs)
+        in ((ac, live, liveactive, expr'), exprrefs)
+  in (StgCase e' live1' live2' b srt at alts', S.unions (exprrefs:altrefs))
+removeNoEscapeE i x = (x, exprRefs x)
+
 
