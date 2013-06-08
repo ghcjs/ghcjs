@@ -24,7 +24,6 @@ import Outputable ((<+>), ptext, text)
 import FastString (sLit)
 import Data.Maybe (catMaybes)
 
-import qualified Generator.Link as Js (link)
 import Compiler.Variants
        (variants, Variant(..))
 import Control.Monad (forM_)
