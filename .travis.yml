@@ -9,32 +9,34 @@ before_install:
     - sudo apt-get -y autoremove
     - dpkg -l | grep ^rc | awk '{print($2)}' | xargs sudo apt-get -y purge
     - sudo apt-get clean
-    - wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-i386-unknown-linux.tar.bz2
-    - tar -xjf ghc-7.6.1-i386-unknown-linux.tar.bz2
-    - cd ghc-7.6.1
-    - ./configure --prefix=$HOME/ghc-7.6.1
-    - make install
-    - export PATH=$HOME/ghc-7.6.1/bin:$PATH
-    - cd ..
-    - rm -rf ghc-7.6.1
-    - rm ghc-7.6.1-i386-unknown-linux.tar.bz2
+    - wget http://hdiff.luite.com/ghcjs/ghcjs-test.tar.xz
+    - cd /home
+    - sudo ln -s /home/travis /home/vagrant
+    - tar -xJf ghc-7.6.1-i386-unknown-linux.tar.bz2
+    - export PATH=$HOME/ghc/bin:$HOME/.cabal/bin:$HOME/jsshell:$HOME/node-v0.10.10-linux-x86:$PATH
+    - cd $HOME/.cabal/bin
+    - wget http://hdiff.luite.com/ghcjs/TestRunner
+    - chmod 755 TestRunner
+    - cd
 
 install:
-    - cabal install mega-sdist hspec cabal-meta cabal-src
-    - cabal-meta install --force-reinstalls
-    - rm -rf dist vendor
-    - wget http://www.haskell.org/ghc/dist/7.6.1/ghc-7.6.1-src.tar.bz2
-    - tar -xjf ghc-7.6.1-src.tar.bz2 
-    - rm ghc-7.6.1-src.tar.bz2
-    - cd ghc-7.6.1
-    - cp mk/build.mk.sample mk/build.mk
-    - echo "HADDOCK_DOCS = NO" >> mk/build.mk
-    - perl boot
-    - ./configure --prefix=$HOME/ghc-7.6.1
-    - make -j2
+    - cabal install -f-compiler-only
+    - ghcjs-boot --reboot
+    - cabal install --ghcjs random syb transformers text parallel QuickCheck old-time vector
+    - cd
+    - git clone git://github.com/ghcjs/ghcjs-prim.git
+    - cd ghcjs-prim
+    - cabal install --ghcjs
+    - cd
+    - git clone git://github.com/ghcjs/ghcjs-base.git
+    - cd ghcjs-base
+    - cabal install --ghcjs
+    - cd $HOME/.ghcjs/i3*
+    - git clone git://github.com/ghcjs/shims.git
 
 script:
-    - ghcjs-boot
+    - cd $HOME/ghcjs
+    - TestRunner
 
 notifications:
   irc:
