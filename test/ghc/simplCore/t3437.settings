@@ -1,2 +1,4 @@
+# test disabled because it takes too long, result seems ok
+disabled: true
 disableUnopt: true
 

@@ -1,11 +1,11 @@
-{-# LANGUAGE OverloadedStrings, TupleSections #-}
+{-# LANGUAGE CPP, OverloadedStrings, TupleSections, ScopedTypeVariables #-}
 
 module Main where
 
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Data.Char (isLower, isDigit)
+import           Data.Char (isLower, toLower, isDigit)
 import           Data.Maybe
 import           Data.Monoid
 import qualified Data.ByteString as B
@@ -20,32 +20,45 @@ import           Filesystem.Path (replaceExtension, basename, directory, extensi
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
 import           Shelly
-import           System.Environment (getArgs)
+import           System.Environment (getArgs, getEnv)
 import           System.Exit (ExitCode(..), exitFailure)
 import           System.Process (readProcessWithExitCode)
 import           System.Random (randomRIO)
 import           Test.Framework
 import           Test.Framework.Providers.HUnit (testCase)
 import           Test.HUnit.Base (assertBool, assertFailure, assertEqual, Assertion)
-import           Text.Read (readMaybe)
 import qualified Data.Yaml as Yaml
 import           Data.Yaml (FromJSON(..), Value(..), (.:?), (.!=))
 import           Data.Default
+import qualified Control.Exception as Ex
+#if __GLASGOW_HASKELL__ >= 707
+import           Text.Read (readMaybe)
+#else
+import           Safe
+
+readMaybe = readMay
+#endif
 
 main = do
   args <- getArgs
   let args' = filter (/="--benchmark") args
   checkRequiredPackages
+  onlyOpt <- getEnvOpt "GHCJS_TEST_ONLYOPT"
+  onlyUnopt <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
   if any (=="--benchmark") args
     then (\bs -> defaultMainWithArgs bs args') =<< benchmarks
-    else defaultMain =<< tests
+    else do
+      if onlyOpt && onlyUnopt
+        then putStrLn "warning: nothing to do, optimized and unoptimized disabled"
+        else defaultMain =<< tests onlyOpt onlyUnopt
 
 benchmarks = do
   nofib <- allTestsIn benchmark "test/nofib"
   return [ testGroup "Benchmarks from nofib" nofib
          ]
 
-tests = do
+tests onlyOpt onlyUnopt = do
+  let test = TestOpts onlyOpt onlyUnopt
   fay     <- allTestsIn test "test/fay"
   ghc     <- allTestsIn test "test/ghc"
   arith   <- allTestsIn test "test/arith"
@@ -83,12 +96,12 @@ requiredPackages = [ "ghc-prim"
                    ]
 
 data TestOpts = TestOpts { disableUnopt :: Bool
+                         , disableOpt   :: Bool
                          }
-test = TestOpts False
-benchmark = TestOpts True
+benchmark = TestOpts True False
 
 -- settings for a single test
-data TestSettings = 
+data TestSettings =
   TestSettings { tsDisableNode         :: Bool
                , tsDisableSpiderMonkey :: Bool
                , tsDisableOpt          :: Bool
@@ -248,7 +261,7 @@ runGhcjsResult opts file = do
     then return []
     else do
       let unopt = if disableUnopt opts || tsDisableUnopt settings then [] else [False]
-          opt   = if tsDisableOpt settings then [] else [True]
+          opt   = if disableOpt opts || tsDisableOpt settings then [] else [True]
           runs  = unopt ++ opt
       concat <$> mapM (run settings) runs
     where
@@ -334,3 +347,10 @@ checkRequiredPackages = shelly . silently $ do
     when (not $ any ((pkg <> "-") `TL.isPrefixOf`) installedPackages) $ do
       echo ("warning: package `" <> pkg <> "' is required by the test suite but is not installed")
 --      liftIO exitFailure
+
+getEnvMay :: String -> IO (Maybe String)
+getEnvMay xs = fmap Just (getEnv xs)
+               `Ex.catch` \(_::Ex.SomeException) -> return Nothing
+
+getEnvOpt :: MonadIO m => String -> m Bool
+getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)

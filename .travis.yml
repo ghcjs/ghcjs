@@ -39,6 +39,10 @@ install:
 script:
     - TestRunner
 
+env:
+    - GHCJS_TEST_ONLYOPT=1
+    - GHCJS_TEST_ONLYUNOPT=1
+
 notifications:
   irc:
     channels: "irc.freenode.net#ghcjs"
