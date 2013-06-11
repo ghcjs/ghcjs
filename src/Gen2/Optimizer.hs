@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, StandaloneDeriving, DeriveDataTypeable, QuasiQuotes, NoMonomorphismRestriction, TupleSections #-}
+{-# LANGUAGE CPP, GADTs, StandaloneDeriving, DeriveDataTypeable, QuasiQuotes, NoMonomorphismRestriction, TupleSections #-}
 {-
   Optimizer:
   Basic optimization of the generated JavaScript to reduce file size and improve readability
@@ -39,9 +39,11 @@ import           Gen2.Dataflow
 import Debug.Trace
 
 optimize :: JStat -> JStat
+#ifdef DISABLE_OPTIMIZER
+optimize = id
+#else
 optimize = renameLocalVars . removeDeadVars . dataflow
--- optimize s = trace ("*********** optimizing: ***********\n" ++ r s)
---       (renameLocalVars . removeDeadVars . dataflow $ s)
+#endif
 
 renameLocalVars :: JStat -> JStat
 renameLocalVars = thisFunction . nestedFuns %~ renameLocalsFun

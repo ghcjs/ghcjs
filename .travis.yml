@@ -1,26 +1,26 @@
 language: haskell
 
 before_install:
+    - export START=`pwd`
     - sudo apt-get update -qq
     - sudo apt-get --no-install-recommends install darcs libgmp3-dev libgmp3c2 freeglut3 freeglut3-dev
     - sudo apt-get build-dep ghc
-    - echo Removing Java to free up more space
-    - apt-cache search java | awk '{print($1)}' | grep -E -e '^(ia32-)?(sun|oracle)-java' -e '^openjdk-' -e '^icedtea' -e '^(default|gcj)-j(re|dk)' -e '^gcj-(.*)-j(re|dk)' -e 'java-common' | xargs sudo apt-get -y remove
-    - sudo apt-get -y autoremove
-    - dpkg -l | grep ^rc | awk '{print($2)}' | xargs sudo apt-get -y purge
     - sudo apt-get clean
+    - cd
     - wget http://hdiff.luite.com/ghcjs/ghcjs-test.tar.xz
-    - cd /home
-    - sudo ln -s /home/travis /home/vagrant
-    - tar -xJf ghc-7.6.1-i386-unknown-linux.tar.bz2
-    - export PATH=$HOME/ghc/bin:$HOME/.cabal/bin:$HOME/jsshell:$HOME/node-v0.10.10-linux-x86:$PATH
+    - tar -xJf $HOME/ghcjs-test.tar.xz --strip-components=1
+    - rm ghcjs-test.tar.xz
+    - export PATH=$HOME/ghc/bin:$HOME/.cabal/bin:$HOME/jsshell:$HOME/node/bin:$PATH
     - cd $HOME/.cabal/bin
     - wget http://hdiff.luite.com/ghcjs/TestRunner
     - chmod 755 TestRunner
-    - cd
+    - hash -r
+    - cd $START
 
 install:
-    - cabal install -f-compiler-only
+    - pwd
+    - export REPOSITORY_DIR=`pwd`
+    - cabal install -f-compiler-only -fdisable-optimizer
     - ghcjs-boot --reboot
     - cabal install --ghcjs random syb transformers text parallel QuickCheck old-time vector
     - cd
@@ -31,15 +31,17 @@ install:
     - git clone git://github.com/ghcjs/ghcjs-base.git
     - cd ghcjs-base
     - cabal install --ghcjs
-    - cd $HOME/.ghcjs/i3*
+    - cd $HOME/.ghcjs/x86*
     - git clone git://github.com/ghcjs/shims.git
+    - ghcjs-pkg list
+    - cd $REPOSITORY_DIR
 
 script:
-    - cd $HOME/ghcjs
     - TestRunner
 
 notifications:
   irc:
     channels: "irc.freenode.net#ghcjs"
   email: true
+
 

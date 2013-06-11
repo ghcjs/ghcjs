@@ -91,7 +91,7 @@ updateThunk
   | rtsInlineBlackhole =
       [j| `push' [toJExpr R1, jsv "h$upd_frame"]`;
           `R1`.f = h$blackhole;
-          `R1`.d1 = h$currentThread.tid;
+          `R1`.d1 = h$currentThread;
           `R1`.d2 = null; // will be filled with waiters array
         |]
   | otherwise = [j| h$bh(); |]
@@ -210,7 +210,7 @@ var !h$currentThread = null;
 fun h$bh {
   `push' [toJExpr R1, jsv "h$upd_frame"]`;
   `R1`.f  = h$blackhole;
-  `R1`.d1 = h$currentThread.tid;
+  `R1`.d1 = h$currentThread;
   `R1`.d2 = null; // will be filled with waiters array
 }
 
@@ -316,7 +316,7 @@ fun h$select1_e {
   `Stack`[`Sp`-1] = h$upd_frame;
   `Stack`[`Sp`] = h$select1_ret;
   `R1`.f = h$blackhole;
-  `R1`.d1 = h$currentThread.tid;
+  `R1`.d1 = h$currentThread;
   `R1`.d2 = null;
   `R1` = t;
   return h$ap_0_0_fast();
@@ -338,7 +338,7 @@ fun h$select2_e {
   `Stack`[`Sp`-1] = h$upd_frame;
   `Stack`[`Sp`] = h$select2_ret;
   `R1`.f = h$blackhole;
-  `R1`.d1 = h$currentThread.tid;
+  `R1`.d1 = h$currentThread;
   `R1`.d2 = null;
   `R1` = t;
   return h$ap_0_0_fast();

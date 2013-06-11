@@ -25,7 +25,12 @@ flag boot
 flag compiler-only
   default:            True
 
+flag disable-optimizer
+  default:            False
+
 Library
+    if flag(disable-optimizer)
+      cpp-options: -DDISABLE_OPTIMIZER
     Default-Language: Haskell2010
     exposed-modules: Gen2.Generator,
                      Gen2.Floater,
