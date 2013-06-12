@@ -16,7 +16,8 @@ import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime, diffUTCTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Filesystem (removeTree, isFile, getWorkingDirectory, setWorkingDirectory, copyFile)
-import           Filesystem.Path (replaceExtension, basename, directory, extension, addExtension, filename)
+import           Filesystem.Path ( replaceExtension, basename, directory, extension, addExtension
+                                 , filename, addExtensions, dropExtensions)
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
 import           Shelly
@@ -249,7 +250,7 @@ includeOpt fp = "-i" <> encodeString (directory fp)
 
 extraJsFiles :: FilePath -> IO [String]
 extraJsFiles file =
-  let jsFile = replaceExtension file "js"
+  let jsFile = addExtensions (dropExtensions file) ["foreign", "js"]
   in do
     e <- isFile jsFile
     return $ if e then [encodeString jsFile] else []
