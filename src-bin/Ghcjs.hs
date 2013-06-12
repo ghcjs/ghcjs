@@ -237,9 +237,14 @@ addPkgConf df = do
   db2 <- getUserPackageDB
   base <- getGlobalPackageBase
   return $ df {
-               extraPkgConfs = ([PkgConfFile db1, PkgConfFile db2]++)
+               extraPkgConfs = (([PkgConfFile db1, PkgConfFile db2]++).filter isNotUser.filter isNotGlobal.extraPkgConfs df)
              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
              }
+  where
+    isNotGlobal GlobalPkgConf = False
+    isNotGlobal _ = True
+    isNotUser UserPkgConf = False
+    isNotUser _ = True
 
 pkgConfArgs :: IO [String]
 pkgConfArgs = do
@@ -551,9 +556,6 @@ addPlatformDefines baseDir df = df { settings = settings1
            , "ALIGNMENT_DOUBLE=8"
            , "SIZEOF_FLOAT=4"
            , "ALIGNMENT_FLOAT=4"
-           , "WORDS_BIGENDIAN=1"
-           , "FLOAT_WORDS_BIGENDIAN=1"
-           , "__BIG_ENDIAN__=1"
            ]
 
 runGhcSession mbMinusB a = do

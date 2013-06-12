@@ -7,12 +7,12 @@ before_install:
     - sudo apt-get build-dep ghc
     - sudo apt-get clean
     - cd
-    - wget http://hdiff.luite.com/ghcjs/ghcjs-test.tar.xz
+    - wget --prefer-family=IPv4 http://hdiff.luite.com/ghcjs/ghcjs-test.tar.xz
     - tar -xJf $HOME/ghcjs-test.tar.xz --strip-components=1
     - rm ghcjs-test.tar.xz
     - export PATH=$HOME/ghc/bin:$HOME/.cabal/bin:$HOME/jsshell:$HOME/node/bin:$PATH
     - cd $HOME/.cabal/bin
-    - wget http://hdiff.luite.com/ghcjs/TestRunner
+    - wget --prefer-family=IPv4 http://hdiff.luite.com/ghcjs/TestRunner
     - chmod 755 TestRunner
     - hash -r
     - cd $START
