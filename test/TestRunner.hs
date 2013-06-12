@@ -104,6 +104,7 @@ requiredPackages = [ "ghc-prim"
                    , "QuickCheck"
                    , "old-time"
                    , "vector"
+                   , "stm"
                    ]
 
 data TestOpts = TestOpts { disableUnopt :: Bool

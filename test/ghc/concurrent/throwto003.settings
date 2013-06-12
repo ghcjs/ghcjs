@@ -1,3 +1,2 @@
-disableOpt: true
-disableUnopt: true
+disabled: true
 

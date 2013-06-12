@@ -22,7 +22,7 @@ install:
     - export REPOSITORY_DIR=`pwd`
     - cabal install -f-compiler-only -fdisable-optimizer
     - ghcjs-boot --reboot
-    - cabal install --ghcjs random syb transformers text parallel QuickCheck old-time vector
+    - cabal install --ghcjs stm random syb transformers text parallel QuickCheck old-time vector
     - cd
     - git clone git://github.com/ghcjs/ghcjs-prim.git
     - cd ghcjs-prim
