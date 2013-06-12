@@ -12,7 +12,7 @@ main = do shared <- atomically $ newTVar 0
 --          forkIO $ 25 `timesDo` (dispVar shared >> milliSleep 20)
           forkIO $ 10 `timesDo` (appV ((+) 2) shared >> milliSleep 50)
           forkIO $ 20 `timesDo` (appV pred shared >> milliSleep 25)
-          milliSleep 800
+          milliSleep 6000
           after <- atomRead shared
           putStrLn $ "After: " ++ show after
  where timesDo = replicateM_
