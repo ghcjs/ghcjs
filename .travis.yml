@@ -37,7 +37,7 @@ install:
     - cd $REPOSITORY_DIR
 
 script:
-    - TestRunner
+    - TestRunner -j 2 -t ghc -t conc -t integer -t ffi
 
 env:
     - GHCJS_TEST_ONLYOPT=1

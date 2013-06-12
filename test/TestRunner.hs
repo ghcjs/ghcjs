@@ -172,19 +172,22 @@ stdioAssertion testOpts file = do
   mexpected <- stdioExpected file
   case mexpected of
     Nothing -> putStrLn "test disabled"
-    Just expected -> do
+    Just (expected, t) -> do
       actual <- runGhcjsResult testOpts file
       when (null actual) (putStrLn "warning: no test results")
+      case t of
+        Nothing -> return ()
+        Just ms -> putStrLn ((padTo 35 $ encodeString file) ++ " - " ++ (padTo 35 "runhaskell") ++ " " ++ show ms ++ "ms")
       forM_ actual $ \((a,t),d) -> do
         assertEqual (encodeString file ++ ": " ++ d) expected a
-        putStrLn ("    " ++ (padTo 40 d) ++ " " ++ show t ++ "ms")
+        putStrLn ((padTo 35 $ encodeString file) ++ " - " ++ (padTo 35 d) ++ " " ++ show t ++ "ms")
 
 padTo :: Int -> String -> String
 padTo n xs | l < n     = xs ++ replicate (n-l) ' '
            | otherwise = xs
   where l = length xs
 
-stdioExpected :: FilePath -> IO (Maybe StdioResult)
+stdioExpected :: FilePath -> IO (Maybe (StdioResult, Maybe Integer))
 stdioExpected file = do
   settings <- settingsFor file
   if tsDisabled settings
@@ -193,13 +196,13 @@ stdioExpected file = do
       xs@[mex,mout,merr] <- mapM (readFilesIfExists.(map (replaceExtension file)))
              [["exit"], ["stdout", "out"], ["stderr","err"]]
       if any isJust xs
-        then return . Just $ StdioResult (fromMaybe ExitSuccess $ readExitCode =<< mex)
-                               (fromMaybe "" mout) (fromMaybe "" merr)
+        then return . Just $ (StdioResult (fromMaybe ExitSuccess $ readExitCode =<< mex)
+                               (fromMaybe "" mout) (fromMaybe "" merr), Nothing)
         else do
           mr <- runhaskellResult settings file
           case mr of
             Nothing    -> assertFailure "cannot run `runhaskell'" >> return undefined
-            Just (r,t) -> return (Just r)
+            Just (r,t) -> return (Just (r, Just t))
 
 readFileIfExists :: FilePath -> IO (Maybe Text)
 readFileIfExists file = do
