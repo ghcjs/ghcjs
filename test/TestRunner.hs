@@ -5,6 +5,8 @@ module Main where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Concurrent.MVar
+import           Control.Concurrent
 import           Data.Char (isLower, toLower, isDigit)
 import           Data.Maybe
 import           Data.Monoid
@@ -15,15 +17,17 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime, diffUTCTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import           Filesystem (removeTree, isFile, getWorkingDirectory, setWorkingDirectory, copyFile)
+import           Filesystem (removeTree, isFile, getWorkingDirectory, copyFile)
 import           Filesystem.Path ( replaceExtension, basename, directory, extension, addExtension
                                  , filename, addExtensions, dropExtensions)
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
 import           Prelude hiding (FilePath)
+import qualified Prelude
 import           Shelly
 import           System.Environment (getArgs, getEnv)
 import           System.Exit (ExitCode(..), exitFailure)
-import           System.Process (readProcessWithExitCode)
+import           System.Process ( createProcess, proc, CreateProcess(..), StdStream(..)
+                                , terminateProcess, waitForProcess)
 import           System.Random (randomRIO)
 import           Test.Framework
 import           Test.Framework.Providers.HUnit (testCase)
@@ -32,6 +36,12 @@ import qualified Data.Yaml as Yaml
 import           Data.Yaml (FromJSON(..), Value(..), (.:?), (.!=))
 import           Data.Default
 import qualified Control.Exception as Ex
+import qualified Control.Exception as C
+import           Foreign.C.Error (ePIPE, Errno(..))
+import           System.IO (hClose, hFlush, hPutStr, hGetContents)
+import           System.IO.Error
+import           Control.DeepSeq
+import           GHC.IO.Exception(IOErrorType(..), IOException(..))
 #if __GLASGOW_HASKELL__ >= 707
 import           Text.Read (readMaybe)
 #else
@@ -242,10 +252,8 @@ runhaskellResult :: TestSettings -> FilePath -> IO (Maybe (StdioResult, Integer)
 runhaskellResult settings file = do
     cd <- getWorkingDirectory
     let args = tsArguments settings
-    setWorkingDirectory (cd </> directory file)
-    r <- runProcess "runhaskell" ([ includeOpt file, "-w"
-                                 , encodeString $ filename file] ++ args) ""
-    setWorkingDirectory cd
+    r <- runProcess (cd </> directory file) "runhaskell" ([ includeOpt file, "-w"
+                                                         , encodeString $ filename file] ++ args) ""
     return r
 
 includeOpt :: FilePath -> String
@@ -282,23 +290,21 @@ runGhcjsResult opts file = do
                             then [inc, "-o", encodeString output, "-O2"] ++ [input] ++ extra
                             else [inc, "-o", encodeString output] ++ [input] ++ extra
             args = tsArguments settings
-        e <- liftIO $ runProcess "ghcjs" compileOpts ""
+        e <- liftIO $ runProcess cd "ghcjs" compileOpts ""
         case e of
           Nothing    -> assertFailure "cannot find ghcjs"
           Just (r,_) -> assertEqual "compile error" ExitSuccess (stdioExit r)
         forM_ (tsCopyFiles settings) $ \cfile ->
           let cfile' = fromText (TL.pack cfile)
           in  copyFile (directory file </> cfile') (cd </> outputG2 </> cfile')
-        setWorkingDirectory (cd </> outputG2)
         nodeResult <-
           case tsDisableNode settings of
-            False -> fmap (,"node" ++ desc) <$> runProcess "node" (encodeString outputRun:args) ""
+            False -> fmap (,"node" ++ desc) <$> runProcess (cd </> outputG2) "node" (encodeString outputRun:args) ""
             True  -> return Nothing
         smResult <-
           case tsDisableSpiderMonkey settings of
-            False -> fmap (,"SpiderMonkey" ++ desc) <$> runProcess "js" (encodeString outputRun:args) ""
+            False -> fmap (,"SpiderMonkey" ++ desc) <$> runProcess (cd </> outputG2) "js" (encodeString outputRun:args) ""
             True  -> return Nothing
-        setWorkingDirectory cd
         liftIO $ removeTree outputG2
         return $ catMaybes [nodeResult, smResult]
 
@@ -310,18 +316,75 @@ outputPath = do
   return . decodeString $ "ghcjs_test_" ++ t ++ "_" ++ rnd
 
 -- | returns Nothing if the program cannot be run
-runProcess :: MonadIO m => FilePath -> [String] -> String -> m (Maybe (StdioResult, Integer))
-runProcess pgm args input = do
+runProcess :: MonadIO m => FilePath -> FilePath -> [String] -> String -> m (Maybe (StdioResult, Integer))
+runProcess workingDir pgm args input = do
   before <- liftIO getCurrentTime
-  (ex, out, err) <- liftIO $ readProcessWithExitCode (encodeString pgm) args input
+  (ex, out, err) <- liftIO $ readProcessWithExitCode' (encodeString workingDir) (encodeString pgm) args input
   after <- liftIO getCurrentTime
-  return $ 
+  return $
     case ex of -- fixme is this the right way to find out that a program does not exist?
       (ExitFailure 127) -> Nothing
       _                 ->
         Just ( StdioResult ex (T.pack out) (T.pack err)
              , round $ 1000 * (after `diffUTCTime` before)
              )
+
+-- modified readProcessWithExitCode with working dir
+readProcessWithExitCode'
+    :: Prelude.FilePath         -- ^ Working directory
+    -> Prelude.FilePath         -- ^ Filename of the executable (see 'proc' for details)
+    -> [String]                 -- ^ any arguments
+    -> String                   -- ^ standard input
+    -> IO (ExitCode,String,String) -- ^ exitcode, stdout, stderr
+readProcessWithExitCode' workingDir cmd args input =
+    C.mask $ \restore -> do
+      (Just inh, Just outh, Just errh, pid) <- createProcess (proc cmd args)
+                                                   { std_in  = CreatePipe,
+                                                     std_out = CreatePipe,
+                                                     std_err = CreatePipe,
+                                                     cwd     = Just workingDir }
+      flip C.onException
+        (do hClose inh; hClose outh; hClose errh;
+            terminateProcess pid; waitForProcess pid) $ restore $ do
+        -- fork off a thread to start consuming stdout
+        out <- hGetContents outh
+        waitOut <- forkWait $ C.evaluate $ rnf out
+
+        -- fork off a thread to start consuming stderr
+        err <- hGetContents errh
+        waitErr <- forkWait $ C.evaluate $ rnf err
+
+        -- now write and flush any input
+        let writeInput = do
+              unless (null input) $ do
+                hPutStr inh input
+                hFlush inh
+              hClose inh
+
+        C.catch writeInput $ \e -> case e of
+          IOError { ioe_type = ResourceVanished
+                  , ioe_errno = Just ioe }
+            | Errno ioe == ePIPE -> return ()
+          _ -> Ex.throwIO e
+
+        -- wait on the output
+        waitOut
+        waitErr
+
+        hClose outh
+        hClose errh
+
+        -- wait on the process
+        ex <- waitForProcess pid
+
+        return (ex, out, err)
+
+forkWait :: IO a -> IO (IO a)
+forkWait a = do
+  res <- newEmptyMVar
+  _ <- C.mask $ \restore -> forkIO $ C.try (restore a) >>= putMVar res
+  return (takeMVar res >>= either (\ex -> C.throwIO (ex :: C.SomeException)) return)
+
 
 {-
   a mocha test changes to the directory,
