@@ -434,9 +434,6 @@ defaults
 
 
 
-
-
-
 -- We need platform defines (tests for mingw32 below).
 
 
@@ -735,15 +732,6 @@ primop   PopCnt64Op   "popCnt64#"   GenPrimOp   Word64# -> Word#
     {Count the number of set bits in a 64-bit word.}
 primop   PopCntOp   "popCnt#"   Monadic   Word# -> Word#
     {Count the number of set bits in a word.}
-
-primop   BSwap16Op   "byteSwap16#"   Monadic   Word# -> Word#
-    {Swap bytes in the lower 16 bits of a word. The higher bytes are undefined. }
-primop   BSwap32Op   "byteSwap32#"   Monadic   Word# -> Word#
-    {Swap bytes in the lower 32 bits of a word. The higher bytes are undefined. }
-primop   BSwap64Op   "byteSwap64#"   GenPrimOp Word64# -> Word64#
-    {Swap bytes in a 64 bits of a word.}
-primop   BSwapOp     "byteSwap#"     Monadic   Word# -> Word#
-    {Swap bytes in a word.}
 
 ------------------------------------------------------------------------
 section "Narrowings" 
