@@ -1329,21 +1329,15 @@ parseFfiJME xs u = fmap (saturateFFI u) . parseJME $ xs
 
 -- parse and saturate ffi splice, check for unhygienic declarations
 parseFfiJM :: String -> Int -> Either P.ParseError JStat
-parseFfiJM xs u = fmap (satCheck . saturateFFI u) . parseJM $ xs
+parseFfiJM xs u = fmap (makeHygienic . saturateFFI u) . parseJM $ xs
   where
-    satCheck x
-      | all isValidDecl (listify isDecl x) = x
-      | otherwise  = error ("unhygienic declaration in FFI splice:\n" ++ xs)
+    makeHygienic :: JStat -> JStat
+    makeHygienic s = snd $ O.renameLocalsFun (map addFFIToken O.newLocals) ([], s)
 
-    isDecl (DeclStat{}) = True
-    isDecl _            = False
-
-    isValidDecl (DeclStat (StrI xs) _)
-      | "ghcjs_ffi" `L.isPrefixOf` xs = True
-    isValidDecl _ = False
+    addFFIToken (StrI xs) = StrI ("ghcjs_ffi_" ++ show u ++ "_" ++ xs)
 
 saturateFFI :: JMacro a => Int -> a -> a
-saturateFFI u = jsSaturate (Just $ "ghcjs_ffi_" ++ show u)
+saturateFFI u = jsSaturate (Just $ "ghcjs_ffi_sat_" ++ show u)
 
 -- $r for single, $r1,$r2 for dual
 -- $r1, $r2, etc for ubx tup, void args not counted

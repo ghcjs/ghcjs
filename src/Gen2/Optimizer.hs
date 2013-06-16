@@ -46,7 +46,7 @@ optimize = renameLocalVars . removeDeadVars . dataflow
 #endif
 
 renameLocalVars :: JStat -> JStat
-renameLocalVars = thisFunction . nestedFuns %~ renameLocalsFun
+renameLocalVars = thisFunction . nestedFuns %~ renameLocalsFun newLocals
 
 newLocals :: [Ident]
 newLocals = map StrI $ (map (:[]) chars0) ++ concatMap mkIdents [1..]
@@ -144,15 +144,15 @@ localFunctionVals f (JList es)   = JList <$> template (localFunctionVals f) es
 localFunctionVals f (JHash m)    = JHash <$> tinplate (localFunctionVals f) m  -- lens bug?
 localFunctionVals f v            = f v
 
-renameLocalsFun :: ([Ident], JStat) -> ([Ident], JStat)
-renameLocalsFun f = ( map renameVar args
-                    , s' & localIdents %~ renameVar & nonExprLocalIdents %~ renameVar
-                    )
+renameLocalsFun :: [Ident] -> ([Ident], JStat) -> ([Ident], JStat)
+renameLocalsFun newNames f = ( map renameVar args
+                             , s' & localIdents %~ renameVar & nonExprLocalIdents %~ renameVar
+                             )
   where
     (_,   s')   = nestedFuns %~ renameGlobals rename $ (args, s)
-    (args, s)   = nestedFuns %~ renameLocalsFun $ f
+    (args, s)   = nestedFuns %~ renameLocalsFun newNames $ f
     renameVar i = fromMaybe i (M.lookup i rename)
-    rename      = M.fromList $ zip locals (filter (`S.notMember` globals) newLocals)
+    rename      = M.fromList $ zip locals (filter (`S.notMember` globals) newNames)
     globals     = idents S.\\ (S.fromList locals)
     idents      = S.fromList (s ^.. allIdents ++ args)
     locals      = L.nub $ localVars s -- args ++ s ^.. localVars

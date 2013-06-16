@@ -1,10 +1,9 @@
-{-# LANGUAGE ForeignFunctionInterface, CPP, OverloadedStrings #-}
+{-# LANGUAGE ForeignFunctionInterface, JavaScriptFFI, CPP, OverloadedStrings #-}
 
 module Main where
 
 import Foreign.Ptr
 import GHCJS.Types
-import GHCJS.Types.Internal
 import GHCJS.Foreign
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
