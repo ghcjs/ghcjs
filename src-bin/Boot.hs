@@ -255,7 +255,7 @@ installRts = do
   base  <- liftIO getGlobalPackageBase
   let inc = base </> "include"
       lib = base </> "lib"
-  rtsConf <- readfile "rts/package.conf.inplace"
+  rtsConf <- readfile "rts/dist/package.conf.inplace"
   writefile (dest </> "builtin_rts.conf") $
                  fixRtsConf (toTextIgnore inc) (toTextIgnore lib) rtsConf
   run_ "ghcjs-pkg" ["recache", "--global"]
