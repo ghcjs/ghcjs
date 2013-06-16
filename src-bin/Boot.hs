@@ -231,7 +231,7 @@ fixGhcWrapper wrapper log ghcjs = T.unlines . concatMap fixLine . T.lines $ wrap
       fixLine line
           | exec `T.isPrefixOf` line =
               [ exec <> "\"" <> toTextIgnore ghcjs <> "\""
-              , "export GHCJS_FALLBACK_GHC=" <> T.drop (T.length exec) line
+              , "export GHCJS_WITH_GHC=" <> T.drop (T.length exec) line
               , "export GHCJS_FALLBACK_PLAIN=1"
               , "export GHCJS_BOOTING=1"
               , "export GHCJS_NO_NATIVE=1"
