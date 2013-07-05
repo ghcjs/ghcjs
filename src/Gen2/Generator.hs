@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, TupleSections, CPP #-}
+{-# LANGUAGE TemplateHaskell, QuasiQuotes, TupleSections, CPP, OverloadedStrings #-}
 
 {-
   Main generator module
@@ -6,9 +6,7 @@
 
 module Gen2.Generator (generate) where
 
-import           StgCmmClosure
 import           ForeignCall
-import           Outputable hiding ((<>))
 import           FastString
 import           BasicTypes
 import           DynFlags
@@ -30,10 +28,11 @@ import           Type hiding (typeSize)
 import           Name
 import           Id
 
-import           Data.Char (ord, chr, isDigit)
+import           Data.Char (ord, isDigit)
 import           Data.Bits ((.|.), shiftL, shiftR, (.&.), testBit, xor, complement)
 import           Data.ByteString (ByteString)
 import qualified Data.Serialize as C
+import           Data.Binary.Put
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import           Data.Either (partitionEithers)
@@ -44,38 +43,32 @@ import           Data.Maybe (isJust, fromMaybe)
 import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Set (Set)
-import           Data.Foldable (fold)
 import qualified Data.Set as S
-import           Data.List (partition, intercalate, sort, sortBy, find)
+import           Data.List (partition, intercalate, sort, sortBy)
 import qualified Data.List as L
-import           Data.List.Split (splitOn)
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.Text.Encoding.Error as T
 import           Data.Text (Text)
-import           Text.PrettyPrint.Leijen.Text hiding ((<>), (<$>), pretty)
 import qualified Text.Parsec as P
-import qualified Text.Parsec.Char as P
 import           Language.Javascript.JMacro
 import           Control.Monad.State.Strict
 import           Control.Applicative
 import           Control.DeepSeq
-import           Gen2.Floater
 import           Gen2.Utils
 import           Gen2.Prim
 import           Gen2.Rts
 import           Gen2.RtsTypes
 import           Gen2.StgAst
-import           Gen2.Debug
 import           Gen2.RtsAlloc
 import           Gen2.RtsApply
 import           Gen2.RtsSettings
-import           Gen2.Printer
 import qualified Gen2.Linker as Linker
+import           Gen2.ClosureInfo
 
 import qualified Gen2.Optimizer as O
+import qualified Gen2.Object    as Object
 
 import           Control.Lens
 
@@ -90,13 +83,17 @@ type StaticRefs = [Id]
 generate :: DynFlags -> StgPgm -> Module -> (ByteString, ByteString)  -- module,metadata
 generate df s m = flip evalState (initState df m) $ do
   (p1, d) <- unzip <$> pass1 df m s
-  let result = BL.toStrict $ TL.encodeUtf8 (TL.unlines p1)
+  let result = BL.toStrict $ Object.object' (dumpAst s ++ p1)
   (deps, pkgs, funs) <- genMetaData d
   let depsBs = C.runPut $ Linker.serializeDeps pkgs funs deps
-  return ({- dumpAst s <> -} result, depsBs)
+  return (result, depsBs)
 
-dumpAst s = BL.toStrict . TL.encodeUtf8 . TL.pack $
-  (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s))
+dumpAst :: StgPgm -> [([Text], BL.ByteString)]
+dumpAst s 
+  | True = []
+  | otherwise = [([T.pack "h$debug", T.pack "h$dumpAst"], Object.serializeStat [] [j| h$dumpAst = `x` |])]
+      where
+        x = (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s))
 
 -- | variable prefix for the nth block in module
 modulePrefix :: Module -> Int -> String
@@ -106,21 +103,29 @@ modulePrefix m n = "h$" ++ (zEncodeString . moduleNameString . moduleName $ m) +
 pass1 :: DynFlags
       -> Module
       -> StgPgm
-      -> G [(TL.Text,([Id], [Id]))] -- for each toplevel chunk
+      -> G [(([Text],BL.ByteString),([Id], [Id]))] -- for each toplevel chunk
 pass1 df m ss = sequence (zipWith generateBlock ss [(1::Int)..])
     where
-      generateBlock :: StgBinding -> Int -> G (TL.Text,([Id], [Id]))
+      generateBlock :: StgBinding -> Int -> G (([Text],BL.ByteString),([Id], [Id]))
       generateBlock decl n = do
           tl <- genToplevel (removeNoEscape decl)
           extraTl <- use gsToplevelStats
+          ci      <- use gsClosureInfo
           resetToplevel
           let allDeps = collectIds decl
               topDeps = collectTopIds decl
-          tl' <- delimitBlock m topDeps
+          o <- objectEntry m topDeps ci
                           . O.optimize
                           . jsSaturate (Just $ modulePrefix m n) $ (tl <> mconcat (reverse extraTl))
-          let tltxt   = displayT . renderPretty 0.8 150 . pretty $ tl'
-          rnf tltxt `seq` return (tltxt,(topDeps,allDeps))
+          return (o, (topDeps, allDeps))
+
+objectEntry :: Module -> [Id] -> [ClosureInfo] -> JStat -> G ([Text], BL.ByteString)
+objectEntry m i ci stat = do
+  i' <- mapM idStr i
+  let o = Object.serializeStat ci stat
+  rnf i' `seq` rnf o `seq` return (i', o)
+    where
+      idStr i = T.pack . istr <$> jsIdI i
 
 collectTopIds :: StgBinding -> [Id]
 collectTopIds (StgNonRec b _) = [b]
@@ -231,12 +236,12 @@ genToplevelRhs i (StgRhsCon _cc con args)
       return [j| `id` = `a` |]
   | otherwise =
     typeComment i <>
-    declIds i <> do
+    do
       id <- jsId i
       eid <- jsEntryIdI i
       as <- mapM genArg args
       ec <- enterDataCon con
-      return (decl eid <> [j| `eid` = `ec` |]) <> (allocConStatic id con . concat $ as)
+      return (decl eid <> [j| `eid` = `ec` |]) <> declIds i <> (allocConStatic id con . concat $ as)
 genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) = do
         eid <- jsEnIdI i
         eid' <- jsEnId i
@@ -245,11 +250,10 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) = do
         body0 <- genBody i [] body Updatable i
         tci <- typeComment i
         sr <- genStaticRefs srt
+        emitClosureInfo (ClosureInfo (itxt eid) [] (itxt idi) (CILayoutFixed 0 []) CIThunk sr)
         return [j| `tci`;
                    `decl eid`;
                    `eid` = `JFunc funArgs (preamble <> updateThunk <> body0)`;
-                   `ClosureInfo eid' [] (istr idi)
-                     (CILayoutFixed 0 []) CIThunk sr`;
                    `decl id`;
                    `id` = h$static_thunk(`eid`);
                  |]
@@ -262,11 +266,10 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
         et <- genEntryType args
         tci <- typeComment i
         sr <- genStaticRefs srt
+        emitClosureInfo (ClosureInfo (itxt eid) (genArgInfo False $ map idType args) (itxt idi) (CILayoutFixed 0 []) et sr)
         return [j| `tci`;
                    `decl eid`;
                    `eid` = `JFunc funArgs (preamble <> body0)`;
-                   `ClosureInfo eid' (genArgInfo False $ map idType args) (istr idi)
-                          (CILayoutFixed 0 []) et sr`;
                    `decl idi`;
                    `id` = h$static_fun(`eid`);
                  |]
@@ -426,12 +429,12 @@ genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) =
   ie <- jsEntryIdI i
   et <- genEntryType []
   sr <- genStaticRefs srt
+  emitClosureInfo (ClosureInfo (itxt ie) (genArgInfo True []) (itxt ie <> " ," <> T.pack (show i))
+                     (fixedLayout $ map (uTypeVt . idType) live) et sr)
 -- fixme args correct here?
   emitToplevel
      [j| `decl ie`;
          `iex ie` = `f`;
-         `ClosureInfo (iex ie) (genArgInfo True []) (istr ie ++ " ," ++ show i)
-             (fixedLayout $ map (uTypeVt.idType) live) et sr`;
        |]
 
 genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlots $ do
@@ -442,11 +445,11 @@ genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlo
   ei <- jsEntryIdI i
   et <- genEntryType args
   sr <- genStaticRefs srt
+  emitClosureInfo (ClosureInfo (itxt ei) (genArgInfo True $ map idType args) (itxt ei <> " ," <> T.pack (show i))
+                     (fixedLayout $ map (uTypeVt . idType) live) et sr)
   emitToplevel
              [j| `decl ei`;
                  `iex ei` = `f`;
-                 `ClosureInfo (iex ei) (genArgInfo True $ map idType args) (istr ei ++ "," ++ show i)
-                    (fixedLayout $ map (uTypeVt.idType) live) et sr`;
                |]
 
 genEntryType :: [Id] -> G CIType
@@ -460,10 +463,10 @@ genSetConInfo :: Id -> DataCon -> SRT -> C
 genSetConInfo i d srt = do
   ei <- jsDcEntryIdI i
   sr <- genStaticRefs srt
+  emitClosureInfo (ClosureInfo (itxt ei) [PtrV] (T.pack $ show d) (fixedLayout $ map uTypeVt fields)
+                 (CICon $ dataConTag d) sr)
   return [j| `decl ei`;
              `iex ei`     = `mkDataEntry`;
-             `ClosureInfo (iex ei) [PtrV] (show d) (fixedLayout $ map uTypeVt fields)
-                 (CICon $ dataConTag d) sr`;
            |]
     where
       fields = dataConRepArgTys d
@@ -599,7 +602,7 @@ genCase top bnd x@(StgConApp c as) at [(DataAlt{}, bndrs, _, e)] l srt = do
   mconcat (map declIds bndrs) <> return (assignAll ids args') <> genExpr top e
 
 genCase top bnd expr at@PolyAlt alts l srt = do
-   genRet top bnd at alts l srt <> genExpr top expr
+  genRet top bnd at alts l srt <> genExpr top expr
 
 genCase _ _ x at alts _ _ = error ("unhandled genCase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
 
@@ -648,12 +651,12 @@ genRet top e at as l srt = withNewIdent f -- $ \ret -> pushRetArgs free (iex ret
       topi <- jsIdI top
       tc <- typeComment e
       sr <- genStaticRefs srt
+      emitClosureInfo (ClosureInfo (itxt r) (genArgInfo isBoxedAlt []) (itxt r)
+                         (fixedLayout $ map (freeType . fst3) free) (CIFun regs regs) sr)
       emitToplevel $
          tc -- is this correct?
          <> (decl r)
          <> [j| `r` = `fun'`;
-                `ClosureInfo (iex r) (genArgInfo isBoxedAlt []) (istr r)
-                   (fixedLayout $ map (freeType . fst3) free) (CIFun regs regs) sr`;
               |]
       return pushRet
     fst3 ~(x,_,_)  = x
@@ -700,7 +703,7 @@ pushRetArgs free fun = do
   c <- comment . ("slots: " ++) . show <$> (mapM showSlot =<< getSlots)
   p <- pushOptimized . (++[(fun,False)]) =<< mapM (\(i,n,b) -> (\es->(es!!(n-1),b)) <$> genIdArg i) free
 --  p <- push . (++[fun]) =<< mapM (\(i,n,b) -> (\es->es!!(n-1)) <$> genIdArg i) free
-  return (c <> p)
+  return ({- c <> -} p)
     where
       showSlot SlotUnknown = return "unknown"
       showSlot (SlotId i n) = do
@@ -802,7 +805,7 @@ mkSwitch e cases
       (n,d) = partition (isJust.fst) cases
 
 checkIsCon :: JExpr -> JStat
-checkIsCon e = assertRts [je| `e` !== undefined |] "unexpected undefined, expected datacon or prim"
+checkIsCon e = assertRts [je| `e` !== undefined |] ("unexpected undefined, expected datacon or prim"::String)
 
 -- mempty -- traceErrorCond [je| `e` === undefined |] "expected data constructor!"
 
@@ -905,7 +908,7 @@ genStackArg a@(StgVarArg i) = zipWith f [1..] <$> genArg a
   where
     f :: Int -> JExpr -> (JExpr, StackSlot)
     f n e = (e, SlotId i n)
-
+ 
 genArg :: StgArg -> G [JExpr]
 genArg (StgLitArg l) = genLit l
 genArg a@(StgVarArg i)
@@ -1066,8 +1069,7 @@ genCon con args
   | otherwise = do
       di <- makeIdent
       alloc <- allocCon di con args
-      return [j| `decl di`;
-                 `alloc`;
+      return [j| `alloc`;
                  `R1` = `di`;
                  return `Stack`[`Sp`];
                |]
@@ -1086,10 +1088,10 @@ allocCon to con []
       i <- jsId (dataConWorkId con)
       return $ decl to <> [j| `to` = `i`; |]
 allocCon to con [x]
-  | isUnboxableCon con = return [j| `to` = `x` |]
+  | isUnboxableCon con = return $ decl to <> [j| `to` = `x` |]
 allocCon to con xs = do
   e <- enterDataCon con
-  return $ allocDynamic False to e xs
+  return $ allocDynamic True to e xs
 
 nullaryConClosure tag = ValExpr (JVar . StrI $ "data_static_0_" ++ show tag ++ "_c")
 
@@ -1103,14 +1105,19 @@ allocConStatic to con []
       return [j| `to` = true;  |]
   | otherwise = do
       e <- enterDataCon con
-      return [j| `to` = { f: `e`, d1: null, d2: null }; |]
+      return [j| `to` = h$c(`e`); |]
+--      return [j| `to` = { f: `e`, d1: null, d2: null }; |]
 allocConStatic to con [x]
   | isUnboxableCon con = return [j| `to` = `x` |]
 allocConStatic to con xs = do
   e <- enterDataCon con
-  return [j| `to` = { f: `e`, d1: null, d2: null };
+  return [j| `to` = h$c(`e`);
+             h$sti(\ -> `JList (to:xs)`);
+           |]
+{-x
              h$initStatic.push( \ { h$init_closure(`to`, `JList xs`); } );
            |]
+-}
 
 -- avoid one indirection for global ids
 -- fixme in many cases we can also jump directly to the entry for local?
@@ -1158,6 +1165,7 @@ selectApply fast (args, as) = do
 
 -- insert delimiters around block so linker can extract this efficiently
 -- abuses PPostStat to insert a comment!
+{-
 delimitBlock :: Module -> [Id] -> JStat -> C
 delimitBlock m i s = do
   b <- block
@@ -1168,10 +1176,12 @@ delimitBlock m i s = do
     emptye = iex (StrI "")
     start block = T.unpack Linker.startMarker ++ block ++ ">"
     end   block = T.unpack Linker.endMarker ++ block ++ ">"
+-}
 
 -- ew
 comment :: String -> JStat
 comment xs = PPostStat True ("// " ++ xs) (iex $ StrI "")
+
 
 typeComment :: Id -> C
 typeComment i
@@ -1404,7 +1414,7 @@ makeIdent = do
   gsId += 1
   i <- use gsId
   mod <- use gsModule
-  return (StrI $ "h$" ++ zEncodeString (show mod) ++ "_" ++ encodeUnique i)
+  return (StrI $ "h$$" ++ zEncodeString (show mod) ++ "_" ++ encodeUnique i)
 
 freshUnique :: G Int
 freshUnique = gsId += 1 >> use gsId

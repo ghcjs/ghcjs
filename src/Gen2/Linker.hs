@@ -32,21 +32,23 @@ import qualified Data.Text                as T
 import qualified Data.Text.IO             as T
 import qualified Data.Text.Encoding       as TE
 import qualified Data.Text.Encoding.Error as TE
+import qualified Data.Text.Lazy           as TL
+import qualified Data.Text.Lazy.Encoding  as TLE
 import           System.FilePath (dropExtension, splitPath, (<.>), (</>))
 import           System.Directory (createDirectoryIfMissing, doesFileExist)
 import           Config
 import           Module                   (ModuleName, moduleNameString)
+import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
+import           Language.Javascript.JMacro
 
 import           Gen2.StgAst
 import           Gen2.Rts (rtsStr)
-import Gen2.Shim
-import Compiler.Info
-
-startMarker :: Text
-startMarker = "// GHCJS_BLOCK_START<"
-
-endMarker :: Text
-endMarker = "// GHCJS_BLOCK_END<"
+import           Gen2.Shim
+import           Gen2.Printer (pretty)
+import qualified Gen2.Compactor as Compactor
+import           Gen2.ClosureInfo hiding (Fun)
+import           Compiler.Info
+import qualified Gen2.Object as Object
 
 link :: String       -- ^ output file/directory
      -> [FilePath]   -- ^ directories to load package modules, end with package name
@@ -58,9 +60,9 @@ link out searchPath objFiles pageModules = do
   metas <- mapM (readDeps . metaFile) objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
   T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
-  (allDeps, src) <- collectDeps (lookup metas) (S.union rtsDeps (S.fromList $ concatMap modFuns roots))
+  (allDeps, src, infos) <- collectDeps (lookup metas) (S.union rtsDeps (S.fromList $ concatMap modFuns roots))
   createDirectoryIfMissing False out
-  BL.writeFile (out </> "out.js") (BL.fromChunks src)
+  BL.writeFile (out </> "out.js") (renderLinker src infos) -- (BL.fromChunks src)
   writeFile (out </> "rts.js") rtsStr
   getShims extraFiles allDeps (out </> "lib.js", out </> "lib1.js")
   writeHtml out
@@ -86,6 +88,10 @@ link out searchPath objFiles pageModules = do
                              (M.lookup (funModule fun) (localLookup metas))
       where
         modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> ext
+
+renderLinker :: JStat -> [ClosureInfo] -> BL.ByteString
+renderLinker stat infos = TLE.encodeUtf8 . displayT . renderPretty 0.8 150 . pretty $
+                        Compactor.compact stat infos
 
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
@@ -241,42 +247,17 @@ getDepsSources lookup funs = do
   return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
 
 -- | collect source snippets
-collectDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun, [ByteString])
+collectDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun, JStat, [ClosureInfo])
 collectDeps lookup roots = do
   (allDeps, srcs) <- getDepsSources lookup roots
-  srcs' <- mapM (uncurry extractDeps) srcs
-  return (allDeps, srcs')
+  (stats, infos) <- unzip <$> mapM (uncurry extractDeps) srcs
+  return (allDeps, mconcat stats, concat infos)
 
-extractDeps :: FilePath -> Set Fun -> IO ByteString
+extractDeps :: FilePath -> Set Fun -> IO (JStat, [ClosureInfo])
 extractDeps file funs = do
-  blocks <- collectBlocks <$> T.readFile file
-  let funs' = F.foldMap (S.singleton . funSymbol) funs
-      src   = concatMap snd . filter (any (`S.member` funs') . fst) $ blocks
-  return (TE.encodeUtf8 $ T.unlines src)
-
--- | get the delimited blocks from a js file, each
---   block can contain multiple symbols
-collectBlocks :: Text -> [([Text],[Text])]
-collectBlocks t = go [] [] (T.lines t)
-  where
-    go _            _          []     = []
-    go []           _          (l:ls) =
-      case isStartLine l of
-        Nothing   -> go []   [] ls
-        Just funs -> go funs [] ls
-    go currentBlock blockLines (l:ls)
-      | isEndLine currentBlock l = (currentBlock, reverse blockLines) : go [] [] ls
-      | otherwise                = go currentBlock (l:blockLines) ls
-
-isStartLine :: Text -> Maybe [Text]
-isStartLine t | startMarker `T.isPrefixOf` t
-  = Just $ T.splitOn "," (T.takeWhile (/='>') $ T.drop (T.length startMarker) t)
-              | otherwise = Nothing
-
-isEndLine :: [Text] -> Text -> Bool
-isEndLine ts t =
-     endMarker `T.isPrefixOf` t
-  && ts == T.splitOn "," (T.takeWhile (/='>') $ T.drop (T.length endMarker) t)
+  let symbs = S.fromList $ map funSymbol (S.toList funs)
+  l <- Object.readObjectKeys (any (`S.member` symbs)) <$> BL.readFile file
+  return (mconcat (map Object.oiStat l), concatMap Object.oiClInfo l)
 
 getText :: Get Text
 getText = do

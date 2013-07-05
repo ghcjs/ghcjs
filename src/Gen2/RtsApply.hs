@@ -1,5 +1,4 @@
-{-# LANGUAGE QuasiQuotes     #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes #-}
 
 {-
   generate various apply functions for the rts
@@ -15,11 +14,13 @@ import           Gen2.RtsAlloc
 import           Gen2.RtsSettings
 import           Gen2.RtsTypes
 import           Gen2.Utils
+import           Gen2.ClosureInfo
 
 import           Data.Bits
 import           Data.List                        (find, foldl', sort)
 import           Data.Maybe
 import           Data.Monoid
+import qualified Data.Text as T
 
 rtsApply :: JStat
 rtsApply = mconcat $  map (uncurry stackApply) applySpec
@@ -77,7 +78,7 @@ mkApplyArr =
 genericStackApply :: JStat
 genericStackApply =
   [j| fun h$ap_gen {
-        `traceRts $ "h$ap_gen"`;
+        `traceRts "h$ap_gen"`;
         var c = `R1`.f;
         switch(c.t) {
           case `Thunk`:
@@ -96,7 +97,7 @@ genericStackApply =
             throw "h$ap_gen: unexpected closure type";
         }
       }
-      `ClosureInfo (jsv "h$ap_gen") [PtrV] "h$ap_gen" CILayoutVariable (CIFun 1 1) CINoStatic`;
+      `ClosureInfo (T.pack "h$ap_gen") [PtrV] (T.pack "h$ap_gen") CILayoutVariable (CIFun 1 1) CINoStatic`;
     |]
   where
     funCase c arity = withIdent $ \pap ->
@@ -150,7 +151,7 @@ genericFastApply =
         var c = `R1`.f;
         switch(c.t) {
           case `Thunk`:
-            `traceRts $ "h$ap_gen_fast: thunk"`;
+            `traceRts "h$ap_gen_fast: thunk"`;
             `pushStackApply c tag`;
             return c;
           case `Fun`:
@@ -251,7 +252,7 @@ stackApply :: Int -> -- ^ number of registers in stack frame
               JStat
 stackApply r n = [j| `decl func`;
                      `JVar func` = `JFunc funArgs (preamble <> body)`;
-                     `ClosureInfo (iex func) [PtrV] funcName layout (CIFun 0 0) CINoStatic`;
+                     `ClosureInfo funcNameT [PtrV] funcNameT layout (CIFun 0 0) CINoStatic`;
                    |]
   where
     layout    = CILayoutPtrs r []
@@ -259,6 +260,7 @@ stackApply r n = [j| `decl func`;
     frameSize = r+1
 
     funcName = "h$ap_" ++ show n ++ "_" ++ show r
+    funcNameT = T.pack funcName
 
     popFrame = adjSpN frameSize
 
@@ -464,7 +466,7 @@ zeroApply :: JStat
 zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
 
                 fun h$ap_0_0 { `preamble`; `adjSpN 1`; `enter (toJExpr R1)`; }
-                `ClosureInfo (iex (StrI "h$ap_0_0")) [PtrV] "h$ap_0_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo (T.pack "h$ap_0_0") [PtrV] (T.pack "h$ap_0_0") (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
                 fun h$ap_1_0 x {
                   `preamble`;
@@ -480,7 +482,7 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
                     return c;
                   }
                 }
-                `ClosureInfo (iex (StrI "h$ap_1_0")) [PtrV] "h$ap_1_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo (T.pack "h$ap_1_0") [PtrV] (T.pack "h$ap_1_0") (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
                 fun h$e c { `preamble`; `R1` = c; `enter c`; }
 
@@ -543,7 +545,7 @@ updates =
         `traceRts $ "h$upd_frame: updating: " |+ updatee |+ " -> " |+ R1`;
         return `Stack`[`Sp`];
       };
-      `ClosureInfo (iex $ StrI "h$upd_frame") [PtrV] "h$upd_frame" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+      `ClosureInfo (T.pack "h$upd_frame") [PtrV] (T.pack "h$upd_frame") (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
   |]
 
 mkFunc :: Ident -> JStat -> JStat
@@ -567,10 +569,12 @@ mkPap tgt fun n values =
 pap :: Int -> JStat
 pap r = [j| `decl func`;
             `iex func` = `JFunc [] (preamble <> body)`;
-            `ClosureInfo (iex func) [] funcName CILayoutVariable (CIPap r) CINoStatic`;
+            `ClosureInfo funcNameT [] funcNameT CILayoutVariable (CIPap r) CINoStatic`;
           |]
   where
     funcName = "h$pap_" ++ show r
+    funcNameT = T.pack funcName
+
     func     = StrI funcName
 
     body = [j| var c = `R1`.d1;

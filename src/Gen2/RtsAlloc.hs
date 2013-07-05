@@ -2,6 +2,8 @@
 
 module Gen2.RtsAlloc where
 
+import Control.Lens
+import Data.Data.Lens
 import Data.Monoid
 import Language.Javascript.JMacro
 
@@ -9,11 +11,12 @@ import qualified Data.Map as M
 import Gen2.RtsSettings
 import Gen2.RtsTypes
 import Gen2.Utils
--- allocate multiple, possible mutually recursive, closures
--- fixme make sure that all thunk objects have at least size 2
--- to allow overwriting by update object
+
+-- allocate multiple, possibly mutually recursive, closures
+
 allocDynAll :: Bool -> [(Ident,JExpr,[JExpr])] -> JStat
--- allocDynAll haveDecl [(to,entry,free)] = allocDynamic haveDecl to entry free
+allocDynAll haveDecl [(to,entry,free)]
+  | to `notElem` (free ^.. template) = allocDynamic haveDecl to entry free
 allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
   where
     makeObjs

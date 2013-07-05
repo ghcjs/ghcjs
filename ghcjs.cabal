@@ -51,6 +51,9 @@ Library
                      Gen2.Linker,
                      Gen2.Shim,
                      Gen2.PrimIface,
+                     Gen2.Compactor,
+                     Gen2.Object,
+                     Gen2.ClosureInfo,
                      Compiler.Info,
                      Compiler.Variants,
                      GHCJSMain
@@ -84,7 +87,9 @@ Library
                    deepseq,
                    vector         >= 0.10     && < 0.11,
                    data-default   >= 0.5      && < 0.6,
-                   array          >= 0.4      && < 0.5
+                   array          >= 0.4      && < 0.5,
+                   binary         >= 0.7      && < 0.8,
+                   text-binary    >= 0.1      && < 0.2
     exposed: True
     buildable: True
     hs-source-dirs: src

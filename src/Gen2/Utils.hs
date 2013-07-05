@@ -16,6 +16,9 @@ import Data.Char                  (isSpace)
 import Data.List                  (isPrefixOf)
 import Data.Map                   (Map, singleton)
 
+import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+
 makeLenses ''JStat
 makePrisms ''JStat
 makeLenses ''JExpr
@@ -28,6 +31,12 @@ makePrisms ''Ident
 -- missing instances, todo: add to jmacro
 instance ToJExpr Ident where
   toJExpr i = ValExpr (JVar i)
+
+instance ToJExpr T.Text where
+  toJExpr = toJExpr . T.unpack
+
+instance ToJExpr TL.Text where
+  toJExpr = toJExpr . TL.unpack
 
 -- instance ToJExpr JVal where
 --   toJExpr v = ValExpr v
@@ -113,6 +122,9 @@ iex i = (ValExpr . JVar) i
 
 istr :: Ident -> String
 istr (StrI s) = s
+
+itxt :: Ident -> T.Text
+itxt (StrI s) = T.pack s
 
 ji :: Int -> JExpr
 ji = toJExpr

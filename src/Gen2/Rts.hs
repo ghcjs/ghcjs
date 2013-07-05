@@ -1,5 +1,4 @@
-{-# LANGUAGE QuasiQuotes     #-}
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
 
 module Gen2.Rts where
 
@@ -13,6 +12,7 @@ import           Gen2.RtsPrim
 import           Gen2.RtsSettings
 import           Gen2.RtsTypes
 import           Gen2.Utils
+import           Gen2.ClosureInfo
 
 import           Data.Bits
 import           Data.Char                        (toLower, toUpper)
@@ -20,6 +20,7 @@ import qualified Data.List                        as L
 import qualified Data.Map                         as M
 import           Data.Monoid
 
+import qualified Data.Text                        as T
 import qualified Data.Text.Lazy                   as TL
 import           Gen2.Printer
 import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
@@ -215,13 +216,13 @@ fun h$bh {
 }
 
 fun h$blackhole { throw "<<loop>>"; return 0; }
-`ClosureInfo (jsv "h$blackhole") [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
+`ClosureInfo "h$blackhole" [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
 
 fun h$done o {
   h$finishThread(h$currentThread);
   return h$reschedule;
 }
-`ClosureInfo (jsv "h$done") [PtrV] "done" (CILayoutPtrs 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$done" [PtrV] "done" (CILayoutPtrs 0 []) (CIFun 0 0) CINoStatic`;
 
 fun h$doneMain {
   if(typeof process !== 'undefined' && process.exit) {
@@ -232,24 +233,24 @@ fun h$doneMain {
   h$finishThread(h$currentThread);
   return h$reschedule;
 }
-`ClosureInfo (jsv "h$doneMain") [PtrV] "doneMain" (CILayoutPtrs 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$doneMain" [PtrV] "doneMain" (CILayoutPtrs 0 []) (CIFun 0 0) CINoStatic`;
 
 // many primops return bool, and we can cheaply convert javascript bool to 0,1 with |0
 // so this is where we store our Bool constructors, hackily
 // note: |0 hack removed because it's slow in v8, fixed positions still useful: x?1:0
 fun h$false_e { return `Stack`[`Sp`]; }
-`ClosureInfo (jsv "h$false_e") [] "GHC.Types.False" (CILayoutFixed 0 []) (CICon 1) CINoStatic`;
+`ClosureInfo "h$false_e" [] "GHC.Types.False" (CILayoutFixed 0 []) (CICon 1) CINoStatic`;
 
 fun h$true_e { return `Stack`[`Sp`]; }
-`ClosureInfo (jsv "h$true_e") [] "GHC.Types.True" (CILayoutFixed 0 []) (CICon 2) CINoStatic`;
+`ClosureInfo "h$true_e" [] "GHC.Types.True" (CILayoutFixed 0 []) (CICon 2) CINoStatic`;
 
 // generic data constructor with 1 non-heapobj field
 fun h$data1_e { return `Stack`[`Sp`]; }
-`ClosureInfo (jsv "h$data1_e") [] "data1" (CILayoutFixed 1 [ObjV]) (CICon 1) CINoStatic`;
+`ClosureInfo "h$data1_e" [] "data1" (CILayoutFixed 1 [ObjV]) (CICon 1) CINoStatic`;
 
 // generic data constructor with 2 non-heapobj fields
 fun h$data2_e { return `Stack`[`Sp`]; }
-`ClosureInfo (jsv "h$data2_e") [] "data2" (CILayoutFixed 2 [ObjV,ObjV]) (CICon 1) CINoStatic`;
+`ClosureInfo "h$data2_e" [] "data2" (CILayoutFixed 2 [ObjV,ObjV]) (CICon 1) CINoStatic`;
 
 
 fun h$con_e { return `Stack`[`Sp`]; };
@@ -267,7 +268,7 @@ fun h$catch a handler {
 fun h$noop_e {
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$noop_e") [] "no-op IO ()" (CILayoutFixed 0 []) (CIFun 1 0) CINoStatic`;
+`ClosureInfo "h$noop_e" [] "no-op IO ()" (CILayoutFixed 0 []) (CIFun 1 0) CINoStatic`;
 var !h$noop = h$c0(h$noop_e);
 
 fun h$catch_e {
@@ -275,7 +276,7 @@ fun h$catch_e {
   `adjSpN 3`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$catch_e") [] "exception handler" (CILayoutFixed 2 [PtrV,IntV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$catch_e" [] "exception handler" (CILayoutFixed 2 [PtrV,IntV]) (CIFun 0 0) CINoStatic`;
 
 
 // function application to one argument
@@ -285,7 +286,7 @@ fun h$ap1_e {
   `R2` = c.d2;
   return h$ap_1_1_fast();
 }
-`ClosureInfo (jsv "h$ap1_e") [] "apply1" (CILayoutFixed 2 [PtrV, PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$ap1_e" [] "apply1" (CILayoutFixed 2 [PtrV, PtrV]) CIThunk CINoStatic`;
 
 // function application to one argument
 fun h$ap2_e {
@@ -295,7 +296,7 @@ fun h$ap2_e {
   `R3` = c.d2.d2;
   return h$ap_2_2_fast();
 }
-`ClosureInfo (jsv "h$ap2_e") [] "apply2" (CILayoutFixed 3 [PtrV, PtrV, PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$ap2_e" [] "apply2" (CILayoutFixed 3 [PtrV, PtrV, PtrV]) CIThunk CINoStatic`;
 
 // function application to three arguments
 fun h$ap3_e {
@@ -306,7 +307,7 @@ fun h$ap3_e {
   `R4` = c.d2.d3;
   return h$ap_3_3_fast();
 }
-`ClosureInfo (jsv "h$ap3_e") [] "apply3" (CILayoutFixed 4 [PtrV, PtrV, PtrV, PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$ap3_e" [] "apply3" (CILayoutFixed 4 [PtrV, PtrV, PtrV, PtrV]) CIThunk CINoStatic`;
 
 // select first field
 fun h$select1_e {
@@ -321,14 +322,14 @@ fun h$select1_e {
   `R1` = t;
   return h$ap_0_0_fast();
 }
-`ClosureInfo (jsv "h$select1_e") [] "select1" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$select1_e" [] "select1" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
 
 fun h$select1_ret {
   `R1` = `R1`.d1;
   `adjSpN 1`;
   return h$ap_0_0_fast();
 }
-`ClosureInfo (jsv "h$select1_ret") [] "select1ret" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$select1_ret" [] "select1ret" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 // select second field of a two-field constructor
 fun h$select2_e {
@@ -343,14 +344,14 @@ fun h$select2_e {
   `R1` = t;
   return h$ap_0_0_fast();
 }
-`ClosureInfo (jsv "h$select2_e") [] "select2" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$select2_e" [] "select2" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
 
 fun h$select2_ret {
   `R1` = `R1`.d2;
   `adjSpN 1`;
   return h$ap_0_0_fast();
 }
-`ClosureInfo (jsv "h$select2_ret") [] "select2ret" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$select2_ret" [] "select2ret" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 // throw an exception: unwind the thread's stack until you find a handler
 fun h$throw e async {
@@ -446,13 +447,13 @@ fun h$throw e async {
 fun h$raise_e {
   return h$throw(`R1`.d1, false);
 }
-`ClosureInfo (jsv "h$raise_e") [PtrV] "h$raise_e" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$raise_e" [PtrV] "h$raise_e" (CILayoutFixed 0 []) CIThunk CINoStatic`;
 
 // a thunk that just raises an asynchronous exception
 fun h$raiseAsync_e {
   return h$throw(`R1`.d1, true);
 }
-`ClosureInfo (jsv "h$raiseAsync_e") [PtrV] "h$raiseAsync_e" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$raiseAsync_e" [PtrV] "h$raiseAsync_e" (CILayoutFixed 0 []) CIThunk CINoStatic`;
 
 // a stack frame that raises an exception, this is pushed by
 // the scheduler when raising an async exception
@@ -461,7 +462,7 @@ fun h$raiseAsync_frame {
   `adjSpN 2`;
   return h$throw(ex,true);
 }
-`ClosureInfo (jsv "h$raiseAsync_frame") [] "h$raiseAsync_frame" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$raiseAsync_frame" [] "h$raiseAsync_frame" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
 
 // reduce result if it's a thunk, follow if it's an ind
 // add this to the stack if you want the outermost result
@@ -475,7 +476,7 @@ fun h$reduce {
     return `Stack`[`Sp`];
   }
 }
-`ClosureInfo (jsv "h$reduce") [PtrV] "h$reduce" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$reduce" [PtrV] "h$reduce" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 var h$gccheckcnt = 0;
 fun h$gc_check next {
@@ -769,7 +770,7 @@ fun h$runio_e {
   `Stack`[++`Sp`] = h$ap_1_0;
   return h$ap_1_0;
 }
-`ClosureInfo (jsv "h$runio_e") [PtrV] "runio" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$runio_e" [PtrV] "runio" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
 
 fun h$runio c {
   return h$c1(h$runio_e, c);
@@ -780,7 +781,7 @@ fun h$flushStdout_e {
   `R2` = h$baseZCGHCziIOziHandleziFDzistdout;
   return h$ap_1_1_fast();
 }
-`ClosureInfo (jsv "h$flushStdout_e") [] "flushStdout" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$flushStdout_e" [] "flushStdout" (CILayoutFixed 0 []) CIThunk CINoStatic`;
 var !h$flushStdout = h$static_thunk(h$flushStdout_e);
 
 var h$start = new Date();
@@ -821,10 +822,10 @@ fun h$dumpStackTop stack start sp {
              } else if(h$isInstanceOf(s,h$MVar)) {
                var val = s.val ===
                  null ? " empty"
-                      : " value -> " + s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")";
+                      : " value -> " + (typeof s.val === 'object' ? s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")" : s.val);
                log("stack[" + i + "] = MVar " + val);
              } else if(h$isInstanceOf(s,h$MutVar)) {
-               log("stack[" + i + "] = IORef -> " + s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")");
+               log("stack[" + i + "] = IORef -> " + (typeof s.val === 'object' ? (s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")") : s.val));
              } else if(typeof s === 'object') {
                log("stack[" + i + "] = " + h$collectProps(s).substring(0,50));
              } else if(typeof s === 'function') {
@@ -841,9 +842,12 @@ fun h$dumpStackTop stack start sp {
 // f is a haskell entry function
 // d exists, but might be null, if it isn't, warn for any undefined/null fields or fields with unfamiliar names
 fun h$checkObj obj {
-  if(!obj.hasOwnProperty("f") || obj.f === null || obj.f === undefined || !obj.f.n || obj.f.a === undefined || typeof obj.f !== 'function') {
+  if(typeof obj === 'boolean' || typeof obj === 'number') { return; }
+  if(!obj.hasOwnProperty("f") || obj.f === null || obj.f === undefined || obj.f.a === undefined || typeof obj.f !== 'function') {
     log("h$checkObj: WARNING, something wrong with f:");
     log((""+obj).substring(0,200));
+    log(h$collectProps(obj));
+    log(typeof obj.f);
   }
   if(!obj.hasOwnProperty("d1") || obj.d1 === undefined) {
     log("h$checkObj: WARNING, something wrong with d1:");
@@ -914,7 +918,7 @@ fun h$restoreThread {
   `Sp` = `Sp` - frameSize;
   return f;
 }
-`ClosureInfo (jsv "h$restoreThread") [] "restoreThread" CILayoutVariable (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$restoreThread" [] "restoreThread" CILayoutVariable (CIFun 0 0) CINoStatic`;
 
 // return a closure in the stack frame to the next thing on the stack
 fun h$return {
@@ -923,7 +927,7 @@ fun h$return {
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$return") [] "return" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$return" [] "return" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
 
 // return a function in the stack frame for the next call
 fun h$returnf {
@@ -932,7 +936,7 @@ fun h$returnf {
   `adjSpN 2`;
   return r;
 }
-`ClosureInfo (jsv "h$returnf") [] "returnf" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$returnf" [] "returnf" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`;
 
 // return this function when the scheduler needs to come into action
 // (yield, delay etc), returning thread needs to push all relevant
@@ -940,12 +944,12 @@ fun h$returnf {
 fun h$reschedule {
   return h$reschedule;
 }
-`ClosureInfo (jsv "h$reschedule") [] "reschedule" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$reschedule" [] "reschedule" (CILayoutFixed 0 []) CIThunk CINoStatic`;
 
 // carefully suspend the current thread, looking at the
 // function that would be called next
 fun h$suspendCurrentThread next {
-  `assertRts (next |!== (StrI "h$reschedule")) "suspend called with h$reschedule"`;
+  `assertRts (next |!== (StrI "h$reschedule")) ("suspend called with h$reschedule"::String)`;
   if(next === h$reschedule) { throw "suspend called with h$reschedule"; }
   if(`Stack`[`Sp`] === h$restoreThread || next === h$return) {
     h$currentThread.sp = `Sp`;
@@ -990,7 +994,7 @@ fun h$dumpRes {
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$dumpRes") [] "dumpRes" (CILayoutFixed 1 [ObjV]) CIThunk CINoStatic`;
+`ClosureInfo "h$dumpRes" [] "dumpRes" (CILayoutFixed 1 [ObjV]) CIThunk CINoStatic`;
 
 // resume an interrupted computation, the stack
 // we need to push is in d1, restore frame should
@@ -1008,7 +1012,7 @@ fun h$resume_e {
   `R1` = null;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$resume_e") [] "resume" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$resume_e" [] "resume" (CILayoutFixed 0 []) CIThunk CINoStatic`;
 
 fun h$unmaskFrame {
   //log("h$unmaskFrame: " + h$threadString(h$currentThread));
@@ -1022,7 +1026,7 @@ fun h$unmaskFrame {
     return `Stack`[`Sp`];
   }
 }
-`ClosureInfo (jsv "h$unmaskFrame") [] "unmask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$unmaskFrame" [] "unmask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 fun h$maskFrame {
   //log("h$maskFrame: " + h$threadString(h$currentThread));
@@ -1030,7 +1034,7 @@ fun h$maskFrame {
   `adjSpN 1`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$maskFrame") [] "mask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$maskFrame" [] "mask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 fun h$maskUnintFrame {
   //log("h$maskUnintFrame: " + h$threadString(h$currentThread));
@@ -1038,7 +1042,7 @@ fun h$maskUnintFrame {
   `adjSpN 1`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$maskUnintFrame") [] "maskUnint" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$maskUnintFrame" [] "maskUnint" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 // async ffi results are returned in R1 = { f: ... d1: [array of values], d2: null }
 fun h$unboxFFIResult {
@@ -1049,7 +1053,7 @@ fun h$unboxFFIResult {
   `adjSpN 1`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$unboxFFIResult") [PtrV] "unboxFFI" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$unboxFFIResult" [PtrV] "unboxFFI" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 // for non-strict things that are represented as an unboxed value:
 // 1. enumerations
@@ -1058,14 +1062,14 @@ fun h$unbox_e {
   `R1` = `R1`.d1;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$unbox_e") [DoubleV] "unboxed value" (CILayoutFixed 1 [DoubleV]) CIThunk CINoStatic`;
+`ClosureInfo "h$unbox_e" [DoubleV] "unboxed value" (CILayoutFixed 1 [DoubleV]) CIThunk CINoStatic`;
 
 fun h$retryInterrupted {
   var a = `Stack`[`Sp`-1];
   `adjSpN 2`;
   return a[0].apply(this, a.slice(1));
 }
-`ClosureInfo (jsv "h$retryInterrupted") [ObjV] "retry interrupted operation" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$retryInterrupted" [ObjV] "retry interrupted operation" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`;
 
 // STM support
 
@@ -1079,13 +1083,13 @@ fun h$atomically_e {
     return h$stmStartTransaction(`Stack`[`Sp`-2]);
   }
 }
-`ClosureInfo (jsv "h$atomically_e") [PtrV] "atomic operation" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$atomically_e" [PtrV] "atomic operation" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
 
 fun h$checkInvariants_e {
   `adjSpN 1`;
   return h$stmCheckInvariants();
 }
-`ClosureInfo (jsv "h$checkInvariants_e") [] "check transaction invariants" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$checkInvariants_e" [] "check transaction invariants" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 fun h$stmCheckInvariantStart_e {
   var t   = `Stack`[`Sp`-2];
@@ -1099,7 +1103,7 @@ fun h$stmCheckInvariantStart_e {
   `R1` = inv.action;
   return h$ap_1_0_fast();
 }
-`ClosureInfo (jsv "h$stmCheckInvariantStart_e") [] "start checking invariant" (CILayoutFixed 2 [ObjV, ObjV]) (CIFun 0 0) CINoStatic`
+`ClosureInfo "h$stmCheckInvariantStart_e" [] "start checking invariant" (CILayoutFixed 2 [ObjV, ObjV]) (CIFun 0 0) CINoStatic`
 
 fun h$stmCheckInvariantResult_e {
   var inv = `Stack`[`Sp`-1];
@@ -1109,7 +1113,7 @@ fun h$stmCheckInvariantResult_e {
   h$stmAbortTransaction();
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$stmCheckInvariantResult_e") [] "finish checking invariant" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`
+`ClosureInfo "h$stmCheckInvariantResult_e" [] "finish checking invariant" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`
 
 // update invariant TVar dependencies and rethrow exception
 fun h$stmInvariantViolatedHandler_e {
@@ -1122,7 +1126,7 @@ fun h$stmInvariantViolatedHandler_e {
   h$stmAbortTransaction();
   return h$throw(`R2`, false);
 }
-`ClosureInfo (jsv "h$stmInvariantViolatedHandler_e") [PtrV] "finish checking invariant" (CILayoutFixed 0 []) (CIFun 2 1) CINoStatic`;
+`ClosureInfo "h$stmInvariantViolatedHandler_e" [PtrV] "finish checking invariant" (CILayoutFixed 0 []) (CIFun 2 1) CINoStatic`;
 
 var !h$stmInvariantViolatedHandler = h$c(h$stmInvariantViolatedHandler_e);
 
@@ -1131,13 +1135,13 @@ fun h$stmCatchRetry_e {
   h$stmCommitTransaction();
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$stmCatchRetry_e") [] "catch retry" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$stmCatchRetry_e" [] "catch retry" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
 
 fun h$catchStm_e {
   `adjSpN 4`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo (jsv "h$catchStm_e") [] "STM catch" (CILayoutFixed 3 [ObjV,PtrV,ObjV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$catchStm_e" [] "STM catch" (CILayoutFixed 3 [ObjV,PtrV,ObjV]) (CIFun 0 0) CINoStatic`;
 
 fun h$stmResumeRetry_e {
   if(`Stack`[`Sp`-2] !== h$atomically_e) {  // must be pushed just above atomically
@@ -1149,7 +1153,7 @@ fun h$stmResumeRetry_e {
   h$stmRemoveBlockedThread(blocked, h$currentThread);
   return h$stmStartTransaction(`Stack`[`Sp`-2]);
 }
-`ClosureInfo (jsv "h$stmResumeRetry_e") [] "resume retry" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$stmResumeRetry_e" [] "resume retry" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 |]
 

@@ -45,6 +45,8 @@ import           Control.Monad
 import           Data.Char (toLower)
 import           Data.IORef (modifyIORef, writeIORef)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
 import qualified Data.Text.Encoding as T
 import           Data.Maybe
 import           Data.Monoid
@@ -76,11 +78,13 @@ import           Options.Applicative.Types
 import           Options.Applicative.Builder.Internal
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Char8  as C8
 import qualified Gen2.Generator as Gen2
 import qualified Gen2.Linker    as Gen2
 import qualified Gen2.Rts       as Gen2
 import           Gen2.PrimIface as Gen2
+import qualified Gen2.Object    as Object
 
 -- debug
 import           Finder
@@ -237,7 +241,7 @@ addPkgConf df = do
   db2 <- getUserPackageDB
   base <- getGlobalPackageBase
   return $ df {
-               extraPkgConfs = (([PkgConfFile db1, PkgConfFile db2]++).filter isNotUser.filter isNotGlobal.extraPkgConfs df)
+               extraPkgConfs = const [PkgConfFile db1, PkgConfFile db2] -- (([PkgConfFile db1, PkgConfFile db2]++).filter isNotUser.filter isNotGlobal.extraPkgConfs df)
              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
              }
   where
@@ -284,6 +288,7 @@ handleCommandline settings args minusBargs
             , ("-M", fallbackGhc settings False True args)
             , ("--print-rts", printRts)
             , ("--print-ji", printJi args)
+            , ("--print-obj", printObj args)
             , ("--show-iface", printIface args)
             ]
 
@@ -370,6 +375,7 @@ fallbackGhc settings isNative nonHaskell args = do
       noNative = gsNoNative settings
   plain <- getEnvOpt "GHCJS_FALLBACK_PLAIN"
   args' <- if plain then getArgs else return args
+  putStrLn ("ghcjs: falling back to: " ++ ghc)
   if isNative
     then when (not noNative || nonHaskell) $ do
 --      putStrLn ("falling back with: " ++ intercalate " " (pkgargs ++ args'))
@@ -481,6 +487,11 @@ printRts = putStrLn Gen2.rtsStr >> exitSuccess
 printJi :: [String] -> IO ()
 printJi ["--print-ji", file] = Gen2.readDeps file >>= putStrLn . Gen2.dumpDeps
 printJi _                    = putStrLn "usage: ghcjs --print-ji jifile"
+
+printObj :: [String] -> IO ()
+printObj ["--print-obj", file] = TL.putStrLn . Object.showObject =<< BL.readFile file
+printObj _                     = putStrLn "usage: ghcjs --print-obj objfile"
+
 
 setOpt = gopt_set
 unsetOpt = gopt_unset
@@ -675,7 +686,7 @@ touchFile :: DynFlags -> FilePath -> IO ()
 touchFile df file = do
   e <- doesFileExist file
   when e (touch df "keep build system happy" file)
-  
+
 copyNoOverwrite :: FilePath -> FilePath -> IO ()
 copyNoOverwrite from to = do
   ef <- doesFileExist from
