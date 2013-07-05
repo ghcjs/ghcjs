@@ -265,12 +265,12 @@ getCIL = getTag >>= \case
                        3 -> CILayoutFixed <$> getIW16 <*> getList getVT
 
 putCIS :: CIStatic -> Put
-putCIS (CIStaticRefs refs) = tag 1 >> putList putI refs
+putCIS (CIStaticRefs refs) = tag 1 >> putList put refs
 putCIS CINoStatic          = tag 2
 
 getCIS :: Get CIStatic
 getCIS = getTag >>= \case
-                       1 -> CIStaticRefs <$> getList getI
+                       1 -> CIStaticRefs <$> getList get
                        2 -> pure CINoStatic
 
 putCIT :: CIType -> Put

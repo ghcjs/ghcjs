@@ -195,7 +195,7 @@ data CIType = CIFun { citArity :: Int  -- | function arity
   --          | CIInd
 
 data CIStatic = -- CIStaticParent { staticParent :: Ident } -- ^ static refs are stored in parent in fungroup
-                CIStaticRefs   { staticRefs :: [Ident] } -- ^ list of refs that need to be kept alive
+                CIStaticRefs   { staticRefs :: [Text] } -- ^ list of refs that need to be kept alive
               | CINoStatic
 
 -- | static refs: array = references, single var = follow parent link, null = nothing to report

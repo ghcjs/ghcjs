@@ -222,7 +222,7 @@ genStaticRefs (SRTEntries s) = do
 genStaticRefs (SRT n e bmp) =
   error "genStaticRefs: unexpected SRT"
 
-getStaticRef = fmap head . genIdsI
+getStaticRef = fmap (itxt.head) . genIdsI
 
 genToplevelRhs :: Id -> StgRhs -> C
 genToplevelRhs i (StgRhsCon _cc con args)
