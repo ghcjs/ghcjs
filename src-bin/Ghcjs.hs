@@ -96,13 +96,14 @@ data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
                                    , gsNoJSExecutables   :: Bool
                                    , gsLogCommandLine    :: Maybe FilePath
                                    , gsGhc               :: Maybe FilePath
+                                   , gsDebug             :: Bool
                                    } deriving (Eq, Show)
 
 instance Monoid GhcjsSettings where
-  mempty = GhcjsSettings False False False Nothing Nothing
-  mappend (GhcjsSettings ne1 nn1 nj1 lc1 gh1)
-          (GhcjsSettings ne2 nn2 nj2 lc2 gh2) =
-          GhcjsSettings (ne1 || ne2) (nn1 || nn2) (nj1 || nj2) (lc1 <> lc2) (gh1 <> gh2)
+  mempty = GhcjsSettings False False False Nothing Nothing False
+  mappend (GhcjsSettings ne1 nn1 nj1 lc1 gh1 dbg1)
+          (GhcjsSettings ne2 nn2 nj2 lc2 gh2 dbg2) =
+          GhcjsSettings (ne1 || ne2) (nn1 || nn2) (nj1 || nj2) (lc1 <> lc2) (gh1 <> gh2) (dbg1 || dbg2)
 
 getGhcjsSettings :: [String] -> IO ([String], GhcjsSettings)
 getGhcjsSettings args
@@ -120,12 +121,14 @@ getGhcjsSettings args
          , "--no-js-executables"
          , "--log-commandline="
          , "--with-ghc="
+         , "--debug"
          ]
     envSettings = GhcjsSettings <$> getEnvOpt "GHCJS_NATIVE_EXECUTABLES"
                                 <*> getEnvOpt "GHCJS_NO_NATIVE"
                                 <*> pure False
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
                                 <*> getEnvMay "GHCJS_WITH_GHC"
+                                <*> pure False
 
 optParser' :: ParserInfo GhcjsSettings
 optParser' = info (helper <*> optParser) fullDesc
@@ -137,6 +140,7 @@ optParser = GhcjsSettings
             <*> switch ( long "no-js-executables" )
             <*> optStr ( long "log-commandline" )
             <*> optStr ( long "with-ghc" )
+            <*> switch ( long "debug" )
 
 optStr :: Mod OptionFields (Maybe String) -> Parser (Maybe String)
 optStr m = nullOption $ value Nothing <> reader (Right . str)  <> m
@@ -213,14 +217,14 @@ main =
                           let mgraph = flattenSCCs $ topSortModuleGraph False mgraph0 Nothing
 --                          liftIO $ print $ map (showPpr dflags2 . ms_mod) mgraph
                           if oneshot
-                            then mapM_ compileModSummary (take (length targets) mgraph)
-                            else mapM_ compileModSummary mgraph
+                            then mapM_ (compileModSummary settings) (take (length targets) mgraph)
+                            else mapM_ (compileModSummary settings) mgraph
                           dflags3 <- getSessionDynFlags
                           case ghcLink sdflags of
                             LinkBinary -> when (        not oneshot
                                                && isJust (outputFile dflags3)
                                                && not (gsNoJSExecutables settings)) $ do
-                              buildExecutable dflags3 jsArgs
+                              buildExecutable settings dflags3 jsArgs
 --                              touchOutputFile
                             LinkDynLib -> return ()
                             _          -> touchOutputFile
@@ -389,14 +393,14 @@ fallbackGhc settings isNative nonHaskell args = do
 isBootModSum :: ModSummary -> Bool
 isBootModSum ms = isBootSummary ms || (maybe False ("-boot"`isSuffixOf`).ml_hs_file.ms_location $ ms)
 
-compileModSummary :: GhcMonad m => ModSummary -> m ()
-compileModSummary mod
+compileModSummary :: GhcMonad m => GhcjsSettings -> ModSummary -> m ()
+compileModSummary settings mod
   | isBootModSum mod = liftIO $ putStrLn $ concat ["Skipping boot ", name]
   | otherwise =
        do liftIO $ putStrLn $ concat ["Compiling ", name]
           desugaredMod <- desugaredModuleFromModSummary mod
           dsm2 <- loadModule (noCode desugaredMod)
-          writeDesugaredModule desugaredMod -- dsm2 -- desugaredMod
+          writeDesugaredModule settings desugaredMod -- dsm2 -- desugaredMod
   where name = moduleNameString . moduleName . ms_mod $ mod
         mod' = mod { ms_hspp_opts = (ms_hspp_opts mod) { hscTarget = HscAsm } }
 
@@ -417,8 +421,8 @@ ioMsgMaybe ioA = do
         Nothing -> liftIO . throwIO . mkSrcErr $ errs -- throwErrors errs
         Just r  -> return r -- ASSERT( isEmptyBag errs ) return r
 
-writeDesugaredModule :: GhcMonad m => DesugaredModule -> m ()
-writeDesugaredModule mod =
+writeDesugaredModule :: GhcMonad m => GhcjsSettings -> DesugaredModule -> m ()
+writeDesugaredModule settings mod =
   do env <- getSession
      let mod_guts0 = coreModule mod
          mb_old_iface = Nothing -- fixme?
@@ -427,7 +431,7 @@ writeDesugaredModule mod =
      (iface, no_change) <- ioMsgMaybe $ mkIface env mb_old_iface details mod_guts1
      liftIO $ writeIfaceFile dflags ifaceFile iface
      versions <- liftIO $ forM variants $ \variant -> do
-          (program, meta) <- liftIO $ concreteJavascriptFromCgGuts dflags env tidyCore variant
+          (program, meta) <- liftIO $ concreteJavascriptFromCgGuts settings dflags env tidyCore variant
           let outputFile = addExtension outputBase (variantExtension variant)
           putStrLn $ concat ["Writing module ", name, " (", outputFile, ")"]
           B.writeFile outputFile program
@@ -445,23 +449,23 @@ writeDesugaredModule mod =
     name = moduleNameString . moduleName . ms_mod $ mod_summary
     dflags = ms_hspp_opts mod_summary
 
-concreteJavascriptFromCgGuts :: DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
-concreteJavascriptFromCgGuts dflags env core variant =
+concreteJavascriptFromCgGuts :: GhcjsSettings -> DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
+concreteJavascriptFromCgGuts settings dflags env core variant =
   do core_binds <- corePrepPgm dflags
                                env
                                (cg_binds core)
                                (cg_tycons $ core)
      stg <- coreToStg dflags (cg_module core) core_binds
      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-     return (variantRender variant dflags stg' (cg_module core))
+     return (variantRender variant (gsDebug settings) dflags stg' (cg_module core))
 
 {-
   with -o x, ghcjs links all required functions into an executable
   bundle, which is a directory x.jsexe, rather than a filename
 -}
 
-buildExecutable :: GhcMonad m => DynFlags -> [FilePath] -> m ()
-buildExecutable df linkedFiles = do
+buildExecutable :: GhcMonad m => GhcjsSettings -> DynFlags -> [FilePath] -> m ()
+buildExecutable settings df linkedFiles = do
 --  case outputFile df of
 --    Just file -> liftIO $ writeFile file "ghcjs generated executable"
 --    Nothing   -> return ()
@@ -470,7 +474,7 @@ buildExecutable df linkedFiles = do
   let ofiles = map (ml_obj_file . ms_location) graph
   -- TODO find a suitable way to get a list of Modules to use
   -- passing [] now defaults to JSMain (or failing that Main)
-  liftIO $ GHCJSMain.linkJavaScript df (linkedFiles++ofiles) (collectDeps ifaces) []
+  liftIO $ GHCJSMain.linkJavaScript (gsDebug settings) df (linkedFiles++ofiles) (collectDeps ifaces) []
 
 modsumToInfo :: GhcMonad m => ModSummary -> m (Maybe ModuleInfo)
 modsumToInfo ms = getModuleInfo (ms_mod ms)

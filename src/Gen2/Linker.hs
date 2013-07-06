@@ -50,19 +50,20 @@ import           Gen2.ClosureInfo hiding (Fun)
 import           Compiler.Info
 import qualified Gen2.Object as Object
 
-link :: String       -- ^ output file/directory
+link :: Bool
+     -> String       -- ^ output file/directory
      -> [FilePath]   -- ^ directories to load package modules, end with package name
      -> [FilePath]   -- ^ the object files we're linking
      -> [ModuleName] -- ^ modules to use as roots (include all their functions and deps)
      -> IO [String]  -- ^ arguments for the closure compiler to minify our result
-link out searchPath objFiles pageModules = do
+link debug out searchPath objFiles pageModules = do
   let (objFiles', extraFiles) = partition (".js" `isSuffixOf`) objFiles
   metas <- mapM (readDeps . metaFile) objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
   T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
   (allDeps, src, infos) <- collectDeps (lookup metas) (S.union rtsDeps (S.fromList $ concatMap modFuns roots))
   createDirectoryIfMissing False out
-  BL.writeFile (out </> "out.js") (renderLinker src infos) -- (BL.fromChunks src)
+  BL.writeFile (out </> "out.js") (renderLinker debug src infos)
   writeFile (out </> "rts.js") rtsStr
   getShims extraFiles allDeps (out </> "lib.js", out </> "lib1.js")
   writeHtml out
@@ -89,9 +90,10 @@ link out searchPath objFiles pageModules = do
       where
         modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> ext
 
-renderLinker :: JStat -> [ClosureInfo] -> BL.ByteString
-renderLinker stat infos = TLE.encodeUtf8 . displayT . renderPretty 0.8 150 . pretty $
-                        Compactor.compact stat infos
+renderLinker :: Bool -> JStat -> [ClosureInfo] -> BL.ByteString
+renderLinker debug stat infos 
+   = TLE.encodeUtf8 . displayT . renderPretty 0.8 150 . pretty $
+       Compactor.compact debug stat infos
 
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath

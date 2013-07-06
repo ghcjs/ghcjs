@@ -80,20 +80,20 @@ import qualified Debug.Trace as DT
 type StgPgm     = [StgBinding]
 type StaticRefs = [Id]
 
-generate :: DynFlags -> StgPgm -> Module -> (ByteString, ByteString)  -- module,metadata
-generate df s m = flip evalState (initState df m) $ do
+generate :: Bool -> DynFlags -> StgPgm -> Module -> (ByteString, ByteString)  -- module,metadata
+generate debug df s m = flip evalState (initState df m) $ do
   (p1, d) <- unzip <$> pass1 df m s
-  let result = BL.toStrict $ Object.object' (dumpAst s ++ p1)
+  let result = BL.toStrict $ Object.object' (dumpAst debug s ++ p1)
   (deps, pkgs, funs) <- genMetaData d
   let depsBs = C.runPut $ Linker.serializeDeps pkgs funs deps
   return (result, depsBs)
 
-dumpAst :: StgPgm -> [([Text], BL.ByteString)]
-dumpAst s 
-  | True = []
-  | otherwise = [([T.pack "h$debug", T.pack "h$dumpAst"], Object.serializeStat [] [j| h$dumpAst = `x` |])]
+dumpAst :: Bool -> StgPgm -> [([Text], BL.ByteString)]
+dumpAst debug s 
+  | debug     = [([T.pack "h$debug", T.pack "h$dumpAst"], Object.serializeStat [] [j| h$dumpAst = `x` |])]
+  | otherwise = []
       where
-        x = (intercalate "\n\n" (map ((\x -> "/*\n"++x++" */\n").showIndent) s))
+        x = (intercalate "\n\n" (map showIndent s))
 
 -- | variable prefix for the nth block in module
 modulePrefix :: Module -> Int -> String
@@ -203,8 +203,7 @@ lookupStaticRefs i xs = fromMaybe [] (lookup i xs)
 
 genToplevelDecl :: Id -> StgRhs -> C
 genToplevelDecl i rhs
---  | isBoolId i = mempty   -- these are fixed on the heap
-  | otherwise = resetSlots (genToplevelConEntry i rhs) <> resetSlots (genToplevelRhs i rhs)
+  = resetSlots (genToplevelConEntry i rhs) <> resetSlots (genToplevelRhs i rhs)
 
 genToplevelConEntry :: Id -> StgRhs -> C
 genToplevelConEntry i (StgRhsCon _cc con args)
@@ -227,13 +226,13 @@ getStaticRef = fmap (itxt.head) . genIdsI
 genToplevelRhs :: Id -> StgRhs -> C
 genToplevelRhs i (StgRhsCon _cc con args)
   | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 1 =
-      (\id -> [j| `id` = false; |]) <$> jsId i 
+      declIds i <> ((\id -> [j| `id` = false; |]) <$> jsId i)
   | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 2 =
-      (\id -> [j| `id` = true;  |]) <$> jsId i
+      declIds i <> ((\id -> [j| `id` = true;  |]) <$> jsId i)
   | [x] <- args, isUnboxableCon con = do
       [a] <- genArg x
       id  <- jsId i
-      return [j| `id` = `a` |]
+      declIds i <> return [j| `id` = `a` |]
   | otherwise =
     typeComment i <>
     do
@@ -380,13 +379,13 @@ genApp force mstackTop i a
                 else return [j| return h$e(`ii`); |]
     | idArity i == n && not (isLocalId i) && n /= 0 = do
         as' <- concatMapM genArg a
-        r1 <> jumpToII i as'
+        jumpToII i as' =<< r1
     | idArity i <  n && idArity i > 0 =
          let (reg,over) = splitAt (idArity i) a
          in  do
            reg' <- concatMapM genArg reg
-           r1 <> pushCont over <> jumpToII i reg' -- (concatMap genArg reg)
-    | otherwise = r1 <> jumpToFast a
+           pushCont over <> (jumpToII i reg' =<< r1)-- (concatMap genArg reg)
+    | otherwise = jumpToFast a =<< r1
   where
     stackTop = [je| `Stack`[`Sp`] |] -- fixme, use known val? fromMaybe [je| stack[sp]; |] mstackTop
     r1 :: C
@@ -1121,16 +1120,16 @@ allocConStatic to con xs = do
 
 -- avoid one indirection for global ids
 -- fixme in many cases we can also jump directly to the entry for local?
-jumpToII :: Id -> [JExpr] -> C
-jumpToII i args
+jumpToII :: Id -> [JExpr] -> JStat -> C
+jumpToII i args afterLoad
   | isLocalId i = do
      ii <- jsId i
-     return ( mconcat ra <> [j| return `ii`.f; |])
+     return ( mconcat ra <> afterLoad <> [j| return `ii`.f; |])
   | otherwise   = do
      ei <- jsEntryId i
-     return (mconcat ra <> [j| return `ei`; |])
+     return (mconcat ra <> afterLoad <> [j| return `ei`; |])
   where
-    ra = zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) args
+    ra = reverse $ zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) args
 
 
 -- load arguments and jump to fun directly (not going through trampoline)
@@ -1139,15 +1138,15 @@ jumpTo' fun args = mconcat ra <> [j| return `fun`(); |]
   where
       ra = zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) args
 
-jumpToFast :: [StgArg] -> C
-jumpToFast as = do
+jumpToFast :: [StgArg] -> JStat -> C
+jumpToFast as afterLoad = do
   regs <- concatMapM genArg as
   (fun, spec) <- selectApply True (as,regs)
   if spec
-    then return $ mconcat (ra regs) <> [j| return `fun`(); |]
-    else return $ mconcat (ra regs) <> [j| return `fun`(`mkTag regs as`); |]
+    then return $ mconcat (ra regs) <> afterLoad <> [j| return `fun`(); |]
+    else return $ mconcat (ra regs) <> afterLoad <> [j| return `fun`(`mkTag regs as`); |]
     where
-      ra regs   = zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) regs
+      ra regs   = reverse $ zipWith (\r e -> [j| `r` = `e` |]) (enumFrom R2) regs
       mkTag rs as = (length rs `shiftL` 8) .|. length as
 
 

@@ -14,6 +14,7 @@ import           Language.Javascript.JMacro
 
 import           Gen2.Utils
 import           Gen2.StgAst ()
+import           Gen2.RtsSettings
 
 import           StgSyn
 import           DataCon
@@ -222,20 +223,23 @@ fixedLayout vts = CILayoutFixed (sum (map varSize vts)) vts
 
 -- a gi gai i
 instance ToStat ClosureInfo where
-  toStat (ClosureInfo obj rs name layout CIThunk srefs)       =
-    setObjInfoL obj rs layout Thunk name 0 srefs
-  toStat (ClosureInfo obj rs name layout (CIFun arity nregs) srefs) =
-    setObjInfoL obj rs layout Fun name (mkArityTag arity nregs) srefs
-  toStat (ClosureInfo obj rs name layout (CICon con) srefs)   =
-    setObjInfoL obj rs layout Con name con srefs
+  toStat = closureInfoStat rtsDebug
+
+closureInfoStat :: Bool -> ClosureInfo -> JStat
+closureInfoStat debug (ClosureInfo obj rs name layout CIThunk srefs) =
+    setObjInfoL debug obj rs layout Thunk name 0 srefs
+closureInfoStat debug (ClosureInfo obj rs name layout (CIFun arity nregs) srefs) =
+    setObjInfoL debug obj rs layout Fun name (mkArityTag arity nregs) srefs
+closureInfoStat debug (ClosureInfo obj rs name layout (CICon con) srefs) =
+    setObjInfoL debug obj rs layout Con name con srefs
 --  toStat (ClosureInfo obj rs name layout CIInd srefs)         =
 --    setObjInfoL obj rs layout Ind name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
-  toStat (ClosureInfo obj rs name layout CIBlackhole srefs)   =
-    setObjInfoL obj rs layout Blackhole name 0 srefs
+closureInfoStat debug (ClosureInfo obj rs name layout CIBlackhole srefs)   =
+    setObjInfoL debug obj rs layout Blackhole name 0 srefs
 
   -- pap have a special gtag for faster gc ident (only need to access gtag field)
-  toStat (ClosureInfo obj rs name layout (CIPap size) srefs)  =
-    setObjInfo obj Pap name [] size (toJExpr $ -3-size) rs srefs
+closureInfoStat debug (ClosureInfo obj rs name layout (CIPap size) srefs)  =
+    setObjInfo debug obj Pap name [] size (toJExpr $ -3-size) rs srefs
 -- setObjInfo obj rs layout Pap name size srefs
 
 
@@ -243,7 +247,8 @@ mkArityTag :: Int -> Int -> Int
 mkArityTag arity trailingVoid = arity .|. (trailingVoid `shiftL` 8)
 
 -- tag repurposed as size
-setObjInfoL :: Text      -- ^ the object name
+setObjInfoL :: Bool      -- ^ debug: output symbol names
+            -> Text      -- ^ the object name
             -> [VarType] -- ^ things in registers
             -> CILayout  -- ^ layout of the object
             -> CType     -- ^ closure type
@@ -251,18 +256,19 @@ setObjInfoL :: Text      -- ^ the object name
             -> Int       -- ^ `a' argument, depends on type (arity, conid, size)
             -> CIStatic  -- ^ static refs
             -> JStat
-setObjInfoL obj rs CILayoutVariable t n a            =
-  setObjInfo obj t n [] a (toJExpr (-1 :: Int)) rs
-setObjInfoL obj rs (CILayoutPtrs size ptrs) t n a    =
-  setObjInfo obj t n xs a tag rs
-  where
-    tag = toJExpr size  -- mkGcTagPtrs t size ptrs
-    xs -- | tag /= 0  = []
+setObjInfoL debug obj rs CILayoutVariable t n a =
+  setObjInfo debug obj t n [] a (toJExpr (-1 :: Int)) rs
+setObjInfoL debug obj rs (CILayoutPtrs size ptrs) t n a =
+  setObjInfo debug obj t n xs a tag rs
+    where
+      tag = toJExpr size  -- mkGcTagPtrs t size ptrs
+      xs -- | tag /= 0  = []
        = map (\i -> fromEnum $ if i `elem` ptrs then PtrV else ObjV) [1..size-1]
-setObjInfoL obj rs (CILayoutFixed size layout) t n a = setObjInfo obj t n xs a tag rs
-  where
-    tag  = toJExpr size -- mkGcTag t size layout
-    xs   = toTypeList layout
+setObjInfoL debug obj rs (CILayoutFixed size layout) t n a =
+  setObjInfo debug obj t n xs a tag rs
+    where
+      tag  = toJExpr size -- mkGcTag t size layout
+      xs   = toTypeList layout
        {-
        | tag /= 0 = []
        | otherwise = toTypeList layout
@@ -286,7 +292,8 @@ mkGcTagPtrs t objSize ptrs = fromMaybe fallback $
     fallback = toJExpr (0::Int) -- (objSize' : ptrs)
     objSize' = if t == Thunk then max 2 objSize else objSize
 
-setObjInfo :: Text       -- ^ the thing to modify
+setObjInfo :: Bool       -- ^ debug: output all symbol names
+           -> Text       -- ^ the thing to modify
            -> CType      -- ^ closure type
            -> Text       -- ^ object name, for printing
            -> [Int]      -- ^ list of item types in the object, if known (free variables, datacon fields)
@@ -295,8 +302,8 @@ setObjInfo :: Text       -- ^ the thing to modify
            -> [VarType]  -- ^ things in registers
            -> CIStatic   -- ^ static refs
            -> JStat
-setObjInfo obj t name fields a gctag argptrs static
---  | True  = [j| h$setObjInfo(`StrI (T.unpack obj)`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
+setObjInfo debug obj t name fields a gctag argptrs static
+   | debug     = [j| h$setObjInfo(`StrI (T.unpack obj)`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
    | otherwise = [j| h$o(`StrI (T.unpack obj)`,`t`,`a`,`gctag`,`nregs`,`static`); |]
   where
     nregs = sum $ map varSize argptrs

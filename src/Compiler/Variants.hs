@@ -19,15 +19,15 @@ import           Id                    (Id)
 import           Module                (Module (..))
 import           StgSyn                (StgBinding)
 
-data CallingConvention = Gen2 | Plain | Trampoline
+data CallingConvention = Gen2
 
 data Variant = Variant
     { variantExtension         :: String
     , variantMetaExtension     :: Maybe String
     , variantExeExtension      :: String
     , variantCallingConvention :: CallingConvention
-    , variantRender            :: DynFlags -> StgPgm -> Module -> (ByteString, ByteString)
-    , variantLink              :: String -> [FilePath] -> [FilePath] -> [ModuleName] -> IO [String]
+    , variantRender            :: Bool -> DynFlags -> StgPgm -> Module -> (ByteString, ByteString)
+    , variantLink              :: Bool -> String -> [FilePath] -> [FilePath] -> [ModuleName] -> IO [String]
     }
 
 variantExtension' = tail . variantExtension

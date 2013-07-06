@@ -2,7 +2,7 @@
 
 {-
   Binary intermediate JavaScript object files:
-    serialized (Text, JStat) key/value pairs
+    serialized [Text] -> ([ClosureInfo], JStat) blocks
 
 -}
 
@@ -227,11 +227,22 @@ putI (StrI xs) = putString xs
 getI :: Get Ident
 getI = StrI <$> getString
 
+-- we need to preserve NaN and infinities, unfortunately the Binary instance for Double does not do this
 putSD :: SaneDouble -> Put
-putSD (SaneDouble d) = put d
+putSD (SaneDouble d)
+  | isNaN d               = tag 1
+  | isInfinite d && d > 0 = tag 2
+  | isInfinite d && d < 0 = tag 3
+  | isNegativeZero d      = tag 4
+  | otherwise             = tag 5 >> put d
 
 getSD :: Get SaneDouble
-getSD = SaneDouble <$> get
+getSD = getTag >>= \case 
+                      1 -> pure $ SaneDouble (0    / 0)
+                      2 -> pure $ SaneDouble (1    / 0)
+                      3 -> pure $ SaneDouble ((-1) / 0)
+                      4 -> pure $ SaneDouble (-0)
+                      5 -> SaneDouble <$> get
 
 -- we do not need these atm
 putLT :: JLocalType -> Put

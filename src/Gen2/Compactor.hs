@@ -32,18 +32,18 @@ import           Gen2.Utils
 import           Gen2.ClosureInfo
 import qualified Gen2.Optimizer as Optimizer
 
-compact :: JStat -> [ClosureInfo] -> JStat
-compact input ci = renameInternals input ci
+compact :: Bool -> JStat -> [ClosureInfo] -> JStat
+compact debug input ci = renameInternals debug input ci
 
 data RenamerState = RenamerState [Ident] (Map String Ident)
 
-renameInternals :: JStat -> [ClosureInfo] -> JStat
-renameInternals stat ci = evalState doRename
+renameInternals :: Bool -> JStat -> [ClosureInfo] -> JStat
+renameInternals debug stat ci = evalState doRename
   (RenamerState (map (\(StrI xs) -> StrI ("h$$"++xs)) Optimizer.newLocals) M.empty)
   where
     doRename = do
        s'  <- template renameVar stat
-       rci <- renderClosureInfo ci
+       rci <- renderClosureInfo debug ci
        return (s' <> rci)
 
 renameVar :: Ident -> State RenamerState Ident
@@ -55,8 +55,9 @@ renameVar i@(StrI xs)
         Nothing -> put (RenamerState ys (M.insert xs y m)) >> return y
   | otherwise = return i
 
-renderClosureInfo :: [ClosureInfo] -> State RenamerState JStat
-renderClosureInfo cis = fmap (renderInfoBlock . renameClosureInfo cis) get
+renderClosureInfo :: Bool -> [ClosureInfo] -> State RenamerState JStat
+renderClosureInfo debug cis =
+   fmap (renderInfoBlock debug . renameClosureInfo cis) get
 
 renameClosureInfo :: [ClosureInfo] -> RenamerState -> [ClosureInfo]
 renameClosureInfo cis (RenamerState _ m) =
@@ -68,14 +69,16 @@ renameClosureInfo cis (RenamerState _ m) =
     h _ CINoStatic = CINoStatic
     h m0 (CIStaticRefs rs) = CIStaticRefs (map (\sr -> fromMaybe sr $ M.lookup sr m0) rs)
 
-renderInfoBlock :: [ClosureInfo] -> JStat
-renderInfoBlock infos = -- mconcat (map toStat infos) <>
-  [j| h$initStatic.push(\ {
-        var !h$functions = `funArr`;
-        var !h$info      = `infoTables`;
-        h$initInfoTables(`nfuns`, h$functions, h$info);
-      });
-    |]
+renderInfoBlock :: Bool -> [ClosureInfo] -> JStat
+renderInfoBlock debug infos
+  | debug = mconcat (map (closureInfoStat True) infos)
+  | otherwise =
+      [j| h$initStatic.push(\ {
+            var !h$functions = `funArr`;
+            var !h$info      = `infoTables`;
+            h$initInfoTables(`nfuns`, h$functions, h$info);
+          });
+        |]
   where
     infos' = sortBy (compare `on` ciVar) infos
     infoTables :: String

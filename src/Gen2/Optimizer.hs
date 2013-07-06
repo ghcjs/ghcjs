@@ -199,9 +199,22 @@ liveVarsE f e                      = template (liveVarsE f) e
 ----------------------------------------------------------
 dataflow :: JStat -> JStat
 dataflow = thisFunction . nestedFuns %~ f
-  where f (args,stat)     = g stat . liveness . constants . constants . constants . propagateStack $ (args, localVars stat, cfg stat)
+  where f d@(args,stat)
+          | noDataflow stat = d
+          | otherwise       = g stat . liveness . constants . constants . constants . propagateStack $ (args, localVars stat, cfg stat)
         g _ (args,_,cfg) = (args, unCfg cfg)
 --        g stat (args,_,cfg) = (args, unCfg cfg <> [j| return; |]  <> stat)  -- append original, debug!
+
+-----------------------------------------------------------
+-- detect some less frequently used constructs that we
+-- do not support in the dataflow analyzer yet
+-----------------------------------------------------------
+
+noDataflow :: JStat -> Bool
+noDataflow stat = any unsupportedExpr (universeOnOf template template stat)
+  where
+    unsupportedExpr (ValExpr (JFunc {})) = True
+    unsupportedExpr _                    = False
 
 -----------------------------------------------------------
 -- liveness: remove unnecessary assignments
@@ -283,17 +296,19 @@ constants (args,locals,g) = -- trace (show g) $ trace (show fs)
       where
         c  = exprCond e'
         e' = updExpr (nodeFact nid) e
-    rewriteNode nid (SimpleNode (ApplStat s args)) = 
+    rewriteNode nid (SimpleNode (ApplStat s args)) =
       case propagateExpr (nodeFact nid) (ApplExpr s args) of
         (ApplExpr s' args') -> SimpleNode (ApplStat s' args')
         _ -> error "rewriteNode: not ApplyExpr"
+    rewriteNode nid (SimpleNode (AssignStat (ValExpr (JVar x)) (ValExpr (JVar y))))
+      | x == y = SequenceNode []
     rewriteNode nid n = rewriteExprs (nodeFact nid) n
 
     -- apply our facts to an expression
     propagateExpr :: CVals -> JExpr -> JExpr
     propagateExpr cv e@(ApplExpr (ValExpr _) args) =
       propagateExpr' (maybe M.empty (`deleteConstants` cv) (S.unions <$> mapM mutated args)) e
-    propagateExpr cv e = 
+    propagateExpr cv e =
       propagateExpr' (maybe M.empty (`deleteConstants` cv) (mutated e)) e
     propagateExpr' :: CVals -> JExpr -> JExpr
     propagateExpr' cv e = transformOf template f e
@@ -465,29 +480,37 @@ normalize :: JExpr -> JExpr
 normalize = rewriteOf template assoc . rewriteOf template comm . foldExpr
   where
     comm :: JExpr -> Maybe JExpr
+    comm e | not (allowed e) = Nothing
     comm (InfixExpr op e1 e2)
       |  commutes op && isConst e1 && not (isConst e2)
       || commutes op && isVar e1 && not (isConstOrVar e2) = f (InfixExpr op e2 e1)
     comm (InfixExpr op1 e1 (InfixExpr op2 e2 e3))
-      |   op1 == op2 && commutes op1 && isConst e1 && not (isConst e2) 
+      |   op1 == op2 && commutes op1 && isConst e1 && not (isConst e2)
       ||  op1 == op2 && commutes op1 && isVar e1 && not (isConstOrVar e2)
       || commutes2a op1 op2 && isConst e1 && not (isConst e2)
       || commutes2a op1 op2 && isVar e1 && not (isConstOrVar e2)
           = f (InfixExpr op1 e2 (InfixExpr op2 e1 e3))
     comm _ = Nothing
     assoc :: JExpr -> Maybe JExpr
+    assoc e | not (allowed e) = Nothing
     assoc (InfixExpr op1 (InfixExpr op2 e1 e2) e3)
       | op1 == op2 && associates op1 = f (InfixExpr op1 e1 (cf $ InfixExpr op1 e2 e3))
-      | associates2a op1 op2 = f (InfixExpr op1 e1 (cf $ InfixExpr op2 e2 e3))
-      | associates2b op1 op2 = f (InfixExpr op2 e1 (cf $ InfixExpr op1 e2 e3))
+      | associates2a op1 op2 = f (InfixExpr op2 e1 (cf $ InfixExpr op1 e2 e3))
+      | associates2b op1 op2 = f (InfixExpr op1 e1 (cf $ InfixExpr op2 e3 e2))
     assoc _ = Nothing
-    commutes   op  = op `elem` [] --["*", "+"]                            --  a * b       = b * a
-    commutes2a op1 op2 = (op1,op2) `elem` [] -- [("+","-"),("*", "/")]     --  a + (b - c) = b + (a - c)
-    associates op  = op `elem` [] -- ["*", "+"]                            -- (a * b) * cv = a * (b * c)
-    associates2a op1 op2 = (op1,op2) `elem` [] -- [("+", "-"), ("*", "/")] -- (a + b) - c  = a + (b - c)  -- (a*b)/c = a*(b/c)
-    associates2b op1 op2 = (op1,op2) `elem` [] -- [("-", "+"), ("/", "*")] -- (a - b) + c  = a + (c - b)
+    commutes   op  = op `elem` ["+"] -- ["*", "+"]                            --  a * b       = b * a
+    commutes2a op1 op2 = (op1,op2) `elem` [("+", "-")] -- ,("*", "/")]     --  a + (b - c) = b + (a - c)
+    associates op  = op `elem` ["+"] -- ["*", "+"]                            -- (a * b) * cv = a * (b * c)
+    associates2a op1 op2 = (op1,op2) `elem` [("-", "+")] -- , ("/", "*")] -- (a + b) - c  = a + (b - c)  -- (a*b)/c = a*(b/c)
+    associates2b op1 op2 = (op1,op2) `elem` [("+", "-")] -- , ("*", "/")] -- (a - b) + c  = a + (c - b)
     cf = rewriteOf template comm . foldExpr
     f  = Just . foldExpr
+    allowed e = S.null (exprDeps e S.\\ x) && all isSmall (e ^.. template)
+       where
+         x = S.fromList [StrI "h$sp" , StrI "h$stack"]
+         isSmall (JDouble (SaneDouble d)) = abs d < 10000
+         isSmall (JInt x)                 = abs x < 10000
+         isSmall _                        = True
 
 lorOp :: JExpr -> JExpr -> JExpr
 lorOp e1 e2 | Just b <- exprCond e1 = if b then jTrue else e2
@@ -532,6 +555,9 @@ intInfixOp "!="  i1 i2 = jBool (i1 /= i2)
 intInfixOp op i1 i2 = InfixExpr op (ValExpr (JInt i1)) (ValExpr (JInt i2))
 
 doubleInfixOp :: String -> SaneDouble -> SaneDouble -> JExpr
+-- doubleInfixOp op sd1@(SaneDouble d1) sd2@(SaneDouble d2)
+--  | isInfinite d1 || isInfinite d2 || isNaN d1 || isNaN d2
+--  = InfixExpr op (ValExpr (JDouble sd1)) (ValExpr (JDouble sd2))
 doubleInfixOp "+"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1+d2))
 doubleInfixOp "-"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1-d2))
 doubleInfixOp "*"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1*d2))

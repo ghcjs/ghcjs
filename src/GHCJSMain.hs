@@ -39,16 +39,16 @@ linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
 linkJavaScript dyflags o_files dep_packages pagesMods = return ()
   #else
 -}
-writeJavaScriptModule :: DynFlags -> ModSummary -> CgGuts
+writeJavaScriptModule :: Bool -> DynFlags -> ModSummary -> CgGuts
         -> ([StgBinding], CollectedCCs) -> IO ()
-writeJavaScriptModule dyflags summary tidyCore (stg', _ccs) = do
+writeJavaScriptModule debug dyflags summary tidyCore (stg', _ccs) = do
     forM_ variants $ \variant -> do
-        writeJavaScriptModule' dyflags variant summary tidyCore (stg', _ccs)
+        writeJavaScriptModule' debug dyflags variant summary tidyCore (stg', _ccs)
 
-writeJavaScriptModule' :: DynFlags -> Variant -> ModSummary -> CgGuts
+writeJavaScriptModule' :: Bool -> DynFlags -> Variant -> ModSummary -> CgGuts
         -> ([StgBinding], CollectedCCs) -> IO ()
-writeJavaScriptModule' dyflags var summary _tidyCore (stg', _ccs) =
-  do let (program, meta) = variantRender var dyflags stg' (ms_mod summary)
+writeJavaScriptModule' debug dyflags var summary _tidyCore (stg', _ccs) =
+  do let (program, meta) = variantRender var debug dyflags stg' (ms_mod summary)
      putStrLn $ concat ["Writing module ", name, " (to ", outputFile vext, ")"]
      B.writeFile (outputFile vext) program
      case variantMetaExtension var of
@@ -59,13 +59,13 @@ writeJavaScriptModule' dyflags var summary _tidyCore (stg', _ccs) =
       outputFile ext = replaceExtension (ml_hi_file . ms_location $ summary) ext
       name = moduleNameString . moduleName . ms_mod $ summary
 
-linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
-linkJavaScript dyflags o_files dep_packages pagesMods = do
+linkJavaScript :: Bool -> DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
+linkJavaScript debug dyflags o_files dep_packages pagesMods = do
     forM_ variants $ \variant -> do
-        linkJavaScript' variant dyflags o_files dep_packages pagesMods
+        linkJavaScript' debug variant dyflags o_files dep_packages pagesMods
 
-linkJavaScript' :: Variant -> DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
-linkJavaScript' var dyflags o_files dep_packages pagesMods = do
+linkJavaScript' :: Bool -> Variant -> DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
+linkJavaScript' debug var dyflags o_files dep_packages pagesMods = do
     let jsexe = jsexeFileName var dyflags
     importPaths <- getPackageImportPaths dyflags dep_packages
     debugTraceMsg dyflags 1 (ptext (sLit "JavaScript Linking") <+> text jsexe
@@ -77,7 +77,7 @@ linkJavaScript' var dyflags o_files dep_packages pagesMods = do
                         [] | any ((=="JSMain") . takeBaseName) jsFiles -> [mkModuleName "JSMain"]
                         []                                             -> [mkModuleName "Main"]
                         _                                              -> pagesMods
-    closureArgs <- variantLink var jsexe importPaths jsFiles pagesMods'
+    closureArgs <- variantLink var debug jsexe importPaths jsFiles pagesMods'
     writeFile (jsexe </> "closure.args") $ unwords closureArgs
   where
     ext = variantExtension var
