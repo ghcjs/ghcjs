@@ -1,6 +1,6 @@
-{-# LANGUAGE QuasiQuotes     #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE CPP             #-}
+{-# LANGUAGE QuasiQuotes,
+             TemplateHaskell,
+             CPP #-}
 module Gen2.Prim where
 
 {-
@@ -32,6 +32,7 @@ import           Gen2.StgAst
 import           Gen2.Utils
 import           Language.Javascript.JMacro
 import           Language.Javascript.JMacro.Types
+import qualified Data.Text as T
 
 import           Data.Monoid
 
@@ -577,7 +578,7 @@ genPrim op rs as = PrimInline [j| log(`"warning, unhandled primop: "++show op++"
   `copyRes`;
 |]
   where
-    f = ApplStat (iex . StrI $ "h$prim_" ++ show op) as
+    f = ApplStat (iex . TxtI . T.pack $ "h$prim_" ++ show op) as
     copyRes = mconcat $ zipWith (\r reg -> [j| `r` = `reg`; |]) rs (enumFrom Ret1)
 
 newByteArray :: JExpr -> JExpr -> JStat

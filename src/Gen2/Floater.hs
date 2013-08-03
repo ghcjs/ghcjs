@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-
 
 The first pass of the code generator generates nested functions like:
@@ -42,7 +43,7 @@ unlabel (LabelStat _ x) = x
 unlabel x               = x
 
 isToplevelStatement :: JStat -> Bool
-isToplevelStatement (LabelStat "toplevel" _) = True
-isToplevelStatement _                        = False
+isToplevelStatement (LabelStat l _) | l == "toplevel" = True
+isToplevelStatement _                                 = False
 
 

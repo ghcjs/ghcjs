@@ -1,54 +1,55 @@
+{-# LANGUAGE DefaultSignatures,
+             OverloadedStrings,
+             TupleSections #-}
 {-
   GHCJS linker, manages dependencies with
     modulename.ji files, which contain function-level dependencies
     the source files (.js) contain function groups delimited by
     special markers
 -}
-{-# LANGUAGE DefaultSignatures #-}
-{-# LANGUAGE DeriveGeneric     #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections     #-}
 module Gen2.Linker where
 
 import           Control.Applicative
 import           Control.Monad
+
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
+import           Data.Char                (isDigit)
+import qualified Data.Foldable            as F
+import           Data.List                (partition, isSuffixOf, isPrefixOf)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe               (fromMaybe)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
-import qualified Data.Vector              as V
-
-import Data.Char (isDigit)
-import qualified Data.Foldable            as F
-import Data.List (partition, isSuffixOf, isPrefixOf)
-import           Data.Serialize
 import           Data.Text                (Text)
 import qualified Data.Text                as T
-import qualified Data.Text.IO             as T
 import qualified Data.Text.Encoding       as TE
 import qualified Data.Text.Encoding.Error as TE
+import qualified Data.Text.IO             as T
 import qualified Data.Text.Lazy           as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
-import           System.FilePath (dropExtension, splitPath, (<.>), (</>))
-import           System.Directory (createDirectoryIfMissing, doesFileExist)
+import qualified Data.Vector              as V
+
+
+import           Language.Javascript.JMacro
+import           System.FilePath          (dropExtension, splitPath, (<.>), (</>))
+import           System.Directory         (createDirectoryIfMissing, doesFileExist)
+import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
+
 import           Config
 import           Module                   (ModuleName, moduleNameString)
-import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
-import           Language.Javascript.JMacro
 
-import           Gen2.StgAst
-import           Gen2.Rts (rtsStr)
-import           Gen2.Shim
-import           Gen2.Printer (pretty)
-import qualified Gen2.Compactor as Compactor
-import           Gen2.ClosureInfo hiding (Fun)
 import           Compiler.Info
-import qualified Gen2.Object as Object
+import           Gen2.StgAst
+import           Gen2.Rts                 (rtsStr)
+import           Gen2.Shim
+import           Gen2.Printer             (pretty)
+import qualified Gen2.Compactor           as Compactor
+import           Gen2.ClosureInfo         hiding (Fun)
+import           Gen2.Object
 
 link :: Bool
      -> String       -- ^ output file/directory
@@ -58,9 +59,12 @@ link :: Bool
      -> IO [String]  -- ^ arguments for the closure compiler to minify our result
 link debug out searchPath objFiles pageModules = do
   let (objFiles', extraFiles) = partition (".js" `isSuffixOf`) objFiles
-  metas <- mapM (readDeps . metaFile) objFiles'
+  metas <- mapM (readDepsFile . metaFile) objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
   T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
+  print searchPath
+  print objFiles
+--  print pageModules
   (allDeps, src, infos) <- collectDeps (lookup metas) (S.union rtsDeps (S.fromList $ concatMap modFuns roots))
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (renderLinker debug src infos)
@@ -98,6 +102,7 @@ renderLinker debug stat infos
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
 
+-- fixme get dependencies from DynFlags instead
 getShims :: [FilePath] -> Set Fun -> (FilePath, FilePath) -> IO ()
 getShims extraFiles deps (fileBefore, fileAfter) = do
   base <- (</> "shims") <$> getGlobalPackageBase
@@ -144,9 +149,9 @@ writeHtml out = do
   where
     htmlFile = out </> "index" <.> "html"
 
--- get the ji file for a js file
+-- get the js file for a js file -- fixme
 metaFile :: FilePath -> FilePath
-metaFile = (<.> "ji") . dropExtension
+metaFile = (<.> "js") . dropExtension
 
 -- drop the version from a package name
 -- fixme this is probably a bit wrong but should only be necessary
@@ -163,68 +168,9 @@ splitVersion t
   where
     (ver, name) = T.break (=='-') (T.reverse t)
 
-
--- | dependencies for a single module
-data Deps = Deps { depsPackage :: !Package
-                 , depsModule  :: !Text
-                 , depsDeps    :: Map Fun (Set Fun)
-                 }
-
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
 modFuns (Deps p m d) = map fst (M.toList d)
-
-data Package = Package { packageName :: !Text
-                       , packageVersion :: !Text
-                       } deriving (Eq, Ord, Show)
-
-instance Serialize Package where
-  get = Package <$> getText <*> getText
-  put (Package n v) = mapM_ putText [n,v]
-
-data Fun = Fun { funPackage :: !Package
-               , funModule  :: !Text
-               , funSymbol  :: !Text
-               } deriving (Eq, Ord, Show)
-
-data IndexedFun = IndexedFun { ifunPackage :: !Int
-                             , ifunModule  :: !Text
-                             , ifunSymbol  :: !Text
-                             }
-
-instance Serialize IndexedFun where
-  get             = IndexedFun <$> get <*> getText <*> getText
-  put (IndexedFun p m s) = put p >> mapM_ putText [m,s]
-
-toIndexedFun :: Map Package Int -> Fun -> IndexedFun
-toIndexedFun pkgs (Fun p m s) = (IndexedFun idx m s)
-  where
-    idx = fromMaybe (error $ "missing package in deps set: " ++ show p) (M.lookup p pkgs)
-
-fromIndexedFun :: V.Vector Package -> IndexedFun -> Fun
-fromIndexedFun pkgs (IndexedFun pi m s) = (Fun (pkgs V.! pi) m s)
-
--- set of packages and set of funs must contain at least everything in Deps
-serializeDeps :: Set Package -> Set Fun -> Putter Deps --  -> Putter ByteString
-serializeDeps pkgs funs (Deps p m d) = do
-  put p
-  putText m
-  put (S.toAscList pkgs)
-  let pkgs' = M.fromList $ zip (S.toAscList pkgs) [(0::Int)..]
-      funs' = M.fromList $ zip (S.toAscList funs) [(0::Int)..]
-  put $ map (toIndexedFun pkgs') (S.toAscList funs)
-  let depIndex d = fromMaybe (error $ "missing symbol in deps set: " ++ show d) (M.lookup d funs')
-  put $ map (\(d,ds) -> (depIndex d, map depIndex $ S.toList ds)) (M.toAscList d)
-
--- reads back a deps file, uses sharing for efficiency so be careful with the result
-unserializeDeps :: Get Deps
-unserializeDeps = do
-  p    <- get
-  m    <- getText
-  pkgs <- V.fromList <$> get
-  funs <- V.fromList . map (fromIndexedFun pkgs) <$> get
-  deps <- M.fromList . map (\(d,ds) -> (funs V.! d, S.fromList $ map (funs V.!) ds)) <$> get
-  return (Deps p m deps)
 
 -- | get all dependencies for a given set of roots
 getDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun)
@@ -235,7 +181,7 @@ getDeps lookup fun = go S.empty M.empty (S.toList fun)
     go result deps ffs@(f:fs) =
       let key = (funPackage f, funModule f)
       in  case M.lookup key deps of
-            Nothing -> lookup "ji" f >>= readDeps >>=
+            Nothing -> lookup "js" f >>= readDepsFile >>=
                            \d -> go result (M.insert key d deps) ffs
             Just (Deps _ _ d)  -> let ds = filter (`S.notMember` result)
                                            (maybe [] S.toList $ M.lookup f d)
@@ -258,42 +204,14 @@ collectDeps lookup roots = do
 extractDeps :: FilePath -> Set Fun -> IO (JStat, [ClosureInfo])
 extractDeps file funs = do
   let symbs = S.fromList $ map funSymbol (S.toList funs)
-  l <- Object.readObjectKeys (any (`S.member` symbs)) <$> BL.readFile file
-  return (mconcat (map Object.oiStat l), concatMap Object.oiClInfo l)
-
-getText :: Get Text
-getText = do
-  l <- getWord32le
-  TE.decodeUtf8With TE.lenientDecode <$> getByteString (fromIntegral l)
-
-putText :: Text -> Put
-putText t =
-  let bs = TE.encodeUtf8 t
-  in  putWord32le (fromIntegral $ B.length bs) >> putByteString bs
-
--- | read the modulename.ji file
-readDeps :: FilePath -> IO Deps
-readDeps file = do
-  either error id . runGet unserializeDeps <$> B.readFile file
-
-dumpDeps :: Deps -> String
-dumpDeps (Deps p m d) = T.unpack $
-  "package: " <> showPkg p <> "\n" <>
-  "module: " <> m <> "\n" <>
-  "deps:\n" <> T.unlines (map (uncurry dumpDep) (M.toList d))
-  where
-    dumpDep s ds = funSymbol s <> " -> \n" <>
-      F.foldMap (\(Fun fp fm fs) -> "   "
-        <> showPkg fp <> ":" <> fm <> "." <> fs <> "\n") ds
-
-showPkg :: Package -> Text
-showPkg (Package name ver)
-  | T.null ver = name
-  | otherwise  = name <> "-" <> ver
+  l <- readObjectFileKeys (any (`S.member` symbs)) file
+  return (mconcat (map oiStat l), concatMap oiClInfo l)
 
 -- Fun -> packagename-packagever
 funPkgTxt :: Fun -> Text
-funPkgTxt = showPkg . funPackage
+funPkgTxt f = packageName pkg <> "-" <> packageVersion pkg
+   where
+    pkg = funPackage f
 
 -- Fun -> packagename
 funPkgTxtNoVer :: Fun -> Text

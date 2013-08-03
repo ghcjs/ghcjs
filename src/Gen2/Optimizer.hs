@@ -1,42 +1,48 @@
-{-# LANGUAGE CPP, GADTs, StandaloneDeriving, DeriveDataTypeable, QuasiQuotes, NoMonomorphismRestriction, TupleSections #-}
+{-# Language CPP,
+             GADTs,
+             StandaloneDeriving,
+             DeriveDataTypeable,
+             QuasiQuotes,
+             NoMonomorphismRestriction,
+             TupleSections,
+             OverloadedStrings #-}
 {-
+
   Optimizer:
-  Basic optimization of the generated JavaScript to reduce file size and improve readability
+
+  Basic optimization of the generated JavaScript to 
+  reduce file size and improve readability
 
   assumptions:
-  - ast is fully saturated
+  - getProperty is pure
+
 -}
 module Gen2.Optimizer where
 
-import Control.Monad
-import Language.Javascript.JMacro
-import Control.Applicative
-import Data.Set (Set)
-import qualified Data.Set as S
-import Data.Map (Map)
-import Data.Int
-import qualified Data.Map as M
+import           Control.Applicative
+import           Control.Lens
+import           Control.Monad
+
+import           Data.Bits
+import           Data.Data
+import           Data.Data.Lens
+import           Data.Default
+import qualified Data.IntSet as IS
+import           Data.Int
+import           Data.IntMap (IntMap)
 import qualified Data.IntMap as IM
-import Data.Generics.Aliases
-import Data.Generics.Schemes
-import Data.Data
-import Data.Monoid
-import Data.Data.Lens
-import Data.Tree
-import Control.Lens
-import Control.Arrow
-import Data.List (foldl')
+import           Data.List (foldl')
 import qualified Data.List as L
-import Data.Maybe
-import Panic
-import Control.Monad.State
-import Data.Bits
-import Data.Default
+import qualified Data.Map as M
+import           Data.Maybe
+import qualified Data.Set as S
+import qualified Data.Text as T
+import           Data.Monoid
+
+import           Language.Javascript.JMacro
 
 import           Gen2.Utils
 import           Gen2.Dataflow
-
-import Debug.Trace
 
 optimize :: JStat -> JStat
 #ifdef DISABLE_OPTIMIZER
@@ -49,7 +55,7 @@ renameLocalVars :: JStat -> JStat
 renameLocalVars = thisFunction . nestedFuns %~ renameLocalsFun newLocals
 
 newLocals :: [Ident]
-newLocals = map StrI $ (map (:[]) chars0) ++ concatMap mkIdents [1..]
+newLocals = map (TxtI . T.pack) $ (map (:[]) chars0) ++ concatMap mkIdents [1..]
   where
     mkIdents n = [c0:cs | c0 <- chars0, cs <- replicateM n chars]
     chars0 = ['a'..'z']++['A'..'Z']
@@ -82,7 +88,6 @@ subExprs f (IdxExpr e1 e2) = IdxExpr <$> f e1 <*> f e2
 subExprs f (InfixExpr o e1 e2) = InfixExpr o <$> f e1 <*> f e2
 subExprs f (PPostExpr b xs e) = PPostExpr b xs <$> f e
 subExprs f (IfExpr e1 e2 e3) = IfExpr <$> f e1 <*> f e2 <*> f e3
-subExprs f (NewExpr e) = NewExpr <$> f e
 subExprs f (ApplExpr e es) = ApplExpr <$> f e <*> traverse f es
 subExprs f (TypeExpr b e t) = TypeExpr b <$> f e <*> pure t
 subExprs f e = f e
@@ -107,8 +112,8 @@ localVars :: JStat -> [Ident]
 localVars = universeOf subStats >=> getLocals
   where
     getLocals (DeclStat i _) = [i]
-    getLocals (ForInStat _ i _ _) = [i]
-    getLocals (TryStat _ i _ _) = [i]
+    getLocals (ForInStat _ i _ _) = [i] -- remove ident?
+    getLocals (TryStat _ i _ _) = []  -- is this correct?
     getLocals _ = []
 
 localIdents = template . localFunctionVals . _JVar
@@ -144,6 +149,7 @@ localFunctionVals f (JList es)   = JList <$> template (localFunctionVals f) es
 localFunctionVals f (JHash m)    = JHash <$> tinplate (localFunctionVals f) m  -- lens bug?
 localFunctionVals f v            = f v
 
+-- fixme: check that try/catch is handled correctly, with separate local vars for the caught things
 renameLocalsFun :: [Ident] -> ([Ident], JStat) -> ([Ident], JStat)
 renameLocalsFun newNames f = ( map renameVar args
                              , s' & localIdents %~ renameVar & nonExprLocalIdents %~ renameVar
@@ -164,7 +170,7 @@ renameGlobals m f@(args,s) = (args, localIdents %~ renameVar $ s')
     (_, s')     = nestedFuns %~ renameGlobals m' $ f
     renameVar i = fromMaybe i (M.lookup i m')
     locals      = L.nub $ args ++ localVars s
-    m'          = m M.\\ (M.fromList $ zip locals (repeat (StrI "_")))
+    m'          = m M.\\ (M.fromList $ zip locals (repeat (TxtI "_")))
 
 tup :: a -> (a,a)
 tup x = (x,x)
@@ -197,13 +203,60 @@ liveVarsE f v@(ValExpr (JFunc {})) = pure v
 liveVarsE f e                      = template (liveVarsE f) e
 
 ----------------------------------------------------------
+
+data Annot = Annot { aIdents      :: IdSet -- identifiers in the expression
+                   , aSideEffects :: Bool  -- can the expression have side effects
+                   } deriving (Data, Typeable, Eq)
+
+type Graph'      = Graph Annot
+type Node'       = Node  Annot
+type AExpr'      = AExpr Annot
+type SimpleStat' = SimpleStat Annot
+
+-- things that we do not want to calculate multiple times for the graph
+data Cache = Cache { cachedKnownFuns :: IntMap IdSet
+                   , cachedKnownPure :: IdSet
+                   }
+
+cache :: Graph' -> Cache
+cache g = Cache (knownFuns g) (knownPureFuns g)
+
+-- empty annotation to get started, replace this with a proper annotations before rewriting
+emptyAnnot :: Annot
+emptyAnnot = Annot (error "emptyAnnot: empty annotation") (error "emptyAnnot: empty annotation")
+
+annotate :: Cache -> Expr -> AExpr'
+annotate c e = AExpr (Annot (exprIdents e) (mightHaveSideeffects c e)) e
+
+noAnnot :: Graph' -> Expr -> AExpr'
+noAnnot _ e = AExpr emptyAnnot e
+
+normalizeAnnot :: Cache -> Graph' -> Graph'
+normalizeAnnot c g = g & nodes . tinplate %~ normalizeAExpr
+  where
+    normalizeAExpr :: AExpr' -> AExpr'
+    normalizeAExpr ae = annotate c (normalize g $ fromA ae)
+
 dataflow :: JStat -> JStat
 dataflow = thisFunction . nestedFuns %~ f
-  where f d@(args,stat)
+  where f d@(args, stat)
           | noDataflow stat = d
-          | otherwise       = g stat . liveness . constants . constants . constants . propagateStack $ (args, localVars stat, cfg stat)
-        g _ (args,_,cfg) = (args, unCfg cfg)
---        g stat (args,_,cfg) = (args, unCfg cfg <> [j| return; |]  <> stat)  -- append original, debug!
+          | otherwise       = ung stat . liveness args' locals
+                                       . constants args' locals c
+                                       . constants args' locals c
+                                       . constants args' locals c
+                                       . propagateStack args' locals c
+                                       $ g1
+          where
+            g0 = cfg noAnnot stat
+            c  = cache g0
+            g1 :: Graph'
+            g1 = normalizeAnnot c g0
+            args' :: IdSet
+            args' = IS.fromList $ catMaybes (map (lookupId g0) args)
+            locals = localVarsGraph g0
+            ung _ g = (args, unCfg g)
+            -- ung _ g = (args, [j| if(runOptimized) { `unCfg g` } else { `stat` } |])
 
 -----------------------------------------------------------
 -- detect some less frequently used constructs that we
@@ -220,384 +273,507 @@ noDataflow stat = any unsupportedExpr (universeOnOf template template stat)
 -- liveness: remove unnecessary assignments
 -----------------------------------------------------------
 
-liveness :: ([Ident],[Ident],Graph) -> ([Ident],[Ident],Graph)
-liveness (args,locals,g) = (args,locals,g')
+liveness :: IdSet -> IdSet -> Graph' -> Graph'
+liveness args locals g = g & nodes %~ IM.mapWithKey updNode
   where
-    locals' = S.fromList locals
+    la = args `IS.union` locals
     lf = livenessFacts g
-    g' = (nodes %~ IM.mapWithKey updNode) g
-    updNode :: NodeId -> Node -> Node
-    updNode nid (SimpleNode (AssignStat (ValExpr (JVar i)) e))
-      | Just live <- lookupFact nid 0 lf, i `M.notMember` live 
-         && not (mightHaveSideEffects e) 
-         && i `S.member` locals' = SequenceNode []
+    updNode :: NodeId -> Node' -> Node'
+    updNode nid (SimpleNode (AssignS (AExpr _ (ValE (Var i))) e))
+      | not (live i (lookupFact def nid 0 lf))
+         && not (mightHaveSideeffects' e)
+         && i `IS.member` la = SequenceNode []
     updNode _  n = n
 
-type Liveness = Map Ident Use
+    live :: Id -> Liveness -> Bool
+    live i (Liveness x y) = i `IM.member` x || i `IM.member` y
+
+-- Id -> use
+data Liveness = Liveness { lUse   :: IntMap Use -- normal uses
+                         , lExcep :: IntMap Use -- if the statement generates an exception uses
+                         } deriving (Eq)
+
+instance Default Liveness where
+  def = Liveness IM.empty IM.empty
 
 data Use = Once | Multiple deriving (Show, Eq, Bounded, Ord, Enum)
 
-livenessFacts :: Graph -> Facts Liveness
-livenessFacts = foldBackward (M.unionWith lMax) f M.empty
-  where
-    f _ (SimpleNode (AssignStat (ValExpr (JVar i)) e)) m
-       = M.unionWith lPlus (M.delete i m) (exprL e)
-    f _ n m = M.unionWith lPlus (exprL n) m
-    exprL n = M.fromList (map (,Once) $ n ^.. template)
+-- fixme for trystat probably
 
+livenessFacts :: Graph Annot -> Facts Liveness
+livenessFacts = foldBackward c f def def
+  where
+    c :: Liveness -> Liveness -> Liveness
+    c (Liveness x1 y1) (Liveness x2 y2) = Liveness (IM.unionWith lUb x1 x2) (IM.unionWith lUb y1 y2)
+    c' :: IntMap Use -> IntMap Use -> IntMap Use
+    c' = IM.unionWith lUb
+
+    p :: Liveness -> Liveness -> Liveness
+    p (Liveness x1 y1) (Liveness x2 y2) = Liveness (IM.unionWith lPlus x1 x2) (IM.unionWith lPlus y1 y2)
+--    p' :: IntMap Use -> IntMap Use -> IntMap Use
+--    p' = IM.unionWith lUb
+
+    r :: Id -> Liveness -> Liveness
+    r i (Liveness x y) = Liveness (IM.delete i x) y
+
+    f :: Backward Annot Liveness
+    f = Backward { bIf       = \_ -> cb
+                 , bWhile    = \_ -> cb
+                 , bDoWhile  = \_ e x -> x `p` exprL e
+                 , bSimple   = \_ -> simple
+                 , bBreak    = \_ -> id
+                 , bContinue = \_ -> id
+                 , bReturn   = \_ e -> exprL e
+                 , bTry      = \_ _ -> try
+                 , bForIn    = \_ _ _ -> cb
+                 , bSwitch   = \_ e x -> x `p` exprL e
+                 }
+
+    cb :: AExpr' -> (Liveness, Liveness) -> Liveness
+    cb e (x1, x2) = (x1 `c` x2) `p` exprL e
+
+    exprL :: AExpr' -> Liveness
+    exprL e = Liveness (IM.fromList . map (,Once) . IS.toList . exprDeps $ e) IM.empty
+
+    simple :: SimpleStat' -> Liveness -> Liveness
+    simple (DeclS _) l = l
+    simple (AssignS e1 e2) l
+      | (ValE (Var i)) <-  fromA e1 = r i l `p` exprL e2
+      | otherwise                   = (l `p` exprL e1) `p` exprL e2
+    simple (ExprS e) l = l `p` exprL e
+
+    try :: (Liveness, Liveness, Liveness) -> (Liveness, Liveness)
+    try (bt, bc, bf) = let et  = Liveness (lUse bf) (lUse bc `c'` lExcep bc) -- is this correct?
+                           bt' = Liveness (lUse bt) (lExcep bf)
+                       in (bt', et)
 
 lPlus :: Use -> Use -> Use
 lPlus _ _ = Multiple
 
-lMax :: Use -> Use -> Use
-lMax Once Once = Once
-lMax _    _    = Multiple
+lUb :: Use -> Use -> Use
+lUb Once Once = Once
+lUb _    _    = Multiple
 
 -----------------------------------------------------------
 -- constants and assignment propagation
 --   removes unreachable branches and statements
 -----------------------------------------------------------
 
-type CVals = Map Ident (JExpr, Set Ident) -- ident = expr, depends on set of idents
+data CVals = CUnreached
+           | CReached (IntMap CFact)
+  deriving (Eq, Data, Typeable)
 
-constants :: ([Ident],[Ident],Graph) -> ([Ident],[Ident],Graph)
-constants (args,locals,g) = -- trace (show g) $ trace (show fs) 
-                            (args, locals, g')
+newtype CFact = CKnown AExpr'  -- known value
+  deriving (Eq, Data, Typeable)
+
+(%%) :: (IntMap CFact -> IntMap CFact) -> CVals -> CVals
+_ %% CUnreached = CUnreached
+f %% CReached m = CReached (f m)
+
+constants :: IdSet -> IdSet -> Cache -> Graph' -> Graph'
+constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
   where
-    fs  = constantsFacts lfs g
+    fs  = constantsFacts lfs c g
     lfs = livenessFacts g
-    g'  = (nodes %~ IM.mapWithKey updNode) g
 
     -- fact index 2 is what flows into the expression
     nodeFact :: NodeId -> CVals
-    nodeFact nid = fromMaybe M.empty (lookupFact nid 2 fs)
+    nodeFact nid = lookupFact CUnreached nid 2 fs
 
-    updNode :: NodeId -> Node -> Node
-    updNode nid = rewriteNode nid . rewriteExprs (nodeFact nid)
+    rewriteExprs :: CVals -> Node' -> Node'
+    rewriteExprs cv = template %~ propagateExpr cv
 
-    rewriteExprs :: CVals -> Node -> Node
-    rewriteExprs cv = template %~ (normalize . propagateExpr cv)
+    updExpr :: CVals -> AExpr' -> AExpr'
+    updExpr fact e = propagateExpr fact $ e
 
-    updExpr :: CVals -> JExpr -> JExpr
-    updExpr fact e = normalize . propagateExpr fact $ e
-
-    rewriteNode :: NodeId -> Node -> Node
+    rewriteNode :: NodeId -> Node' -> Node'
     rewriteNode nid _
-      | isNothing (lookupFact nid 0 fs) = SequenceNode [] -- unreachable code
+      | lookupFact CUnreached nid 0 fs == CUnreached = SequenceNode [] -- unreachable code
     rewriteNode nid (IfNode e s1 s2)
       | Just True  <- c, not s = SequenceNode [s1] -- else branch unreachable
       | Just False <- c, not s = SequenceNode [s2] -- if branch unreachable
       where
-        s  = mightHaveSideEffects e'
-        c  = exprCond e'
+        s  = mightHaveSideeffects' e'
+        c  = exprCond' e'
         e' = updExpr (nodeFact nid) e
     rewriteNode nid (WhileNode e s1)  -- loop body unreachable
-      | Just False <- c, not (mightHaveSideEffects e') = SequenceNode []
+      | Just False <- exprCond' e', not (mightHaveSideeffects' e') = SequenceNode []
       where
-        c  = exprCond e'
         e' = updExpr (nodeFact nid) e
-    rewriteNode nid (SimpleNode (ApplStat s args)) =
-      case propagateExpr (nodeFact nid) (ApplExpr s args) of
-        (ApplExpr s' args') -> SimpleNode (ApplStat s' args')
-        _ -> error "rewriteNode: not ApplyExpr"
-    rewriteNode nid (SimpleNode (AssignStat (ValExpr (JVar x)) (ValExpr (JVar y))))
-      | x == y = SequenceNode []
+    rewriteNode nid n@(SimpleNode (AssignS e1 e2))
+      | (ValE (Var x)) <- fromA e1, (ValE (Var y)) <- fromA e2, x == y
+          = SequenceNode []
+      | (ValE (Var _)) <- fromA e1
+          = SimpleNode (AssignS e1 (propagateExpr (nodeFact nid) e2))
     rewriteNode nid n = rewriteExprs (nodeFact nid) n
 
     -- apply our facts to an expression
-    propagateExpr :: CVals -> JExpr -> JExpr
-    propagateExpr cv e@(ApplExpr (ValExpr _) args) =
-      propagateExpr' (maybe M.empty (`deleteConstants` cv) (S.unions <$> mapM mutated args)) e
-    propagateExpr cv e =
-      propagateExpr' (maybe M.empty (`deleteConstants` cv) (mutated e)) e
-    propagateExpr' :: CVals -> JExpr -> JExpr
-    propagateExpr' cv e = transformOf template f e
+    propagateExpr :: CVals -> AExpr' -> AExpr'
+    propagateExpr CUnreached ae = ae
+    propagateExpr cv@(CReached{}) ae
+      | not hasKnownDeps = ae
+      | e@(ApplE (ValE _) args) <- fromA ae = annotate c . normalize g $
+          propagateExpr' (maybe (CReached IM.empty) (`deleteConstants` cv) (IS.unions <$> mapM (mutated c) args)) e
+      | otherwise = annotate c . normalize g $
+          propagateExpr' (maybe (CReached IM.empty) (`deleteConstants` cv) (mutated c (fromA ae))) (fromA ae)
       where
-        f :: JExpr -> JExpr
-        f (ValExpr (JVar i)) | Just (e,_) <- M.lookup i cv = e
+        hasKnownDeps = not . IS.null $ exprDeps ae `IS.intersection` knownValues cv
+
+    propagateExpr' :: CVals -> Expr -> Expr
+    propagateExpr' (CReached cv) e = transformOf template f e
+      where
+        f :: Expr -> Expr
+        f (ValE (Var i)) | Just (CKnown ae) <- IM.lookup i cv = fromA ae
         f x = x
 
+-- set of identifiers with known values
+knownValues :: CVals -> IdSet
+knownValues (CReached cv) = IS.fromList . (\xs -> [ x | (x, CKnown _) <- xs]) . IM.toList $ cv
+knownValues _             = IS.empty
+
 -- constant and variable assignment propagation
-constantsFacts :: Facts Liveness -> Graph -> Facts CVals
-constantsFacts lfs g = foldForward combineConstants f0 M.empty g
+constantsFacts :: Facts Liveness -> Cache -> Graph' -> Facts CVals
+constantsFacts lfs c g = foldForward combineConstants f0 (CReached IM.empty) CUnreached g
   where
-    f0 :: Forward CVals
+    f0 :: Forward Annot CVals
     f0 = def { fIf      = removeMutated1t
              , fWhile   = removeMutated1t
              , fDoWhile = removeMutated1t
              , fSwitch  = switched
              , fReturn  = removeMutated1
-             , fForIn   = removeMutated3
-             , fSimple  = \nid s m -> simple nid s (removeMutated s m)
-             , fTry     = \_ x -> x
+             , fForIn   = \_ _ -> removeMutated1t
+             , fSimple  = \nid s m -> simple nid s m -- (removeMutated s m)
+             , fTry     = \_ x -> (x, CReached IM.empty, CReached IM.empty)
              }
-    usedOnce :: NodeId -> Ident -> Bool
-    usedOnce nid ident = fromMaybe False $
-      (== Once) <$> (M.lookup ident =<< lookupFact nid 0 lfs)
+    usedOnce :: NodeId -> Id -> Bool
+    usedOnce nid i = let (Liveness u excep) = lookupFact def nid 0 lfs
+                     in  IM.lookup i u == Just Once && isNothing (IM.lookup i excep)
 
-    switched :: NodeId -> JExpr -> [JExpr] -> CVals -> ([CVals], CVals)
+    switched :: NodeId -> AExpr' -> [AExpr'] -> CVals -> ([CVals], CVals)
     switched _ e es m = let m' = removeMutated e m in (replicate (length es) m', m')
-    simple :: NodeId -> JStat -> CVals -> CVals
-    -- fixme remove ugly ReturnStat hack
-    simple nid (ApplStat fn es) m = removeMutated (ReturnStat (ApplExpr fn es)) m
-    simple nid (PPostStat b op expr) m = removeMutated (ReturnStat (PPostExpr b op expr)) m
-    simple nid (AssignStat (ValExpr (JVar i)) e@(ValExpr (JInt _))) m =
-       M.insert i (e, S.empty) (dc i m)
-    simple nid (AssignStat (ValExpr (JVar i)) e@(ValExpr (JDouble _))) m =
-       M.insert i (e, S.empty) (dc i m)
-    simple nid (AssignStat (ValExpr (JVar i)) e@(ValExpr (JVar j))) m =
-       M.insert i (e, S.singleton j) (dc i m)
-    simple nid (AssignStat (ValExpr (JVar i)) e@(ApplExpr (ValExpr (JVar fun)) exprs)) m
-       | isKnownPureFun fun && usedOnce nid i && i `S.notMember` argDeps = M.insert i (e,argDeps) (dc i m)
-          where argDeps = S.unions (map exprDeps exprs)
-    simple nid (AssignStat (ValExpr (JVar i)) e) m
-       | not (mightHaveSideEffects e) && usedOnce nid i && i `S.notMember` exprDeps e
-           = M.insert i (e, exprDeps e) (dc i m)
-    simple nid (AssignStat (ValExpr (JVar i)) e@(SelExpr (ValExpr (JVar j)) field)) m
-       | usedOnce nid i = M.insert i (e, S.singleton j) m
-    simple nid (AssignStat (ValExpr (JVar i)) _) m = dc i m
-    simple nid (AssignStat (IdxExpr (ValExpr (JVar i)) _) _) m = dc i m
-    simple nid (AssignStat (SelExpr (ValExpr (JVar i)) _) _) m = dc i m
-    simple _ _ m = m
+    simple :: NodeId -> SimpleStat' -> CVals -> CVals
+    simple nid _ CUnreached = CUnreached
+    simple nid (DeclS{}) m = m
+    simple nid (ExprS e) m = removeMutated e m
+    simple nid (AssignS e1 e2) m
+       | (ValE (Var i)) <- fromA e1, (ValE (IntV _))                <- fromA e2 = IM.insert i (CKnown e2) %% dc i m'
+       | (ValE (Var i)) <- fromA e1, (ValE (DoubleV _))             <- fromA e2 = IM.insert i (CKnown e2) %% dc i m'
+       | (ValE (Var i)) <- fromA e1, (ValE (Var _))                 <- fromA e2 = IM.insert i (CKnown e2) %% dc i m'
+       | (ValE (Var i)) <- fromA e1, (ApplE (ValE (Var fun)) args)  <- fromA e2, isKnownPureFun c fun
+           && usedOnce nid i && i `IS.notMember` (IS.unions $ map exprDeps' args) = IM.insert i (CKnown e2) %% dc i m'
+       | (ValE (Var i)) <- fromA e1, not (mightHaveSideeffects' e2)
+           && usedOnce nid i && i `IS.notMember` exprDeps e2                    = IM.insert i (CKnown e2) %% dc i m'
+       | (ValE (Var i)) <- fromA e1, (SelE (ValE (Var j)) field) <- fromA e2,
+           not (mightHaveSideeffects' e2) && usedOnce nid i                     = IM.insert i (CKnown e1) %% dc i m'
+       | (ValE (Var i)) <- fromA e1                                             = dc i m'
+       | (IdxE (ValE (Var i)) _) <- fromA e1                                    = dc i m'
+       | (SelE (ValE (Var i)) _) <- fromA e1                                    = dc i m'
+       | otherwise = removeMutated e1 m'
+       where m' = removeMutated e2 m
     tup x = (x,x)
-    removeMutated1t _ s  = tup . removeMutated s
-    removeMutated1 _     = removeMutated
-    removeMutated3 _ _ _ = removeMutated
-    removeMutated s m = maybe M.empty (`deleteConstants` m) mut
+    removeMutated1t _ s    = tup . removeMutated s
+    removeMutated1 _       = removeMutated
+    removeMutated :: Data a => a -> CVals -> CVals
+    removeMutated s = maybe (const $ CReached IM.empty) deleteConstants mut
       where
-        mut = S.unions <$> sequence (Just S.empty : map mutated (s ^.. template))
+        mut = IS.unions <$> sequence (Just IS.empty : map (mutated c) (s ^.. template))
 
-    dc :: Ident -> CVals -> CVals
-    dc i m = deleteConstants (S.singleton i) m
+    dc :: Id -> CVals -> CVals
+    dc i m = deleteConstants (IS.singleton i) m
 
     -- propagate constants if we have the same from both branches
     combineConstants :: CVals -> CVals -> CVals
-    combineConstants c1 c2 = M.filterWithKey f c1
+    combineConstants (CReached m1) (CReached m2) = CReached (IM.mergeWithKey f id id m1 m2)
       where
-        f i v = M.lookup i c2 == Just v
+        f k x y | x == y    = Just x
+                | otherwise = Nothing
+    combineConstants CUnreached x = x
+    combineConstants x          _ = x
+
 
 -- all variables referenced by expression
-exprDeps :: JExpr -> Set Ident
-exprDeps e = S.fromList $ (e ^.. tinplate) >>= ids
-  where
-    ids (JVar x) = [x]
-    ids _        = []
+exprDeps :: AExpr' -> IdSet
+exprDeps = aIdents . getAnnot
 
-deleteConstants :: Set Ident -> CVals -> CVals
-deleteConstants s m = M.filterWithKey f m
+exprDeps' :: Expr -> IdSet
+exprDeps' e = exprIdents e
+
+deleteConstants :: IdSet -> CVals -> CVals
+deleteConstants s (CReached m) = CReached (IM.filterWithKey f m)
   where
-    f k _       | k `S.member` s                       = False
-    f _ (_, ds) | not . S.null $ ds `S.intersection` s = False
-    f _ _                                              = True
+    f :: Id -> CFact -> Bool
+    f k _           | k `IS.member` s                                 = False
+    f _ (CKnown ae) | not . IS.null $ exprDeps ae `IS.intersection` s = False
+    f _ _                                                             = True
+deleteConstants _ CUnreached = CUnreached
 
 -- returns Nothing if it does things that we aren't sure of
-mutated :: JExpr -> Maybe (Set Ident)
-mutated expr = foldl' f (Just S.empty) (universeOf tinplate expr)
+mutated :: Cache -> Expr -> Maybe IdSet
+mutated c expr = foldl' f (Just IS.empty) (universeOf tinplate expr)
    where
-    f Nothing _                            = Nothing
-    f s (PPostExpr _ _ (ValExpr (JVar i))) = S.insert i <$> s
-    f s (ApplExpr (ValExpr (JVar i)) _)
-      | Just m <- knownMutated i           = S.union m <$> s
-    f s (SelExpr {})                       = s -- fixme might not be true with properties
-    f s (InfixExpr{})                      = s
-    f s (IdxExpr{})                        = s
-    f s (NewExpr{})                        = s
-    f s (ValExpr{})                        = s
-    f _ _                                  = Nothing
+    f :: Maybe IdSet -> Expr -> Maybe IdSet
+    f Nothing _                    = Nothing
+    f s (UOpE op (ValE (Var i)))
+      | op `S.member` uOpMutated   = IS.insert i <$> s
+      | otherwise                  = s
+    f s (ApplE (ValE (Var i)) _)
+      | Just m <- knownMutated i   = IS.union m <$> s
+    f s (SelE {})                  = s -- fixme might not be true with properties
+    f s (BOpE{})                   = s
+    f s (IdxE{})                   = s
+    f s (ValE{})                   = s
+    f _ _                          = Nothing
     knownMutated i
-      | isKnownPureFun i               = Just S.empty
-      | Just s <- M.lookup i knownFuns = Just s
+      | isKnownPureFun c i         = Just IS.empty
+      | Just s <- IM.lookup i (cachedKnownFuns c) = Just s
     knownMutated _ = Nothing
+    uOpMutated = S.fromList [PreInc, PostInc, PreDec, PostDec]
 
-mutated' :: Data a => a -> Maybe (Set Ident)
-mutated' a = S.unions <$> (mapM mutated $ a ^.. tinplate)
+mutated' :: Data a => Cache -> a -> Maybe IdSet
+mutated' c a = IS.unions <$> (mapM (mutated c) $ a ^.. tinplate)
 
 -- common RTS functions that we know touch only a few global variables
-knownFuns :: Map Ident (Set Ident)
-knownFuns = M.fromList . map (StrI *** S.fromList . map StrI) $
+knownFuns :: Graph a -> IntMap IdSet
+knownFuns g = IM.fromList . catMaybes . map f $
                [ ("h$bh", [ "h$r1" ])
-               ] ++ map (\n -> ("h$p"  ++ show n, ["h$stack", "h$sp"])) [(1::Int)..32]
-                 ++ map (\n -> ("h$pp" ++ show n, ["h$stack", "h$sp"])) [(1::Int)..255]
+               ] ++ map (\n -> ("h$p"  <> T.pack (show n), ["h$stack", "h$sp"])) [(1::Int)..32]
+                 ++ map (\n -> ("h$pp" <> T.pack (show n), ["h$stack", "h$sp"])) [(1::Int)..255]
+  where
+    f (fun, vals) = fmap (,IS.fromList [x | Just x <- map (lookupId g . TxtI) vals]) (lookupId g (TxtI fun))
 
 -- pure RTS functions that we know we can safely move around or remove
-isKnownPureFun :: Ident -> Bool
-isKnownPureFun (StrI i) = S.member i knownPure
-  where knownPure = S.fromList . map ("h$"++) $
+knownPureFuns :: Graph a -> IdSet
+knownPureFuns g = IS.fromList $ catMaybes (map (lookupId g) knownPure)
+  where
+    knownPure = map (TxtI . T.pack . ("h$"++)) $
           ("c" : map (('c':).show) [(1::Int)..32]) ++
           map (('d':).show) [(1::Int)..32]
 
 
-mightHaveSideEffects :: JExpr -> Bool
-mightHaveSideEffects e = any f (universeOf template e)
+isKnownPureFun :: Cache -> Id -> Bool
+isKnownPureFun c i = IS.member i (cachedKnownPure c)
+
+mightHaveSideeffects' :: AExpr' -> Bool
+mightHaveSideeffects' = aSideEffects . getAnnot
+
+mightHaveSideeffects :: Cache -> Expr -> Bool
+mightHaveSideeffects c e = any f (universeOf template e)
   where
-    f (ValExpr{})          = False
-    f (SelExpr{})          = False  -- might be wrong with defineProperty
-    f (IdxExpr{})          = False
-    f (InfixExpr{})        = False
-    f (PPostExpr _ "++" _) = True
-    f (PPostExpr _ "--" _) = True
-    f (PPostExpr{})        = False
-    f (IfExpr{})           = False
-    f (NewExpr{})          = False
-    f (ApplExpr (ValExpr (JVar i)) _) | isKnownPureFun i = False
-    f _                    = True
+    f (ValE{})          = False
+    f (SelE{})          = False  -- might be wrong with defineProperty
+    f (IdxE{})          = False
+    f (BOpE{})          = False
+    f (UOpE op _ )  = op `S.member` sideEffectOps
+    f (CondE{})         = False
+    f (ApplE (ValE (Var i)) _) | isKnownPureFun c i = False
+    f _                 = True
+    sideEffectOps = S.fromList [DeleteOp, NewOp, PreInc, PostInc, PreDec, PostDec]
 
 -- constant folding and other bottom up rewrites
-foldExpr :: JExpr -> JExpr
+foldExpr :: Expr -> Expr
 foldExpr = transformOf template f
   where
-    f (InfixExpr "||" v1 v2) = lorOp v1 v2
-    f (InfixExpr "&&" v1 v2) = landOp v1 v2
-    f (InfixExpr op (ValExpr (JInt i1)) (ValExpr (JInt i2)))       = intInfixOp op i1 i2
-    f (InfixExpr op (ValExpr (JDouble d1)) (ValExpr (JDouble d2))) = doubleInfixOp op d1 d2
-    f (InfixExpr op (ValExpr (JInt x)) (ValExpr (JDouble d)))
+    f (BOpE LOrOp v1 v2) = lorOp v1 v2
+    f (BOpE LAndOp v1 v2) = landOp v1 v2
+    f (BOpE op (ValE (IntV i1)) (ValE (IntV i2)))       = intInfixOp op i1 i2
+    f (BOpE op (ValE (DoubleV d1)) (ValE (DoubleV d2))) = doubleInfixOp op d1 d2
+    f (BOpE op (ValE (IntV x)) (ValE (DoubleV d)))
       | abs x < 10000 = doubleInfixOp op (fromIntegral x) d -- conservative estimate to prevent loss of precision?
-    f (InfixExpr op (ValExpr (JDouble d)) (ValExpr (JInt x)))
+    f (BOpE op (ValE (DoubleV d)) (ValE (IntV x)))
       | abs x < 10000 = doubleInfixOp op d (fromIntegral x)
-    f (InfixExpr "+" (ValExpr (JStr s1)) (ValExpr (JStr s2))) = ValExpr (JStr (s1++s2))
-    f (InfixExpr "+" e (ValExpr (JInt i))) | i < 0 = InfixExpr "-" e (ValExpr (JInt $ negate i))
-    f (InfixExpr "-" e (ValExpr (JInt i))) | i < 0 = InfixExpr "+" e (ValExpr (JInt $ negate i))
-    f (PPostExpr True "-" (ValExpr (JInt i))) = ValExpr (JInt $ negate i)
-    f (PPostExpr True "-" (ValExpr (JDouble i))) = ValExpr (JDouble $ negate i)
-    f (PPostExpr True "!" e) | Just b <- exprCond e = if b then jFalse else jTrue
+    f (BOpE AddOp (ValE (StrV s1)) (ValE (StrV s2))) = ValE (StrV (s1<>s2))
+    f (BOpE AddOp e (ValE (IntV i))) | i < 0 = BOpE SubOp e (ValE (IntV $ negate i))
+    f (BOpE SubOp e (ValE (IntV i))) | i < 0 = BOpE AddOp e (ValE (IntV $ negate i))
+    f (UOpE NegOp (ValE (IntV i))) = ValE (IntV $ negate i)
+    f (UOpE NegOp (ValE (DoubleV i))) = ValE (DoubleV $ negate i)
+    f (UOpE NotOp e) | Just b <- exprCond e = eBool (not b)
+    f (BOpE eqOp (CondE c (ValE (IntV v1)) (ValE (IntV v2))) (ValE (IntV v3)))
+       | isEqOp eqOp = f (constIfEq eqOp c v1 v2 v3)
+    f (BOpE eqOp (ValE (IntV v3)) (CondE c (ValE (IntV v1)) (ValE (IntV v2))))
+       | isEqOp eqOp = f (constIfEq eqOp c v1 v2 v3)
+    f (BOpE eqOp (BOpE relOp x y) (ValE (BoolV b))) | isEqOp eqOp && isBoolOp relOp = f (boolRelEq eqOp relOp x y b)
+    f (BOpE eqOp (ValE (BoolV b)) (BOpE relOp x y)) | isEqOp eqOp && isBoolOp relOp = f (boolRelEq eqOp relOp x y b)
+    f (UOpE NotOp (BOpE eqOp x y)) | isEqOp eqOp = BOpE (negateEqOp eqOp) x y
     f e = e
 
+-- v3 `op` (c ? v1 : v2)
+constIfEq :: BinOp -> Expr -> Integer -> Integer -> Integer -> Expr
+constIfEq op c v1 v2 v3
+  | not (neqOp || eqOp) = error ("constIfEq: not an equality operator: " ++ show op)
+  | v1 == v2  = ValE (BoolV $ eqOp == (v1 == v3))
+  | v3 == v1  = if eqOp then c else UOpE NotOp c
+  | v3 == v2  = if eqOp then UOpE NotOp c else c
+  | otherwise = ValE (BoolV False)
+  where
+    neqOp = op == NeqOp || op == StrictNeqOp
+    eqOp = op == EqOp || op == StrictEqOp
+
+-- only use if rel always produces a bool result
+boolRelEq :: BinOp -> BinOp -> Expr -> Expr -> Bool -> Expr
+boolRelEq eq rel x y b | eq == EqOp  || eq == StrictEqOp  =
+  if b     then BOpE rel x y else UOpE NotOp (BOpE rel x y)
+boolRelEq eq rel x y b | eq == NeqOp || eq == StrictNeqOp =
+  if not b then BOpE rel x y else UOpE NotOp (BOpE rel x y)
+boolRelEq op _   _ _ _ = error ("boolRelEq: not an equality operator: " ++ show op)
+
+negateEqOp :: BinOp -> BinOp
+negateEqOp EqOp        = NeqOp
+negateEqOp NeqOp       = EqOp
+negateEqOp StrictEqOp  = StrictNeqOp
+negateEqOp StrictNeqOp = StrictEqOp
+negateEqOp op          = error ("negateEqOp: not an equality operator: " ++ show op)
+
 -- is expression a numeric or string constant?
-isConst :: JExpr -> Bool
-isConst (ValExpr (JDouble _)) = True
-isConst (ValExpr (JInt _)) = True
-isConst (ValExpr (JStr _)) = True
+isConst :: Expr -> Bool
+isConst (ValE (DoubleV _)) = True
+isConst (ValE (IntV _)) = True
+isConst (ValE (StrV _)) = True
 isConst _ = False
 
-isVar :: JExpr -> Bool
-isVar (ValExpr (JVar _)) = True
+isVar :: Expr -> Bool
+isVar (ValE (Var _)) = True
 isVar _ = False
 
-isConstOrVar :: JExpr -> Bool
+isConstOrVar :: Expr -> Bool
 isConstOrVar x = isConst x || isVar x
 
-normalize :: JExpr -> JExpr
-normalize = rewriteOf template assoc . rewriteOf template comm . foldExpr
+normalize :: Graph' -> Expr -> Expr
+normalize g = rewriteOf template assoc . rewriteOf template comm . foldExpr
   where
-    comm :: JExpr -> Maybe JExpr
+    comm :: Expr -> Maybe Expr
     comm e | not (allowed e) = Nothing
-    comm (InfixExpr op e1 e2)
+    comm (BOpE op e1 e2)
       |  commutes op && isConst e1 && not (isConst e2)
-      || commutes op && isVar e1 && not (isConstOrVar e2) = f (InfixExpr op e2 e1)
-    comm (InfixExpr op1 e1 (InfixExpr op2 e2 e3))
+      || commutes op && isVar e1 && not (isConstOrVar e2) = f (BOpE op e2 e1)
+    comm (BOpE op1 e1 (BOpE op2 e2 e3))
       |   op1 == op2 && commutes op1 && isConst e1 && not (isConst e2)
       ||  op1 == op2 && commutes op1 && isVar e1 && not (isConstOrVar e2)
       || commutes2a op1 op2 && isConst e1 && not (isConst e2)
       || commutes2a op1 op2 && isVar e1 && not (isConstOrVar e2)
-          = f (InfixExpr op1 e2 (InfixExpr op2 e1 e3))
+          = f (BOpE op1 e2 (BOpE op2 e1 e3))
     comm _ = Nothing
-    assoc :: JExpr -> Maybe JExpr
+    assoc :: Expr -> Maybe Expr
     assoc e | not (allowed e) = Nothing
-    assoc (InfixExpr op1 (InfixExpr op2 e1 e2) e3)
-      | op1 == op2 && associates op1 = f (InfixExpr op1 e1 (cf $ InfixExpr op1 e2 e3))
-      | associates2a op1 op2 = f (InfixExpr op2 e1 (cf $ InfixExpr op1 e2 e3))
-      | associates2b op1 op2 = f (InfixExpr op1 e1 (cf $ InfixExpr op2 e3 e2))
+    assoc (BOpE op1 (BOpE op2 e1 e2) e3)
+      | op1 == op2 && associates op1 = f (BOpE op1 e1 (cf $ BOpE op1 e2 e3))
+      | associates2a op1 op2 = f (BOpE op2 e1 (cf $ BOpE op1 e2 e3))
+      | associates2b op1 op2 = f (BOpE op1 e1 (cf $ BOpE op2 e3 e2))
     assoc _ = Nothing
-    commutes   op  = op `elem` ["+"] -- ["*", "+"]                            --  a * b       = b * a
-    commutes2a op1 op2 = (op1,op2) `elem` [("+", "-")] -- ,("*", "/")]     --  a + (b - c) = b + (a - c)
-    associates op  = op `elem` ["+"] -- ["*", "+"]                            -- (a * b) * cv = a * (b * c)
-    associates2a op1 op2 = (op1,op2) `elem` [("-", "+")] -- , ("/", "*")] -- (a + b) - c  = a + (b - c)  -- (a*b)/c = a*(b/c)
-    associates2b op1 op2 = (op1,op2) `elem` [("+", "-")] -- , ("*", "/")] -- (a - b) + c  = a + (c - b)
+    commutes   op  = op `elem` [AddOp] -- ["*", "+"]                            --  a * b       = b * a
+    commutes2a op1 op2 = (op1,op2) `elem` [(AddOp, SubOp)] -- ,("*", "/")]     --  a + (b - c) = b + (a - c)
+    associates op  = op `elem` [AddOp] -- ["*", "+"]                            -- (a * b) * cv = a * (b * c)
+    associates2a op1 op2 = (op1,op2) `elem` [(SubOp, AddOp)] -- , ("/", "*")] -- (a + b) - c  = a + (b - c)  -- (a*b)/c = a*(b/c)
+    associates2b op1 op2 = (op1,op2) `elem` [(AddOp, SubOp)] -- , ("*", "/")] -- (a - b) + c  = a + (c - b)
     cf = rewriteOf template comm . foldExpr
     f  = Just . foldExpr
-    allowed e = S.null (exprDeps e S.\\ x) && all isSmall (e ^.. template)
+    allowed e = IS.null (exprDeps' e IS.\\ x) && all isSmall (e ^.. tinplate)
        where
-         x = S.fromList [StrI "h$sp" , StrI "h$stack"]
-         isSmall (JDouble (SaneDouble d)) = abs d < 10000
-         isSmall (JInt x)                 = abs x < 10000
+         x = IS.fromList $ catMaybes (map (lookupId g) [TxtI "h$sp" , TxtI "h$stack"])
+         isSmall (DoubleV (SaneDouble d)) = abs d < 10000
+         isSmall (IntV x)                 = abs x < 10000
          isSmall _                        = True
 
-lorOp :: JExpr -> JExpr -> JExpr
-lorOp e1 e2 | Just b <- exprCond e1 = if b then jTrue else e2
-lorOp e1 e2 = InfixExpr "||" e1 e2
+lorOp :: Expr -> Expr -> Expr
+lorOp e1 e2 | Just b <- exprCond e1 = if b then eBool True else e2
+lorOp e1 e2 = BOpE LOrOp e1 e2
 
-landOp :: JExpr -> JExpr -> JExpr
-landOp e1 e2 | Just b <- exprCond e1 = if b then e2 else jFalse
-landOp e1 e2 = InfixExpr "&&" e1 e2
+landOp :: Expr -> Expr -> Expr
+landOp e1 e2 | Just b <- exprCond e1 = if b then e2 else eBool False
+landOp e1 e2 = BOpE LAndOp e1 e2
 
 -- if expression is used in a condition, can we statically determine its result?
-exprCond :: JExpr -> Maybe Bool
-exprCond (ValExpr (JInt x)) = Just (x /= 0)
-exprCond (ValExpr (JDouble x)) = Just (x /= 0)
-exprCond (ValExpr (JStr xs)) = Just (not $ null xs)
-exprCond (ValExpr (JVar (StrI "false"))) = Just False   -- fixme these need to be proper values in jmacro
-exprCond (ValExpr (JVar (StrI "true"))) = Just True
-exprCond (ValExpr (JVar (StrI "undefined"))) = Just False
-exprCond (ValExpr (JVar (StrI "null"))) = Just False
-exprCond _ = Nothing
+exprCond :: Expr -> Maybe Bool
+exprCond (ValE (IntV x))    = Just (x /= 0)
+exprCond (ValE (DoubleV x)) = Just (x /= 0)
+exprCond (ValE (StrV xs))   = Just (not $ T.null xs)
+exprCond (ValE (BoolV b))   = Just b
+exprCond (ValE NullV)       = Just False
+exprCond (ValE UndefinedV)  = Just False
+exprCond _                  = Nothing
+
+exprCond' :: AExpr a -> Maybe Bool
+exprCond' = exprCond . fromA
 
 -- constant folding and other bottom up rewrites
-intInfixOp :: String -> Integer -> Integer -> JExpr
-intInfixOp "+" i1 i2 = ValExpr (JInt (i1+i2))
-intInfixOp "-" i1 i2 = ValExpr (JInt (i1-i2))
-intInfixOp "*" i1 i2 = ValExpr (JInt (i1*i2))
-intInfixOp "/" i1 i2
-  | i2 /= 0 && d * i2 == i1 = ValExpr (JInt d)
+intInfixOp :: BinOp -> Integer -> Integer -> Expr
+intInfixOp AddOp i1 i2 = ValE (IntV (i1+i2))
+intInfixOp SubOp i1 i2 = ValE (IntV (i1-i2))
+intInfixOp MulOp i1 i2 = ValE (IntV (i1*i2))
+intInfixOp DivOp i1 i2
+  | i2 /= 0 && d * i2 == i1 = ValE (IntV d)
   where
     d = i1 `div` i2
-intInfixOp "%"   i1 i2 = ValExpr (JInt (i1 `mod` i2)) -- not rem?
-intInfixOp "&"   i1 i2 = bitwiseInt (.&.) i1 i2
-intInfixOp "|"   i1 i2 = bitwiseInt (.|.) i1 i2
-intInfixOp "^"   i1 i2 = bitwiseInt xor   i1 i2
-intInfixOp ">"   i1 i2 = jBool (i1 > i2)
-intInfixOp "<"   i1 i2 = jBool (i1 < i2)
-intInfixOp "<="  i1 i2 = jBool (i1 <= i2)
-intInfixOp ">="  i1 i2 = jBool (i1 >= i2)
-intInfixOp "===" i1 i2 = jBool (i1 == i2)
-intInfixOp "!==" i1 i2 = jBool (i1 /= i2)
-intInfixOp "=="  i1 i2 = jBool (i1 == i2)
-intInfixOp "!="  i1 i2 = jBool (i1 /= i2)
-intInfixOp op i1 i2 = InfixExpr op (ValExpr (JInt i1)) (ValExpr (JInt i2))
+intInfixOp ModOp       i1 i2 = ValE (IntV (i1 `mod` i2)) -- not rem?
+intInfixOp BAndOp      i1 i2 = bitwiseInt (.&.) i1 i2
+intInfixOp BOrOp       i1 i2 = bitwiseInt (.|.) i1 i2
+intInfixOp BXorOp      i1 i2 = bitwiseInt xor   i1 i2
+intInfixOp GtOp        i1 i2 = eBool (i1 > i2)
+intInfixOp LtOp        i1 i2 = eBool (i1 < i2)
+intInfixOp LeOp        i1 i2 = eBool (i1 <= i2)
+intInfixOp GeOp        i1 i2 = eBool (i1 >= i2)
+intInfixOp StrictEqOp  i1 i2 = eBool (i1 == i2)
+intInfixOp StrictNeqOp i1 i2 = eBool (i1 /= i2)
+intInfixOp EqOp        i1 i2 = eBool (i1 == i2)
+intInfixOp NeqOp       i1 i2 = eBool (i1 /= i2)
+intInfixOp op          i1 i2 = BOpE op (ValE (IntV i1)) (ValE (IntV i2))
 
-doubleInfixOp :: String -> SaneDouble -> SaneDouble -> JExpr
+doubleInfixOp :: BinOp -> SaneDouble -> SaneDouble -> Expr
 -- doubleInfixOp op sd1@(SaneDouble d1) sd2@(SaneDouble d2)
 --  | isInfinite d1 || isInfinite d2 || isNaN d1 || isNaN d2
 --  = InfixExpr op (ValExpr (JDouble sd1)) (ValExpr (JDouble sd2))
-doubleInfixOp "+"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1+d2))
-doubleInfixOp "-"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1-d2))
-doubleInfixOp "*"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1*d2))
-doubleInfixOp "/"   (SaneDouble d1) (SaneDouble d2) = ValExpr (JDouble $ SaneDouble (d1/d2))
-doubleInfixOp ">"   (SaneDouble d1) (SaneDouble d2) = jBool (d1 > d2)
-doubleInfixOp "<"   (SaneDouble d1) (SaneDouble d2) = jBool (d1 < d2)
-doubleInfixOp "<="  (SaneDouble d1) (SaneDouble d2) = jBool (d1 <= d2)
-doubleInfixOp ">="  (SaneDouble d1) (SaneDouble d2) = jBool (d1 >= d2)
-doubleInfixOp "===" (SaneDouble d1) (SaneDouble d2) = jBool (d1 == d2)
-doubleInfixOp "!==" (SaneDouble d1) (SaneDouble d2) = jBool (d1 /= d2)
-doubleInfixOp "=="  (SaneDouble d1) (SaneDouble d2) = jBool (d1 == d2)
-doubleInfixOp "!="  (SaneDouble d1) (SaneDouble d2) = jBool (d1 /= d2)
-doubleInfixOp op d1 d2 = InfixExpr op (ValExpr (JDouble d1)) (ValExpr (JDouble d2))
+doubleInfixOp AddOp   (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1+d2))
+doubleInfixOp SubOp   (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1-d2))
+doubleInfixOp MulOp   (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1*d2))
+doubleInfixOp DivOp   (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1/d2))
+doubleInfixOp GtOp   (SaneDouble d1) (SaneDouble d2) = eBool (d1 > d2)
+doubleInfixOp LtOp   (SaneDouble d1) (SaneDouble d2) = eBool (d1 < d2)
+doubleInfixOp LeOp  (SaneDouble d1) (SaneDouble d2) = eBool (d1 <= d2)
+doubleInfixOp GeOp  (SaneDouble d1) (SaneDouble d2) = eBool (d1 >= d2)
+doubleInfixOp StrictEqOp (SaneDouble d1) (SaneDouble d2) = eBool (d1 == d2)
+doubleInfixOp StrictNeqOp (SaneDouble d1) (SaneDouble d2) = eBool (d1 /= d2)
+doubleInfixOp EqOp  (SaneDouble d1) (SaneDouble d2) = eBool (d1 == d2)
+doubleInfixOp NeqOp  (SaneDouble d1) (SaneDouble d2) = eBool (d1 /= d2)
+doubleInfixOp op d1 d2 = BOpE op (ValE (DoubleV d1)) (ValE (DoubleV d2))
 
-bitwiseInt :: (Int32 -> Int32 -> Int32) -> Integer -> Integer -> JExpr
+bitwiseInt :: (Int32 -> Int32 -> Int32) -> Integer -> Integer -> Expr
 bitwiseInt op i1 i2 =
   let i = fromIntegral i1 `op` fromIntegral i2
-  in ValExpr (JInt $ fromIntegral i)
+  in ValE (IntV $ fromIntegral i)
 
 -----------------------------------------------------------
 -- stack and stack pointer magic
 -----------------------------------------------------------
 
-type StackFacts = Maybe Integer  -- relative offset of h$sp if known
+data StackFacts = SFUnknownB
+                | SFOffset Integer
+                | SFUnknownT
+  deriving (Eq, Ord, Show, Data, Typeable)
 
-propagateStack :: ([Ident],[Ident],Graph) -> ([Ident],[Ident],Graph)
-propagateStack (args,locals,g)
-  | nrets > 4 || stackAccess < nrets - 1 || stackAccess == 0 = (args, locals, g)
-  | otherwise = (args,locals,g')
+sfKnown :: StackFacts -> Bool
+sfKnown (SFOffset _) = True
+sfKnown _            = False
+
+sfUnknown :: StackFacts -> Bool
+sfUnknown = not . sfKnown
+
+propagateStack :: IdSet -> IdSet -> Cache -> Graph' -> Graph'
+propagateStack args locals c g
+  | nrets > 4 || stackAccess < nrets - 1 || stackAccess == 0 = g
+  | otherwise                                                = g'
   where
+    stackI = fromMaybe (-1) (lookupId g (TxtI "h$stack"))
+    spI    = fromMaybe (-2) (lookupId g (TxtI "h$sp"))
+    z      = SFOffset 0
+
     allNodes = IM.elems (g ^. nodes)
     nrets = length [() | (ReturnNode{}) <- allNodes]
-    stackAccess = length $ filter ((StrI "h$stack") `S.member`)
-                     (map exprDeps (allNodes ^.. template))
+    stackAccess = length $ filter (stackI `IS.member`) (map exprDeps (allNodes ^.. template))
 
-    sf = stackFacts g
-    g' :: Graph
+    sf = stackFacts c g
+    g' :: Graph'
     g' = foldl' (\g (k,v) -> updNode k v g) g (IM.toList $ g^.nodes)
 
-    updNode :: NodeId -> Node -> Graph -> Graph
+    updNode :: NodeId -> Node' -> Graph' -> Graph'
     updNode nid e@(IfNode _ n1 _) g
       | known nid && unknown n1 = replace nid e g
     updNode nid e@(WhileNode _ n1) g
@@ -611,91 +787,109 @@ propagateStack (args,locals,g)
     updNode nid e@(ReturnNode{}) g
       | known nid = replace nid e g
     updNode nid e@(SimpleNode{}) g
-      | known nid && isNothing (join (lookupFact nid 1 sf)) = replace nid e g
+      | known nid && sfUnknown (lookupFact SFUnknownB nid 1 sf) = replace nid e g -- fixme is this right?
     updNode nid e@(SimpleNode{}) g
-      | Just (Just x) <- lookupFact nid 0 sf,
-        Just (Just y) <- lookupFact nid 1 sf,
+      | SFOffset x <- lookupFact SFUnknownB nid 0 sf,
+        SFOffset y <- lookupFact SFUnknownB nid 1 sf,
          x /= y = nodes %~ IM.insert nid (SequenceNode []) $ g
     updNode nid n g = updExprs nid n g
 
-    updExprs :: NodeId -> Node -> Graph -> Graph
+    updExprs :: NodeId -> Node' -> Graph' -> Graph'
     updExprs nid n g
-      | Just (Just offset) <- lookupFact nid 2 sf =
+      | SFOffset offset <- lookupFact z nid 2 sf =
          let n' =  (tinplate %~ updExpr offset) n
          in  nodes %~ IM.insert nid n' $ g
       | otherwise = g
 
-    updExpr :: Integer -> JExpr -> JExpr
+    updExpr :: Integer -> Expr -> Expr
     updExpr 0 e = e
     updExpr n e = transformOf tinplate sp e
       where
-        sp (ValExpr (JVar (StrI "h$sp"))) = [je|h$sp+`n`|]
+        sp e@(ValE (Var i)) | i == spI = BOpE AddOp e (ValE (IntV n))
         sp e = e
 
     known :: NodeId -> Bool
-    known nid | Just (Just _) <- lookupFact nid 0 sf = True
-              | otherwise = False
+    known nid = sfKnown (lookupFact SFUnknownB nid 0 sf)
 
     unknown :: NodeId -> Bool
     unknown = not . known
 
-    replace :: NodeId -> Node -> Graph -> Graph
+    replace :: NodeId -> Node' -> Graph' -> Graph'
     replace nid n g
-      | Just (Just x) <- lookupFact nid 0 sf, x /= 0 =
+      | SFOffset x <- lookupFact SFUnknownB nid 0 sf, x /= 0 =
           let newId = g^.nodeid
-              sp = ValExpr (JVar (StrI "h$sp"))
+              sp = ValE (Var spI)
               newNodes = IM.fromList
                 [ (nid,     SequenceNode [newId, newId+1])
-                , (newId,   SimpleNode (AssignStat sp (InfixExpr "+" sp (ValExpr (JInt x)))))
+                , (newId,   SimpleNode (AssignS (annotate c sp) (annotate c . normalize g $ BOpE AddOp sp (ValE (IntV x)))))
                 , (newId+1, n)
                 ]
           in  (nodeid %~ (+2)) . (nodes %~ IM.union newNodes) $ g
       | otherwise = g
 
-stackFacts :: Graph -> Facts StackFacts
-stackFacts g = foldForward combineStack f0 (Just 0) g
+stackFacts :: Cache -> Graph' -> Facts StackFacts
+stackFacts c g = foldForward combineStack f0 (SFOffset 0) SFUnknownB g
   where
+    stackI = fromMaybe (-1) (lookupId g (TxtI "h$stack"))
+    spI    = fromMaybe (-2) (lookupId g (TxtI "h$sp"))
     f0 = def { fIf      = updSfT
              , fWhile   = updSfT
              , fDoWhile = updSfT
              , fSwitch  = switched
              , fReturn  = updSf1
-             , fForIn   = updSf3
+             , fForIn   = \_ _ -> updSfT
              , fSimple  = simple
-             , fTry     = \_ _ -> Nothing
+             , fTry     = \_ _ -> (SFUnknownT, SFUnknownT, SFUnknownT)
              }
     updSfT _ e sf = tup (updSf e sf)
     updSf1 _ = updSf
-    updSf3 _ _ _ = updSf
-    updSf :: JExpr -> StackFacts -> StackFacts
-    updSf e sf | Just m <- mutated e, (StrI "h$sp") `S.notMember` m = sf
-               | otherwise                                          = Nothing
-    updSf' :: JStat -> StackFacts -> StackFacts
-    updSf' s sf | Just m <- mutated' s, (StrI "h$sp") `S.notMember` m = sf
-                | otherwise                                           = Nothing
+    updSf :: AExpr' -> StackFacts -> StackFacts
+    updSf _ SFUnknownT = SFUnknownT
+    updSf e sf | Just m <- mutated c (fromA e), spI `IS.notMember` m = sf
+               | otherwise                                           = SFUnknownT
 
-    switched :: NodeId -> JExpr -> [JExpr] -> StackFacts -> ([StackFacts], StackFacts)
+    updSf' :: SimpleStat' -> StackFacts -> StackFacts
+    updSf' _ SFUnknownT = SFUnknownT
+    updSf' (DeclS {}) sf = sf
+    updSf' (ExprS e) sf
+      | Just s <- mutated c (fromA e),  spI `IS.notMember` s = sf
+    updSf' (AssignS e1 e2) sf
+      | Just s1 <- mutated c (fromA e1), Just s2 <- mutated c (fromA e2),
+        spI `IS.notMember` s1 && spI `IS.notMember` s2 = sf
+    updSf' _ _ = SFUnknownT
+
+    switched :: NodeId -> AExpr' -> [AExpr'] -> StackFacts -> ([StackFacts], StackFacts)
     switched _ e es sf = let sf' = updSf e sf in (replicate (length es) sf', sf')
 
     adjSf :: Integer -> StackFacts -> StackFacts
-    adjSf n = fmap (+n)
+    adjSf n (SFOffset x) = SFOffset (x+n)
+    adjSf _ _            = SFUnknownT
 
-    adjSfE :: JExpr -> StackFacts -> StackFacts
-    adjSfE e sf | (ValExpr (JVar (StrI "h$sp"))) <- e = sf
-                | (InfixExpr op (ValExpr (JVar (StrI "h$sp"))) (ValExpr (JInt x))) <- e =
+    adjSfE :: AExpr' -> StackFacts -> StackFacts
+    adjSfE e sf
+      | (ValE (Var i)) <- fromA e, i == spI = sf
+      | (BOpE op (ValE (Var i)) (ValE (IntV x))) <- fromA e, i == spI =
                    case op of
-                     "+" -> adjSf x sf
-                     "-" -> adjSf (-x) sf
-                     _   -> Nothing
-                | otherwise = Nothing
-      where e' = normalize e
+                     AddOp -> adjSf x sf
+                     SubOp -> adjSf (-x) sf
+                     _     -> SFUnknownT
+                | otherwise = SFUnknownT
 
-    simple :: NodeId -> JStat -> StackFacts -> StackFacts
-    simple nid (ApplStat e es) = updSf (ApplExpr e es)
-    simple nid (PPostStat _ "++" (ValExpr (JVar (StrI "h$sp")))) = adjSf 1
-    simple nid (PPostStat _ "--" (ValExpr (JVar (StrI "h$sp")))) = adjSf (-1)
-    simple nid (AssignStat (ValExpr (JVar (StrI "h$sp"))) e) = adjSfE e
-    simple nid s = updSf' s
+    simple :: NodeId -> SimpleStat' -> StackFacts -> StackFacts
+    simple nid (ExprS (AExpr _ (UOpE op (ValE (Var i)))))
+      | i == spI && op == PreInc                               = adjSf 1
+      | i == spI && op == PreDec                               = adjSf (-1)
+      | i == spI && op == PostInc                              = adjSf 1
+      | i == spI && op == PostDec                              = adjSf (-1)
+    simple nid (AssignS (AExpr _ (ValE (Var i))) e) | i == spI = adjSfE e
+    simple nid s                                               = updSf' s
 
-    combineStack x y | x == y    = x
-                     | otherwise = Nothing
+    combineStack :: StackFacts -> StackFacts -> StackFacts
+    combineStack SFUnknownT _ = SFUnknownT
+    combineStack _ SFUnknownT = SFUnknownT
+    combineStack SFUnknownB x = x
+    combineStack x SFUnknownB = x
+    combineStack ox@(SFOffset x) (SFOffset y)
+      | x == y    = ox
+      | otherwise = SFUnknownT
+

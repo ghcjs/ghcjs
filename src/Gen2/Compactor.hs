@@ -1,4 +1,6 @@
-{-# LANGUAGE QuasiQuotes, ScopedTypeVariables #-}
+{-# LANGUAGE QuasiQuotes,
+             ScopedTypeVariables,
+             OverloadedStrings #-}
 
 {-
   The compactor does link-time optimization. It is much simpler
@@ -35,11 +37,11 @@ import qualified Gen2.Optimizer as Optimizer
 compact :: Bool -> JStat -> [ClosureInfo] -> JStat
 compact debug input ci = renameInternals debug input ci
 
-data RenamerState = RenamerState [Ident] (Map String Ident)
+data RenamerState = RenamerState [Ident] (Map Text Ident)
 
 renameInternals :: Bool -> JStat -> [ClosureInfo] -> JStat
 renameInternals debug stat ci = evalState doRename
-  (RenamerState (map (\(StrI xs) -> StrI ("h$$"++xs)) Optimizer.newLocals) M.empty)
+  (RenamerState (map (\(TxtI xs) -> TxtI ("h$$"<>xs)) Optimizer.newLocals) M.empty)
   where
     doRename = do
        s'  <- template renameVar stat
@@ -47,8 +49,8 @@ renameInternals debug stat ci = evalState doRename
        return (s' <> rci)
 
 renameVar :: Ident -> State RenamerState Ident
-renameVar i@(StrI xs)
-  | "h$$" `isPrefixOf` xs = do
+renameVar i@(TxtI xs)
+  | "h$$" `T.isPrefixOf` xs = do
       (RenamerState (y:ys) m) <- get
       case M.lookup xs m of
         Just r  -> return r
@@ -61,7 +63,7 @@ renderClosureInfo debug cis =
 
 renameClosureInfo :: [ClosureInfo] -> RenamerState -> [ClosureInfo]
 renameClosureInfo cis (RenamerState _ m) =
-  let m' = M.fromList . map (\(k,StrI v) -> (T.pack k, T.pack v)) $ M.toList m
+  let m' = M.fromList . map (\(k,TxtI v) -> (k, v)) $ M.toList m
   in  map (g m m') cis
    where
     g m0 m (ClosureInfo v rs n l t s) =
@@ -84,7 +86,7 @@ renderInfoBlock debug infos
     infoTables :: String
     infoTables = encodeStr (concatMap (encodeInfo m) infos')
     funArr :: [Ident]
-    funArr = map (StrI . T.unpack) (funs ++ extras)
+    funArr = map TxtI (funs ++ extras)
     s = S.fromList funs
     m = M.fromList $ zip symbols [0..]
     symbols = funs ++ extras
@@ -92,7 +94,7 @@ renderInfoBlock debug infos
     nfuns = length funs
     extras = filter (`S.notMember` s) allSrts
 
-    allSrts = let getSrts inf = case ciStatic inf of 
+    allSrts = let getSrts inf = case ciStatic inf of
                                   CINoStatic      -> []
                                   CIStaticRefs xs -> xs
               in S.toList $ S.fromList (concatMap getSrts infos)

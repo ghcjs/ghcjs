@@ -1,4 +1,10 @@
-{-# LANGUAGE TemplateHaskell, TupleSections, DeriveDataTypeable, DeriveFunctor, ScopedTypeVariables, GADTs #-}
+{-# LANGUAGE TemplateHaskell,
+             TupleSections,
+             DeriveDataTypeable,
+             DeriveFunctor,
+             ScopedTypeVariables,
+             GADTs,
+             OverloadedStrings #-}
 
 {-
    Dataflow analysis on the bastard child of a JavaScript AST and a control flow graph
@@ -6,82 +12,384 @@
    some valid JavaScript syntax may be unsupported here
 -}
 
-module Gen2.Dataflow ( Graph(..), nodes, arcsIn, arcsOut, entry, nodeid, labels
+module Gen2.Dataflow ( Graph(..), nodes, arcsIn, arcsOut, entry, nodeid, labels, idents, identsR
+                     , lookupId, lookupIdent
                      , Node(..)
+                     , Expr(..), eBool, AExpr(..), fromA, getAnnot, exprIdents
+                     , SimpleStat(..)
+                     , Val(..)
+                     , Id, IdSet
+                     , BinOp(..), UnOp(..), fromJBOp, toJBOp, fromJUOp, toJUOp
+                     , isEqOp, isBoolOp
                      , NodeId
                      , Arc(..), arcFrom, arcTo, arcType
                      , ArcType(..)
                      , Facts(..)
+                     , localVarsGraph
                      , noFacts, addFact, lookupFact
                      , cfg
                      , unCfg
-                     , Forward(..)
-                     , constForward
+                     , Forward(..), Backward(..)
+                     , constForward, constBackward
                      , foldForward, foldBackward
                      ) where
 
+import           Control.Arrow (second)
 import           Control.Applicative
-import           Control.Lens
-import           Control.Lens.Plated
-import           Data.Data.Lens
+import           Control.Lens hiding (op)
 import           Control.Monad.State
 import           Data.Default
+import qualified Data.HashMap.Strict as HM
+import           Data.HashMap.Strict (HashMap)
 import qualified Data.IntMap as IM
 import           Data.IntMap (IntMap)
 import           Data.List (foldl')
 import qualified Data.Map as M
 import           Data.Map (Map)
 import           Data.Maybe
-import           Data.Monoid
+import qualified Data.IntSet as IS
+import           Data.IntSet (IntSet)
 import qualified Data.Set as S
 import           Data.Set (Set)
-import           Data.Foldable (traverse_)
+import qualified Data.Text as T
+import           Data.Text (Text)
 import           Language.Javascript.JMacro
 import           Data.Typeable
 import           Data.Data
 
+type Id    = Int
+type IdSet = IntSet
+type IdS   = State (HashMap Ident Int)
+
+-- | Annotated expression, store identifiers so that rewrites can be applied more quickly
+data AExpr a = AExpr a Expr
+  deriving (Show, Eq, Ord, Data, Typeable)
+
+fromA :: AExpr a -> Expr
+fromA (AExpr _ e) = e
+
+getAnnot :: AExpr a -> a
+getAnnot (AExpr x _) = x
+
+-- optimized way to get identifiers from a local function body
+-- (does not include x1 for a.x1, even though it's stored as TxtI)
+exprIdents :: Expr -> IntSet
+exprIdents = goE IS.empty
+  where
+    goE s (ValE v)   = goV s v
+    goE s (SelE e _) = goE s e -- ignore the selected thing
+    goE s (IdxE e1 e2)     = go2 s e1 e2
+    goE s (BOpE _ e1 e2)   = go2 s e1 e2
+    goE s (UOpE _ e)       = goE s e
+    goE s (CondE e1 e2 e3) = goE (go2 s e1 e2) e3
+    goE s (ApplE e es)     = foldl' goE s (e:es)
+    go2 s e1 e2 = let s' = goE s e1
+                  in  s' `seq` goE s' e2
+    goV s (Var i)   = IS.insert i s
+    goV s (ListV es) = foldl' goE s es
+    goV s (HashV m)  = foldl' goE s (M.elems m) -- ignore the keys
+    goV s _         = s
+
+data Expr =
+        ValE  Val
+      | SelE  Expr Id
+      | IdxE  Expr Expr
+      | BOpE  BinOp Expr Expr
+      | UOpE  UnOp Expr
+      | CondE Expr Expr Expr
+      | ApplE Expr [Expr]
+  deriving (Show, Eq, Ord, Data, Typeable)
+
+eBool :: Bool -> Expr
+eBool = ValE . BoolV
+
+fromJExpr :: JExpr -> IdS Expr
+fromJExpr (ValExpr v)          = ValE  <$> fromJVal v
+fromJExpr (IdxExpr e1 e2)      = IdxE  <$> fromJExpr e1 <*> fromJExpr e2
+fromJExpr (InfixExpr op e1 e2) = BOpE  <$> pure (fromJBOp op) <*> fromJExpr e1 <*> fromJExpr e2
+fromJExpr (PPostExpr b o e)    = UOpE  <$> pure (fromJUOp b o) <*> fromJExpr e
+fromJExpr (IfExpr e1 e2 e3)    = CondE <$> fromJExpr e1 <*> fromJExpr e2 <*> fromJExpr e3
+fromJExpr (ApplExpr e1 es)     = ApplE <$> fromJExpr e1 <*> mapM fromJExpr es
+fromJExpr (SelExpr e i)        = SelE  <$> fromJExpr e <*> fromJIdent i
+fromJExpr (UnsatExpr{})        = error "fromJExpr: unsaturated expression"
+fromJExpr (AntiExpr{})         = error "fromJExpr: antiquoted expression"
+fromJExpr (TypeExpr{})         = error "fromJExpr: type expression"
+
+toJExpr' :: IntMap Ident -> AExpr a -> JExpr
+toJExpr' m (AExpr _ e) = exprToJExpr m e
+
+exprToJExpr :: IntMap Ident -> Expr -> JExpr
+exprToJExpr m (ValE v)   = ValExpr (toJVal m v)
+exprToJExpr m (SelE e i) =
+  case IM.lookup i m of
+    Just i' -> SelExpr (exprToJExpr m e) i'
+    Nothing -> error ("toJExpr: unknown identifier: " ++ show i)
+exprToJExpr m (IdxE e1 e2) = IdxExpr (exprToJExpr m e1) (exprToJExpr m e2)
+exprToJExpr m (BOpE op e1 e2) = InfixExpr (toJBOp op) (exprToJExpr m e1) (exprToJExpr m e2)
+exprToJExpr m (UOpE op e) =
+  let (pos, op') = toJUOp op
+  in PPostExpr pos op' (exprToJExpr m e)
+exprToJExpr m (CondE e1 e2 e3) = IfExpr (exprToJExpr m e1) (exprToJExpr m e2) (exprToJExpr m e3)
+exprToJExpr m (ApplE e es) = ApplExpr (exprToJExpr m e) (map (exprToJExpr m) es)
+
+data UnOp =
+        NotOp           -- !
+      | BNotOp          -- ~
+      | NegOp           -- -
+      | PlusOp          -- +x
+      | NewOp           -- new x
+      | TypeofOp        -- typeof x
+      | DeleteOp        -- delete x
+      | YieldOp         -- yield x
+      | VoidOp          -- void x
+      | PreInc          -- ++x
+      | PostInc         -- x++
+      | PreDec          -- --x
+      | PostDec         -- x--
+  deriving (Show, Eq, Ord, Enum, Data, Typeable)
+
+fromJUOp :: Bool -> String -> UnOp
+fromJUOp True  "!"      = NotOp
+fromJUOp True  "~"      = BNotOp
+fromJUOp True  "-"      = NegOp
+fromJUOp True  "+"      = PlusOp
+fromJUOp True  "new"    = NewOp
+fromJUOp True  "typeof" = TypeofOp
+fromJUOp True  "yield"  = YieldOp
+fromJUOp True  "delete" = DeleteOp
+fromJUOp True  "void"   = VoidOp
+fromJUOp True  "++"     = PreInc
+fromJUOp True  "--"     = PreDec
+fromJUOp False "++"     = PostInc
+fromJUOp False "--"     = PostDec
+fromJUOp b     xs   = error ("fromJUop: unknown unary operator: " ++ show (b, xs))
+
+toJUOp :: UnOp -> (Bool, String)
+toJUOp NotOp    = (True, "!")
+toJUOp BNotOp   = (True, "~")
+toJUOp NegOp    = (True, "-")
+toJUOp PlusOp   = (True, "+")
+toJUOp NewOp    = (True, "new")
+toJUOp TypeofOp = (True, "typeof")
+toJUOp YieldOp  = (True, "yield")
+toJUOp DeleteOp = (True, "delete")
+toJUOp VoidOp   = (True, "void")
+toJUOp PreInc   = (True, "++")
+toJUOp PreDec   = (True, "--")
+toJUOp PostInc  = (False, "++")
+toJUOp PostDec  = (False, "--")
+
+data BinOp =
+        EqOp            -- ==
+      | StrictEqOp      -- ===
+      | NeqOp           -- !=
+      | StrictNeqOp     -- !==
+      | GtOp            -- >
+      | GeOp            -- >=
+      | LtOp            -- <
+      | LeOp            -- <=
+      | AddOp           -- +
+      | SubOp           -- -
+      | MulOp           -- *
+      | DivOp           -- /
+      | ModOp           -- %
+      | LeftShiftOp     -- <<
+      | RightShiftOp    -- >>
+      | ZRightShiftOp   -- >>>
+      | BAndOp          -- &
+      | BOrOp           -- |
+      | BXorOp          -- ^
+      | LAndOp          -- &&
+      | LOrOp           -- ||
+      | InstanceofOp    -- instanceof
+      | InOp            -- in
+  deriving (Show, Eq, Ord, Enum, Data, Typeable)
+
+fromJBOp :: String -> BinOp
+fromJBOp "=="         = EqOp
+fromJBOp "==="        = StrictEqOp
+fromJBOp "!="         = NeqOp
+fromJBOp "!=="        = StrictNeqOp
+fromJBOp ">"          = GtOp
+fromJBOp ">="         = GeOp
+fromJBOp "<"          = LtOp
+fromJBOp "<="         = LeOp
+fromJBOp "+"          = AddOp
+fromJBOp "-"          = SubOp
+fromJBOp "*"          = MulOp
+fromJBOp "/"          = DivOp
+fromJBOp "%"          = ModOp
+fromJBOp "<<"         = LeftShiftOp
+fromJBOp ">>"         = RightShiftOp
+fromJBOp ">>>"        = ZRightShiftOp
+fromJBOp "&"          = BAndOp
+fromJBOp "|"          = BOrOp
+fromJBOp "^"          = BXorOp
+fromJBOp "&&"         = LAndOp
+fromJBOp "||"         = LOrOp
+fromJBOp "instanceof" = InstanceofOp
+fromJBOp "in"         = InOp
+fromJBOp xs    = error ("fromJBOp: unknown binary operator: " ++ xs)
+
+toJBOp :: BinOp -> String
+toJBOp EqOp          = "=="
+toJBOp StrictEqOp    = "==="
+toJBOp NeqOp         = "!="
+toJBOp StrictNeqOp   = "!=="
+toJBOp GtOp          = ">"
+toJBOp GeOp          = ">="
+toJBOp LtOp          = "<"
+toJBOp LeOp          = "<="
+toJBOp AddOp         = "+"
+toJBOp SubOp         = "-"
+toJBOp MulOp         = "*"
+toJBOp DivOp         = "/"
+toJBOp ModOp         = "%"
+toJBOp LeftShiftOp   = "<<"
+toJBOp RightShiftOp  = ">>"
+toJBOp ZRightShiftOp = ">>>"
+toJBOp BAndOp        = "&"
+toJBOp BOrOp         = "|"
+toJBOp BXorOp        = "^"
+toJBOp LAndOp        = "&&"
+toJBOp LOrOp         = "||"
+toJBOp InstanceofOp  = "instanceof"
+toJBOp InOp          = "in"
+
+-- does this operator always give a bool result
+isBoolOp :: BinOp -> Bool
+isBoolOp EqOp         = True
+isBoolOp StrictEqOp   = True
+isBoolOp NeqOp        = True
+isBoolOp StrictNeqOp  = True
+isBoolOp GtOp         = True
+isBoolOp GeOp         = True
+isBoolOp LtOp         = True
+isBoolOp LeOp         = True
+isBoolOp InstanceofOp = True
+isBoolOp InOp         = True
+isBoolOp _            = False
+ 
+-- is this an equality operator
+isEqOp :: BinOp -> Bool
+isEqOp EqOp        = True
+isEqOp NeqOp       = True
+isEqOp StrictEqOp  = True
+isEqOp StrictNeqOp = True
+isEqOp _           = False
+
+data Val =
+        UndefinedV
+      | NullV
+      | Var !Id
+      | ListV [Expr]
+      | BoolV Bool
+      | DoubleV SaneDouble
+      | IntV Integer
+      | StrV Text
+      | RegExV Text
+      | HashV (Map Text Expr)
+      | FuncV [Ident] JStat  -- function args/body not converted!
+  deriving (Show, Eq, Ord, Data, Typeable)
+
+toJVal :: IntMap Ident -> Val -> JVal
+toJVal _ UndefinedV  = JVar (TxtI "undefined")
+toJVal _ NullV       = JVar (TxtI "null")
+toJVal _ (BoolV b)   = JVar (TxtI $ if b then "true" else "false")
+toJVal m (Var i)        =
+  case IM.lookup i m of
+    Just i' -> JVar i'
+    Nothing -> error ("toJVal: unknown identifier: " ++ show i)
+toJVal _ (DoubleV d)  = JDouble d
+toJVal _ (IntV i)     = JInt i
+toJVal _ (StrV t)     = JStr t
+toJVal _ (RegExV t)   = JRegEx t
+toJVal _ (FuncV is s) = JFunc is s
+toJVal m (ListV xs)   = JList (map (exprToJExpr m) xs)
+toJVal m (HashV h)    = JHash . M.fromList . map (second (exprToJExpr m)) . M.toList $ h
+
+fromJVal :: JVal -> IdS Val
+fromJVal (JVar (TxtI x))
+  | x == "undefined" = pure UndefinedV
+  | x == "null"      = pure NullV
+  | x == "false"     = pure (BoolV False)
+  | x == "true"      = pure (BoolV True)
+fromJVal (JVar i) = Var <$> fromJIdent i
+fromJVal (JList xs)  = ListV <$> mapM fromJExpr xs
+fromJVal (JDouble d) = pure (DoubleV d)
+fromJVal (JInt i)    = pure (IntV i)
+fromJVal (JStr s)    = pure (StrV s)
+fromJVal (JRegEx r)  = pure (RegExV r)
+fromJVal (JFunc is s) = pure (FuncV is s)
+fromJVal (UnsatVal{}) = error "fromJVal: unsaturated value"
+fromJVal (JHash h)   = HashV . M.fromList <$> mapM f (M.toList h)
+  where 
+   f :: (Text, JExpr) -> IdS (Text, Expr)
+   f (k, e) = (k,) <$> fromJExpr e
+
+fromJIdent :: Ident -> IdS Id
+fromJIdent i = do
+  m <- get
+  case HM.lookup i m of
+    Just n  -> return n
+    Nothing ->
+      let n = HM.size m
+      in  put (HM.insert i n m) >> return n
+
+toJIdent :: IntMap Ident -> Id -> Ident
+toJIdent m i = fromMaybe (error $ "toJIdent: unknown identifier: " ++ show i) (IM.lookup i m)
+
 type NodeId  = Int
-type Label = String
-data Node where
-  SimpleNode   :: JStat    -> Node
-  SequenceNode :: [NodeId] -> Node
-  IfNode       :: JExpr -> NodeId -> NodeId -> Node
-  WhileNode    :: JExpr -> NodeId -> Node
-  DoWhileNode  :: JExpr -> NodeId -> Node
-  ForInNode    :: Bool -> Ident -> JExpr -> NodeId -> Node
-  SwitchNode   :: JExpr -> [(JExpr,NodeId)] -> NodeId -> Node
-  ReturnNode   :: JExpr -> Node
-  TryNode      :: NodeId -> Ident -> NodeId -> NodeId -> Node
-  BreakNode    :: Maybe String -> NodeId -> Node
-  ContinueNode :: Maybe String -> NodeId -> Node
-  LabelNode    :: String -> NodeId -> Node
+type Label = Text
+data Node a where
+  SimpleNode   :: SimpleStat a -> Node a
+  SequenceNode :: [NodeId] -> Node a
+  IfNode       :: AExpr a -> NodeId -> NodeId -> Node a
+  WhileNode    :: AExpr a -> NodeId -> Node a
+  DoWhileNode  :: AExpr a -> NodeId -> Node a
+  ForInNode    :: Bool -> Id -> AExpr a -> NodeId -> Node a
+  SwitchNode   :: AExpr a -> [(AExpr a,NodeId)] -> NodeId -> Node a
+  ReturnNode   :: AExpr a -> Node a
+  TryNode      :: NodeId -> Id -> NodeId -> NodeId -> Node a
+  BreakNode    :: Maybe Text -> NodeId -> Node a
+  ContinueNode :: Maybe Text -> NodeId -> Node a
+  LabelNode    :: Text -> NodeId -> Node a
     deriving (Show, Data, Typeable, Eq, Ord)
 
-isLoop :: Node -> Bool
+-- a simple, non-control-flow statement
+data SimpleStat a =
+    DeclS !Id
+  | ExprS (AExpr a) --  apply / unary op folded into expression
+  | AssignS (AExpr a) (AExpr a)
+  deriving (Show, Data, Typeable, Eq, Ord)
+
+isLoop :: Node a -> Bool
 isLoop (WhileNode{}) = True
 isLoop (DoWhileNode{}) = True
 isLoop (ForInNode{}) = True
 isLoop _ = False
 
-isSwitch :: Node -> Bool
+isSwitch :: Node a -> Bool
 isSwitch (SwitchNode{}) = True
 isSwitch _ = False
 
-isContinue :: Node -> Bool
+isContinue :: Node a -> Bool
 isContinue (ContinueNode{}) = True
 isContinue _ = False
 
-isBreak :: Node -> Bool
+isBreak :: Node a -> Bool
 isBreak (BreakNode{}) = True
 isBreak _ = False
 
-data Graph = Graph { _nodes :: IntMap Node
-                   , _arcsIn :: IntMap (Set Arc)
-                   , _arcsOut :: IntMap (Set Arc)
-                   , _entry :: NodeId
-                   , _nodeid :: NodeId
-                   , _labels :: Map String NodeId
-                   }
+data Graph a = Graph { _nodes :: IntMap (Node a)
+                     , _arcsIn :: IntMap (Set Arc)
+                     , _arcsOut :: IntMap (Set Arc)
+                     , _entry :: NodeId
+                     , _nodeid :: NodeId
+                     , _labels :: Map Text NodeId
+                     , _idents :: IntMap Ident
+                     , _identsR :: HashMap Ident Id
+                     }
   deriving (Data, Typeable)
 
 data Arc = Arc { _arcFrom :: NodeId
@@ -96,47 +404,62 @@ makeLenses ''Graph
 makeLenses ''Node
 makeLenses ''Arc
 
-instance Show Graph
+lookupId :: Graph a -> Ident -> Maybe Id
+lookupId g i = HM.lookup i (g ^. identsR)
+
+lookupIdent :: Graph a -> Id -> Maybe Ident
+lookupIdent g i = IM.lookup i (g ^. idents)
+
+-- local vars declared in the graph
+localVarsGraph :: Graph a -> IntSet
+localVarsGraph g = IS.fromList . concatMap getDecls . IM.elems $ g ^. nodes
+  where
+    getDecls (SimpleNode (DeclS i)) = [i]
+    getDecls (TryNode _ _ _ _)      = [] -- fixme?
+    getDecls _                      = []
+
+instance Show a => Show (Graph a)
   where
     show g = unlines [ns, arcs, lbls, extra]
       where
         ns   = unlines $ g ^. nodes . to (map (\(i,n) -> show i ++ ": " ++ show n) . IM.toList)
         arcs   = unlines . map show . S.toList . S.unions $ g ^. arcsIn . to IM.elems
-        lbls = unlines $ g ^. labels . to (map (\(l,i) -> "label: " ++ l ++ ": " ++ show i) . M.toList)
+        lbls = unlines $ g ^. labels . to (map (\(l,i) -> "label: " ++ T.unpack l ++ ": " ++ show i) . M.toList)
         extra  = unlines [ "entry: " ++ (g ^. entry . to show) ]
 
 instance Show Arc where
   show (Arc f t ty) = show f ++ " -> " ++ show t ++ " (" ++ show ty ++ ")"
 
-emptyGraph = Graph IM.empty IM.empty IM.empty 0 1 M.empty
+emptyGraph :: Graph a
+emptyGraph = Graph IM.empty IM.empty IM.empty 0 1 M.empty IM.empty HM.empty
 
-addArc :: Arc -> State Graph  ()
+addArc :: Arc -> State (Graph a) ()
 addArc a = do
   let sa = S.singleton a
   arcsOut %= IM.insertWith S.union (a^.arcFrom) sa
   arcsIn  %= IM.insertWith S.union (a^.arcTo) sa
 
-newNodeId :: State Graph NodeId
+newNodeId :: State (Graph a) NodeId
 newNodeId = do
   n <- use nodeid
   nodeid %= (+1)
   return n
 
-newLabel :: String -> NodeId -> State Graph ()
+newLabel :: Text -> NodeId -> State (Graph a) ()
 newLabel lbl lid = do
   labels %= M.insert lbl lid
 
-lookupLabel :: String -> State Graph NodeId
+lookupLabel :: Text -> State (Graph a) NodeId
 lookupLabel lbl = do
   lbls <- use labels
   case M.lookup lbl lbls of
     Just nid -> return nid
-    Nothing  -> error ("lookupLabel: unknown label: " ++ lbl)
+    Nothing  -> error ("lookupLabel: unknown label: " ++ T.unpack lbl)
 
-newNode :: Node -> NodeId -> State Graph NodeId
+newNode :: Node a -> NodeId -> State (Graph a) NodeId
 newNode s n = nodes %= IM.insert n s >> return n
 
-continueTo :: Maybe String -> NodeId -> NodeId -> State Graph NodeId
+continueTo :: Maybe Text -> NodeId -> NodeId -> State (Graph a) NodeId
 continueTo lbl nid n
   | nid < 0 = error "continueTo: continuing to invalid node, not in a loop?"
   | otherwise = do
@@ -144,7 +467,7 @@ continueTo lbl nid n
       addArc (Arc n nid ContinueArc)
       return n
 
-breakTo :: Maybe String -> NodeId -> NodeId -> State Graph NodeId
+breakTo :: Maybe Text -> NodeId -> NodeId -> State (Graph a) NodeId
 breakTo lbl nid n
   | nid < 0 = error "breakTo: breaking to invalid node, not in a loop?"
   | otherwise = do
@@ -154,7 +477,7 @@ breakTo lbl nid n
 
 -- | after the initial conversion, labels may point to a SequenceNode or another label
 --   fix them, and make sure that all labels point to a loop or switch now
-fixLabels :: State Graph ()
+fixLabels :: State (Graph a) ()
 fixLabels = do
   lbls <- use labels
   ns   <- use nodes
@@ -162,7 +485,7 @@ fixLabels = do
   checkLabels
   checkJumps
     where
-      updLabel :: String -> IntMap Node -> NodeId -> NodeId -> State Graph ()
+      updLabel :: Text -> IntMap (Node a) -> NodeId -> NodeId -> State (Graph a) ()
       updLabel s ns orig n =
         case IM.lookup n ns of
           (Just (SequenceNode (s0:_))) -> updLabel s ns orig s0
@@ -180,7 +503,7 @@ fixLabels = do
                   nodes   %= fmap f'
 
 -- | check that labels are only used for loops
-checkLabels :: State Graph ()
+checkLabels :: State (Graph a) ()
 checkLabels = do
   lbls <- use labels
   ns   <- use nodes
@@ -189,11 +512,11 @@ checkLabels = do
       checkValidLabelTarget ns l =
         case IM.lookup l ns of
           Just x | isLoop x -> return ()
-          Just x            -> error ("invalid label target: " ++ show x)
+          Just x            -> error ("invalid label target: " ++ show l)
           _                 -> error ("unknown label target: " ++ show l)
 
 -- | check that continue only jumps to loops, break to switch or loop
-checkJumps :: State Graph ()
+checkJumps :: State (Graph a) ()
 checkJumps = do
   out <- S.toList . S.unions . IM.elems <$> use arcsOut
   ns  <- use nodes
@@ -206,85 +529,128 @@ checkJumps = do
       checkJump _ (Arc fr to _) = error ("invalid jump: " ++ show fr ++ " -> " ++ show to)
       check p ns n = maybe False p (IM.lookup n ns)
 
-cfg :: JStat -> Graph
-cfg s = execState buildGraph emptyGraph
+cfg :: forall a. (Graph a -> Expr -> AExpr a) -> JStat -> Graph a
+cfg toAExpr stat = execState buildGraph emptyGraph
   where
-    source = 0
-    sink = 1
     buildGraph = do
       start <- newNodeId
-      go s (-1) (-1) start
+      _ <- go stat (-1) (-1) start
       entry .= start
       fixLabels
+      ir <- use identsR
+      idents  .= IM.fromList (map (\(x,y) -> (y,x)) $ HM.toList ir)
     loopOf s1 f n = do
       s1n <- go s1 n n =<< newNodeId
       newNode (f s1n) n
     newSimpleNode s n = newNode (SimpleNode s) n
-    go :: JStat -> NodeId -> NodeId -> NodeId -> State Graph NodeId
-    go s@(DeclStat{})   lb lc n = newSimpleNode s n
-    go s@(ReturnStat e) lb lc n = do
-      newNode (ReturnNode e) n
+    expr :: JExpr -> State (Graph a) (AExpr a)
+    expr e = do
+      g <- get
+      runIdS (toAExpr g <$> fromJExpr e)
+    ident :: Ident -> State (Graph a) Id
+    ident i = runIdS (fromJIdent i)
+    runIdS :: IdS b -> State (Graph a) b
+    runIdS x = do
+      (r', m') <- runState x <$> use identsR
+      identsR .= m'
+      return r'
+    go :: JStat -> NodeId -> NodeId -> NodeId -> State (Graph a) NodeId
+    go (DeclStat i _) lb lc n = do
+      i' <- ident i
+      newSimpleNode (DeclS i') n
+    go (ReturnStat e) lb lc n = do
+      e' <- expr e
+      newNode (ReturnNode e') n
       return n
-    go s@(IfStat e s1 s2) lb lc n = do
+    go (IfStat e s1 s2) lb lc n = do
       s1n <- go s1 lb lc =<< newNodeId
       s2n <- go s2 lb lc =<< newNodeId
-      newNode (IfNode e s1n s2n) n
-    go s@(WhileStat True e s1) lb lc n = loopOf s1 (DoWhileNode e) n
-    go s@(WhileStat False e s1) lb lc n = loopOf s1 (WhileNode e) n
-    go s@(ForInStat b i e s1) lb lc n = loopOf s1 (ForInNode b i e) n
-    go s@(SwitchStat e es sd) lb lc n = do
-      ns <- mapM (\(e',s') -> (e',) <$> (go s' n lc =<< newNodeId)) es
+      e' <- expr e
+      newNode (IfNode e' s1n s2n) n
+    go (WhileStat True e s1) lb lc n = do
+      e' <- expr e
+      loopOf s1 (DoWhileNode e') n
+    go (WhileStat False e s1) lb lc n = do
+      e' <- expr e
+      loopOf s1 (WhileNode e') n
+    go (ForInStat b i e s1) lb lc n = do
+      e' <- expr e
+      i' <- ident i
+      loopOf s1 (ForInNode b i' e') n
+    go (SwitchStat e es sd) lb lc n = do
+      ns <- mapM (\(e',s') -> (,) <$> expr e' <*> (go s' n lc =<< newNodeId)) es
       sd' <- go sd n lc =<< newNodeId
-      newNode (SwitchNode e ns sd') n
+      e' <- expr e
+      newNode (SwitchNode e' ns sd') n
     go s@(TryStat t i c f) lb lc n = do
       tn <- go t lb lc =<< newNodeId
       cn <- go c lb lc =<< newNodeId
       fn <- go f lb lc =<< newNodeId
-      newNode (TryNode tn i cn fn) n
-    go s@(BlockStat ss)           lb lc n = do
+      i' <- ident i
+      newNode (TryNode tn i' cn fn) n
+    go (BlockStat ss)                    lb lc n = do
       ss' <- (SequenceNode <$> mapM (\s' -> go s' lb lc =<< newNodeId) ss)
       newNode ss' n
-    go s@(ApplStat{})                    lb lc n = newSimpleNode s n
-    go s@(PPostStat{})                   lb lc n = newSimpleNode s n
-    go s@(AssignStat{})                  lb lc n = newSimpleNode s n
-    go s@(UnsatBlock{})                  lb lc n = error "cfg: unsaturated block"
-    go s@(AntiStat{})                    lb lc n = error "cfg: antistat"
-    go s@(ForeignStat{})                 lb lc n = error "cfg: foreignstat"
-    go s@(LabelStat lbl s1)              lb lc n = do
+    go (ApplStat e es)                   lb lc n = do
+      e' <- expr (ApplExpr e es)
+      es' <- mapM expr es
+      newSimpleNode (ExprS e') n
+    go (PPostStat b op e)                lb lc n = do
+       e' <- expr (PPostExpr b op e)
+       newSimpleNode (ExprS e') n
+    go (AssignStat e1 e2)                lb lc n = do
+       e1' <- expr e1
+       e2' <- expr e2
+       newSimpleNode (AssignS e1' e2') n
+    go (UnsatBlock{})                    lb lc n = error "cfg: unsaturated block"
+    go (AntiStat t)                      lb lc n = error ("cfg: antistat: " ++ T.unpack t)
+    go (ForeignStat t _)                 lb lc n = error ("cfg: foreignstat" ++ show t)
+    go (LabelStat lbl s1)                lb lc n = do
       lid <- newNodeId
       newLabel lbl lid
       go s1                              lb lc lid
       newNode (LabelNode lbl lid) n
-    go s@(BreakStat lbl@(Just lbl'))     lb lc n = do
+    go (BreakStat lbl@(Just lbl'))       lb lc n = do
       ll <- lookupLabel lbl'
       breakTo lbl ll n
-    go s@(BreakStat lbl)                 lb lc n = breakTo lbl lb n
-    go s@(ContinueStat lbl@(Just lbl'))  lb lc n = do
+    go (BreakStat lbl)                   lb lc n = breakTo lbl lb n
+    go (ContinueStat lbl@(Just lbl'))    lb lc n = do
       ll <- lookupLabel lbl'
       continueTo lbl ll n
-    go s@(ContinueStat lbl)              lb lc n = continueTo lbl lc n
+    go (ContinueStat lbl)                lb lc n = continueTo lbl lc n
 
 
-unCfg :: Graph -> JStat
+unCfg :: forall a. Graph a -> JStat
 unCfg g = go' (g ^. entry)
   where
+    m = g ^. idents
+    convertI :: Id -> Ident
+    convertI i = fromMaybe (error $ "unCfg: unknown identifier: " ++ show i) (IM.lookup i m)
     go' :: Int -> JStat
     go' n = case IM.lookup n (g ^. nodes) of
               Just x  -> go x
               Nothing -> error ("unCfg: unknown node: " ++ show n)
-    go :: Node -> JStat
-    go (SimpleNode s)        = s
+    go :: Node a -> JStat
+    go (SimpleNode s)        = fromSimpleStat m s
     go (SequenceNode ss)     = BlockStat (map go' ss)
-    go (IfNode e n1 n2)      = IfStat e (go' n1) (go' n2)
-    go (WhileNode e s)       = WhileStat False e (go' s)
-    go (DoWhileNode e s)     = WhileStat True e (go' s)
-    go (ForInNode b i e s)   = ForInStat b i e (go' s)
-    go (SwitchNode e ss s)   = SwitchStat e (map (\(e,s') -> (e, go' s')) ss) (go' s)
-    go (ReturnNode e)        = ReturnStat e
-    go (TryNode t i c f)     = TryStat (go' t) i (go' c) (go' f)
+    go (IfNode e n1 n2)      = IfStat (toJExpr' m e) (go' n1) (go' n2)
+    go (WhileNode e s)       = WhileStat False (toJExpr' m e) (go' s)
+    go (DoWhileNode e s)     = WhileStat True (toJExpr' m e) (go' s)
+    go (ForInNode b i e s)   = ForInStat b (convertI i) (toJExpr' m e) (go' s)
+    go (SwitchNode e ss s)   = SwitchStat (toJExpr' m e) (map (\(e',s') -> (toJExpr' m e', go' s')) ss) (go' s)
+    go (ReturnNode e)        = ReturnStat (toJExpr' m e)
+    go (TryNode t i c f)     = TryStat (go' t) (convertI i) (go' c) (go' f)
     go (BreakNode lbl _)     = BreakStat lbl
     go (ContinueNode lbl _)  = ContinueStat lbl
     go (LabelNode lbl s)     = LabelStat lbl (go' s)
+
+fromSimpleStat :: IntMap Ident -> SimpleStat a -> JStat
+fromSimpleStat m (DeclS i)       = DeclStat (toJIdent m i) Nothing
+fromSimpleStat m (ExprS (AExpr _ (ApplE e es))) = ApplStat (exprToJExpr m e) (map (exprToJExpr m) es)
+fromSimpleStat m (ExprS (AExpr _ (UOpE op e))) = let (pos, op') = toJUOp op
+                                                in PPostStat pos op' (exprToJExpr m e)
+fromSimpleStat _ (ExprS (AExpr _ e)) = error ("fromSimpleStat: ExprS, not a valid expression statement: " ++ show e)
+fromSimpleStat m (AssignS e1 e2) = AssignStat (toJExpr' m e1) (toJExpr' m e2)
 
 -- facts, forward flow:
 -- index 0: combined fact when entering for the first time (continue, looping excluded)
@@ -303,31 +669,40 @@ noFacts = Facts M.empty
 addFact :: NodeId -> Int -> a -> Facts a -> Facts a
 addFact node idx x (Facts m) = Facts $ M.insert (node,idx) x m
 
-lookupFact :: NodeId -> Int -> Facts a -> Maybe a
-lookupFact node idx (Facts m) = M.lookup (node,idx) m
+lookupFact :: a -> NodeId -> Int -> Facts a -> a
+lookupFact z node idx (Facts m) = fromMaybe z (M.lookup (node,idx) m)
 
-data Forward a =
-  Forward { fIf       :: NodeId -> JExpr                   -> a -> (a,a)
-          , fWhile    :: NodeId -> JExpr                   -> a -> (a,a)
-          , fDoWhile  :: NodeId -> JExpr                   -> a -> (a,a)
-          , fSimple   :: NodeId -> JStat                   -> a -> a
-          , fBreak    :: NodeId                            -> a -> a
-          , fContinue :: NodeId                            -> a -> a
-          , fReturn   :: NodeId -> JExpr                   -> a -> a
-          , fTry      :: NodeId                            -> a -> a
-          , fForIn    :: NodeId -> Bool  -> Ident -> JExpr -> a -> a
-          , fSwitch   :: NodeId -> JExpr -> [JExpr]        -> a -> ([a],a)
+data Forward a b =
+  Forward { fIf       :: NodeId -> AExpr a                   -> b -> (b, b)  -- condition true, false
+          , fWhile    :: NodeId -> AExpr a                   -> b -> (b, b)  -- condition true, false
+          , fDoWhile  :: NodeId -> AExpr a                   -> b -> (b, b)  -- condition true, false
+          , fSimple   :: NodeId -> SimpleStat a              -> b -> b
+          , fBreak    :: NodeId                              -> b -> b
+          , fContinue :: NodeId                              -> b -> b
+          , fReturn   :: NodeId -> AExpr a                   -> b -> b
+          , fTry      :: NodeId                              -> b -> (b, b, b)   -- start of try, catch, finally
+          , fForIn    :: NodeId -> Bool    -> Id  -> AExpr a -> b -> (b, b)   -- after condition: loop, no loop
+          , fSwitch   :: NodeId -> AExpr a -> [AExpr a]      -> b -> ([b], b) -- start of every label, default
           }
 
-instance Default (Forward a) where
-  def = Forward c2tup c2tup c2tup fconst2 fconst fconst fconst2 fconst fconst4 defSwitch
+instance Default (Forward a b) where
+  def = Forward c2tup c2tup c2tup fconst2 fconst fconst fconst2 c1tup3 c4tup defSwitch
 
-constForward :: a -> (Forward a)
+constForward :: b -> Forward a b
 constForward z = Forward (const3 (z,z)) (const3 (z,z)) (const3 (z,z)) (const3 z)
-                         (const2 z) (const2 z) (const3 z) (const2 z) (const5 z) (zSwitch z)
+                         (const2 z) (const2 z) (const3 z) (const2 (z,z,z)) (const5 (z,z)) (zSwitch z)
 
-c2tup :: a -> b -> c -> (c,c)
-c2tup _ _ x = (x,x)
+c1tup :: a -> b -> (b, b)
+c1tup _ x = (x, x)
+
+c1tup3 :: a -> b -> (b, b, b)
+c1tup3 _ x = (x, x, x)
+
+c2tup :: a -> b -> c -> (c, c)
+c2tup _ _ x = (x, x)
+
+c4tup :: a -> b -> c -> d -> e -> (e, e)
+c4tup _ _ _ _ x = (x, x)
 
 fconst :: a -> b -> b
 fconst _ x = x
@@ -359,191 +734,191 @@ defSwitch _ _ xs y = (replicate (length xs) y, y)
 zSwitch :: d -> a -> b -> [c] -> d -> ([d],d)
 zSwitch z _ _ xs _ = (replicate (length xs) z, z)
 
-foldForward :: forall a. Eq a
-            => (a -> a -> a)
-            -> Forward a
-            -> a
-            -> Graph
-            -> Facts a
-foldForward c f z g = fixed (goEntry $ g^.entry) noFacts
+foldForward :: forall a b. Eq b
+            => (b -> b -> b)
+            -> Forward a b
+            -> b
+            -> b
+            -> Graph a
+            -> Facts b
+foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
   where
-    combine :: Maybe a -> Maybe a -> Maybe a
-    combine (Just x) (Just y) = Just (x `c` y)
-    combine (Just x) _        = Just x
-    combine _        y        = y
-
-    combineMaybe :: a -> Maybe a -> a
-    combineMaybe x my = maybe x (c x) my
-
     -- combine x with data from nodes, only if nodes have available data
-    combineWith :: a -> [NodeId] -> State (Facts a) a
+    combineWith :: b -> [NodeId] -> State (Facts b) b
     combineWith x nids = do
       m <- get
-      return $ foldl' c x (catMaybes $ map (\n -> lookupFact n 1 m) nids)
+      return $ foldl' c x (map (\n -> lookupFact z n 1 m) nids)
 
-    combineFrom :: [NodeId] -> State (Facts a) (Maybe a)
+    combineFrom :: [NodeId] -> State (Facts b) b
     combineFrom nids = do
       m <- get
-      case catMaybes (map (\n -> lookupFact n 1 m) nids) of -- retrieve fact 1, flows out of node
-        (x:xs) -> return $ Just (foldl' c x xs)
-        _      -> return Nothing
+      return $ foldl c z (map (\n -> lookupFact z n 1 m) nids) -- retrieve fact 1, flows out of node
 
-    upd :: NodeId -> Int -> a -> State (Facts a) ()
+    upd :: NodeId -> Int -> b -> State (Facts b) ()
     upd nid i x = modify (addFact nid i x)
 
-    upds :: NodeId -> [Int] -> a -> State (Facts a) ()
+    upds :: NodeId -> [Int] -> b -> State (Facts b) ()
     upds nid is x = mapM_ (\i -> upd nid i x) is
 
-    upd' :: NodeId -> Int -> Maybe a -> State (Facts a) ()
-    upd' _   _ Nothing = return ()
-    upd' nid i (Just x) = upd nid i x
+    fact :: NodeId -> Int -> State (Facts b) b
+    fact n i = lookupFact z n i <$> get
 
-    fact :: NodeId -> Int -> State (Facts a) (Maybe a)
-    fact n i = lookupFact n i <$> get
+    goEntry :: NodeId -> Facts b -> Facts b
+    goEntry nid = execState (go' nid entr)
 
-    goEntry :: NodeId -> Facts a -> Facts a
-    goEntry nid = execState (go' nid z)
-
-    go' :: NodeId -> a -> State (Facts a) (Maybe a)
+    go' :: NodeId -> b -> State (Facts b) b
     go' nid x = go nid (lookupNode nid g) x
 
-    go :: NodeId -> Node -> a -> State (Facts a) (Maybe a)
+    go :: NodeId -> Node a -> b -> State (Facts b) b
     go nid (SimpleNode s) x = do
       upds nid [0,2] x
       let x' = fSimple f nid s x
       upd nid 1 x'
-      return (Just x')
+      return x'
     go nid (SequenceNode ss) x  = do
       upd nid 0 x
       go0 ss x
         where
           go0 (y:ys) x0 = do
-            r <- go' y x0
-            case r of
-              Nothing -> return Nothing
-              Just x1 -> go0 ys x1
+            x1 <- go' y x0
+            go0 ys x1
           go0 [] x0 = do
             upd nid 1 x0
-            return (Just x0)
+            return x0
     go nid (IfNode e s1 s2) x = do
       upds nid [0,2] x
       let (xi,xe) = fIf f nid e x
       xi' <- go' s1 xi
       xe' <- go' s2 xe
-      let x' = combine xi' xe'
-      upd' nid 1 x'
+      let x' = xi' `c` xe'
+      upd nid 1 x'
       return x'
     go nid (WhileNode e s) x = do
       upd nid 0 x
       let (brks, conts) = getBreaksConts nid g
       x0 <- combineWith x conts
-      x1 <- combineMaybe x0 <$> fact nid 3
+      x1 <- (x0 `c`) <$> fact nid 3
       upd nid 2 x1
       let (xt,xf) = fWhile f nid e x1
       s0 <- go' s xt
-      upd' nid 3 s0
+      upd nid 3 s0
       x3 <- combineWith xf brks
       upd nid 1 x3
-      return (Just x3)
+      return x3
     go nid (DoWhileNode e s) x = do
       upd nid 0 x
       let (brks, conts) = getBreaksConts nid g
-      x0 <- combineMaybe x <$> fact nid 3
+      x0 <- (x `c`) <$> fact nid 3
       s0 <- go' s x0
-      case s0 of
-        Nothing -> do
-          s1 <- combineFrom conts
-          case s1 of
-            Nothing -> return Nothing
-            Just s2 -> do
-              upd nid 2 s2
-              let (xt,xf) = fDoWhile f nid e s2
-              upd nid 3 xt
-              s3 <- combineWith xf brks
-              upd nid 1 s3
-              return (Just s3)
-        Just x1 -> do
-          x2 <- combineWith x1 conts
-          upd nid 2 x2
-          let (xt,xf) = fDoWhile f nid e x2
-          upd nid 3 xt
-          x3 <- combineWith xf brks
-          upd nid 1 x3
-          return (Just x3)
+      x1 <- combineWith x0 conts
+      upd nid 2 x1
+      let (xt, xf) = fDoWhile f nid e x1
+      upd nid 3 xt
+      x2 <- combineWith xf brks
+      upd nid 1 x2
+      return x2
+    go nid (ForInNode b i e s) x = do
+      upds nid [0,2] x
+      let (brks, conts) = getBreaksConts nid g
+      x0 <- combineWith x conts
+      x1 <- (x0 `c`) <$> fact nid 3
+      upd nid 2 x1
+      let (xb, xf) = fForIn f nid b i e x1
+      s0 <- go' s xb
+      upd nid 3 s0
+      x3 <- combineWith xf brks
+      upd nid 1 x3
+      return x3
     go nid (SwitchNode e ss s) x = do
       let (brks, _) = getBreaksConts nid g
           (xes,xd)       = fSwitch f nid e (map fst ss) x
-          go0 [] []      = return
-          go0 (z:zs) ((e,y):ys) = go0 zs ys <=< go' y . combineMaybe z
+          go0 [] []             = return z
+          go0 [a] [(e,y)]       = go' y a
+          go0 (a:as) ((e,y):ys) = go' y a >> go0 as ys
           go0 _ _ = error "foldForward: unmatched list length for switch"
       upds nid [0,2] x
-      s0 <- go0 xes ss Nothing
-      s1 <- go' s (combineMaybe xd s0)
-      s2 <- combine s1 <$> combineFrom brks
-      upd' nid 1 s2
+      s0 <- go0 xes ss
+      s1 <- go' s (xd `c` s0)
+      s2 <- (`c` s1) <$> combineFrom brks
+      upd nid 1 s2
       return s2
     go nid (ReturnNode e) x = do
       upds nid [0,2] x
       let x' = fReturn f nid e x
       upd nid 3 x'
-      return Nothing
+      return z
     go nid (BreakNode{}) x = do
       upds nid [0,2] x
       let x'= fBreak f nid x
       upd nid 3 x'
-      return Nothing
+      return z
     go nid (ContinueNode{}) x = do
       upds nid [0,2] x
       let x' = fContinue f nid x
       upd nid 3 x'
-      return Nothing
+      return z
     go nid (LabelNode _ s) x = do
       upds nid [0,2] x
       x0 <- go' s x
-      upd' nid 1 x0
-      return x0
-    go nid (TryNode t _ c fin) x = do
-      upd nid 0 x
-      let x' = fTry f nid x
-      t' <- go' t x'
-      upd' nid 2 t'
-      c' <- go' c z
-      upd' nid 3 c'
-      case combine t' c' of
-        Just x0 -> do
-          s <- go' fin x0
-          upd' nid 1 s
-          return s
-        Nothing  -> return Nothing
---    go _ _ _ = error "unsupported node type"
-
-foldBackward :: forall a. Eq a
-             => (a -> a -> a)
-             -> (NodeId -> Node -> a -> a)
-             -> a
-             -> Graph
-             -> Facts a
-foldBackward c f z g = fixed (goEntry $ g^.entry) noFacts
-  where
-    upd :: NodeId -> Int -> a -> State (Facts a) ()
-    upd nid i x = modify (addFact nid i x)
-
-    fact :: NodeId -> Int -> State (Facts a) (Maybe a)
-    fact n i = lookupFact n i <$> get
-
-    goEntry :: NodeId -> Facts a -> Facts a
-    goEntry nid = execState (go' nid z)
-
-    go' :: NodeId -> a -> State (Facts a) a
-    go' nid x = go nid (lookupNode nid g) x
-
-    go :: NodeId -> Node -> a -> State (Facts a) a
-    go nid n@(SimpleNode s) x = do
-      upd nid 0 x
-      let x0 = f nid n x
       upd nid 1 x0
       return x0
-    go nid n@(SequenceNode ss) x = do
+    go nid (TryNode t _ ctch fin) x = do
+      upd nid 0 x
+      let (x', xc, xf) = fTry f nid x
+      t' <- go' t x'
+      upd nid 2 t'
+      c' <- go' ctch xc
+      upd nid 3 c'
+      s <- go' fin xf -- (t' `c` c')
+      upd nid 1 s
+      return s
+
+data Backward a b =
+  Backward { bIf       :: NodeId -> AExpr a          -> (b, b) -> b
+           , bWhile    :: NodeId -> AExpr a          -> (b, b) -> b
+           , bDoWhile  :: NodeId -> AExpr a               -> b -> b
+           , bSimple   :: NodeId -> SimpleStat a          -> b -> b
+           , bBreak    :: NodeId                          -> b -> b
+           , bContinue :: NodeId                          -> b -> b
+           , bReturn   :: NodeId -> AExpr a                    -> b
+           -- (beginning of try, beginning of catch, beginning of finally) -> (before try, end of try)
+           , bTry      :: NodeId -> Id            -> (b, b, b) -> (b, b)
+           , bForIn    :: NodeId -> Bool -> Id -> AExpr a -> (b, b) -> b
+           , bSwitch   :: NodeId -> AExpr a               -> b -> b
+           }
+
+constBackward :: b -> Backward a b
+constBackward z = Backward (const3 z) (const3 z) (const3 z) (const3 z) (const2 z)
+                           (const2 z) (const2 z) (const3 (z, z)) (const5 z) (const3 z)
+
+foldBackward :: forall a b. Eq b
+             => (b -> b -> b)
+             -> Backward a b
+             -> b
+             -> b
+             -> Graph a
+             -> Facts b
+foldBackward c f exit z g = fixed (goEntry $ g^.entry) noFacts
+  where
+    upd :: NodeId -> Int -> b -> State (Facts b) ()
+    upd nid i x = modify (addFact nid i x)
+
+    fact :: NodeId -> Int -> State (Facts b) b
+    fact n i = lookupFact z n i <$> get
+
+    goEntry :: NodeId -> Facts b -> Facts b
+    goEntry nid = execState (go' nid exit)
+
+    go' :: NodeId -> b -> State (Facts b) b
+    go' nid x = go nid (lookupNode nid g) x
+
+    go :: NodeId -> Node a -> b -> State (Facts b) b
+    go nid (SimpleNode s) x = do
+      upd nid 0 x
+      let x0 = bSimple f nid s x
+      upd nid 1 x0
+      return x0
+    go nid (SequenceNode ss) x = do
       upd nid 0 x
       go0 (reverse ss) x
         where
@@ -552,76 +927,85 @@ foldBackward c f z g = fixed (goEntry $ g^.entry) noFacts
           go0 [] x0 = do
             upd nid 1 x0
             return x0
-    go nid n@(IfNode _ s1 s2) x = do
+    go nid (IfNode e s1 s2) x = do
       upd nid 0 x
       xi <- go' s1 x
       xe <- go' s2 x
-      let x0 = f nid n (xi `c` xe)
+      let x0 = bIf f nid e (xi,xe)
       upd nid 1 x0
       return x0
-    go nid n@(WhileNode _ s) x = do
+    go nid (WhileNode e s) x = do
       upd nid 0 x
       x0 <- go' s x
-      let x1 = f nid n (x `c` x0)
+      let x1 = bWhile f nid e (x0,x)
       upd nid 1 x1
       return x1
-    go nid n@(DoWhileNode _ s) x = do
+    go nid (DoWhileNode e s) x = do
       upd nid 0 x
-      let x0 = f nid n x
+      let x0 = bDoWhile f nid e x
       upd nid 2 x0
       x1 <- go' s x0
-      let x2 = x `c` x1
+      let x2 = x0 `c` x1 -- is this correct, x0 vs x?
       upd nid 1 x2
       return x2
-    go nid n@(SwitchNode e ss s) x = do
+    go nid (ForInNode b i e s) x = do
+      upd nid 0 x
+      x' <- go' s x
+      let xb = bForIn f nid b i e (x', x)
+      upd nid 1 xb
+      return xb
+    go nid (SwitchNode e ss s) x = do
       upd nid 0 x
       x0  <- go' s x
       xs1 <- go0 (reverse ss) x0
-      let x2 = f nid n (foldl' c x0 xs1)
+      let x2 = bSwitch f nid e (foldl' c x0 xs1)
       upd nid 1 x2
       return x2
         where
-          go0 [] x = return [x]
-          go0 ((_,y):ys) x = do
-            x' <- go' y x
-            (x':) <$> go0 ys x'
-    go nid n@(ReturnNode{}) _ = do
-      upd nid 0 z
-      let x = f nid n z
+          go0 [] z = return [z]
+          go0 ((_,y):ys) z = do
+            z' <- go' y z
+            (z':) <$> go0 ys z'
+    go nid (ReturnNode e) _ = do
+      upd nid 0 exit
+      let x = bReturn f nid e
       upd nid 1 x
       return x
-    go nid n@(BreakNode _ tgt) _ = do
-      x <- fromMaybe z <$> fact tgt 0
+    go nid (BreakNode _ tgt) _ = do
+      x <- fact tgt 0
       upd nid 0 x
-      let x0 = f nid n x
+      let x0 = bBreak f nid x
       upd nid 1 x0
       return x0
-    go nid n@(ContinueNode _ tgt) _ = do
-      x <- fromMaybe z <$> fact tgt 2
+    go nid (ContinueNode _ tgt) _ = do
+      x <- fact tgt 2
       upd nid 0 x
-      let x0 = f nid n x
+      let x0 = bContinue f nid x
       upd nid 1 x0
       return x0
-    go nid n@(LabelNode _ s) x = do
+    go nid (LabelNode _ s) x = do
       upd nid 0 x
       x0 <- go' s x
       upd nid 1 x0
       return x0
-    go nid n@(TryNode t _ ctch fin) x = do
+    go nid (TryNode t i ctch fin) x = do
       upd nid 0 x
       f' <- go' fin x
       c' <- go' ctch f'
-      t' <- go' t (f' `c` c')
-      upd nid 1 t'
-      return t'
-    go _ _ _ = error "unsupported node type"
+      tb <- fact nid 3
+      let (_b0, te0) = bTry f nid i (tb, c', f')
+      tb' <- go' t te0
+      let (b1, _te1) = bTry f nid i (tb', c', f')
+      upd nid 3 tb'
+      upd nid 1 b1
+      return b1
 
-lookupNode :: NodeId -> Graph -> Node
+lookupNode :: NodeId -> Graph a -> Node a
 lookupNode nid g = fromMaybe
                      (error $ "lookupNode: unknown node " ++ show nid)
                      (IM.lookup nid $ g ^. nodes)
 
-getBreaksConts :: NodeId -> Graph -> ([NodeId], [NodeId])
+getBreaksConts :: NodeId -> Graph a -> ([NodeId], [NodeId])
 getBreaksConts nid g = go (maybe [] S.toList . IM.lookup nid $ g ^. arcsIn) ([],[])
   where
     go [] x = x

@@ -23,10 +23,9 @@ data CallingConvention = Gen2
 
 data Variant = Variant
     { variantExtension         :: String
-    , variantMetaExtension     :: Maybe String
     , variantExeExtension      :: String
     , variantCallingConvention :: CallingConvention
-    , variantRender            :: Bool -> DynFlags -> StgPgm -> Module -> (ByteString, ByteString)
+    , variantRender            :: Bool -> DynFlags -> StgPgm -> Module -> ByteString
     , variantLink              :: Bool -> String -> [FilePath] -> [FilePath] -> [ModuleName] -> IO [String]
     }
 
@@ -36,7 +35,7 @@ variants :: [Variant]
 variants = [gen2Variant]
 
 gen2Variant :: Variant
-gen2Variant = Variant ".js" (Just ".ji") ".jsexe" Gen2 Gen2.generate
+gen2Variant = Variant ".js" ".jsexe" Gen2 Gen2.generate
     Gen2.link
 
 type StgPgm = [StgBinding]

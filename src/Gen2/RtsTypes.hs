@@ -1,31 +1,34 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell, TypeSynonymInstances, FlexibleInstances, TupleSections, CPP #-}
+{-# LANGUAGE QuasiQuotes,
+             TemplateHaskell,
+             TypeSynonymInstances,
+             FlexibleInstances,
+             TupleSections,
+             CPP #-}
+
 module Gen2.RtsTypes where
 
 import           Language.Javascript.JMacro
 
 import           Control.Applicative
-
-import           Gen2.StgAst
-import           Gen2.Utils
-import           Gen2.ClosureInfo
-
-import           Data.Char                        (toLower)
 import           Control.Lens
-import           Data.Bits
-import qualified Data.List                        as L
-import           Data.Maybe                       (fromMaybe)
-import           Data.Monoid
-
-import           Data.Array ((!), listArray)
 import           Control.Monad.State.Strict
 
-import           Data.Text (Text)
-import qualified Data.Text as T
+import           Data.Array   (Array, (!), listArray)
+import           Data.Char    (toLower)
+import           Data.Bits
+import           Data.IntMap  (IntMap)
+import qualified Data.IntMap  as IM
+import           Data.Ix
+import qualified Data.List    as L
+import qualified Data.Map     as M
+import           Data.Maybe   (fromMaybe)
+import           Data.Monoid
+import           Data.Text    (Text)
+import qualified Data.Text    as T
 
 import           DataCon
 import           DynFlags
 import           Encoding
-import           Gen2.RtsSettings
 import           Id
 import           Module
 import           Name
@@ -36,7 +39,13 @@ import           TyCon
 import           Type
 import           Unique
 
-import           System.IO.Unsafe
+import           Gen2.ClosureInfo
+import qualified Gen2.Object as Object
+import           Gen2.RtsSettings
+import           Gen2.StgAst
+import           Gen2.Utils
+
+
 
 -- showPpr' :: Outputable a => a -> G String
 -- showSDoc' :: SDoc -> G String
@@ -65,21 +74,30 @@ data StgReg = R1  | R2  | R3  | R4  | R5  | R6  | R7  | R8
             | R105 | R106 | R107 | R108 | R109 | R110 | R111 | R112
             | R113 | R114 | R115 | R116 | R117 | R118 | R119 | R120
             | R121 | R122 | R123 | R124 | R125 | R126 | R127 | R128
-  deriving (Eq, Ord, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded, Ix)
 
 -- | return registers
 --   extra results from foreign calls can be stored here (first result is returned)
 data StgRet = Ret1 | Ret2 | Ret3 | Ret4 | Ret5 | Ret6 | Ret7 | Ret8 | Ret9 | Ret10
-  deriving (Eq, Ord, Show, Enum, Bounded)
+  deriving (Eq, Ord, Show, Enum, Bounded, Ix)
 
 instance ToJExpr StgReg where
-  toJExpr r
-    | fromEnum r <= 32 = ve . ("h$"++) . map toLower . show $ r
-    | otherwise   = [je| h$regs[`fromEnum r-32`] |]
+  toJExpr = (registers!)
 
+registers :: Array StgReg JExpr
+registers = listArray (minBound, maxBound) (map regN (enumFrom R1))
+  where
+    regN r
+      | fromEnum r <= 32 = ValExpr . JVar . TxtI . T.pack . ("h$"++) . map toLower . show $ r
+      | otherwise        = [je| h$regs[`fromEnum r-32`] |]
 
 instance ToJExpr StgRet where
-  toJExpr = ve . ("h$"++) . map toLower . show
+  toJExpr r = ValExpr (JVar (rets!r))
+
+rets :: Array StgRet Ident
+rets = listArray (minBound, maxBound) (map retN (enumFrom Ret1))
+  where
+    retN = TxtI . T.pack . ("h$"++) . map toLower . show
 
 regName :: StgReg -> String
 regName = map toLower . show
@@ -96,17 +114,22 @@ minReg = regNum minBound
 maxReg :: Int
 maxReg = regNum maxBound
 
+data IdType = IdPlain | IdEntry | IdConEntry deriving (Enum, Eq, Ord, Show)
+data IdKey = IdKey !Int !Int !IdType deriving (Eq, Ord)
+newtype IdCache = IdCache (M.Map IdKey Ident)
+
+emptyIdCache = IdCache M.empty
+
 -- | the current code generator state
 data GenState = GenState
-  { _gsModule   :: Module      -- | the module we're compiling, used for generating names
-  , _gsToplevel :: Maybe Id    -- | the toplevel function group we're generating
---  , _gsScope    :: GenScope  -- | the current lexical environment
-  , _gsToplevelStats :: [JStat] -- | extra toplevel statements that our current function emits
-  , _gsClosureInfo :: [ClosureInfo] -- | closure information in the current function group
-  , _gsId       :: Int         -- | integer for the id generator
-  , _gsDynFlags :: DynFlags    -- | the DynFlags, used for prettyprinting etc
-  , _gsStack    :: [StackSlot] -- | what's currently on the stack, above SP
---  , _gsSRTs     :: Map Id Int
+  { _gsModule        :: Module        -- | the module we're compiling, used for generating names
+  , _gsToplevel      :: Maybe Id      -- | the toplevel function group we're generating
+  , _gsToplevelStats :: [JStat]       -- | extra toplevel statements that our current function emits
+  , _gsClosureInfo   :: [ClosureInfo] -- | closure information in the current function group
+  , _gsId            :: Int           -- | integer for the id generator
+  , _gsDynFlags      :: DynFlags      -- | the DynFlags, used for prettyprinting etc
+  , _gsStack         :: [StackSlot]   -- | what's currently on the stack, above h$sp
+  , _gsIdents        :: IdCache       -- | hash consing for identifiers from a Unique
   }
 
 type C   = State GenState JStat
@@ -188,7 +211,7 @@ data GenScope = GenScope
 -- emptyScope = GenScope mempty mempty
 
 initState :: DynFlags -> Module -> GenState
-initState df m = GenState m Nothing [] [] 1 df []
+initState df m = GenState m Nothing [] [] 1 df [] emptyIdCache
 
 runGen :: DynFlags -> Module -> G a -> a
 runGen df m = flip evalState (initState df m)
@@ -237,15 +260,27 @@ instance ToJExpr Special where
   toJExpr HFalse = [je| false   |]
 
 adjSp :: Int -> JStat
-adjSp e = [j| h$sp = h$sp + `e`; |] -- [j| _sp += `e`; sp = _sp; |]
+adjSp e = [j| h$sp = h$sp + `e`; |]
 
 adjSpN :: Int -> JStat
-adjSpN e = [j| h$sp = h$sp  - `e`; |] -- [j| _sp = _sp - `e`; sp = _sp; |]
+adjSpN e = [j| h$sp = h$sp  - `e`; |]
 
 -- stuff that functions are supposed to execute at the start of the body
 -- (except very simple functions)
 preamble :: JStat
 preamble = mempty
+
+pushN :: Array Int Ident
+pushN = listArray (1,32) $ map (TxtI . T.pack . ("h$p"++) . show) [1..32]
+
+pushN' :: Array Int JExpr
+pushN' = fmap (ValExpr . JVar) pushN
+
+pushNN :: Array Integer Ident
+pushNN = listArray (1,255) $ map (TxtI . T.pack . ("h$pp"++) . show) [1..255]
+
+pushNN' :: Array Integer JExpr
+pushNN' = fmap (ValExpr . JVar) pushNN
 
 -- optimized push that reuses existing values on stack
 -- slots are True if the right value is already there
@@ -257,9 +292,9 @@ pushOptimized xs = dropSlots l >> return go
      | rtsInlinePush               = inlinePush
      | all snd xs                  = adjSp l
      | all (not.snd) xs && l <= 32 =
-        ApplStat (toJExpr . StrI $ "h$p" ++ show l) (map fst xs)
+        ApplStat (pushN' ! l) (map fst xs)
      | l <= 8 && not (snd $ last xs) =
-        ApplStat (toJExpr . StrI $ "h$pp" ++ show sig) [ e | (e,False) <- xs ]
+        ApplStat (pushNN' ! sig) [ e | (e,False) <- xs ]
      | otherwise = inlinePush
     l   = length xs
     sig :: Integer
@@ -277,7 +312,7 @@ push' :: [JExpr] -> JStat
 push' [] = mempty
 push' xs
    | rtsInlinePush || l > 32 || l < 2 = adjSp l <> mconcat items
-   | otherwise                        = ApplStat (toJExpr . StrI $ "h$p" ++ show l) xs
+   | otherwise                        = ApplStat (toJExpr $ pushN ! l) xs
   where
     items = zipWith (\i e -> [j| `Stack`[`offset i`] = `e`; |]) [(1::Int)..] xs
     offset i | i == l    = [je| `Sp` |]
@@ -430,13 +465,24 @@ withRegsRE start end max fallthrough f =
           | otherwise   = [j| break; |]
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
 
-jsIdIdent :: Id -> Maybe Int -> String -> G Ident
---jsIdIdent i Nothing suffix
---   | not (isExportedId i) || isNothing (nameModule_maybe . getName) i = jsLocalIdIdent i suffix
-jsIdIdent i mn suffix = do
+jsIdIdent :: Id -> Maybe Int -> IdType -> G Ident
+jsIdIdent i mi suffix = do
+  IdCache cache <- use gsIdents
+  let key = IdKey (getKey . getUnique $ i) (fromMaybe 0 mi) suffix
+  case M.lookup key cache of
+    Just ident -> return ident
+    Nothing -> do
+      ident <- jsIdIdent' i mi suffix
+      gsIdents .= IdCache (M.insert key ident cache)
+      return ident
+
+jsIdIdent' :: Id -> Maybe Int -> IdType -> G Ident
+jsIdIdent' i mn suffix0 = do
   (prefix, u) <- mkPrefixU
-  StrI . (\x -> "h$"++prefix++x++mns++suffix++u) . zEncodeString <$> name
+  i' <- (\x -> T.pack $ "h$"++prefix++x++mns++suffix++u) . zEncodeString <$> name
+  i' `seq` return (TxtI i') 
     where
+      suffix = idTypeSuffix suffix0
       mns = maybe "" (('_':).show) mn
       name = fmap ('.':) . showPpr' . localiseName . getName $ i
       mkPrefixU
@@ -446,48 +492,53 @@ jsIdIdent i mn suffix = do
         | otherwise = (,('_':) . encodeUnique . getKey . getUnique $ i) . ('$':) . zEncodeString
                         <$> currentModulePkg
 
+idTypeSuffix :: IdType -> String
+idTypeSuffix IdPlain = ""
+idTypeSuffix IdEntry = "_e"
+idTypeSuffix IdConEntry = "_con_e"
+
 jsVar :: String -> JExpr
-jsVar v = ValExpr . JVar . StrI $ v
+jsVar v = ValExpr . JVar . TxtI . T.pack $ v
 
 -- regular id, shortcut for bools!
 jsId :: Id -> G JExpr
 jsId i
 --  | isTrueCon i  = return $ toJExpr HTrue
 --  | isFalseCon i = return $ toJExpr HFalse
-  | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing ""
+  | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing IdPlain
 
 -- entry id
 jsEnId :: Id -> G JExpr
 jsEnId i = ValExpr . JVar <$> jsEnIdI i
 
 jsEnIdI :: Id -> G Ident
-jsEnIdI i = jsIdIdent i Nothing "_e"
+jsEnIdI i = jsIdIdent i Nothing IdEntry
 
 jsEntryId :: Id -> G JExpr
 jsEntryId i = ValExpr . JVar <$> jsEntryIdI i
 
 jsEntryIdI :: Id -> G Ident
-jsEntryIdI i = jsIdIdent i Nothing "_e"
+jsEntryIdI i = jsIdIdent i Nothing IdEntry
 
 -- datacon entry, different name than the wrapper
 jsDcEntryId :: Id -> G JExpr
 jsDcEntryId i = ValExpr . JVar <$> jsDcEntryIdI i
 
 jsDcEntryIdI :: Id -> G Ident
-jsDcEntryIdI i = jsIdIdent i Nothing "_con_e"
+jsDcEntryIdI i = jsIdIdent i Nothing IdConEntry
 
 jsIdV :: Id -> G JVal
-jsIdV i = JVar <$> jsIdIdent i Nothing ""
+jsIdV i = JVar <$> jsIdIdent i Nothing IdPlain
 
 jsIdI :: Id -> G Ident
-jsIdI i = jsIdIdent i Nothing ""
+jsIdI i = jsIdIdent i Nothing IdPlain
 
 -- some types, Word64, Addr#, unboxed tuple have more than one javascript var
 jsIdIN :: Id -> Int -> G Ident
-jsIdIN i n = jsIdIdent i (Just n) ""
+jsIdIN i n = jsIdIdent i (Just n) IdPlain
 
 jsIdN :: Id -> Int -> G JExpr
-jsIdN i n = ValExpr . JVar <$> jsIdIdent i (Just n) ""
+jsIdN i n = ValExpr . JVar <$> jsIdIdent i (Just n) IdPlain
 
 -- | generate all js vars for the ids (can be multiple per var)
 genIds :: Id -> G [JExpr]

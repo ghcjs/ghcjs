@@ -303,8 +303,8 @@ setObjInfo :: Bool       -- ^ debug: output all symbol names
            -> CIStatic   -- ^ static refs
            -> JStat
 setObjInfo debug obj t name fields a gctag argptrs static
-   | debug     = [j| h$setObjInfo(`StrI (T.unpack obj)`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
-   | otherwise = [j| h$o(`StrI (T.unpack obj)`,`t`,`a`,`gctag`,`nregs`,`static`); |]
+   | debug     = [j| h$setObjInfo(`TxtI obj`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
+   | otherwise = [j| h$o(`TxtI obj`,`t`,`a`,`gctag`,`nregs`,`static`); |]
   where
     nregs = sum $ map varSize argptrs
 

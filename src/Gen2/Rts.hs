@@ -41,19 +41,19 @@ closureConstructors =
        <> mconcat (map mkDataFill [1..24])
   where
     mkClosureCon :: Int -> JStat
-    mkClosureCon n = let funName = StrI ("h$c" ++ show n)
-                         vals   = map (StrI.('x':).show) [(1::Int)..n]
-                         fun    = JFunc (StrI "f" : vals) funBod
+    mkClosureCon n = let funName = TxtI $ T.pack ("h$c" ++ show n)
+                         vals   = map (TxtI . T.pack . ('x':) . show) [(1::Int)..n]
+                         fun    = JFunc (TxtI "f" : vals) funBod
                          funBod = [j| return { f: f, m: 0, d1: x1, d2: `obj` }; |]
                          obj    = JHash . M.fromList . zip
-                                    (map (('d':).show) [(1::Int)..]) $
-                                    (map (toJExpr.StrI.('x':).show) [2..n])
+                                    (map (T.pack . ('d':) . show) [(1::Int)..]) $
+                                    (map (toJExpr . TxtI . T.pack . ('x':) . show) [2..n])
                      in decl funName <> [j| `funName` = `fun` |]
     mkDataFill :: Int -> JStat
-    mkDataFill n = let funName = StrI ("h$d" ++ show n)
-                       ds      = map (('d':).show) [(1::Int)..n]
-                       obj     = JHash . M.fromList . zip ds $ map (toJExpr.StrI) ds
-                       fun     = JFunc (map StrI ds) [j| return `obj` |]
+    mkDataFill n = let funName = TxtI $ T.pack ("h$d" ++ show n)
+                       ds      = map (T.pack . ('d':) . show) [(1::Int)..n]
+                       obj     = JHash . M.fromList . zip ds $ map (toJExpr . TxtI) ds
+                       fun     = JFunc (map TxtI ds) [j| return `obj` |]
                    in decl funName <> [j| `funName` = `fun` |]
 
 stackManip :: JStat
@@ -61,8 +61,8 @@ stackManip = mconcat (map mkPush [1..32]) <>
              mconcat (map mkPpush [1..255])
   where
     mkPush :: Int -> JStat
-    mkPush n = let funName = StrI ("h$p" ++ show n)
-                   as      = map (StrI . ('x':) . show) [1..n]
+    mkPush n = let funName = TxtI $ T.pack ("h$p" ++ show n)
+                   as      = map (TxtI . T.pack . ('x':) . show) [1..n]
                    fun     = JFunc as $ [j| `Sp` = `Sp` + `n`; |] <>
                              mconcat (zipWith (\i a -> [j| `Stack`[`Sp`- `n-i`] = `a`; |]) [1..] as)
                in decl funName <> [j| `funName` = `fun`; |]
@@ -70,11 +70,11 @@ stackManip = mconcat (map mkPush [1..32]) <>
     -- | partial pushes, based on bitmap, increases Sp by highest bit
     mkPpush :: Integer -> JStat
     mkPpush sig | sig .&. (sig+1) == 0 = mempty -- already handled by h$p
-    mkPpush sig = let funName = StrI ("h$pp" ++ show sig)
+    mkPpush sig = let funName = TxtI $ T.pack ("h$pp" ++ show sig)
                       bits    = bitsIdx sig
                       n       = length bits
                       h       = last bits
-                      args    = map (StrI . ('x':) . show) [1..n]
+                      args    = map (TxtI . T.pack . ('x':) . show) [1..n]
                       fun     = JFunc args $ [j| `Sp` = `Sp` + `h+1` |] <>
                                 mconcat (zipWith (\b a -> [j| `Stack`[`Sp`-`h-b`] = `a` |]) bits args)
                    in decl funName <> [j| `funName` = `fun`; |]
@@ -103,7 +103,7 @@ declRegs = [j| var !h$regs = []; |]
         <> mconcat (map declReg (enumFromTo R1 R32))
         <> regGettersSetters
     where
-      declReg r = (decl . StrI . ("h$"++) . map toLower . show) r <> [j| `r` = 0; |]
+      declReg r = (decl . TxtI . T.pack . ("h$"++) . map toLower . show) r <> [j| `r` = 0; |]
 
 regGettersSetters :: JStat
 regGettersSetters =
@@ -121,7 +121,7 @@ regGettersSetters =
       map (\r -> (toJExpr (regNum r), [j| `r` = `v`; return; |])) (enumFrom R1)
 
 declRets :: JStat
-declRets = mconcat $ map (decl . StrI . ("h$"++) . map toLower . show) (enumFrom Ret1)
+declRets = mconcat $ map (decl . TxtI . T.pack . ("h$"++) . map toLower . show) (enumFrom Ret1)
 
 trace :: ToJExpr a => a -> JStat
 trace e = [j| log(`e`);  |]
@@ -130,7 +130,7 @@ closureTypes :: JStat
 closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> closureTypeName
   where
     mkClosureType :: CType -> JStat
-    mkClosureType c = let s = StrI $ "h$" ++ map toUpper (show c) ++ "_CLOSURE"
+    mkClosureType c = let s = TxtI . T.pack $ "h$" ++ map toUpper (show c) ++ "_CLOSURE"
                       in  decl s <> [j| `iex s` = `c` |]
     closureTypeName :: JStat
     closureTypeName = [j| fun h$closureTypeName c {
@@ -288,7 +288,7 @@ fun h$ap1_e {
 }
 `ClosureInfo "h$ap1_e" [] "apply1" (CILayoutFixed 2 [PtrV, PtrV]) CIThunk CINoStatic`;
 
-// function application to one argument
+// function application to two arguments
 fun h$ap2_e {
   var c = `R1`;
   `R1` = c.d1;
@@ -491,7 +491,7 @@ fun h$gc_check next {
 }
 
 fun h$o o typ0 a gcinfo regs srefs {
-  h$setObjInfo o typ0 "" [] a gcinfo regs srefs;
+  h$setObjInfo(o,typ0,"",[],a,gcinfo,regs,srefs);
 }
 
 // set heap/stack object information
@@ -760,7 +760,7 @@ fun h$logStack {
 }
 
 `rtsApply`;
-`rtsPrim`;
+// rtsPrim
 `closureTypes`;
 `garbageCollector`;
 
@@ -949,7 +949,7 @@ fun h$reschedule {
 // carefully suspend the current thread, looking at the
 // function that would be called next
 fun h$suspendCurrentThread next {
-  `assertRts (next |!== (StrI "h$reschedule")) ("suspend called with h$reschedule"::String)`;
+  `assertRts (next |!== (TxtI "h$reschedule")) ("suspend called with h$reschedule"::String)`;
   if(next === h$reschedule) { throw "suspend called with h$reschedule"; }
   if(`Stack`[`Sp`] === h$restoreThread || next === h$return) {
     h$currentThread.sp = `Sp`;

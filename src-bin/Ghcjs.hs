@@ -1,10 +1,16 @@
-{-# LANGUAGE CPP, TypeFamilies, ScopedTypeVariables, TupleSections #-}
+{-# LANGUAGE CPP,
+             TypeFamilies,
+             ScopedTypeVariables,
+             TupleSections,
+             OverloadedStrings #-}
+
 module Main where
 
 import           Paths_ghcjs
 import           Data.Typeable
 import qualified GHC.Paths
 import           GHC
+import           ApiHooks
 import           HscMain (hscSimplify)
 import           TidyPgm (tidyProgram)
 import           CoreToStg (coreToStg)
@@ -13,14 +19,14 @@ import           DynFlags
 import           Platform
 import           ErrUtils (fatalErrorMsg'')
 import           CorePrep (corePrepPgm)
-import           DriverPhases (HscSource (HsBootFile), Phase (..),
+import           DriverPhases (HscSource (HsBootFile), Phase(..),
                                isHaskellSrcFilename, isSourceFilename)
 import           DriverPipeline (oneShot)
 import           DsMeta (templateHaskellNames)
 import           Exception
-import           HscTypes (ModGuts, CgGuts (..), HscEnv (..), Dependencies (..),
+import           HscTypes (ModGuts, CgGuts(..), HscEnv(..), Dependencies(..),
                            NameCache (..), isBootSummary, mkSrcErr, ModGuts(..),
-                           SourceError)
+                           SourceError, FindResult(..))
 import           IfaceEnv (initNameCache)
 import           LoadIface
 import           Outputable (showPpr)
@@ -39,57 +45,55 @@ import           Constants (hiVersion)
 import           TcRnMonad (initIfaceCheck)
 import           Util (looksLikeModuleName)
 import           Outputable hiding ((<>))
+import           MonadUtils (MonadIO(..))
 
 import           Control.Applicative
-import           Control.Monad
-import           Data.Char (toLower)
-import           Data.IORef (modifyIORef, writeIORef)
-import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.IO as TL
-import qualified Data.Text.Encoding as T
-import           Data.Maybe
-import           Data.Monoid
-
-import           System.Environment (getArgs, getEnv)
-import           System.Exit(ExitCode(..), exitWith)
-
-import           Compiler.Info
-import           Compiler.Variants
-import qualified GHCJSMain
-import           MonadUtils (MonadIO(..))
-import           System.FilePath (takeExtension, dropExtension, addExtension,
-                                  replaceExtension, (</>))
-import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory,
-                                   doesFileExist, copyFile)
 import qualified Control.Exception as Ex
+import           Control.Monad
 
-import           Control.Monad (when, mplus, forM, forM_)
-import           System.Exit (exitSuccess)
-import           System.Process (rawSystem)
-import           System.IO
-import           Data.Monoid (mconcat, First(..))
-import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub,
-                            intercalate, foldl')
-import           Data.Maybe (isJust, fromMaybe, catMaybes, isNothing)
-
-import           Options.Applicative
-import           Options.Applicative.Types
-import           Options.Applicative.Builder.Internal
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Char8  as C8
+import           Data.Char (toLower)
+import           Data.IORef (modifyIORef, writeIORef)
+import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub,
+                            intercalate, foldl')
+import           Data.Maybe
+import           Data.Monoid
+import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.IO as TL
+import qualified Data.Text.Encoding as T
+
+import           Options.Applicative
+import           Options.Applicative.Types
+import           Options.Applicative.Builder.Internal
+
+import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory,
+                                   doesFileExist, copyFile)
+import           System.Environment (getArgs, getEnv)
+import           System.Exit(ExitCode(..), exitWith, exitSuccess)
+import           System.FilePath (takeExtension, dropExtension, addExtension,
+                                  replaceExtension, (</>))
+import           System.IO
+import           System.Process (rawSystem)
+
+import qualified GHCJSMain
+import           Compiler.Info
+import           Compiler.Variants
+
 import qualified Gen2.Generator as Gen2
 import qualified Gen2.Linker    as Gen2
 import qualified Gen2.Rts       as Gen2
-import           Gen2.PrimIface as Gen2
+import qualified Gen2.PrimIface as Gen2
+import qualified Gen2.Foreign   as Gen2
 import qualified Gen2.Object    as Object
 
 -- debug
-import           Finder
-import           PrelNames
-import           FastString
+import           Finder (findImportedModule, cannotFindInterface)
+-- import           PrelNames
+-- import           FastString
 
 data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
                                    , gsNoNative          :: Bool
@@ -181,12 +185,12 @@ main =
                                  , hscTarget = HscAsm
                                  }
           (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
-          dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
+          dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf (ghcLink sdflags == LinkBinary && buildExecutableP oneshot dflags0 settings) dflags0
           (dflags2, pkgs) <- liftIO (initPackages dflags1)
           liftIO (doPackageFallback pkgs args1)
           base <- liftIO ghcjsDataDir
           let way = WayCustom "js"
-          _ <- setSessionDynFlags $ setDfOpts $ setGhcjsPlatform base $
+          _ <- setSessionDynFlags $ setDfOpts $ setGhcjsPlatform base $ Gen2.installForeignHooks True $
                dflags2 { objectSuf = "js_o"
                        , hiSuf     = "js_hi"
                        , buildTag   = mkBuildTag [way]
@@ -221,14 +225,15 @@ main =
                             else mapM_ (compileModSummary settings) mgraph
                           dflags3 <- getSessionDynFlags
                           case ghcLink sdflags of
-                            LinkBinary -> when (        not oneshot
-                                               && isJust (outputFile dflags3)
-                                               && not (gsNoJSExecutables settings)) $ do
+                            LinkBinary -> when (buildExecutableP oneshot dflags3 settings) $ do
                               buildExecutable settings dflags3 jsArgs
 --                              touchOutputFile
                             LinkDynLib -> return ()
                             _          -> touchOutputFile
 
+buildExecutableP :: Bool -> DynFlags -> GhcjsSettings -> Bool
+buildExecutableP oneshot df settings =
+   not oneshot && isJust (outputFile df) && not (gsNoJSExecutables settings)
 
 
 isBootFilename :: FilePath -> Bool
@@ -239,14 +244,15 @@ catchMaybe a = (fmap Just a) `gcatch` \(_::Ex.SomeException) -> return Nothing
 isJsFile :: FilePath -> Bool
 isJsFile = (==".js") . takeExtension
 
-addPkgConf :: DynFlags -> IO DynFlags
-addPkgConf df = do
+addPkgConf :: Bool -> DynFlags -> IO DynFlags
+addPkgConf buildJsExe df = do
   db1 <- getGlobalPackageDB
   db2 <- getUserPackageDB
   base <- getGlobalPackageBase
   return $ df {
                extraPkgConfs = const [PkgConfFile db1, PkgConfFile db2] -- (([PkgConfFile db1, PkgConfFile db2]++).filter isNotUser.filter isNotGlobal.extraPkgConfs df)
              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
+             , packageFlags = (if buildJsExe then [ExposePackage "ghcjs-prim"] else []) ++ packageFlags df
              }
   where
     isNotGlobal GlobalPkgConf = False
@@ -291,7 +297,7 @@ handleCommandline settings args minusBargs
             , ("--abi-hash", abiHash args minusBargs)
             , ("-M", fallbackGhc settings False True args)
             , ("--print-rts", printRts)
-            , ("--print-ji", printJi args)
+            , ("--print-deps", printDeps args)
             , ("--print-obj", printObj args)
             , ("--show-iface", printIface args)
             ]
@@ -430,18 +436,15 @@ writeDesugaredModule settings mod =
      (tidyCore, details) <- liftIO $ tidyProgram env mod_guts1
      (iface, no_change) <- ioMsgMaybe $ mkIface env mb_old_iface details mod_guts1
      liftIO $ writeIfaceFile dflags ifaceFile iface
-     versions <- liftIO $ forM variants $ \variant -> do
-          (program, meta) <- liftIO $ concreteJavascriptFromCgGuts settings dflags env tidyCore variant
+     liftIO $ forM variants $ \variant -> do
+          program <- liftIO $ concreteJavascriptFromCgGuts settings dflags env tidyCore variant
           let outputFile = addExtension outputBase (variantExtension variant)
           putStrLn $ concat ["Writing module ", name, " (", outputFile, ")"]
           B.writeFile outputFile program
-          case variantMetaExtension variant of
-            Nothing -> return ()
-            Just mext -> B.writeFile (addExtension outputBase mext) meta
-          return (variant, program, meta)
+          B.writeFile (addExtension outputBase ".ji") "dummy" -- fixme remove after cabal patch is updated
+          return (variant, program)
      df <- getSessionDynFlags
      liftIO $ doFakeNative df outputBase
---     liftIO $ writeCachedFiles dflags outputBase versions
   where
     mod_summary = pm_mod_summary . tm_parsed_module . dm_typechecked_module $ mod
     ifaceFile   = ml_hi_file (ms_location mod_summary)
@@ -449,7 +452,7 @@ writeDesugaredModule settings mod =
     name = moduleNameString . moduleName . ms_mod $ mod_summary
     dflags = ms_hspp_opts mod_summary
 
-concreteJavascriptFromCgGuts :: GhcjsSettings -> DynFlags -> HscEnv -> CgGuts -> Variant -> IO (ByteString, ByteString)
+concreteJavascriptFromCgGuts :: GhcjsSettings -> DynFlags -> HscEnv -> CgGuts -> Variant -> IO ByteString
 concreteJavascriptFromCgGuts settings dflags env core variant =
   do core_binds <- corePrepPgm dflags
                                env
@@ -488,12 +491,12 @@ printRts :: IO ()
 printRts = putStrLn Gen2.rtsStr >> exitSuccess
 
 
-printJi :: [String] -> IO ()
-printJi ["--print-ji", file] = Gen2.readDeps file >>= putStrLn . Gen2.dumpDeps
-printJi _                    = putStrLn "usage: ghcjs --print-ji jifile"
+printDeps :: [String] -> IO ()
+printDeps ["--print-deps", file] = Object.readDepsFile file >>= TL.putStrLn . Object.showDeps
+printDeps _                    = putStrLn "usage: ghcjs --print-deps objfile"
 
 printObj :: [String] -> IO ()
-printObj ["--print-obj", file] = TL.putStrLn . Object.showObject =<< BL.readFile file
+printObj ["--print-obj", file] = Object.readObjectFile file >>= TL.putStrLn . Object.showObject
 printObj _                     = putStrLn "usage: ghcjs --print-obj objfile"
 
 
@@ -509,13 +512,12 @@ setDfOpts df = foldl' setOpt (foldl' unsetOpt df unsetList) setList
 
 -- | configure the GHC API for building 32 bit code
 setGhcjsPlatform :: FilePath -> DynFlags -> DynFlags
-setGhcjsPlatform basePath df = addPlatformDefines basePath $ df { settings = settings' }
+setGhcjsPlatform basePath df = addPlatformDefines basePath $ addPrimIface $ df { settings = settings' }
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
                               , sPlatformConstants = ghcjsPlatformConstants
                               , sPgm_a             = ("ghcjs-gcc-stub", [])
                               , sPgm_l             = ("ghcjs-gcc-stub", [])
-                              , sOverridePrimIface = Just ghcjsPrimIface
                               }
     ghcjsPlatform = (sTargetPlatform (settings df))
        { platformArch     = ArchJavaScript
@@ -529,6 +531,9 @@ setGhcjsPlatform basePath df = addPlatformDefines basePath $ df { settings = set
        , pc_CLONG_LONG_SIZE = 8
        , pc_WORDS_BIGENDIAN = False
        }
+
+addPrimIface :: DynFlags -> DynFlags
+addPrimIface df = df { apiHooks = insertHook GhcPrimIfaceHook Gen2.ghcjsPrimIface (apiHooks df) }
 
 -- ghcjs builds for a strange platform: like 32 bit
 -- instead of letting autoconf doing the defines, we override them here
@@ -587,9 +592,10 @@ generateNative settings oneshot argsS args1 mbMinusB =
   runGhcSession mbMinusB $ do
        do   sdflags <- getSessionDynFlags
             (dflags0, fileargs', _) <- parseDynamicFlags sdflags (ignoreUnsupported argsS)
-            dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
+            dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf False dflags0
             (dflags2, _) <- liftIO (initPackages dflags1)
-            let dflags2' = dflags2 { ghcMode = if oneshot then OneShot else CompManager }
+            let dflags2' = Gen2.installForeignHooks False $
+                   dflags2 { ghcMode = if oneshot then OneShot else CompManager }
             if gsNativeExecutables settings
               then setSessionDynFlags dflags2'
               else setSessionDynFlags $ dflags2' { ghcLink = NoLink
@@ -626,7 +632,7 @@ fixNameCache = do
       knownNames = map getName (filter (not.isPrimOp) wiredInThings) ++
                       basicKnownKeyNames ++
                       templateHaskellNames ++
-                      map (getName . AnId . mkGhcjsPrimOpId) allThePrimOps
+                      map (getName . AnId . Gen2.mkGhcjsPrimOpId) allThePrimOps
       isPrimOp (AnId i) = isPrimOpId i
       isPrimOp _        = False
 
@@ -718,7 +724,7 @@ abiHash args minusB = do
     sdflags <- getSessionDynFlags
     let sdflags' = sdflags { ghcMode = OneShot, ghcLink = LinkBinary }
     (dflags0, fileargs', _) <- parseDynamicFlags sdflags' $ ignoreUnsupported argsS
-    dflags1 <- liftIO $ if isJust minusB then return dflags0 else addPkgConf dflags0
+    dflags1 <- liftIO $ if isJust minusB then return dflags0 else addPkgConf False dflags0
     (dflags2, pkgs) <- liftIO (initPackages dflags1)
     _ <- setSessionDynFlags (setDfOpts dflags2)
     abiHash' (map unLoc fileargs')

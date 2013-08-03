@@ -8,6 +8,7 @@ module Gen2.RtsSettings where
 import           Data.Monoid
 import           Gen2.Utils
 import           Language.Javascript.JMacro
+import           Data.Text (Text)
 
 -- debugging settings (fixme, make these depend on cabal flags?)
 
@@ -88,8 +89,8 @@ infixl 2 |!!
 (|&) e1 e2 = [je| `e1` & `e2` |]
 
 -- a.b
-(|.) :: ToJExpr a => a -> String -> JExpr
-(|.) e i = SelExpr (toJExpr e) (StrI i)
+(|.) :: ToJExpr a => a -> Text -> JExpr
+(|.) e i = SelExpr (toJExpr e) (TxtI i)
 
 -- a[b]
 (|!) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
@@ -103,7 +104,7 @@ infixl 2 |!!
 (|^) :: ToJExpr a => a -> [JExpr] -> JExpr
 (|^) a bs = ApplExpr (toJExpr a) bs
 
-(|^^) :: String -> [JExpr] -> JExpr
+(|^^) :: Text -> [JExpr] -> JExpr
 (|^^) a bs = ApplExpr (jsv a) bs
 
 (|||) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr

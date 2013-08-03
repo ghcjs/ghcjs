@@ -28,34 +28,36 @@ import           Type hiding (typeSize)
 import           Name
 import           Id
 
-import           Data.Char (ord, isDigit)
+import           Control.Applicative
+import           Control.DeepSeq
+import           Control.Lens
+import           Control.Monad.State.Strict
+
+import           Data.Array
 import           Data.Bits ((.|.), shiftL, shiftR, (.&.), testBit, xor, complement)
 import           Data.ByteString (ByteString)
-import qualified Data.Serialize as C
-import           Data.Binary.Put
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
+import           Data.Char (ord, isDigit)
 import           Data.Either (partitionEithers)
 import           Data.Function (on)
+import           Data.Generics.Aliases (mkT)
+import           Data.Generics.Schemes (everywhere)
 import qualified Data.IntMap.Strict as IM
 import           Data.Monoid
 import           Data.Maybe (isJust, fromMaybe)
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.List (partition, intercalate, sort, sortBy)
 import qualified Data.List as L
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.Encoding as TL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Text (Text)
-import qualified Text.Parsec as P
+
 import           Language.Javascript.JMacro
-import           Control.Monad.State.Strict
-import           Control.Applicative
-import           Control.DeepSeq
+import qualified Text.Parsec as P
+
 import           Gen2.Utils
 import           Gen2.Prim
 import           Gen2.Rts
@@ -66,66 +68,77 @@ import           Gen2.RtsApply
 import           Gen2.RtsSettings
 import qualified Gen2.Linker as Linker
 import           Gen2.ClosureInfo
-
 import qualified Gen2.Optimizer as O
 import qualified Gen2.Object    as Object
 
-import           Control.Lens
-
-import           Data.Generics.Aliases
-import           Data.Generics.Schemes
-
-import qualified Debug.Trace as DT
 
 type StgPgm     = [StgBinding]
 type StaticRefs = [Id]
 
-generate :: Bool -> DynFlags -> StgPgm -> Module -> (ByteString, ByteString)  -- module,metadata
+generate :: Bool -> DynFlags -> StgPgm -> Module -> ByteString
 generate debug df s m = flip evalState (initState df m) $ do
-  (p1, d) <- unzip <$> pass1 df m s
-  let result = BL.toStrict $ Object.object' (dumpAst debug s ++ p1)
-  (deps, pkgs, funs) <- genMetaData d
-  let depsBs = C.runPut $ Linker.serializeDeps pkgs funs deps
-  return (result, depsBs)
+  (st, g) <- pass df m s
+  let (p, d) = unzip g
+      (st', dbg) = dumpAst st debug s
+  deps <- genMetaData d
+  return . BL.toStrict $
+    Object.object' st deps (dbg ++ p)
 
-dumpAst :: Bool -> StgPgm -> [([Text], BL.ByteString)]
-dumpAst debug s 
-  | debug     = [([T.pack "h$debug", T.pack "h$dumpAst"], Object.serializeStat [] [j| h$dumpAst = `x` |])]
-  | otherwise = []
+dumpAst :: Object.SymbolTable
+        -> Bool 
+        -> StgPgm
+        -> (Object.SymbolTable, [([Text], BL.ByteString)])
+dumpAst st debug s
+  | debug     = (st', [(["h$debug", "h$dumpAst"], bs)])
+  | otherwise = (st, [])
       where
+        (st', bs) = Object.serializeStat st [] [j| h$dumpAst = `x` |]
         x = (intercalate "\n\n" (map showIndent s))
 
 -- | variable prefix for the nth block in module
-modulePrefix :: Module -> Int -> String
-modulePrefix m n = "h$" ++ (zEncodeString . moduleNameString . moduleName $ m) ++ "_id_" ++ show n
+modulePrefix :: Module -> Int -> Text
+modulePrefix m n = T.pack $ "h$" ++ (zEncodeString . moduleNameString . moduleName $ m) ++ "_id_" ++ show n
 
--- | pass1 generates unsaturated blocks and dependency info
-pass1 :: DynFlags
-      -> Module
-      -> StgPgm
-      -> G [(([Text],BL.ByteString),([Id], [Id]))] -- for each toplevel chunk
-pass1 df m ss = sequence (zipWith generateBlock ss [(1::Int)..])
+pass :: DynFlags
+     -> Module
+     -> StgPgm
+     -> G (Object.SymbolTable, [(([Text], BL.ByteString), ([Id], [Id]))])
+pass df m ss = go 1 Object.emptySymbolTable ss
     where
-      generateBlock :: StgBinding -> Int -> G (([Text],BL.ByteString),([Id], [Id]))
-      generateBlock decl n = do
-          tl <- genToplevel (removeNoEscape decl)
-          extraTl <- use gsToplevelStats
-          ci      <- use gsClosureInfo
-          resetToplevel
-          let allDeps = collectIds decl
-              topDeps = collectTopIds decl
-          o <- objectEntry m topDeps ci
-                          . O.optimize
-                          . jsSaturate (Just $ modulePrefix m n) $ (tl <> mconcat (reverse extraTl))
-          return (o, (topDeps, allDeps))
+      go n st (x:xs) = do
+        (st', o, d) <- generateBlock st x n
+        (st'', ys)  <- go (n+1) st' xs
+        return (st'', (o,d):ys)
+      go _ st []     = return (st, [])
+      generateBlock :: Object.SymbolTable
+                    -> StgBinding
+                    -> Int
+                    -> G (Object.SymbolTable, ([Text], BL.ByteString), ([Id], [Id]))
+      generateBlock st decl n = do
+        tl      <- genToplevel (removeNoEscape decl)
+        extraTl <- use gsToplevelStats
+        ci      <- use gsClosureInfo
+        resetToplevel
+        let allDeps = collectIds decl
+            topDeps = collectTopIds decl
+        (st', ss, bs) <- objectEntry m st topDeps ci
+                           . O.optimize
+                           . jsSaturate (Just $ modulePrefix m n)
+                           $ tl <> mconcat (reverse extraTl)
+        return (st', (ss, bs), (topDeps, allDeps))
 
-objectEntry :: Module -> [Id] -> [ClosureInfo] -> JStat -> G ([Text], BL.ByteString)
-objectEntry m i ci stat = do
+objectEntry :: Module
+            -> Object.SymbolTable
+            -> [Id]
+            -> [ClosureInfo]
+            -> JStat
+            -> G (Object.SymbolTable, [Text], BL.ByteString)
+objectEntry m st i ci stat = do
   i' <- mapM idStr i
-  let o = Object.serializeStat ci stat
-  rnf i' `seq` rnf o `seq` return (i', o)
+  let (st', o) = Object.serializeStat st ci stat
+  rnf i' `seq` rnf o `seq` return (st', i', o)
     where
-      idStr i = T.pack . istr <$> jsIdI i
+      idStr i = itxt <$> jsIdI i
 
 collectTopIds :: StgBinding -> [Id]
 collectTopIds (StgNonRec b _) = [b]
@@ -134,33 +147,33 @@ collectTopIds (StgRec bs) = map fst bs
 collectIds :: StgBinding -> [Id]
 collectIds b = filter acceptId $ S.toList (bindingRefs b)
   where
-    acceptId i = all ($ i) [not.isForbidden] -- [isGlobalId, not.isForbidden]
+    acceptId i = all ($ i) [not . isForbidden] -- fixme test this: [isExported[isGlobalId, not.isForbidden]
     -- the GHC.Prim module has no js source file
     isForbidden i
       | Just m <- nameModule_maybe (getName i) =
                     moduleNameText m    == T.pack "GHC.Prim" &&
-                    Linker.packageName (modulePackageText m) == T.pack "ghc-prim"
+                    Object.packageName (modulePackageText m) == T.pack "ghc-prim"
       | otherwise = False
 
 data MetadataCache = MDC
-         { mdcPackage    :: (IM.IntMap Linker.Package)  -- Unique PackageId -> Linker.Package
-         , mdcId         :: (IM.IntMap Linker.Fun)      -- Unique Id -> Linker.Fun
+         { mdcPackage    :: (IM.IntMap Object.Package)  -- Unique PackageId -> Object.Package
+         , mdcId         :: (IM.IntMap Object.Fun)      -- Unique Id -> Object.Fun
          }
 
-genMetaData :: [([Id], [Id])] -> G (Linker.Deps, Set Linker.Package, Set Linker.Fun)
+genMetaData :: [([Id], [Id])] -> G Object.Deps
 genMetaData p1 = do
   m <- use gsModule
   (ds, (MDC pkgs funs)) <- runStateT (concat <$> mapM oneDep p1) (MDC IM.empty IM.empty)
   let sp = S.fromList (IM.elems pkgs)
       sf = S.fromList (IM.elems funs)
-  return (Linker.Deps (modulePackageText m) (moduleNameText m) (M.fromList ds), sp, sf)
+  return $ Object.Deps (modulePackageText m) (moduleNameText m) (M.fromList ds)
    where
     oneDep (symbs, deps) = mapM (symbDep deps) symbs
     symbDep deps symb = do
       ds <- mapM idFun deps
       st <- idFun symb
       return (st, S.fromList ds)
-    -- makes a Linker.Fun from an Id, from cache if possible
+    -- makes an Object.Fun from an Id, from cache if possible
     idFun i = do
       let k = getKey . getUnique $ i
       (MDC ps is) <- get
@@ -170,16 +183,15 @@ genMetaData p1 = do
           m <- lift (use gsModule)
           let mod = fromMaybe m $ nameModule_maybe (getName i)
               mk = getKey . getUnique $ mod
-          (StrI idStr) <- lift (jsIdI i)
-          let idTxt = T.pack idStr
+          (TxtI idTxt) <- lift (jsIdI i)
           case IM.lookup mk ps of
             Just p -> do
-              let f = Linker.Fun p (moduleNameText mod) idTxt
+              let f = Object.Fun p (moduleNameText mod) idTxt
               put (MDC ps $ IM.insert k f is)
               return f
             Nothing -> do
               let p = modulePackageText mod
-                  f = Linker.Fun p (moduleNameText mod) idTxt
+                  f = Object.Fun p (moduleNameText mod) idTxt
               put (MDC (IM.insert mk p ps) (IM.insert k f is))
               return f
 
@@ -189,10 +201,10 @@ moduleNameText m
   | otherwise = T.pack xs
     where xs = moduleNameString . moduleName $ m
 
-modulePackageText :: Module -> Linker.Package
-modulePackageText m = Linker.Package n v
+modulePackageText :: Module -> Object.Package
+modulePackageText m = Object.Package n v
   where
-    (n,v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
+    (n, v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
 
 genToplevel :: StgBinding -> C
 genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs -- (lookupStaticRefs bndr srts)
@@ -285,9 +297,11 @@ loadLiveFun l = do
        let l'' = mconcat . zipWith (loadLiveVar $ toJExpr d) [(1::Int)..] $ vs
        return (decl' v [je| `R1`.d1 |] <> [j| `decl d`; `d` = `R1`.d2 |] <> l'')
   where
-        loadLiveVar d n v = let ident = StrI ("d" ++ show n)
+        loadLiveVar d n v = let ident = dataFields ! n
                             in  decl' v (SelExpr d ident)
 
+dataFields :: Array Int Ident
+dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [1..1024])
 
 genBody :: Id -> [Id] -> StgExpr -> UpdateFlag -> Id -> C
 genBody topid args e upd i = loadArgs args <> b0
@@ -481,21 +495,10 @@ genArgInfo cl args = map uTypeVt args
 mkDataEntry :: JExpr
 mkDataEntry = ValExpr $ JFunc funArgs [j| `preamble`; return `Stack`[`Sp`]; |]
 
-genFunInfo :: String -> [Id] -> JExpr
+genFunInfo :: Text -> [Id] -> JExpr
 genFunInfo name as = ValExpr . JList $ [s, jstr name] ++ map (toJExpr . uTypeVt . idType) as
   where
     s = toJExpr (argSize (map idType as) + 1)
-
--- fixme need first var for r1 = closure?
-{-
-genGcInfo :: [Type] -> JObj
-genGcInfo ts = gcInfo size (ptrOffsets 0 (map typeVt ts))
-    where
-      size = argSize ts + 1
--}
-
-conEntry :: DataCon -> Ident
-conEntry = StrI . (\x -> "h$" ++ x ++ "_e") . zEncodeString . show
 
 argSize :: [Type] -> Int
 argSize = sum . map (varSize . uTypeVt)
@@ -706,8 +709,8 @@ pushRetArgs free fun = do
     where
       showSlot SlotUnknown = return "unknown"
       showSlot (SlotId i n) = do
-        (StrI i') <- jsIdI i
-        return (i'++"("++show n ++ ")")
+        (TxtI i') <- jsIdI i
+        return (T.unpack i'++"("++show n ++ ")")
 
 loadRetArgs :: [(Id,Int,Bool)] -> C
 loadRetArgs free = popSkipI 1 =<< ids
@@ -890,7 +893,7 @@ loadParams from args use = do
     loadIfUsed  _ _ _  = mempty
 
     loadConVarsIfUsed fr cs = mconcat $ zipWith f cs [(1::Int)..]
-      where f (x,u) n = loadIfUsed (SelExpr fr (StrI $ "d" ++ show n)) x u
+      where f (x,u) n = loadIfUsed (SelExpr fr (dataFields ! n)) x u
 
 genPrimOp :: PrimOp -> [StgArg] -> Type -> C
 genPrimOp op args t = do
@@ -1044,8 +1047,8 @@ genLit (MachWord64 w)    = return [ [je| `toSigned (shiftR w 32)` |] , [je| `toS
 genLit (MachFloat r)     = return [ [je| `r2d r` |] ]
 genLit (MachDouble r)    = return [ [je| `r2d r` |] ]
 genLit (MachLabel name size fod)
-  | fod == IsFunction = return [ [je| h$mkFunctionPtr(`StrI ("h$" ++ unpackFS name)`) |], [je| 0 |] ]
-  | otherwise         = return [ iex (StrI $ "h$" ++ unpackFS name), [je| 0 |] ]
+  | fod == IsFunction = return [ [je| h$mkFunctionPtr(`TxtI . T.pack $ "h$" ++ unpackFS name`) |], [je| 0 |] ]
+  | otherwise         = return [ iex (TxtI . T.pack $ "h$" ++ unpackFS name), [je| 0 |] ]
 genLit (LitInteger i id) = return [ [je| `i` |] ] -- fixme, convert to bytes and JSBN int?
 
 -- make a signed 32 bit int from this unsigned one, lower 32 bits
@@ -1092,7 +1095,7 @@ allocCon to con xs = do
   e <- enterDataCon con
   return $ allocDynamic True to e xs
 
-nullaryConClosure tag = ValExpr (JVar . StrI $ "data_static_0_" ++ show tag ++ "_c")
+-- nullaryConClosure tag = ValExpr (JVar . TxtI . T.pack $ "data_static_0_" ++ show tag ++ "_c")
 
 -- allocConStatic cl f n = decl' cl [je| static_con(`f`,`n`) |]
 allocConStatic :: JExpr -> DataCon -> [JExpr] -> C
@@ -1157,7 +1160,7 @@ selectApply :: Bool     ->    -- ^ true for fast apply, false for stack apply
 selectApply fast (args, as) = do
   case specApply fast (length args) (length as) of
     Just e  -> return (e, True)
-    Nothing -> return (jsv $ "h$ap_gen" ++ fastSuff, False)
+    Nothing -> return (jsv $ "h$ap_gen" <> fastSuff, False)
   where
     fastSuff | fast      = "_fast"
              | otherwise = ""
@@ -1179,7 +1182,7 @@ delimitBlock m i s = do
 
 -- ew
 comment :: String -> JStat
-comment xs = PPostStat True ("// " ++ xs) (iex $ StrI "")
+comment xs = PPostStat True ("// " ++ xs) (iex $ TxtI "")
 
 
 typeComment :: Id -> C
@@ -1280,7 +1283,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
   | otherwise = do
       u <- freshUnique
       case parseFfiJME pat u of
-        Right (ValExpr (JVar (StrI ident))) -> mkApply pat
+        Right (ValExpr (JVar (TxtI ident))) -> mkApply pat
         Right expr | not async && length tgt < 2 -> do
           (statPre, ap) <- argPlaceholders args
           let rp  = resultPlaceholders async t ret
@@ -1319,14 +1322,14 @@ parseFFIPattern' callback javascriptCc pat t ret args
       | otherwise = do
          (stats, as) <- unzip <$> mapM genFFIArg args
          return $ traceCall as <> mconcat stats <> ApplStat f' (concat as)
-        where f' = toJExpr (StrI f)
+        where f' = toJExpr (TxtI $ T.pack f)
     copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs
     p e = error ("parse error in ffi pattern: " ++ pat ++ "\n" ++ e)
     replaceIdent :: Map Ident JExpr -> JExpr -> JExpr
-    replaceIdent env e@(ValExpr (JVar i@(StrI xs)))
+    replaceIdent env e@(ValExpr (JVar i))
       | isFFIPlaceholder i = fromMaybe err (M.lookup i env)
       | otherwise = e
-        where err = error (pat ++ ": invalid placeholder, check function type: " ++ xs)
+        where err = error (pat ++ ": invalid placeholder, check function type: " ++ show i)
     replaceIdent _ e = e
     traceCall as
         | rtsTraceForeign = [j| h$traceForeign(`pat`, `as`); |]
@@ -1343,10 +1346,11 @@ parseFfiJM xs u = fmap (makeHygienic . saturateFFI u) . parseJM $ xs
     makeHygienic :: JStat -> JStat
     makeHygienic s = snd $ O.renameLocalsFun (map addFFIToken O.newLocals) ([], s)
 
-    addFFIToken (StrI xs) = StrI ("ghcjs_ffi_" ++ show u ++ "_" ++ xs)
+--    addFFIToken (StrI xs) = TxtI (T.pack $ "ghcjs_ffi_" ++ show u ++ "_" ++ xs)
+    addFFIToken (TxtI xs) = TxtI (T.pack ("ghcjs_ffi_" ++ show u ++ "_") <> xs)
 
 saturateFFI :: JMacro a => Int -> a -> a
-saturateFFI u = jsSaturate (Just $ "ghcjs_ffi_sat_" ++ show u)
+saturateFFI u = jsSaturate (Just . T.pack $ "ghcjs_ffi_sat_" ++ show u)
 
 -- $r for single, $r1,$r2 for dual
 -- $r1, $r2, etc for ubx tup, void args not counted
@@ -1363,13 +1367,13 @@ resultPlaceholders False t rs =
           phs   = zipWith (\size n -> f n size) sizes [(1::Int)..]
       in case sizes of
            [n] -> mkUnary n
-           _   -> concat $ zipWith (\phs' r -> map (\i -> (StrI i, r)) phs') (concat phs) rs
+           _   -> concat $ zipWith (\phs' r -> map (\i -> (TxtI (T.pack i), r)) phs') (concat phs) rs
     UnaryRep t' -> mkUnary (typeSize t')
   where
     mkUnary 0 = []
-    mkUnary 1 = [(StrI "$r",head rs)] -- single
-    mkUnary n = [(StrI "$r",head rs),(StrI "$r1", head rs)] ++
-       zipWith (\n r -> (StrI $ "$r" ++ show n, toJExpr r)) [2..n] (tail rs)
+    mkUnary 1 = [(TxtI "$r",head rs)] -- single
+    mkUnary n = [(TxtI "$r",head rs),(TxtI "$r1", head rs)] ++
+       zipWith (\n r -> (TxtI . T.pack $ "$r" ++ show n, toJExpr r)) [2..n] (tail rs)
 
 -- $1, $2, $3 for single, $1_1, $1_2 etc for dual
 -- void args not counted
@@ -1382,20 +1386,20 @@ argPlaceholders args = do
 
 callbackPlaceholders :: Maybe JExpr -> [(Ident,JExpr)]
 callbackPlaceholders Nothing  = []
-callbackPlaceholders (Just e) = [((StrI "$c"), e)]
+callbackPlaceholders (Just e) = [((TxtI "$c"), e)]
 
 mkPlaceholder :: Bool -> String -> [JExpr] -> [(Ident, JExpr)]
 mkPlaceholder undersc prefix aids =
       case aids of
              []       -> []
-             [x]      -> [(StrI $ prefix, x)]
-             xs@(x:_) -> (StrI $ prefix, x) :
-                zipWith (\x m -> (StrI $ prefix ++ u ++ show m,x)) xs [(1::Int)..]
+             [x]      -> [(TxtI . T.pack $ prefix, x)]
+             xs@(x:_) -> (TxtI . T.pack $ prefix, x) :
+                zipWith (\x m -> (TxtI . T.pack $ prefix ++ u ++ show m,x)) xs [(1::Int)..]
    where u = if undersc then "_" else ""
 
 -- ident is $N, $N_R, $rN, $rN_R or $r or $c
 isFFIPlaceholder :: Ident -> Bool
-isFFIPlaceholder (StrI x) =
+isFFIPlaceholder (TxtI x) =
   either (const False) (const True) (P.parse parser "" x)
     where
       parser = void (P.try $ P.string "$r") <|>
@@ -1413,7 +1417,7 @@ makeIdent = do
   gsId += 1
   i <- use gsId
   mod <- use gsModule
-  return (StrI $ "h$$" ++ zEncodeString (show mod) ++ "_" ++ encodeUnique i)
+  return (TxtI . T.pack $ "h$$" ++ zEncodeString (show mod) ++ "_" ++ encodeUnique i)
 
 freshUnique :: G Int
 freshUnique = gsId += 1 >> use gsId

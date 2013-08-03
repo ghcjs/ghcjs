@@ -1,23 +1,24 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE QuasiQuotes                #-}
-{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving,
+             TemplateHaskell,
+             QuasiQuotes,
+             OverloadedStrings #-}
 
 module Gen2.Utils where
 
-import Language.Haskell.TH.Quote
-import Language.Javascript.JMacro
+import           Control.Applicative
+import           Control.Lens
+import           Control.Monad.State.Strict
 
-import Control.Applicative
-import Control.Lens
-import Control.Monad.State.Strict
-import Data.Monoid
-
-import Data.Char                  (isSpace)
-import Data.List                  (isPrefixOf)
-import Data.Map                   (Map, singleton)
-
+import           Data.Char        (isSpace)
+import           Data.List        (isPrefixOf)
+import           Data.Map         (Map, singleton)
+import           Data.Monoid
+import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
+
+import           Language.Haskell.TH.Quote
+import           Language.Javascript.JMacro
 
 makeLenses ''JStat
 makePrisms ''JStat
@@ -27,31 +28,6 @@ makeLenses ''JVal
 makePrisms ''JVal
 makeLenses ''Ident
 makePrisms ''Ident
-
--- missing instances, todo: add to jmacro
-instance ToJExpr Ident where
-  toJExpr i = ValExpr (JVar i)
-
-instance ToJExpr T.Text where
-  toJExpr = toJExpr . T.unpack
-
-instance ToJExpr TL.Text where
-  toJExpr = toJExpr . TL.unpack
-
--- instance ToJExpr JVal where
---   toJExpr v = ValExpr v
-
--- easier building of javascript object literals
-newtype JObj = JObj (Map String JExpr) deriving (Monoid, Show, Eq)
-
-{-
-infix 7 .=
-(.=) :: (ToJExpr a) => String -> a -> JObj
-(.=) key val = JObj $ singleton key (toJExpr val)
--}
-
-instance ToJExpr JObj where
-  toJExpr (JObj m) = ValExpr (JHash m)
 
 -- shorter names for jmacro
 j  = jmacro
@@ -67,12 +43,12 @@ jneg :: JExpr -> JExpr
 jneg e = PPostExpr True "-" e
 
 jnull :: JExpr
-jnull = ValExpr (JVar $ StrI "null")
+jnull = ValExpr (JVar $ TxtI "null")
 
-jvar :: String -> JExpr
-jvar xs = ValExpr (JVar $ StrI xs)
+jvar :: Text -> JExpr
+jvar xs = ValExpr (JVar $ TxtI xs)
 
-jstr :: String -> JExpr
+jstr :: Text -> JExpr
 jstr xs = toJExpr xs
 
 jint :: Integer -> JExpr
@@ -87,8 +63,8 @@ decl i = DeclStat i Nothing
 decl' :: Ident -> JExpr -> JStat
 decl' i e = decl i `mappend` AssignStat (ValExpr (JVar i)) e
 
-decls :: String -> JStat
-decls s = DeclStat (StrI s) Nothing
+decls :: Text -> JStat
+decls s = DeclStat (TxtI s) Nothing
 
 -- generate an identifier, use it in both statements
 identBoth :: (Ident -> JStat) -> (Ident -> JStat) -> JStat
@@ -98,14 +74,6 @@ identBoth s1 s2 = UnsatBlock . IS $ do
 
 withIdent :: (Ident -> JStat) -> JStat
 withIdent s = UnsatBlock . IS $ newIdent >>= return . s
-
-{-
-withIdentM :: Monad m => (Ident -> m JStat) -> m JStat
-withIdentM s = do
-  x <- newIdent
---   mr <- s x
-  (s x >>= return . UnsatBlock . IS)
--}
 
 -- declare a new var and use it in statement
 withVar :: (JExpr -> JStat) -> JStat
@@ -120,11 +88,8 @@ newIdent = do
 iex :: Ident -> JExpr
 iex i = (ValExpr . JVar) i
 
-istr :: Ident -> String
-istr (StrI s) = s
-
 itxt :: Ident -> T.Text
-itxt (StrI s) = T.pack s
+itxt (TxtI s) = s
 
 ji :: Int -> JExpr
 ji = toJExpr
@@ -145,8 +110,8 @@ showIndent x = unlines . runIndent 0 . map trim . lines . replaceParens . show $
 trim :: String -> String
 trim = let f = dropWhile isSpace . reverse in f . f
 
-ve :: String -> JExpr
-ve = ValExpr . JVar . StrI
+ve :: Text -> JExpr
+ve = ValExpr . JVar . TxtI
 
 concatMapM :: (Monad m, Monoid b) => (a -> m b) -> [a] -> m b
 concatMapM f xs = mapM f xs >>= return . mconcat
@@ -161,3 +126,4 @@ jFalse = ve "false"
 jBool :: Bool -> JExpr
 jBool True = jTrue
 jBool False = jFalse
+

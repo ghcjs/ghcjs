@@ -1,4 +1,6 @@
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes, 
+             OverloadedStrings #-}
+
 {-
   Add debugging traces to the generated code
 -}
@@ -9,6 +11,7 @@ import Language.Javascript.JMacro
 import Data.Generics.Aliases
 import Data.Generics.Schemes
 import Data.Monoid
+import Data.Text (Text)
 
 import Gen2.Utils
 import Gen2.RtsTypes
@@ -22,11 +25,11 @@ addDebugTrace (AssignStat vi@(ValExpr (JVar i)) (ValExpr (JFunc as body))) =
 addDebugTrace s = s
 
 -- don't trace while you trace
-noTrace :: [String]
+noTrace :: [Text]
 noTrace = ["log", "getGlbl", "dumpHeap", "dumpHeapFromTo", "dumpStack", "dumpStackTop", "closureTypeName"]
 
 mkTrace :: Ident -> JStat
-mkTrace (StrI s) | s `elem` noTrace = mempty
+mkTrace (TxtI s) | s `elem` noTrace = mempty
                  | otherwise  = [j| log(`s <> ": ["` + r1 + ", " + r2 + ", " + r3 + "] hp: " + hp);
                                     dumpStackTop stack Math.max(0,sp - 4) sp;
 //                                    dumpHeapFromTo heap 0 40;

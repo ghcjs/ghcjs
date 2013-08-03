@@ -12,6 +12,7 @@ import           Language.Javascript.JMacro.Types
 
 import           Gen2.Utils
 
+{-
 rtsPrim :: JStat
 rtsPrim = [j|
 
@@ -26,3 +27,4 @@ var !popCntTable =
     3,4,4,5,4,5,5,6,4,5,5,6,5,6,6,7,4,5,5,6,5,6,6,7,5,6,6,7,6,7,7,8];
 
 |]
+-}

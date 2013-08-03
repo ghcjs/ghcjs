@@ -1,4 +1,5 @@
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes,
+             OverloadedStrings #-}
 
 {-
   generate various apply functions for the rts
@@ -22,6 +23,9 @@ import           Data.Maybe
 import           Data.Monoid
 import qualified Data.Text as T
 
+t :: T.Text -> T.Text
+t = id
+
 rtsApply :: JStat
 rtsApply = mconcat $  map (uncurry stackApply) applySpec
                    ++ map (uncurry fastApply) applySpec
@@ -41,10 +45,10 @@ applySpec = [ (regs,arity)  | arity <- [1..6], regs <- [max 0 (arity-1)..(arity*
 
 specApply :: Bool -> Int -> Int -> Maybe JExpr
 specApply fast n r
-  | (r,n) == (0,0)         = Just (toJExpr $ StrI ("h$ap_0_0" ++ fastSuff))
-  | (r,n) == (0,1)         = Just (toJExpr $ StrI ("h$ap_1_0" ++ fastSuff))
+  | (r,n) == (0,0)         = Just (toJExpr . TxtI . T.pack $ ("h$ap_0_0" ++ fastSuff))
+  | (r,n) == (0,1)         = Just (toJExpr . TxtI . T.pack $ ("h$ap_1_0" ++ fastSuff))
   | (r,n) `elem` applySpec =
-        Just (toJExpr $ StrI ("h$ap_" ++ show n ++ "_" ++ show r ++ fastSuff))
+        Just (toJExpr . TxtI . T.pack $ ("h$ap_" ++ show n ++ "_" ++ show r ++ fastSuff))
   | otherwise = Nothing
    where
       fastSuff | fast      = "_fast"
@@ -68,9 +72,9 @@ mkApplyArr =
     |]
   where
     assignSpec (r,n) =
-      [j| h$apply[`shiftL r 8 .|. n`] = `StrI ("h$ap_" ++ show n ++ "_" ++ show r)`; |]
+      [j| h$apply[`shiftL r 8 .|. n`] = `TxtI . T.pack $ ("h$ap_" ++ show n ++ "_" ++ show r)`; |]
     assignPap p =
-      [j| h$paps[`p`] = `StrI ("h$pap_" ++ show p)`; |]
+      [j| h$paps[`p`] = `TxtI . T.pack $ ("h$pap_" ++ show p)`; |]
 
 -- generic stack apply that can do everything, but less efficiently
 -- on stack: tag: (regs << 8 | arity)
@@ -78,7 +82,7 @@ mkApplyArr =
 genericStackApply :: JStat
 genericStackApply =
   [j| fun h$ap_gen {
-        `traceRts "h$ap_gen"`;
+        `traceRts $ t"h$ap_gen"`;
         var c = `R1`.f;
         switch(c.t) {
           case `Thunk`:
@@ -97,7 +101,7 @@ genericStackApply =
             throw "h$ap_gen: unexpected closure type";
         }
       }
-      `ClosureInfo (T.pack "h$ap_gen") [PtrV] (T.pack "h$ap_gen") CILayoutVariable (CIFun 1 1) CINoStatic`;
+      `ClosureInfo "h$ap_gen" [PtrV] "h$ap_gen" CILayoutVariable (CIFun 1 1) CINoStatic`;
     |]
   where
     funCase c arity = withIdent $ \pap ->
@@ -106,14 +110,14 @@ genericStackApply =
           var myAr = myArity & 0xFF;
           var myRegs = myArity >> 8;
           if(myAr == ar) {
-            `traceRts "h$ap_gen: exact"`;
+            `traceRts $ t"h$ap_gen: exact"`;
             for(var i=0;i<myRegs;i++) {
               h$setReg(i+2,`Stack`[`Sp`-2-i]);
             }
             `Sp` = `Sp` - myRegs - 2;
             return `c`;
           } else if(myAr > ar) {
-            `traceRts "h$ap_gen: oversat"`;
+            `traceRts $ t"h$ap_gen: oversat"`;
             var regs = arity >> 8;
             for(var i=0;i<regs;i++) {
               h$setReg(i+2,`Stack`[`Sp`-2-i]);
@@ -129,7 +133,7 @@ genericStackApply =
             `Stack`[`Sp`] = newAp;
             return `c`;
           } else {
-            `traceRts "h$ap_gen: undersat"`;
+            `traceRts $ t"h$ap_gen: undersat"`;
             var p = h$paps[myRegs];
             var dat = [`R1`,myAr];
             for(var i=0;i<myRegs;i++) {
@@ -147,28 +151,28 @@ genericStackApply =
 genericFastApply :: JStat
 genericFastApply =
   [j| fun h$ap_gen_fast tag {
-        `traceRts $ "h$ap_gen_fast: " |+ tag`;
+        `traceRts $ t"h$ap_gen_fast: " |+ tag`;
         var c = `R1`.f;
         switch(c.t) {
           case `Thunk`:
-            `traceRts "h$ap_gen_fast: thunk"`;
+            `traceRts $ t"h$ap_gen_fast: thunk"`;
             `pushStackApply c tag`;
             return c;
           case `Fun`:
             var farity = `funArity' c`;
-            `traceRts $ "h$ap_gen_fast: fun " |+ farity`;
+            `traceRts $ t"h$ap_gen_fast: fun " |+ farity`;
             `funCase c tag farity`;
           case `Pap`:
             var parity;
             `papArity parity (toJExpr R1)`;
-            `traceRts $ "h$ap_gen_fast: pap " |+ parity`;
+            `traceRts $ t"h$ap_gen_fast: pap " |+ parity`;
             `funCase c tag parity`;
           case `Con`:
-            `traceRts $ "h$ap_gen_fast: con"`;
+            `traceRts $ t"h$ap_gen_fast: con"`;
             if(tag != 0) { throw "h$ap_gen_fast: invalid apply"; }
             return c;
           case `Blackhole`:
-            `traceRts $ "h$ap_gen_fast: blackhole"`;
+            `traceRts $ t"h$ap_gen_fast: blackhole"`;
             `pushStackApply c tag`;
             `push' [toJExpr R1, jsv "h$return"]`;
             return h$blockOnBlackhole(`R1`);
@@ -199,11 +203,11 @@ genericFastApply =
           var myRegs = `tag` >> 8;
           if(myAr === ar) {
             // call the function directly
-            `traceRts "h$ap_gen_fast: exact"`;
+            `traceRts $ t"h$ap_gen_fast: exact"`;
             return `c`;
           } else if(myAr > ar) {
             // push stack frame with remaining args, then call fun
-            `traceRts "h$ap_gen_fast: oversat"`;
+            `traceRts $ t"h$ap_gen_fast: oversat"`;
             var regsStart = (`arity` >> 8)+1;
             `Sp` = `Sp` + myRegs - regsStart;
             `pushArgs regsStart myRegs`;
@@ -217,10 +221,10 @@ genericFastApply =
             }
             `Stack`[`Sp`] = newAp;
           } else {
-            `traceRts $ "h$ap_gen_fast: undersat: " |+ myRegs |+ " " |+ tag`; // build PAP and return stack top
+            `traceRts $ t"h$ap_gen_fast: undersat: " |+ myRegs |+ t" " |+ tag`; // build PAP and return stack top
             if(`tag` != 0) {
               var p = h$paps[myRegs];
-              `traceRts $ "h$ap_gen_fast: got pap: " |+ (p|."n")`;
+              `traceRts $ t"h$ap_gen_fast: got pap: " |+ (p|."n")`;
               var dat = [`R1`,myAr];
               for(var i=0;i<myRegs;i++) {
                 dat.push(h$getReg(i+2));
@@ -252,36 +256,36 @@ stackApply :: Int -> -- ^ number of registers in stack frame
               JStat
 stackApply r n = [j| `decl func`;
                      `JVar func` = `JFunc funArgs (preamble <> body)`;
-                     `ClosureInfo funcNameT [PtrV] funcNameT layout (CIFun 0 0) CINoStatic`;
+                     `ClosureInfo funcName [PtrV] funcName layout (CIFun 0 0) CINoStatic`;
                    |]
   where
     layout    = CILayoutPtrs r []
 
     frameSize = r+1
 
-    funcName = "h$ap_" ++ show n ++ "_" ++ show r
-    funcNameT = T.pack funcName
+    funcName = T.pack ("h$ap_" ++ show n ++ "_" ++ show r)
+--    funcNameT = T.pack funcName
 
     popFrame = adjSpN frameSize
 
-    func = StrI funcName
+    func = TxtI funcName
     body = [j| var c = `R1`.f;
-               `traceRts $ funcName |+ " " |+ (c|."n") |+ " sp: " |+ Sp |+ " a: " |+ (c|."a")`;
+               `traceRts $ funcName |+ t" " |+ (c|."n") |+ t" sp: " |+ Sp |+ t" a: " |+ (c|."a")`;
                switch(c.t) {
                  case `Thunk`:
-                   `traceRts $ funcName |+ ": thunk"`;
+                   `traceRts $ funcName <> ": thunk"`;
                    return c;
                  case `Fun`:
-                   `traceRts $ funcName |+ ": fun"`;
+                   `traceRts $ funcName <> ": fun"`;
                    `funCase c`;
                  case `Pap`:
-                   `traceRts $ funcName |+ ": pap"`;
+                   `traceRts $ funcName <> ": pap"`;
                    `papCase c`;
                  case `Blackhole`:
                    `push' [toJExpr R1, jsv "h$return"]`;
                    return h$blockOnBlackhole(`R1`);
                  default:
-                   throw (`"panic: " ++ funcName ++ ", unexpected closure type: "` + c.t);
+                   throw (`"panic: " <> funcName <> ", unexpected closure type: "` + c.t);
                }
            |]
 
@@ -294,15 +298,15 @@ stackApply r n = [j| `decl func`;
                 [j| var arity0;
                     `papArity arity0 (toJExpr R1)`;
                     var arity = arity0 & 0xFF;
-                    `traceRts $ (funcName ++ ": found pap, arity: ") |+ arity0`;
+                    `traceRts $ (funcName <> ": found pap, arity: ") |+ arity0`;
                     if(`n` === arity) {
-                      `traceRts $ funcName ++ ": exact"`;
+                      `traceRts $ funcName <> ": exact"`;
                       `funExact c`;
                     } else if(`n` > arity) {
-                      `traceRts $ funcName ++ ": oversat"`;
+                      `traceRts $ funcName <> ": oversat"`;
                       `oversatCase c arity0 arity`;
                     } else {
-                      `traceRts $ funcName ++ ": undersat"`;
+                      `traceRts $ funcName <> ": undersat"`;
                       // fixme do we want double pap?
                       `mkPap pap (toJExpr R1) (toJExpr n) stackArgs`;
                       `Sp` = `Sp` - `r+1`;
@@ -315,13 +319,13 @@ stackApply r n = [j| `decl func`;
                 [j| var ar0 = `funArity' c`;
                     var ar  = ar0 & 0xFF;
                     if(`n` === ar) {
-                      `traceRts $ funcName ++ ": exact"`;
+                      `traceRts $ funcName <> ": exact"`;
                       `funExact c`;
                     } else if(`n` > ar) {
-                      `traceRts $ funcName ++ ": oversat"`;
+                      `traceRts $ funcName <> ": oversat"`;
                       `oversatCase c ar0 ar`;
                     } else {
-                      `traceRts $ funcName ++ ": undersat"`;
+                      `traceRts $ funcName <> ": undersat"`;
                       `mkPap pap (toJExpr R1) (toJExpr n) stackArgs`;
                       `Sp` = `Sp` - `r+1`;
                       `R1` = `pap`;
@@ -340,7 +344,7 @@ stackApply r n = [j| `decl func`;
           `Sp` = `Sp` - rs;
           var newAp = h$apply[(`n`-`arity0`)|((`r`-rs)<<8)];
           `Stack`[`Sp`] = newAp;
-          `traceRts $ (funcName ++ ": new stack frame: ") |+ (newAp |. "n")`;
+          `traceRts $ (funcName <> ": new stack frame: ") |+ (newAp |. "n")`;
           return `c`;
         |]
       where
@@ -382,8 +386,8 @@ fastApply r n =
       `JVar func` = `JFunc myFunArgs (preamble <> body)`;
     |]
     where
-      funName = "h$ap_" ++ show n ++ "_" ++ show r ++ "_fast"
-      func    = StrI funName
+      funName = T.pack ("h$ap_" ++ show n ++ "_" ++ show r ++ "_fast")
+      func    = TxtI funName
 
       myFunArgs = []
 
@@ -392,7 +396,7 @@ fastApply r n =
       regArgs = take r (enumFrom R2)
 
       mkAp :: Int -> Int -> [JExpr]
-      mkAp n' r' = [ jsv $ "h$ap_" ++ show n' ++ "_" ++ show r' ]
+      mkAp n' r' = [ jsv . T.pack $ "h$ap_" ++ show n' ++ "_" ++ show r' ]
 {-
       makePap :: Ident -> JStat
       makePap pap = mkPap pap (toJExpr R1) (map toJExpr $ take n $ enumFrom R2)
@@ -407,41 +411,41 @@ fastApply r n =
                         |])
 -}
       body = [j| var c = `R1`.f;
-                 `traceRts $ (funName ++ ": sp ") |+ Sp`;
+                 `traceRts $ (funName <> ": sp ") |+ Sp`;
                  switch(c.t) {
                    case `Fun`:
-                     `traceRts $ (funName ++ ": ") |+ clName c |+ " (arity: " |+ (c |. "a") |+ ")"`;
+                     `traceRts $ (funName <> ": ") |+ clName c |+ t" (arity: " |+ (c |. "a") |+ t")"`;
                      var farity = `funArity' c`;
                      `funCase c farity`;
                    case `Pap`:
-                     `traceRts $ (funName ++ ": pap")`;
+                     `traceRts $ (funName <> ": pap")`;
                      var arity;
                      `papArity arity (toJExpr R1)`;
                      `funCase c arity`;
                    case `Thunk`:
-                     `traceRts $ (funName ++ ": thunk")`;
+                     `traceRts $ (funName <> ": thunk")`;
                      `push' $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
                      return c;
                    case `Blackhole`:
-                     `traceRts $ (funName ++ ": blackhole")`;
+                     `traceRts $ (funName <> ": blackhole")`;
                      `push' $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
                      `push' [toJExpr R1, jsv "h$return"]`;
                      return h$blockOnBlackhole(`R1`);
                    default:
-                     throw (`funName ++ ": unexpected closure type: "` + c.t);
+                     throw (`funName <> ": unexpected closure type: "` + c.t);
                  }
                |]
       funCase :: JExpr -> JExpr -> JStat
       funCase c arity = withIdent $ \pap ->
         [j| var ar = `arity` & 0xFF;
             if(`n` === ar) {
-              `traceRts (funName ++ ": exact")`;
+              `traceRts (funName <> ": exact")`;
               return `c`;
             } else if (`n` > ar) {
-              `traceRts (funName ++ ": oversat")`;
+              `traceRts (funName <> ": oversat")`;
               `oversatCase c arity`;
             } else {
-              `traceRts (funName ++ ": undersat")`;
+              `traceRts (funName <> ": undersat")`;
               `mkPap pap (toJExpr R1) (toJExpr n) (map toJExpr regArgs)`;
               `R1` = `pap`;
               return `Stack`[`Sp`];
@@ -451,7 +455,7 @@ fastApply r n =
       oversatCase c arity =
         [j| var rs = `arity` >> 8;
             var rsRemain = `r` - rs;
-            `traceRts (funName |+ " regs oversat " |+ rs |+ " remain: " |+ rsRemain)`;
+            `traceRts (funName |+ t" regs oversat " |+ rs |+ t" remain: " |+ rsRemain)`;
             `saveRegs rs`;
             `Sp` = `Sp` + rsRemain  + 1;
             `Stack`[`Sp`] = h$apply[(rsRemain<<8)|(`n`-(`arity`&0xFF))];
@@ -466,12 +470,12 @@ zeroApply :: JStat
 zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
 
                 fun h$ap_0_0 { `preamble`; `adjSpN 1`; `enter (toJExpr R1)`; }
-                `ClosureInfo (T.pack "h$ap_0_0") [PtrV] (T.pack "h$ap_0_0") (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo "h$ap_0_0" [PtrV] "h$ap_0_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
                 fun h$ap_1_0 x {
                   `preamble`;
                   var c = `R1`.f;
-                  `traceRts $ "h$ap_1_0: " |+ (c|."n") |+ " :a " |+ (c|."a") |+ " (" |+ (clTypeName c) |+ ")"`;
+                  `traceRts $ t"h$ap_1_0: " |+ (c|."n") |+ t" :a " |+ (c|."a") |+ t" (" |+ (clTypeName c) |+ t")"`;
                   if(c.t === `Thunk`) {
                     return c;
                   } else if(c.t === `Blackhole`) {
@@ -482,7 +486,7 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
                     return c;
                   }
                 }
-                `ClosureInfo (T.pack "h$ap_1_0") [PtrV] (T.pack "h$ap_1_0") (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo "h$ap_1_0" [PtrV] "h$ap_1_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
                 fun h$e c { `preamble`; `R1` = c; `enter c`; }
 
@@ -532,7 +536,7 @@ updates =
         }
         // overwrite the object
         if(typeof `R1` === 'object') {
-          `traceRts $ "$upd_frame: boxed: " |+ ((R1|."f")|."n")`;
+          `traceRts $ t"$upd_frame: boxed: " |+ ((R1|."f")|."n")`;
           updatee.f = `R1`.f;
           updatee.d1 = `R1`.d1;
           updatee.d2 = `R1`.d2;
@@ -542,10 +546,10 @@ updates =
           updatee.d2 = null;
         }
         `adjSpN 2`;
-        `traceRts $ "h$upd_frame: updating: " |+ updatee |+ " -> " |+ R1`;
+        `traceRts $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
         return `Stack`[`Sp`];
       };
-      `ClosureInfo (T.pack "h$upd_frame") [PtrV] (T.pack "h$upd_frame") (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+      `ClosureInfo "h$upd_frame" [PtrV] "h$upd_frame" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
   |]
 
 mkFunc :: Ident -> JStat -> JStat
@@ -563,24 +567,23 @@ mkPap tgt fun n values =
         where
           values' | null values = [jnull]
                   | otherwise   = values
-          entry = StrI $ "h$pap_" ++ show (length values)
+          entry = TxtI . T.pack $ "h$pap_" ++ show (length values)
 
 -- entry function for a pap with n stored registers
 pap :: Int -> JStat
 pap r = [j| `decl func`;
             `iex func` = `JFunc [] (preamble <> body)`;
-            `ClosureInfo funcNameT [] funcNameT CILayoutVariable (CIPap r) CINoStatic`;
+            `ClosureInfo funcName [] funcName CILayoutVariable (CIPap r) CINoStatic`;
           |]
   where
-    funcName = "h$pap_" ++ show r
-    funcNameT = T.pack funcName
+    funcName = T.pack ("h$pap_" ++ show r)
 
-    func     = StrI funcName
+    func     = TxtI funcName
 
     body = [j| var c = `R1`.d1;
                var d = `R1`.d2;
                var f = c.f;
-               `assertRts (isFun' f ||| isPap' f) (funcName ++ ": expected function or pap")`;
+               `assertRts (isFun' f ||| isPap' f) (funcName <> ": expected function or pap")`;
                var extra;
                if(`isFun' f`) {
                  extra = (f.a>>8) - `r`;
@@ -588,7 +591,7 @@ pap r = [j| `decl func`;
                  `papArity extra c`;
                  extra = (extra>>8) - `r`;
                }
-               `traceRts $ (funcName ++ ": pap extra args moving: ") |+ extra`;
+               `traceRts $ (funcName <> ": pap extra args moving: ") |+ extra`;
                `moveBy extra`;
                `loadOwnArgs d`;
                `R1` = c;
@@ -598,4 +601,4 @@ pap r = [j| `decl func`;
                    (reverse $ map moveCase [1..maxReg-r-1]) mempty
     moveCase m = (toJExpr m, [j| `numReg (m+r+1)` = `numReg (m+1)`; |])
     loadOwnArgs d = mconcat $ map (\r -> [j| `numReg (r+1)` = `dField d (r+2)`; |]) [1..r]
-    dField d n = SelExpr d (StrI ('d':show (n-1)))
+    dField d n = SelExpr d (TxtI . T.pack $ ('d':show (n-1)))

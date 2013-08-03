@@ -27,18 +27,7 @@ import Data.Maybe (catMaybes)
 import Compiler.Variants
        (variants, Variant(..))
 import Control.Monad (forM_)
--- #endif
 
-{-
-  #ifndef GHCJS_ENABLED
-writeJavaScriptModule :: DynFlags -> ModSummary -> CgGuts
-        -> ([StgBinding], CollectedCCs) -> IO ()
-writeJavaScriptModule _ _ _ = return ()
-
-linkJavaScript :: DynFlags -> [FilePath] -> [PackageId] -> [ModuleName] -> IO ()
-linkJavaScript dyflags o_files dep_packages pagesMods = return ()
-  #else
--}
 writeJavaScriptModule :: Bool -> DynFlags -> ModSummary -> CgGuts
         -> ([StgBinding], CollectedCCs) -> IO ()
 writeJavaScriptModule debug dyflags summary tidyCore (stg', _ccs) = do
@@ -48,12 +37,9 @@ writeJavaScriptModule debug dyflags summary tidyCore (stg', _ccs) = do
 writeJavaScriptModule' :: Bool -> DynFlags -> Variant -> ModSummary -> CgGuts
         -> ([StgBinding], CollectedCCs) -> IO ()
 writeJavaScriptModule' debug dyflags var summary _tidyCore (stg', _ccs) =
-  do let (program, meta) = variantRender var debug dyflags stg' (ms_mod summary)
+  do let program = variantRender var debug dyflags stg' (ms_mod summary)
      putStrLn $ concat ["Writing module ", name, " (to ", outputFile vext, ")"]
      B.writeFile (outputFile vext) program
-     case variantMetaExtension var of
-       Nothing   -> return ()
-       Just mext -> B.writeFile (outputFile mext) meta
    where
       vext = variantExtension var
       outputFile ext = replaceExtension (ml_hi_file . ms_location $ summary) ext
