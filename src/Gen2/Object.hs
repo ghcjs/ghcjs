@@ -201,7 +201,7 @@ readDeps name bs = case getHeader bs of
                        let bsymbs = B.drop (fromIntegral headerLength) bs
                            bdeps  = B.drop (fromIntegral (symbsLen hdr)) bsymbs
                            symbs  = getSymbolTable bsymbs
-                       in getDeps symbs bdeps  
+                       in getDeps symbs bdeps
 
 -- | extract the linkable units from an object file
 readObjectFile :: FilePath -> IO [ObjUnit]
@@ -323,8 +323,8 @@ instance Objectable Char where
   putListOf = put . T.pack
   getListOf = do
     st <- ask
-    n <- lift DB.get
-    return (strString st ! n)
+    n <- lift DB.getWord32le
+    return (strString st ! fromIntegral n)
 
 putList :: (a -> PutS) -> [a] -> PutS
 putList p xs = do
@@ -372,22 +372,22 @@ instance Objectable Text where
   put t = do
     symbols <- SS.get
     case HM.lookup t symbols of
-      Just i  -> lift (DB.put i)
+      Just i  -> lift (DB.putWord32le $ fromIntegral i)
       Nothing -> do
         let n = HM.size symbols
         SS.put (HM.insert t n symbols)
-        lift (DB.put n)
+        lift (DB.putWord32le $ fromIntegral n)
   get = do
     st <- ask
-    n <- lift DB.get
-    return (strText st ! n)
+    n <- lift DB.getWord32le
+    return (strText st ! fromIntegral n)
 
 instance Objectable JStat where
   put (DeclStat i _)       = tag 1  >> put i
   put (ReturnStat e)       = tag 2  >> put e
   put (IfStat e s1 s2)     = tag 3  >> put e  >> put s1 >> put s2
   put (WhileStat b e s)    = tag 4  >> put b  >> put e  >> put s
-  put (ForInStat b i e s)  = tag 5  >> put b  >> put i  >> put e >> put s
+  put (ForInStat b i e s)  = tag 5  >> put b  >> put i  >> put e  >> put s
   put (SwitchStat e ss s)  = tag 6  >> put e  >> put ss >> put s
   put (TryStat s1 i s2 s3) = tag 7  >> put s1 >> put i  >> put s2 >> put s3
   put (BlockStat xs)       = tag 8  >> put xs

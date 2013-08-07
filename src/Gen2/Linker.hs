@@ -2,10 +2,9 @@
              OverloadedStrings,
              TupleSections #-}
 {-
-  GHCJS linker, manages dependencies with
-    modulename.ji files, which contain function-level dependencies
-    the source files (.js) contain function groups delimited by
-    special markers
+  GHCJS linker, collects dependencies from
+    the object files (.js_o), which contain linkable 
+    units with dependency information
 -}
 module Gen2.Linker where
 
@@ -58,8 +57,8 @@ link :: Bool
      -> [ModuleName] -- ^ modules to use as roots (include all their functions and deps)
      -> IO [String]  -- ^ arguments for the closure compiler to minify our result
 link debug out searchPath objFiles pageModules = do
-  let (objFiles', extraFiles) = partition (".js" `isSuffixOf`) objFiles
-  metas <- mapM (readDepsFile . metaFile) objFiles'
+  let (objFiles', extraFiles) = partition (".js_o" `isSuffixOf`) objFiles
+  metas <- mapM readDepsFile objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
   T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
   print searchPath
@@ -149,10 +148,6 @@ writeHtml out = do
   where
     htmlFile = out </> "index" <.> "html"
 
--- get the js file for a js file -- fixme
-metaFile :: FilePath -> FilePath
-metaFile = (<.> "js") . dropExtension
-
 -- drop the version from a package name
 -- fixme this is probably a bit wrong but should only be necessary
 -- for wired-in packages base, ghc-prim, integer-gmp, main, rts
@@ -181,7 +176,7 @@ getDeps lookup fun = go S.empty M.empty (S.toList fun)
     go result deps ffs@(f:fs) =
       let key = (funPackage f, funModule f)
       in  case M.lookup key deps of
-            Nothing -> lookup "js" f >>= readDepsFile >>=
+            Nothing -> lookup "js_o" f >>= readDepsFile >>=
                            \d -> go result (M.insert key d deps) ffs
             Just (Deps _ _ d)  -> let ds = filter (`S.notMember` result)
                                            (maybe [] S.toList $ M.lookup f d)
@@ -191,7 +186,7 @@ getDeps lookup fun = go S.empty M.empty (S.toList fun)
 getDepsSources :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun, [(FilePath, Set Fun)])
 getDepsSources lookup funs = do
   allDeps <- getDeps lookup funs
-  allPaths <- mapM (\x -> (,S.singleton x) <$> lookup "js" x) (S.toList allDeps)
+  allPaths <- mapM (\x -> (,S.singleton x) <$> lookup "js_o" x) (S.toList allDeps)
   return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
 
 -- | collect source snippets

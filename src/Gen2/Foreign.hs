@@ -7,7 +7,7 @@
 
 module Gen2.Foreign where
 
-import ApiHooks
+import Hooks
 import DynFlags
 
 import Id
@@ -26,7 +26,7 @@ import MonadUtils
 import RdrName
 
 installForeignHooks :: Bool -> DynFlags -> DynFlags
-installForeignHooks generatingJs df = df { apiHooks = f generatingJs (apiHooks df) }
+installForeignHooks generatingJs df = df { hooks = f generatingJs (hooks df) }
   where
     f True  = insertHook DsForeignsHook       ghcjsDsForeigns
             . insertHook TcForeignImportsHook ghcjsTcForeignImports

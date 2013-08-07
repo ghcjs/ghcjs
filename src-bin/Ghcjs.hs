@@ -10,7 +10,7 @@ import           Paths_ghcjs
 import           Data.Typeable
 import qualified GHC.Paths
 import           GHC
-import           ApiHooks
+import           Hooks
 import           HscMain (hscSimplify)
 import           TidyPgm (tidyProgram)
 import           CoreToStg (coreToStg)
@@ -441,7 +441,6 @@ writeDesugaredModule settings mod =
           let outputFile = addExtension outputBase (variantExtension variant)
           putStrLn $ concat ["Writing module ", name, " (", outputFile, ")"]
           B.writeFile outputFile program
-          B.writeFile (addExtension outputBase ".ji") "dummy" -- fixme remove after cabal patch is updated
           return (variant, program)
      df <- getSessionDynFlags
      liftIO $ doFakeNative df outputBase
@@ -533,7 +532,7 @@ setGhcjsPlatform basePath df = addPlatformDefines basePath $ addPrimIface $ df {
        }
 
 addPrimIface :: DynFlags -> DynFlags
-addPrimIface df = df { apiHooks = insertHook GhcPrimIfaceHook Gen2.ghcjsPrimIface (apiHooks df) }
+addPrimIface df = df { hooks = insertHook GhcPrimIfaceHook Gen2.ghcjsPrimIface (hooks df) }
 
 -- ghcjs builds for a strange platform: like 32 bit
 -- instead of letting autoconf doing the defines, we override them here
