@@ -442,7 +442,7 @@ constantsFacts lfs c g = foldForward combineConstants f0 (CReached IM.empty) CUn
              , fSwitch  = switched
              , fReturn  = removeMutated1
              , fForIn   = \_ _ -> removeMutated1t
-             , fSimple  = \nid s m -> simple nid s m -- (removeMutated s m)
+             , fSimple  = \nid s m -> simple nid s m
              , fTry     = \_ x -> (x, CReached IM.empty, CReached IM.empty)
              }
     usedOnce :: NodeId -> Id -> Bool
@@ -483,10 +483,11 @@ constantsFacts lfs c g = foldForward combineConstants f0 (CReached IM.empty) CUn
 
     -- propagate constants if we have the same from both branches
     combineConstants :: CVals -> CVals -> CVals
-    combineConstants (CReached m1) (CReached m2) = CReached (IM.mergeWithKey f id id m1 m2)
-      where
-        f k x y | x == y    = Just x
-                | otherwise = Nothing
+    combineConstants (CReached m1) (CReached m2) =
+      CReached (IM.mergeWithKey f (const IM.empty) (const IM.empty) m1 m2)
+        where
+          f k x y | x == y    = Just x
+                  | otherwise = Nothing
     combineConstants CUnreached x = x
     combineConstants x          _ = x
 
@@ -718,15 +719,12 @@ intInfixOp NeqOp       i1 i2 = eBool (i1 /= i2)
 intInfixOp op          i1 i2 = BOpE op (ValE (IntV i1)) (ValE (IntV i2))
 
 doubleInfixOp :: BinOp -> SaneDouble -> SaneDouble -> Expr
--- doubleInfixOp op sd1@(SaneDouble d1) sd2@(SaneDouble d2)
---  | isInfinite d1 || isInfinite d2 || isNaN d1 || isNaN d2
---  = InfixExpr op (ValExpr (JDouble sd1)) (ValExpr (JDouble sd2))
-doubleInfixOp AddOp   (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1+d2))
-doubleInfixOp SubOp   (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1-d2))
-doubleInfixOp MulOp   (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1*d2))
-doubleInfixOp DivOp   (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1/d2))
-doubleInfixOp GtOp   (SaneDouble d1) (SaneDouble d2) = eBool (d1 > d2)
-doubleInfixOp LtOp   (SaneDouble d1) (SaneDouble d2) = eBool (d1 < d2)
+doubleInfixOp AddOp (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1+d2))
+doubleInfixOp SubOp (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1-d2))
+doubleInfixOp MulOp (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1*d2))
+doubleInfixOp DivOp (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1/d2))
+doubleInfixOp GtOp  (SaneDouble d1) (SaneDouble d2) = eBool (d1 > d2)
+doubleInfixOp LtOp  (SaneDouble d1) (SaneDouble d2) = eBool (d1 < d2)
 doubleInfixOp LeOp  (SaneDouble d1) (SaneDouble d2) = eBool (d1 <= d2)
 doubleInfixOp GeOp  (SaneDouble d1) (SaneDouble d2) = eBool (d1 >= d2)
 doubleInfixOp StrictEqOp (SaneDouble d1) (SaneDouble d2) = eBool (d1 == d2)

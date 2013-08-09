@@ -797,11 +797,10 @@ foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
       upd nid 0 x
       let (brks, conts) = getBreaksConts nid g
       x0 <- combineWith x conts
-      x1 <- (x0 `c`) <$> fact nid 3
-      upd nid 2 x1
-      let (xt,xf) = fWhile f nid e x1
+      x1 <- (x0 `c`) <$> fact nid 2
+      let (xt, xf) = fWhile f nid e x1
       s0 <- go' s xt
-      upd nid 3 s0
+      upd nid 2 (x1 `c` s0)
       x3 <- combineWith xf brks
       upd nid 1 x3
       return x3
