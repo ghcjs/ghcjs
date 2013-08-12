@@ -154,6 +154,7 @@ primTypeVt t = case repType t of
     | st == pr "MutVar#" = ArrV -- MutVarV
     | st == pr "BCO#" = ObjV -- fixme what do we need here?
     | st == pr "~#" = VoidV -- coercion token?
+    | st == pr "~R#" = VoidV -- role
     | st == pr "Any" = PtrV
     | st == "Data.Dynamic.Obj" = PtrV -- ?
     | otherwise = error ("primTypeVt: unrecognized primitive type: " ++ st)

@@ -35,7 +35,7 @@ variants :: [Variant]
 variants = [gen2Variant]
 
 gen2Variant :: Variant
-gen2Variant = Variant ".js" ".jsexe" Gen2 Gen2.generate
+gen2Variant = Variant ".js_o" ".jsexe" Gen2 Gen2.generate
     Gen2.link
 
 type StgPgm = [StgBinding]

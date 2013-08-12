@@ -39,26 +39,26 @@ installForeignHooks generatingJs df = df { hooks = f generatingJs (hooks df) }
 ghcjsDsForeigns :: [LForeignDecl Id]
                 -> DsM (ForeignStubs, OrdList (Id, CoreExpr))
 ghcjsDsForeigns fos = do
-  liftIO $ putStrLn "desugaring foreign decls for JavaScript"
+--  liftIO $ putStrLn "desugaring foreign decls for JavaScript"
   dsForeigns' fos
 
 -- desugar foreign declarations for native code
 ghcjsNativeDsForeigns :: [LForeignDecl Id]
                       -> DsM (ForeignStubs, OrdList (Id, CoreExpr))
 ghcjsNativeDsForeigns fos = do
-  liftIO $ putStrLn "desugaring foreign decls for Native"
+--  liftIO $ putStrLn "desugaring foreign decls for Native"
   dsForeigns' fos
 
 ghcjsTcForeignImports :: [LForeignDecl Name]
                       -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
 ghcjsTcForeignImports decls = do
-  liftIO $ putStrLn "typechecking foreign imports"
+--  liftIO $ putStrLn "typechecking foreign imports"
   tcForeignImports' decls
 
 ghcjsTcForeignExports :: [LForeignDecl Name]
                       -> TcM (LHsBinds TcId, [LForeignDecl TcId], Bag GlobalRdrElt)
 ghcjsTcForeignExports decls = do
-  liftIO $ putStrLn "typechecking foreign exports"
+--  liftIO $ putStrLn "typechecking foreign exports"
   tcForeignExports' decls
 
 

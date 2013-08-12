@@ -23,7 +23,7 @@ flag boot
   default:            False
 
 flag compiler-only
-  default:            True
+  default:            False
 
 flag disable-optimizer
   default:            False

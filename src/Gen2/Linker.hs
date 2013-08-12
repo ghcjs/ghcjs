@@ -61,8 +61,8 @@ link debug out searchPath objFiles pageModules = do
   metas <- mapM readDepsFile objFiles'
   let roots = filter ((`elem` mods) . depsModule) metas
   T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
-  print searchPath
-  print objFiles
+--  print searchPath
+--  print objFiles
 --  print pageModules
   (allDeps, src, infos) <- collectDeps (lookup metas) (S.union rtsDeps (S.fromList $ concatMap modFuns roots))
   createDirectoryIfMissing False out

@@ -1,8 +1,9 @@
-{-# LANGUAGE ExtendedDefaultRules      #-}
-{-# LANGUAGE NoImplicitPrelude         #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE OverloadedStrings         #-}
-{-# LANGUAGE CPP                       #-}
+{-# LANGUAGE ExtendedDefaultRules,
+             NoImplicitPrelude,
+             NoMonomorphismRestriction,
+             OverloadedStrings,
+             CPP,
+             ScopedTypeVariables #-}
 
 {-
    Boot program to build the GHCJS core libraries from a configured GHC source tree
@@ -27,8 +28,7 @@ import           Data.Maybe                (catMaybes)
 import           Data.Monoid
 import           Data.Text.Lazy            (Text)
 import qualified Data.Text.Lazy            as T
-import           Filesystem                (isFile)
-import           Filesystem.Path.CurrentOS (empty, stripPrefix, encodeString, decodeString, replaceExtension)
+import           Filesystem.Path.CurrentOS (empty, stripPrefix, encodeString, decodeString, replaceExtension, filename, hasExtension)
 import           Prelude                   hiding (FilePath)
 import           Shelly
 
@@ -41,6 +41,7 @@ import           System.Environment
 import qualified Codec.Archive.Tar         as Tar
 import qualified Codec.Archive.Tar.Check   as Tar
 
+import qualified Control.Exception         as Ex
 import           Control.Monad
 import           Data.Conduit              (unwrapResumable, ($$), ($=), (=$=))
 import           Data.Conduit.BZlib
@@ -125,7 +126,7 @@ doAutoBoot tmp = shelly $ do
 setupBuild :: ShIO ()
 setupBuild = do
   mk <- readfile "mk/build.mk.sample"
-  writefile "mk/build.mk" ("BuildFlavour = quick\n" <> mk)
+  writefile "mk/build.mk" $ T.unlines ["BuildFlavour = quick", mk] -- "DYNAMIC_GHC_PROGS = NO", mk]
   run_ "sh" ["configure","--enable-bootstrap-with-devel-snapshot"]
   ignoreExcep $ run_ "make" ["-j4"] -- for some reason this still fails after a succesful build
 
@@ -168,6 +169,7 @@ installBootPackages settings = do
           case lines of
             (wd:cmds) -> do
               cd (fromText wd)
+              setenv "GHCJS_BOOTING" "1"
               setenv "GHCJS_NO_NATIVE" "1"
               setenv "GHCJS_FALLBACK_PLAIN" "1"
               forM_ cmds $ \r ->
@@ -186,6 +188,7 @@ installBootPackages settings = do
                buildPkg pkg
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePkgs
+      renameLibraries
       installFakes
       installUnlit
       cd p
@@ -254,7 +257,7 @@ installRts = do
   dest <- liftIO getGlobalPackageDB
   base  <- liftIO getGlobalPackageBase
   let inc = base </> "include"
-      lib = base </> "lib"
+      lib = base </> "lib/rts-1.0"
   rtsConf <- readfile "rts/dist/package.conf.inplace"
   writefile (dest </> "builtin_rts.conf") $
                  fixRtsConf (toTextIgnore inc) (toTextIgnore lib) rtsConf
@@ -276,20 +279,6 @@ fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
           | "library-dirs:" `T.isPrefixOf` l = "library-dirs: " <> lib
           | "include-dirs:" `T.isPrefixOf` l = "include-dirs: " <> incl
           | otherwise                        = l
-
-rtsConf :: Text -> Text -> Text
-rtsConf incl lib = T.unlines
-            [ "name:           rts"
-            , "version:        1.0"
-            , "id:             builtin_rts"
-            , "license:        BSD3"
-            , "maintainer:     stegeman@gmail.com"
-            , "exposed:        True"
-            , "include-dirs:   " <> incl
-            , "includes:       Stg.h"
-            , "library-dirs:   " <> lib
-            , "hs-libraries:   HSrts"
-            ]
 
 -- | make fake, empty packages to keep the build system happy
 installFakes :: ShIO ()
@@ -313,7 +302,7 @@ installFakes = silently $ do
 checkShims :: ShIO ()
 checkShims = do
   base <- T.pack <$> liftIO getGlobalPackageBase
-  e <- liftIO $ isFile (base </> "shims" </> "base" <.> "yaml")
+  e <- test_f (base </> "shims" </> "base" <.> "yaml")
   when (not e) $ do
     echo "GHCJS has been booted, but the shims repository is still missing, to install:"
     echo ("cd " <> base)
@@ -380,7 +369,7 @@ installPkg ghcjs ghcjspkg pkg = verbosely $ do
                                , T.pack base <> "/doc" -- myDocDir
                                , "NO" -- relocatablebuild
                                ]
-  -- now install the javascript files
+  -- now install the JavaScript files
   dirs <- chdir (fromString dest) (ls "")
   case filter (\x -> (pkg <> "-") `T.isPrefixOf` toTextIgnore x) dirs of
     (d:_) -> do
@@ -390,15 +379,38 @@ installPkg ghcjs ghcjspkg pkg = verbosely $ do
         files <- findWhen (return . isGhcjsFile) "."
         forM_ files $ \file -> do
            echo $ "installing " <> toTextIgnore file
-           cp file (dest </> d </> file)
+           ignoreExcep $ cp file (dest </> d </> file)
     _ -> errorExit $ "could not find installed package " <> pkg
   echo "done"
+
+renameLibraries :: ShIO ()
+renameLibraries = do
+  echo $ "renaming shared libraries"
+  dest <- liftIO getGlobalPackageInst
+  libs <- findWhen (return . isHsDynLib) (fromString dest)
+  mapM_ replaceTag libs
+  where
+    replaceTag file = do
+      let file' = fromText (T.replace ghcTag ghcjsTag (toTextIgnore file))
+      echo $ "renaming shared lib:\n   " <> toTextIgnore file 
+           <> " ->\n   " <> toTextIgnore file'
+      mv file file'
+    isHsDynLib file = "libHS" `T.isPrefixOf` fileT &&
+                      ghcTag `T.isInfixOf` fileT &&
+                      (any (hasExtension file') ["so", "dll"])
+      where
+        file' = filename file
+        fileT = toTextIgnore file'
+    ghcTag   = T.pack ("-ghc" ++ cProjectVersion)
+    ghcjsTag = T.pack $
+      "-ghcjs" ++ getCompilerVersion ++ "_ghc" ++ cProjectVersion
+
 
 isPathPrefix :: Text -> FilePath -> Bool
 isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file
 
 isGhcjsFile :: FilePath -> Bool
-isGhcjsFile file = any (`T.isSuffixOf` toTextIgnore file) [".js", ".ji", ".native_hi", ".js_o", ".js_hi"]
+isGhcjsFile file = any (`T.isSuffixOf` toTextIgnore file) [".js_o", ".js_hi", ".js_dyn_o", ".js_dyn_hi"]
 
 -- | make sure primops.txt is the one from our data, configured for
 --   JavaScript building
@@ -444,19 +456,23 @@ findPatchFile pkg variants = liftIO $ do
 -- | remove files that we want to regenerate, backup .hi to make that things get rebuilt
 cleanPkg :: Text -> ShIO ()
 cleanPkg pkg = do
-  findWhen (return . hasExt "hi") pkgDir >>= mapM_
-    (\file -> mvNoOverwrite file $ replaceExtension file "backup_hi")
-  findWhen (return . hasExt "o") pkgDir >>= mapM_
-    (\file -> mvNoOverwrite file $ replaceExtension file "backup_o")
+  mapM_ backupExt ["hi", "o", "dyn_hi", "dyn_o"]
   findWhen isRemovedFile pkgDir >>= mapM_ rm
-  where
-    pkgDir = "libraries" </> pkg </> "dist-install" </> "build"
-    isRemovedFile file = return $ any (`hasExt` file) ["hs", "lhs", "p_hi", "dyn_hi"]
+    where
+      backupExt ext = findWhen (toBackup ext) pkgDir >>= mapM_
+         (\file -> mvNoOverwrite file $ replaceExtension file ("backup_" <> T.toStrict ext))
+      pkgDir = "libraries" </> pkg </> "dist-install" </> "build"
+      isRemovedFile file = return $ any (hasExtension file) ["hs", "lhs", "p_hi"]
+      toBackup ext file
+        | hasExt ext file =
+            (||) <$> test_f (replaceExtension file "hi")
+                 <*> test_f (replaceExtension file "backup_hi")
+        | otherwise = return False
 
 mvNoOverwrite :: FilePath -> FilePath -> ShIO ()
 mvNoOverwrite from to = do
   to' <- absPath to
-  e <- liftIO (isFile to')
+  e <- test_f to'
   if e
     then rm from
     else mv from to
