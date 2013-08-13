@@ -205,7 +205,7 @@ main =
                        , dynObjectSuf  = mkGhcjsSuf (dynObjectSuf dflags2)
                        , hiSuf         = mkGhcjsSuf (hiSuf dflags2)
                        , dynHiSuf      = mkGhcjsSuf (dynHiSuf dflags2)
-                       , outputFile    = if ghcLink dflags2 == LinkBinary
+                       , outputFile    = if ghcLink dflags2 == LinkBinary && not (oneshot || null hs_srcs)
                                            then Nothing
                                            else fmap mkGhcjsOutput (outputFile dflags2)
                        , dynOutputFile = fmap mkGhcjsOutput (dynOutputFile dflags2)
