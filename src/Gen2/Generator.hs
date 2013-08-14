@@ -82,10 +82,10 @@ generate debug df s m = flip evalState (initState df m) $ do
       (st', dbg) = dumpAst st debug s
   deps <- genMetaData d
   return . BL.toStrict $
-    Object.object' st deps (dbg ++ p)
+    Object.object' st' deps (dbg ++ p)
 
 dumpAst :: Object.SymbolTable
-        -> Bool 
+        -> Bool
         -> StgPgm
         -> (Object.SymbolTable, [([Text], BL.ByteString)])
 dumpAst st debug s
@@ -323,8 +323,11 @@ genExpr top (StgLit l)           = do
               [j| return `Stack`[`Sp`]; |])
     where assign r v = [j| `r` = `v`; |]
 genExpr top (StgConApp con args) = genCon con =<< concatMapM genArg args
-genExpr top (StgOpApp (StgFCallOp f _) args t) =
-   fst <$> genForeignCall0 f t (map toJExpr $ enumFrom R1) args
+genExpr top (StgOpApp (StgFCallOp f _) args t) = do
+   (fc, async) <- genForeignCall0 f t (map toJExpr $ enumFrom R1) args
+   case async of
+     False -> return $ fc <> [j| return `Stack`[`Sp`]; |]
+     True  -> return fc
 genExpr top (StgOpApp (StgPrimOp op) args t) = genPrimOp op args t
 genExpr top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall c args t
 genExpr top (StgLam{}) = error "genExpr: StgLam"
@@ -560,13 +563,21 @@ genCase top bnd (StgApp i xs) at alts l srt =
 genCase top bnd x@(StgCase {}) at alts l srt =
   genRet top bnd at alts l srt <> genExpr top x
 
--- foreign call, fixme: do unsafe foreign calls inline
-genCase top bnd (StgOpApp (StgFCallOp fc _) args t) at@(UbxTupAlt n) alts@[(DataAlt{}, bndrs, _, e)] l srt =
+genCase top bnd (StgOpApp (StgFCallOp fc _) args t) at alts@[(DataAlt{}, bndrs, _, e)] l srt =
   do
    ids <- concatMapM genIds bndrs
    (fc, async) <- genForeignCall0 fc t ids args
    case async of
      False -> concatMapM declIds bndrs <> return fc <> genExpr top e
+     True -> genRet top bnd at alts l srt <> return fc
+
+-- foreign calls can return ADT's directly in GHCJS
+genCase top bnd (StgOpApp (StgFCallOp fc _) args t) at alts l srt =
+  do
+   ids <- genIds bnd
+   (fc, async) <- genForeignCall0 fc t ids args
+   case async of
+     False -> declIds bnd <> return fc <> genAlts top bnd at alts
      True -> genRet top bnd at alts l srt <> return fc
 
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt tc) alts l srt =
@@ -1324,12 +1335,14 @@ parseFFIPattern' callback javascriptCc pat t ret args
          return $ traceCall as <> mconcat stats <> ApplStat f' (concat as)
         where f' = toJExpr (TxtI $ T.pack f)
     copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs
-    p e = error ("parse error in ffi pattern: " ++ pat ++ "\n" ++ e)
+    p e = error ("Parse error in FFI pattern: " ++ pat ++ "\n" ++ e)
     replaceIdent :: Map Ident JExpr -> JExpr -> JExpr
     replaceIdent env e@(ValExpr (JVar i))
       | isFFIPlaceholder i = fromMaybe err (M.lookup i env)
       | otherwise = e
-        where err = error (pat ++ ": invalid placeholder, check function type: " ++ show i)
+        where
+          (TxtI i') = i
+          err = error (pat ++ ": invalid placeholder, check function type: " ++ show i')
     replaceIdent _ e = e
     traceCall as
         | rtsTraceForeign = [j| h$traceForeign(`pat`, `as`); |]

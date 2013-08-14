@@ -283,7 +283,7 @@ showObject xs = mconcat (map showSymbol xs)
   where
     showSymbol (ObjUnit symbs cis stat)
       | "h$debug" `elem` symbs = 
-           "/*\n" <> (TL.fromStrict $ T.unlines ( stat ^.. template . _JStr )) <> "\n*/"
+           "/*\n" <> (TL.fromStrict $ T.unlines ( stat ^.. template . _JStr )) <> "\n*/\n"
       | otherwise = TL.unlines
         [ "// begin: [" <> TL.intercalate "," (map TL.fromStrict symbs) <> "]"
         , displayT . renderPretty 0.8 150 . pretty $ (stat <> mconcat (map toStat cis))
