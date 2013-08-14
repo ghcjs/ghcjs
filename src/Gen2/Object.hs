@@ -39,7 +39,7 @@ module Gen2.Object ( object
                    , SymbolTable
                    , ObjUnit (..)
                    , Deps (..)
-                   , Fun (..)
+                   , Fun (..), showFun
                    , Package (..)
                    ) where
 
@@ -184,6 +184,7 @@ instance Objectable Deps where
 --   so it's potentially more efficient than readDeps <$> B.readFile file
 readDepsFile :: FilePath -> IO Deps
 readDepsFile file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
+--  putStrLn ("reading deps: " ++ file)
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
     Nothing -> error ("readDepsFile: not a valid GHCJS object: " ++ file)
@@ -209,6 +210,7 @@ readObjectFile = readObjectFileKeys (const True)
 
 readObjectFileKeys :: ([Text] -> Bool) -> FilePath -> IO [ObjUnit]
 readObjectFileKeys p file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
+--  putStrLn ("reading object: " ++ file)
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
     Nothing -> error ("readObjectFileKeys: not a valid GHCJS object: " ++ file)
@@ -302,6 +304,9 @@ showPkg :: Package -> TL.Text
 showPkg (Package name ver)
   | T.null ver = TL.fromStrict name
   | otherwise  = TL.fromStrict name <> "-" <> TL.fromStrict ver
+
+showFun :: Fun -> String
+showFun (Fun p m s) = TL.unpack (showPkg p) ++ ":" ++ T.unpack m ++ "." ++ T.unpack s
 
 tag :: Word8 -> PutS
 tag x = lift (DB.putWord8 x)

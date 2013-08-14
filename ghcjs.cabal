@@ -56,8 +56,7 @@ Library
                      Gen2.ClosureInfo,
                      Gen2.Foreign,
                      Compiler.Info,
-                     Compiler.Variants,
-                     GHCJSMain
+                     Compiler.Variants
     other-modules: Paths_ghcjs
     build-depends: base           >= 4        && < 5,
                    Cabal,

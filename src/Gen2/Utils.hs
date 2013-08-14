@@ -20,6 +20,12 @@ import qualified Data.Text.Lazy as TL
 import           Language.Haskell.TH.Quote
 import           Language.Javascript.JMacro
 
+import           DynFlags
+import           SrcLoc
+import           Outputable (defaultUserStyle, text)
+import           ErrUtils (Severity(..))
+import           FastString
+
 makeLenses ''JStat
 makePrisms ''JStat
 makeLenses ''JExpr
@@ -127,3 +133,15 @@ jBool :: Bool -> JExpr
 jBool True = jTrue
 jBool False = jFalse
 
+ghcjsSrcSpan :: SrcSpan
+ghcjsSrcSpan = UnhelpfulSpan (mkFastString "<GHCJS>")
+
+-- use instead of ErrUtils variant to prevent being suppressed
+compilationProgressMsg :: DynFlags -> String -> IO ()
+compilationProgressMsg dflags msg
+  = ifVerbose dflags 1 (log_action dflags dflags SevOutput ghcjsSrcSpan defaultUserStyle (text msg))
+
+ifVerbose :: DynFlags -> Int -> IO () -> IO ()
+ifVerbose dflags val act
+  | verbosity dflags >= val = act
+  | otherwise               = return ()

@@ -1,6 +1,7 @@
 {-# LANGUAGE DefaultSignatures,
              OverloadedStrings,
-             TupleSections #-}
+             TupleSections,
+             LambdaCase  #-}
 {-
   GHCJS linker, collects dependencies from
     the object files (.js_o), which contain linkable 
@@ -9,14 +10,17 @@
 module Gen2.Linker where
 
 import           Control.Applicative
+import           Control.Lens hiding ((<.>))
 import           Control.Monad
+import           Control.Concurrent.MVar
 
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Char                (isDigit)
 import qualified Data.Foldable            as F
-import           Data.List                (partition, isSuffixOf, isPrefixOf)
+import           Data.List                ( partition, isSuffixOf, isPrefixOf
+                                          , intercalate, group, sort)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe               (fromMaybe)
@@ -38,8 +42,9 @@ import           System.FilePath          (dropExtension, splitPath, (<.>), (</>
 import           System.Directory         (createDirectoryIfMissing, doesFileExist)
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
+import           DynFlags
 import           Config
-import           Module                   (ModuleName, moduleNameString)
+import           Module                   (PackageId, packageIdString, ModuleName, moduleNameString)
 
 import           Compiler.Info
 import           Gen2.StgAst
@@ -49,71 +54,97 @@ import           Gen2.Printer             (pretty)
 import qualified Gen2.Compactor           as Compactor
 import           Gen2.ClosureInfo         hiding (Fun)
 import           Gen2.Object
+import           Gen2.Utils
 
-link :: Bool
-     -> String       -- ^ output file/directory
-     -> [FilePath]   -- ^ directories to load package modules, end with package name
-     -> [FilePath]   -- ^ the object files we're linking
-     -> [ModuleName] -- ^ modules to use as roots (include all their functions and deps)
-     -> IO [String]  -- ^ arguments for the closure compiler to minify our result
-link debug out searchPath objFiles pageModules = do
-  let (objFiles', extraFiles) = partition (".js_o" `isSuffixOf`) objFiles
-  metas <- mapM readDepsFile objFiles'
-  let roots = filter ((`elem` mods) . depsModule) metas
-  T.putStrLn ("linking " <> T.pack out <> ": " <> T.intercalate ", " (map depsModule roots))
---  print searchPath
---  print objFiles
---  print pageModules
-  (allDeps, src, infos) <- collectDeps (lookup metas) (S.union rtsDeps (S.fromList $ concatMap modFuns roots))
+link :: DynFlags
+     -> Bool
+     -> FilePath                  -- ^ output file/directory
+     -> [FilePath]                -- ^ include path for home package
+     -> [(PackageId, [FilePath])] -- ^ directories to load package modules
+     -> [FilePath]                -- ^ the object files we're linking
+     -> [FilePath]                -- ^ extra js files to include
+     -> (Fun -> Bool)             -- ^ functions from the objects to use as roots (include all their deps)
+     -> IO [String]               -- ^ arguments for the closure compiler to minify our result
+link dflags debug out include pkgs objFiles jsFiles isRootFun = do
+  objDeps <- mapM readDepsFile objFiles
+  let roots = S.fromList . filter isRootFun $
+        concatMap (M.keys . depsDeps) objDeps
+      rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
+  -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
+  compilationProgressMsg dflags $ "Linking " ++ out ++ " (" ++ intercalate "," rootMods ++ ")"
+  c <- newMVar M.empty
+  (allDeps, src, infos) <- collectDeps (lookupFun c $ zip objDeps objFiles) (roots `S.union` rtsDeps)
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (renderLinker debug src infos)
   writeFile (out </> "rts.js") rtsStr
-  getShims extraFiles allDeps (out </> "lib.js", out </> "lib1.js")
+  getShims jsFiles (map fst pkgs) (out </> "lib.js", out </> "lib1.js")
   writeHtml out
   combineFiles out
   return []
   where
-    mods = map (T.pack . moduleNameString) pageModules
-    pkgLookup       = M.fromList (map (\p -> (pkgFromPath p, p)) searchPath)
-    -- pkg name-version is last path element, except when there's a ghc-version path element after
-    pkgFromPath path | (a:b:_) <- reverse (splitPath' path) =
-      if (("ghc-"++cProjectVersion) `isPrefixOf` a) then T.pack b else T.pack a
-    pkgFromPath _ = mempty
-    pkgLookupNoVer  = M.mapKeys dropVersion pkgLookup
-    localLookup metas  =
-      M.fromList $ zipWith (\m o -> (depsModule m, dropExtension o)) metas objFiles
+    pkgPaths :: Map Text [FilePath]
+    pkgPaths = M.fromList (traverse . _1 %~ T.pack . packageIdString $ pkgs)
 
-    -- | lookup fun in known packages first, then object files specified on command
-    --   line, otherwise files in the current dir
-    lookup metas ext fun
-      | Just path <- M.lookup (funPkgTxt      fun) pkgLookup = return (path </> modPath)
-      | Just path <- M.lookup (funPkgTxtNoVer fun) pkgLookupNoVer = return (path </> modPath)
-      | otherwise = return $ maybe ("." </> modPath) (<.> ext)
-                             (M.lookup (funModule fun) (localLookup metas))
+    lookupFun :: MVar (Map (Package, Text, String) FilePath)
+              -> [(Deps,FilePath)]
+              -> String -> Fun -> IO FilePath
+    lookupFun cache objs = lCached
       where
-        modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> ext
+        lCached :: String -> Fun -> IO FilePath
+        lCached ext fun = do
+          c <- takeMVar cache
+          let k = (funPackage fun, funModule fun, ext)
+          case M.lookup k c of
+            Just p -> putMVar cache c >> return p
+            Nothing -> do
+              p <- l ext fun
+              -- putStrLn ("looked up: " ++ p)
+              putMVar cache (M.insert k p c)
+              return p
+        objs' = M.fromList $ map (\(Deps pkg m _, p) -> ((pkg,m),p)) objs
+        l ext fun
+           -- already loaded objects
+           | Just p   <- M.lookup (funPackage fun, funModule fun) objs' = return p
+           -- known package in dependencies
+           | Just pkg <- M.lookup (funPkgTxt fun) pkgPaths = searchPaths [] pkg
+           -- known wired-in package (no version)
+           | Just pkg <- M.lookup (funPkgTxtNoVer fun) pkgPaths = searchPaths [] pkg
+           -- search in include dirs
+           | otherwise = searchPaths [] include
+           where
+             modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> ext
+             searchPaths searched [] = error $ "cannot find symbol: " ++ showFun fun
+                                            ++ "\nsearched in:\n" ++ unlines searched
+             searchPaths searched (x:xs) =
+                let p = x </> modPath
+                in  doesFileExist p >>=
+                      \case
+                         False -> searchPaths (p:searched) xs
+                         True  -> return p
 
 renderLinker :: Bool -> JStat -> [ClosureInfo] -> BL.ByteString
-renderLinker debug stat infos 
+renderLinker debug stat infos
    = TLE.encodeUtf8 . displayT . renderPretty 0.8 150 . pretty $
        Compactor.compact debug stat infos
 
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
 
--- fixme get dependencies from DynFlags instead
-getShims :: [FilePath] -> Set Fun -> (FilePath, FilePath) -> IO ()
+-- fixme the wired-in package id's we get from GHC we have no version
+getShims :: [FilePath] -> [PackageId] -> (FilePath, FilePath) -> IO ()
 getShims extraFiles deps (fileBefore, fileAfter) = do
   base <- (</> "shims") <$> getGlobalPackageBase
-  ((before, beforeFiles), (after, afterFiles)) <- collectShims base pkgDeps
+  ((before, beforeFiles), (after, afterFiles))
+     <- collectShims base (map convertPkg deps)
   T.writeFile fileBefore before
   writeFile (fileBefore <.> "files") (unlines beforeFiles)
   t' <- mapM T.readFile extraFiles
   T.writeFile fileAfter (T.unlines $ after : t')
   writeFile (fileAfter <.> "files") (unlines $ afterFiles ++ extraFiles)
     where
-      pkgDeps = map (\(Package n v) -> (n, fromMaybe [] $ parseVersion v))
-                  (S.toList $ S.map funPackage deps)
+      convertPkg p =
+        let (n,v) = splitVersion . T.pack . packageIdString $ p
+        in  (n, fromMaybe [] $ parseVersion v)
 
 -- convenience: combine lib.js, rts.js, lib1.js, out.js to all.js that can be run
 -- directly with node or spidermonkey
@@ -149,19 +180,21 @@ writeHtml out = do
     htmlFile = out </> "index" <.> "html"
 
 -- drop the version from a package name
--- fixme this is probably a bit wrong but should only be necessary
--- for wired-in packages base, ghc-prim, integer-gmp, main, rts
 dropVersion :: Text -> Text
 dropVersion = fst . splitVersion
 
 splitVersion :: Text -> (Text, Text)
 splitVersion t
-  | T.null ver || T.any (`notElem` "1234567890.") ver
-      = (t, mempty)
-  | T.null name = (mempty, mempty)
+  | T.null ver || T.null name  = (t, mempty)
+  | not (validVer ver) =
+      let vn@(ver', name') = T.break (=='-') name
+      in if validVer ver' && not (T.null name)
+           then (T.reverse (T.tail name'), T.reverse ver')
+           else (t, mempty)
   | otherwise   = (T.reverse (T.tail name), T.reverse ver)
-  where
-    (ver, name) = T.break (=='-') (T.reverse t)
+      where
+        validVer v = T.all (`elem` "1234567890.") v && not (T.null v)
+        (ver, name) = T.break (=='-') (T.reverse t)
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
@@ -171,7 +204,7 @@ modFuns (Deps p m d) = map fst (M.toList d)
 getDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun)
 getDeps lookup fun = go S.empty M.empty (S.toList fun)
   where
-    go :: Set Fun -> Map (Package,Text) Deps -> [Fun] -> IO (Set Fun)
+    go :: Set Fun -> Map (Package, Text) Deps -> [Fun] -> IO (Set Fun)
     go result _    []         = return result
     go result deps ffs@(f:fs) =
       let key = (funPackage f, funModule f)
@@ -183,14 +216,18 @@ getDeps lookup fun = go S.empty M.empty (S.toList fun)
                               in  go (S.insert f result) deps (ds++fs)
 
 -- | get all modules used by the roots and deps
-getDepsSources :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun, [(FilePath, Set Fun)])
-getDepsSources lookup funs = do
-  allDeps <- getDeps lookup funs
+getDepsSources :: (String -> Fun -> IO FilePath)
+               -> Set Fun
+               -> IO (Set Fun, [(FilePath, Set Fun)])
+getDepsSources lookup roots = do
+  allDeps <- getDeps lookup roots
   allPaths <- mapM (\x -> (,S.singleton x) <$> lookup "js_o" x) (S.toList allDeps)
   return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
 
--- | collect source snippets
-collectDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun, JStat, [ClosureInfo])
+-- | collect dependencies for a set of roots
+collectDeps :: (String -> Fun -> IO FilePath)
+            -> Set Fun
+            -> IO (Set Fun, JStat, [ClosureInfo])
 collectDeps lookup roots = do
   (allDeps, srcs) <- getDepsSources lookup roots
   (stats, infos) <- unzip <$> mapM (uncurry extractDeps) srcs
@@ -202,11 +239,12 @@ extractDeps file funs = do
   l <- readObjectFileKeys (any (`S.member` symbs)) file
   return (mconcat (map oiStat l), concatMap oiClInfo l)
 
+pkgTxt :: Package -> Text
+pkgTxt p = packageName p <> "-" <> packageVersion p
+
 -- Fun -> packagename-packagever
 funPkgTxt :: Fun -> Text
-funPkgTxt f = packageName pkg <> "-" <> packageVersion pkg
-   where
-    pkg = funPackage f
+funPkgTxt = pkgTxt . funPackage
 
 -- Fun -> packagename
 funPkgTxtNoVer :: Fun -> Text
