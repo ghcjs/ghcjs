@@ -4,7 +4,7 @@
   from other foreign imports since we don't want Bool to de be marshalled through
   0/1 for example.
 
-  Contains code adapted from DsForeign and DsCCall
+  Contains code adapted from DsForeign, DsCCall and TcForeign
  -}
 
 module Gen2.Foreign where
@@ -15,7 +15,7 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Base16 as B16
 
 import Data.Maybe
-import Data.List (partition)
+import Data.List (partition, isPrefixOf)
 
 import Hooks
 import DynFlags
@@ -57,6 +57,9 @@ import CoreUnfold
 import Pair
 import Literal
 import Module
+import TcType
+import TcRnMonad
+import TcHsType
 
 installForeignHooks :: Bool -> DynFlags -> DynFlags
 installForeignHooks generatingJs df = df { hooks = f generatingJs (hooks df) }
@@ -101,11 +104,9 @@ dsJsImport (ForeignImport (L _ id) t co (CImport cconv safety mHeader spec)) =
         rhs = foRhs (Lit (MachLabel cid stdcall_info fod))
         rhs' = Cast rhs co
         stdcall_info = fun_type_arg_stdcall_info dflags cconv ty
---      in
       return ([(id, rhs')], empty, empty)
--- no special primcalls
---    CFunction target | cconv == PrimCallConv ->
---      dsPrimCall id co (CCall (CCallSpec target cconv safety))
+    CFunction target | cconv == PrimCallConv ->
+      dsPrimCall id co (CCall (CCallSpec target cconv safety))
     CFunction target ->
       dsJsCall id co (CCall (CCallSpec target cconv safety)) mHeader
     CWrapper ->
@@ -431,23 +432,106 @@ ghcjsNativeDsForeigns :: [LForeignDecl Id]
                       -> DsM (ForeignStubs, OrdList (Id, CoreExpr))
 ghcjsNativeDsForeigns fos = dsForeigns' fos
 
--- fixme allow additional js types here (and in the native version of this)
 ghcjsTcForeignImports :: [LForeignDecl Name]
                       -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
-ghcjsTcForeignImports decls =
-  tcForeignImports' decls
+ghcjsTcForeignImports decls
+  = do { (ids, decls, gres) <- mapAndUnzip3M ghcjsTcFImport $
+                               filter isForeignImport decls
+       ; return (ids, decls, unionManyBags gres) }
+
+isForeignImport :: LForeignDecl name -> Bool
+isForeignImport (L _ (ForeignImport _ _ _ _)) = True
+isForeignImport _                             = False
+
+foreignDeclCtxt :: ForeignDecl Name -> SDoc
+foreignDeclCtxt fo
+  = hang (ptext (sLit "When checking declaration:"))
+       2 (ppr fo)
+
+ghcjsTcFImport :: LForeignDecl Name -> TcM (Id, LForeignDecl Id, Bag GlobalRdrElt)
+ghcjsTcFImport (L dloc fo@(ForeignImport (L nloc nm) hs_ty _ imp_decl))
+  = setSrcSpan dloc $ addErrCtxt (foreignDeclCtxt fo)  $
+    do { sig_ty <- tcHsSigType (ForSigCtxt nm) hs_ty
+       ; (norm_co, norm_sig_ty, gres) <- normaliseFfiType sig_ty
+       ; let
+           -- Drop the foralls before inspecting the
+           -- structure of the foreign type.
+             (_, t_ty)         = tcSplitForAllTys norm_sig_ty
+             (arg_tys, res_ty) = tcSplitFunTys t_ty
+             id                = mkLocalId nm sig_ty
+                 -- Use a LocalId to obey the invariant that locally-defined
+                 -- things are LocalIds.  However, it does not need zonking,
+                 -- (so TcHsSyn.zonkForeignExports ignores it).
+
+       ; imp_decl' <- ghcjsTcCheckFIType sig_ty arg_tys res_ty imp_decl
+          -- Can't use sig_ty here because sig_ty :: Type and
+          -- we need HsType Id hence the undefined
+       ; let fi_decl = ForeignImport (L nloc id) undefined (mkSymCo norm_co) imp_decl'
+       ; return (id, L dloc fi_decl, gres) }
+ghcjsTcFImport d = pprPanic "ghcjsTcFImport" (ppr d)
+
+ghcjsTcCheckFIType :: Type -> [Type] -> Type -> ForeignImport -> TcM ForeignImport
+ghcjsTcCheckFIType sig_ty arg_tys res_ty idecl@(CImport cconv safety mh (CFunction target))
+  | cconv == JavaScriptCallConv = do
+      dflags <- getDynFlags
+      checkForeignArgs (isGhcjsFFIArgumentTy dflags safety) arg_tys
+      checkForeignRes nonIOok checkSafe (isGhcjsFFIImportResultTy dflags) res_ty
+      case target of
+          StaticTarget _ _ False
+           | not (null arg_tys) ->
+              addErrTc (text "`value' imports cannot have function types")
+          _ -> return ()
+      return $ CImport cconv safety mh (CFunction target)
+ghcjsTcCheckFIType sig_ty arg_tys res_ty idecl = tcCheckFIType sig_ty arg_tys res_ty idecl
+
+
+isGhcjsFFIArgumentTy :: DynFlags -> Safety -> Type -> Bool
+isGhcjsFFIArgumentTy dflags safety ty = isFFIArgumentTy dflags safety ty
+                                     || isGhcjsFFITy dflags ty
+
+isGhcjsFFIImportResultTy :: DynFlags -> Type -> Bool
+isGhcjsFFIImportResultTy dflags ty = isFFIImportResultTy dflags ty
+                                  || isGhcjsFFITy dflags ty
+
+isGhcjsFFITy :: DynFlags -> Type -> Bool
+isGhcjsFFITy dflags ty = checkRepTyCon f ty
+  where
+    f tc = any (\(p,m,n) -> pkg `isPrefixOf` p && m == mod && n == name) ffiTys
+      where
+        -- comparing strings is probably not too fast, perhaps search
+        -- for the types first and use some cache
+        n = tyConName tc
+        (pkg, mod) = case nameModule_maybe n of
+                       Nothing -> ("", "")
+                       Just m  -> ( packageIdString (modulePackageId m)
+                                  , moduleNameString (moduleName m))
+        name = occNameString (nameOccName n)
+    ffiTys :: [(String, String, String)]
+    ffiTys = [ ("ghcjs-prim", "GHCJS", "JSRef") ]
+
+-- normaliseFfiType gets run before checkRepTyCon, so we don't
+-- need to worry about looking through newtypes or type functions
+-- here; that's already been taken care of.
+checkRepTyCon :: (TyCon -> Bool) -> Type -> Bool
+checkRepTyCon check_tc ty
+    | Just (tc, _) <- splitTyConApp_maybe ty
+      = check_tc tc
+    | otherwise
+      = False
 
 ghcjsNativeTcForeignImports :: [LForeignDecl Name]
-                                -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
-ghcjsNativeTcForeignImports decls = tcForeignImports' (map f decls)
-  where
-    f (L l (ForeignImport n t c (CImport JavaScriptCallConv safety mheader spec))) =
-      (L l (ForeignImport n t c (CImport CCallConv safety mheader (convertSpec spec))))
-    f x = x
-    convertSpec (CLabel fs) = CLabel (hashFs "jsCall_" fs)
-    convertSpec (CFunction (StaticTarget lbl mpkg isFun)) =
-      CFunction (StaticTarget (hashFs "jsCall_" lbl) mpkg isFun)
-    convertSpec x = x
+                            -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
+ghcjsNativeTcForeignImports decls = do
+  (ids, decls', b) <- ghcjsTcForeignImports decls
+  return (ids, map f decls', b)
+    where
+      f (L l (ForeignImport n t c (CImport JavaScriptCallConv safety mheader spec))) =
+        (L l (ForeignImport n t c (CImport CCallConv safety mheader (convertSpec spec))))
+      f x = x
+      convertSpec (CLabel fs) = CLabel (hashFs "jsCall_" fs)
+      convertSpec (CFunction (StaticTarget lbl mpkg isFun)) =
+        CFunction (StaticTarget (hashFs "jsCall_" lbl) mpkg isFun)
+      convertSpec x = x
 
 hashFs :: String -> FastString -> FastString
 hashFs prefix fs = mkFastString . (prefix++) . T.unpack . TE.decodeUtf8

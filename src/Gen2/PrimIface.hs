@@ -93,11 +93,11 @@ ghcjsPrimOpSig op
   where
     arity = length arg_tys
     (tyvars, arg_tys, res_ty)
-      = case (primOpInfo op) of
-        Monadic   _occ ty                    -> ([],     [ty],    ty    )
-        Dyadic    _occ ty                    -> ([],     [ty,ty], ty    )
-        Compare   _occ ty                    -> ([],     [ty,ty], boolTy)
-        GenPrimOp _occ tyvars arg_tys res_ty -> (tyvars, arg_tys, res_ty)
+      = case primOpInfo op of
+        Monadic   _occ ty                    -> ([],     [ty],    ty       )
+        Dyadic    _occ ty                    -> ([],     [ty,ty], ty       )
+        Compare   _occ ty                    -> ([],     [ty,ty], intPrimTy)
+        GenPrimOp _occ tyvars arg_tys res_ty -> (tyvars, arg_tys, res_ty   )
 
 data PrimOpInfo
   = Dyadic      OccName         -- string :: T -> T -> T

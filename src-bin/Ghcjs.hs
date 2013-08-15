@@ -508,13 +508,8 @@ ghcjsPackageHsLibs dflags p = map fixLib (packageHsLibs' dflags p)
       replace ghcDynLibVersionTag ghcjsDynLibVersionTag lib
                | otherwise = lib
 
-ghcjsLocateLib dflags is_hs dirs lib = do
-  putStrLn ("locating lib: " ++ lib ++ " (" ++ show is_hs ++ ")")
-  print dirs
-  ghcjsLocateLib' dflags is_hs dirs lib
-
-ghcjsLocateLib' :: DynFlags -> Bool -> [FilePath] -> String -> IO LibrarySpec
-ghcjsLocateLib' dflags is_hs dirs lib
+ghcjsLocateLib :: DynFlags -> Bool -> [FilePath] -> String -> IO LibrarySpec
+ghcjsLocateLib dflags is_hs dirs lib
   | not is_hs
     -- For non-Haskell libraries (e.g. gmp, iconv):
     --   first look in library-dirs for a dynamic library (libfoo.so)

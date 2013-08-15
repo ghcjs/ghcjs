@@ -46,12 +46,12 @@ genPrim :: PrimOp   -- ^ the primitive operation
         -> [JExpr]  -- ^ where to store the result
         -> [JExpr]  -- ^ arguments
         -> PrimRes
-genPrim CharGtOp          [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) |]
-genPrim CharGeOp          [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) |]
-genPrim CharEqOp          [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) |]
-genPrim CharNeOp          [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) |]
-genPrim CharLtOp          [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) |]
-genPrim CharLeOp          [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) |]
+genPrim CharGtOp          [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) ? 1 : 0; |]
+genPrim CharGeOp          [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) ? 1 : 0; |]
+genPrim CharEqOp          [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0; |]
+genPrim CharNeOp          [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) ? 1 : 0|]
+genPrim CharLtOp          [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) ? 1 : 0; |]
+genPrim CharLeOp          [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) ? 1 : 0; |]
 genPrim OrdOp             [r] [x]   = PrimInline [j| `r` = `x` |]
 
 genPrim IntAddOp          [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0 |]
@@ -77,12 +77,12 @@ genPrim IntAddCOp         [r,overf] [x,y] =
   PrimInline [j| var rt = `x`+`y`; `r` = rt|0; `overf` = (`r`!=rt)?1:0; |]
 genPrim IntSubCOp         [r,overf] [x,y] =
   PrimInline [j| var rt = `x`-`y`; `r` = rt|0; `overf` = (`r`!=rt)?1:0; |]
-genPrim IntGtOp           [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) |]
-genPrim IntGeOp           [r] [x,y] = PrimInline [j| `r`= (`x` >= `y`) |]
-genPrim IntEqOp           [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) |]
-genPrim IntNeOp           [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) |]
-genPrim IntLtOp           [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) |]
-genPrim IntLeOp           [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) |]
+genPrim IntGtOp           [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) ? 1 : 0 |]
+genPrim IntGeOp           [r] [x,y] = PrimInline [j| `r`= (`x` >= `y`) ? 1 : 0 |]
+genPrim IntEqOp           [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0 |]
+genPrim IntNeOp           [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) ? 1 : 0 |]
+genPrim IntLtOp           [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) ? 1 : 0 |]
+genPrim IntLeOp           [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) ? 1 : 0 |]
 genPrim ChrOp             [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim Int2WordOp        [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim Int2FloatOp       [r] [x]   = PrimInline [j| `r` = `x` |]
@@ -117,15 +117,15 @@ genPrim SllOp             [r] [x,y] = PrimInline [j| `r` = `x` << `y` |]
 genPrim SrlOp             [r] [x,y] = PrimInline [j| `r` = `x` >>> `y` |]
 genPrim Word2IntOp        [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim WordGtOp          [r] [x,y] =
-  PrimInline [j| `r` = ((`x`>>>1) > (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) > (`y`&1))) |]
+  PrimInline [j| `r` = ((`x`>>>1) > (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) > (`y`&1))) ? 1 : 0 |]
 genPrim WordGeOp          [r] [x,y] =
-  PrimInline [j| `r` = ((`x`>>>1) > (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) >= (`y`&1))) |]
-genPrim WordEqOp          [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) |]
-genPrim WordNeOp          [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) |]
+  PrimInline [j| `r` = ((`x`>>>1) > (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) >= (`y`&1))) ? 1 : 0 |]
+genPrim WordEqOp          [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0 |]
+genPrim WordNeOp          [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) ? 1 : 0 |]
 genPrim WordLtOp          [r] [x,y] =
-  PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) < (`y`&1))) |]
+  PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) < (`y`&1))) ? 1 : 0 |]
 genPrim WordLeOp          [r] [x,y] =
-  PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) <= (`y`&1))) |]
+  PrimInline [j| `r` = ((`x`>>>1) < (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) <= (`y`&1))) ? 1 : 0 |]
 genPrim Word2DoubleOp     [r] [x] = PrimInline [j| `r` = (`x` & 0x7FFFFFFF) + (`x` >>> 31) * 2147483648 |]
 genPrim Word2FloatOp      [r] [x] = PrimInline [j| `r` = (`x` & 0x7FFFFFFF) + (`x` >>> 31) * 2147483648 |]
 genPrim PopCnt8Op         [r] [x]   = PrimInline [j| `r` = h$popCntTab[`x` & 0xFF] |]
@@ -136,18 +136,28 @@ genPrim PopCnt16Op        [r] [x]   =
 genPrim PopCnt32Op        [r] [x]   = PrimInline [j| `r` = h$popCnt32(`x`); |]
 genPrim PopCnt64Op        [r] [x1,x2] = PrimInline [j| `r` = h$popCnt64(`x1`,`x2`); |]
 genPrim PopCntOp          [r] [x]   = genPrim PopCnt32Op [r] [x]
+
+genPrim BSwap16Op         [r] [x]   = PrimInline [j| `r` = ((`x` & 0xFF) << 8) | ((`x` & 0xFF00) >> 8); |] -- ab -> ba
+genPrim BSwap32Op         [r] [x]   = PrimInline [j| `r` = (`x` << 24) | ((`x` & 0xFF00) << 8)
+                                                         | ((`x` & 0xFF0000) >> 8) | (`x` >>> 24);
+                                                   |] -- abcd -> dcba
+genPrim BSwap64Op     [r1,r2] [x,y] = PrimInline [j| `r1` = h$bswap64(`x`,`y`);
+                                                     `r2` = `Ret1`;
+                                                   |]
+genPrim BSwapOp           [r] [x]   = genPrim BSwap32Op [r] [x]
+
 genPrim Narrow8IntOp      [r] [x]   = PrimInline [j| `r` = (`x` & 0x7F)-(`x` & 0x80) |]
 genPrim Narrow16IntOp     [r] [x]   = PrimInline [j| `r` = (`x` & 0x7FFF)-(`x` & 0x8000) |]
 genPrim Narrow32IntOp     [r] [x]   = PrimInline [j| `r` = `x`|0 |]
 genPrim Narrow8WordOp     [r] [x]   = PrimInline [j| `r` = (`x` & 0xFF) |]
 genPrim Narrow16WordOp    [r] [x]   = PrimInline [j| `r` = (`x` & 0xFFFF) |]
 genPrim Narrow32WordOp    [r] [x]   = PrimInline [j| `r` = `x`|0 |]
-genPrim DoubleGtOp        [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) |]
-genPrim DoubleGeOp        [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) |]
-genPrim DoubleEqOp        [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) |]
-genPrim DoubleNeOp        [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) |]
-genPrim DoubleLtOp        [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) |]
-genPrim DoubleLeOp        [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) |]
+genPrim DoubleGtOp        [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) ? 1 : 0 |]
+genPrim DoubleGeOp        [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) ? 1 : 0 |]
+genPrim DoubleEqOp        [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0 |]
+genPrim DoubleNeOp        [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) ? 1 : 0 |]
+genPrim DoubleLtOp        [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) ? 1 : 0 |]
+genPrim DoubleLeOp        [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) ? 1 : 0 |]
 genPrim DoubleAddOp       [r] [x,y] = PrimInline [j| `r` = `x` + `y` |]
 genPrim DoubleSubOp       [r] [x,y] = PrimInline [j| `r` = `x` - `y` |]
 genPrim DoubleMulOp       [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]
@@ -174,12 +184,12 @@ genPrim DoubleDecode_2IntOp [s,h,l,e] [x] =
                  `l` = `Ret2`;
                  `e` = `Ret3`;
                |]
-genPrim FloatGtOp         [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) |]
-genPrim FloatGeOp         [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) |]
-genPrim FloatEqOp         [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) |]
-genPrim FloatNeOp         [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) |]
-genPrim FloatLtOp         [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) |]
-genPrim FloatLeOp         [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) |]
+genPrim FloatGtOp         [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) ? 1 : 0 |]
+genPrim FloatGeOp         [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) ? 1 : 0 |]
+genPrim FloatEqOp         [r] [x,y] = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0 |]
+genPrim FloatNeOp         [r] [x,y] = PrimInline [j| `r` = (`x` !== `y`) ? 1 : 0 |]
+genPrim FloatLtOp         [r] [x,y] = PrimInline [j| `r` = (`x` < `y`) ? 1 : 0 |]
+genPrim FloatLeOp         [r] [x,y] = PrimInline [j| `r` = (`x` <= `y`) ? 1 : 0 |]
 genPrim FloatAddOp        [r] [x,y] = PrimInline [j| `r` = `x` + `y` |]
 genPrim FloatSubOp        [r] [x,y] = PrimInline [j| `r` = `x` - `y` |]
 genPrim FloatMulOp        [r] [x,y] = PrimInline [j| `r` = `x` * `y` |]
@@ -202,9 +212,8 @@ genPrim FloatPowerOp      [r] [x,y] = PrimInline [j| `r` = Math.pow(`x`,`y`) |]
 genPrim Float2DoubleOp    [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim FloatDecode_IntOp [s,e] [x] = PrimInline [j| `s` = h$decodeFloatInt(`x`); `e` = `Ret1`; |]
 genPrim NewArrayOp          [r] [l,e]   = PrimInline (newArray r l e)
-genPrim SameMutableArrayOp  [r] [a1,a2] = PrimInline [j| `r` = (`a1` === `a2`) |] -- ? `HTrue` : `HFalse`; |]
+genPrim SameMutableArrayOp  [r] [a1,a2] = PrimInline [j| `r` = (`a1` === `a2`) ? 1 : 0 |]
 genPrim ReadArrayOp         [r] [a,i]   = PrimInline [j| `r` = `a`[`i`]; |]
--- FIXME: this, and also MVar/IORef needs to update the modified list for the GC!
 genPrim WriteArrayOp        []  [a,i,v] = PrimInline [j| `a`[`i`] = `v`; |]
 genPrim SizeofArrayOp       [r] [a]     = PrimInline [j| `r` = `a`.length; |]
 genPrim SizeofMutableArrayOp [r] [a]    = PrimInline [j| `r` = `a`.length; |]
@@ -228,7 +237,7 @@ genPrim NewByteArrayOp_Char [r] [l] = PrimInline (newByteArray r l)
 genPrim NewPinnedByteArrayOp_Char [r] [l] = PrimInline (newByteArray r l)
 genPrim NewAlignedPinnedByteArrayOp_Char [r] [l,align] = PrimInline (newByteArray r l)
 genPrim ByteArrayContents_Char [a,o] [b] = PrimInline [j| `a` = `b`; `o` = 0; |]
-genPrim SameMutableByteArrayOp [r] [a,b] = PrimInline [j| `r` = (`a` === `b`) |] -- ? `HTrue` : `HFalse`; |]
+genPrim SameMutableByteArrayOp [r] [a,b] = PrimInline [j| `r` = (`a` === `b`) ? 1 : 0 |]
 genPrim UnsafeFreezeByteArrayOp [a] [b] = PrimInline [j| `a` = `b`; |]
 genPrim SizeofByteArrayOp [r] [a] = PrimInline [j| `r` = `a`.len; |]
 genPrim SizeofMutableByteArrayOp [r] [a] = PrimInline [j| `r` = `a`.len; |]
@@ -329,7 +338,7 @@ genPrim SetByteArrayOp [] [a,o,n,v] =
                |]
 genPrim NewArrayArrayOp [r] [n] =
   PrimInline [j| `r` = []; for(var i=0;i<`n`;i++) { `r`[i] = `r`; } |]
-genPrim SameMutableArrayArrayOp [r] [a1,a2] = PrimInline [j| `r` = (`a1` === `a2`) |]
+genPrim SameMutableArrayArrayOp [r] [a1,a2] = PrimInline [j| `r` = (`a1` === `a2`) ? 1 : 0 |]
 genPrim UnsafeFreezeArrayArrayOp [r] [a] = PrimInline [j| `r` = `a` |]
 genPrim SizeofArrayArrayOp [r] [a] = PrimInline [j| `r` = `a`.length; |]
 genPrim SizeofMutableArrayArrayOp [r] [a] = PrimInline [j| `r` = `a`.length; |]
@@ -353,12 +362,12 @@ genPrim AddrSubOp  [i] [a1,o1,a2,o2] = PrimInline [j| `i` = `o1` - `o2` |]
 genPrim AddrRemOp  [r] [a,o,i]   = PrimInline [j| `r` = `o` % `i` |]
 genPrim Addr2IntOp [i]     [a,o]     = PrimInline [j| `i` = `o`; |] -- only usable for comparisons within one range
 genPrim Int2AddrOp [a,o]   [i]       = PrimInline [j| `a` = []; `o` = `i`; |] -- unsupported
-genPrim AddrGtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >  `o2`); |]
-genPrim AddrGeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >= `o2`); |]
-genPrim AddrEqOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`); |]
-genPrim AddrNeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`); |]
-genPrim AddrLtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <  `o2`); |]
-genPrim AddrLeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <= `o2`); |]
+genPrim AddrGtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >  `o2`) ? 1 : 0; |]
+genPrim AddrGeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >= `o2`) ? 1 : 0; |]
+genPrim AddrEqOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 1 : 0; |]
+genPrim AddrNeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 1 : 0; |]
+genPrim AddrLtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <  `o2`) ? 1 : 0; |]
+genPrim AddrLeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <= `o2`) ? 1 : 0; |]
 
 -- addr indexing: unboxed arrays
 genPrim IndexOffAddrOp_Char [c] [a,o,i] = PrimInline [j| `c` = `a`.u8[`o`+`i`]; |]
@@ -450,7 +459,7 @@ genPrim NewMutVarOp       [r] [x]   = PrimInline [j| `r` = new h$MutVar(`x`);  |
 genPrim ReadMutVarOp      [r] [m]   = PrimInline [j| `r` = `m`.val; |]
 genPrim WriteMutVarOp     [] [m,x]  = PrimInline [j| `m`.val = `x`; |]
 genPrim SameMutVarOp      [r] [x,y] =
-  PrimInline [j| `r` = (`x` === `y`) ? `HTrue` : `HFalse`; |]
+  PrimInline [j| `r` = (`x` === `y`) ? 1 : 0; |]
 genPrim AtomicModifyMutVarOp [r] [m,f] =
   PrimInline [j| `r` = h$atomicModifyMutVar(`m`,`f`); |]
 genPrim CasMutVarOp [status,r] [mv,o,n] =
@@ -486,18 +495,21 @@ genPrim NewTVarOp [tv] [v] = PrimInline [j| `tv` = h$newTVar(`v`); |]
 genPrim ReadTVarOp [r] [tv] = PrimInline [j| `r` = h$readTVar(`tv`); |]
 genPrim ReadTVarIOOp [r] [tv] = PrimInline [j| `r` = h$readTVarIO(`tv`); |]
 genPrim WriteTVarOp [] [tv,v] = PrimInline [j| h$writeTVar(`tv`,`v`); |]
-genPrim SameTVarOp [r] [tv1,tv2] = PrimInline [j| `r` = h$sameTVar(`tv1`,`tv2`); |]
+genPrim SameTVarOp [r] [tv1,tv2] = PrimInline [j| `r` = h$sameTVar(`tv1`,`tv2`) ? 1 : 0; |]
 
 genPrim NewMVarOp [r] []   = PrimInline [j| `r` = new h$MVar(); |]
 genPrim TakeMVarOp [r] [m] = PRPrimCall [j| return h$takeMVar(`m`); |]
-genPrim TryTakeMVarOp [v,r] [m] = PrimInline [j| `v` = h$tryTakeMVar(`m`);
-                                                 `r` = `Ret1`;
+genPrim TryTakeMVarOp [r,v] [m] = PrimInline [j| `r` = h$tryTakeMVar(`m`);
+                                                 `v` = `Ret1`;
                                               |]
 genPrim PutMVarOp [] [m,v] = PRPrimCall [j| return h$putMVar(`m`,`v`); |]
 genPrim TryPutMVarOp [r] [m,v] = PrimInline [j| `r` = h$tryPutMVar(`m`,`v`) |]
-
+genPrim ReadMVarOp [r] [m] = PRPrimCall [j| return h$readMVar(`m`); |]
+genPrim TryReadMVarOp [r,v] [m] = PrimInline [j| `v` = `m`.val;
+                                                 `r` = (`v`===null) ? 0 : 1;
+                                               |]
 genPrim SameMVarOp [r] [m1,m2] =
-   PrimInline [j| `r` = `m1` === `m2`; |]
+   PrimInline [j| `r` = (`m1` === `m2`) ? 1 : 0; |]
 genPrim IsEmptyMVarOp [r] [m]  =
   PrimInline [j| `r` = (`m`.val === null) ? 1 : 0; |]
 
@@ -520,10 +532,16 @@ genPrim ThreadStatusOp [stat,cap,locked] [tid] = PrimInline
     |]
 genPrim MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = h$makeWeak(`o`,`b`,`c`); |]
 genPrim MkWeakNoFinalizerOp [r] [o,b] = PrimInline [j| `r` = h$makeWeakNoFinalizer(`o`,`b`); |]
--- genPrim MkWeakForeignEnvOp [r] [o,b,a1a,a1o,a2a,a2o,i,a3a,a3o] = PrimInline [j| `r` = [`b`]; |]
-genPrim DeRefWeakOp        [f,v] [w] = PrimInline [j| `v` = `w`.val; `f`=(`v`===null)?0:1; |]
+genPrim AddCFinalizerToWeakOp [r] [a1,a1o,a2,a2o,i,a3,a3o,w] = 
+  PrimInline [j| `r` = 1; |]
+genPrim DeRefWeakOp        [f,v] [w] = PrimInline [j| `v` = `w`.val; 
+                                                      `f` = (`v`===null) ? 0 : 1;
+                                                    |]
 genPrim FinalizeWeakOp     [fl,fin] [w] =
-  PrimInline [j| `fin` = `w`.finalizer; `w`.finalizer = null; `fl`=(`w`===null)?0:1; |]
+  PrimInline [j| `fin` = `w`.finalizer;
+                 `w`.finalizer = null;
+                 `fl` = (`fin` === null) ? 0 : 1;
+               |]
 genPrim TouchOp [] [e] = PrimInline mempty -- fixme what to do?
 
 genPrim MakeStablePtrOp [s1,s2] [a] = PrimInline [j| `s1` = h$makeStablePtr(`a`); `s2` = `Ret1`; |]
@@ -551,6 +569,8 @@ ParAtOp
 ParAtAbsOp
 ParAtRelOp
 ParAtForNowOp
+CopyableOp
+NowFollowOp
 -}
 -- data may be the following:
 -- false: tag 0 (enum)
@@ -570,9 +590,10 @@ GetCCSOfOp
 GetCurrentCCSOp
 -}
 genPrim TraceEventOp [] [ed,eo] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
+genPrim TraceMarkerOp [] [ed,eo] = PrimInline [j| h$traceMarker(`ed`, `eo`); |]
 
-
--- genPrim op rs as = PrimInline [j| throw `"unhandled primop:"++show op++" "++show (length rs, length as)`; |]
+genPrim op rs as = PrimInline [j| throw `"unhandled primop: "++show op++" "++show (length rs, length as)`; |]
+{-
 genPrim op rs as = PrimInline [j| log(`"warning, unhandled primop: "++show op++" "++show (length rs, length as)`);
   `f`;
   `copyRes`;
@@ -580,6 +601,7 @@ genPrim op rs as = PrimInline [j| log(`"warning, unhandled primop: "++show op++"
   where
     f = ApplStat (iex . TxtI . T.pack $ "h$prim_" ++ show op) as
     copyRes = mconcat $ zipWith (\r reg -> [j| `r` = `reg`; |]) rs (enumFrom Ret1)
+-}
 
 newByteArray :: JExpr -> JExpr -> JStat
 newByteArray tgt len = [j| `tgt` = h$newByteArray(`len`); |]
