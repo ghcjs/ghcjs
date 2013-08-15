@@ -8,6 +8,8 @@ import           Control.Monad.IO.Class
 import           Control.Concurrent.MVar
 import           Control.Concurrent
 import           Data.Char (isLower, toLower, isDigit)
+import           Data.IORef
+import           Data.List (partition, isPrefixOf)
 import           Data.Maybe
 import           Data.Monoid
 import qualified Data.ByteString as B
@@ -32,16 +34,16 @@ import           System.Random (randomRIO)
 import           Test.Framework
 import           Test.Framework.Providers.HUnit (testCase)
 import           Test.HUnit.Base (assertBool, assertFailure, assertEqual, Assertion)
+import           Test.HUnit.Lang (HUnitFailure(..))
 import qualified Data.Yaml as Yaml
 import           Data.Yaml (FromJSON(..), Value(..), (.:?), (.!=))
 import           Data.Default
-import qualified Control.Exception as Ex
-import qualified Control.Exception as C
 import           Foreign.C.Error (ePIPE, Errno(..))
 import           System.IO (hClose, hFlush, hPutStr, hGetContents)
 import           System.IO.Error
 import           Control.DeepSeq
 import           GHC.IO.Exception(IOErrorType(..), IOException(..))
+import qualified Control.Exception as C
 #if __GLASGOW_HASKELL__ >= 707
 import           Text.Read (readMaybe)
 #else
@@ -51,25 +53,34 @@ readMaybe = readMay
 #endif
 
 main = do
+  log <- newIORef []
+  main' log `C.catch` \(e::ExitCode) -> do
+    errs <- readIORef log
+    when (e /= ExitSuccess && not (null errs)) $ do
+      putStrLn "\nFailed tests:"
+      mapM_ putStrLn (reverse errs)
+    C.throwIO e
+
+main' log = do
   args <- getArgs
-  let args' = filter (/="--benchmark") args
+  let (args', bench) = partition (/="--benchmark") args
   checkRequiredPackages
   onlyOpt <- getEnvOpt "GHCJS_TEST_ONLYOPT"
   onlyUnopt <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
-  if any (=="--benchmark") args
-    then (\bs -> defaultMainWithArgs bs args') =<< benchmarks
+  if not (null bench)
+    then (\bs -> defaultMainWithArgs bs args') =<< benchmarks log
     else do
       if onlyOpt && onlyUnopt
         then putStrLn "warning: nothing to do, optimized and unoptimized disabled"
-        else defaultMain =<< tests onlyOpt onlyUnopt
+        else defaultMain =<< tests onlyOpt onlyUnopt log
 
-benchmarks = do
-  nofib <- allTestsIn benchmark "test/nofib"
+benchmarks log = do
+  nofib <- allTestsIn (benchmark log) "test/nofib"
   return [ testGroup "Benchmarks from nofib" nofib
          ]
 
-tests onlyOpt onlyUnopt = do
-  let test = TestOpts onlyOpt onlyUnopt
+tests onlyOpt onlyUnopt log = do
+  let test = TestOpts onlyOpt onlyUnopt log
   fay     <- allTestsIn test "test/fay"
   ghc     <- allTestsIn test "test/ghc"
   arith   <- allTestsIn test "test/arith"
@@ -104,11 +115,12 @@ requiredPackages = [ "ghc-prim"
                    , "QuickCheck"
                    , "old-time"
                    , "vector"
-                   , "stm"
                    ]
 
+-- settings for the test suite
 data TestOpts = TestOpts { disableUnopt :: Bool
                          , disableOpt   :: Bool
+                         , failedTests  :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
                          }
 benchmark = TestOpts True False
 
@@ -137,6 +149,18 @@ instance FromJSON TestSettings where
 
   parseJSON _ = mempty
 
+testCaseLog :: TestOpts -> TestName -> Assertion -> Test
+testCaseLog opts name assertion = testCase name assertion'
+  where
+    assertion'   = assertion `C.catch` \e@(HUnitFailure msg) -> do
+      let errMsg = listToMaybe (filter (not . null) (lines msg))
+          err    = name ++ maybe "" (\x -> " (" ++ trunc (dropName x) ++ ")") errMsg
+          trunc xs | length xs > 43 = take 40 xs ++ "..."
+                   | otherwise = xs
+          dropName xs | name `isPrefixOf` xs = drop (length name) xs
+                      | otherwise            = xs
+      modifyIORef (failedTests opts) (err:)
+      C.throwIO e
 {-
   run all files in path as stdio tests
   tests are:
@@ -164,18 +188,26 @@ allTestsIn testOpts path = shelly $
 data StdioResult = StdioResult { stdioExit :: ExitCode
                                , stdioOut :: Text
                                , stdioErr :: Text
-                               } -- deriving (Show)
+                               }
 instance Eq StdioResult where
   (StdioResult e1 ou1 er1) == (StdioResult e2 ou2 er2) =
     e1 == e2 && (T.strip ou1 == T.strip ou2) && (T.strip er1 == T.strip er2)
 
+outputLimit :: Int
+outputLimit = 4096
+
+truncLimit :: Int -> Text -> Text
+truncLimit n t | T.length t >= n = T.take n t <> "\n[output truncated]"
+               | otherwise       = t
+
 instance Show StdioResult where
   show (StdioResult ex out err) =
     "\n>>> exit: " ++ show ex ++ "\n>>> stdout >>>\n" ++
-    T.unpack out ++ "\n<<< stderr >>>\n" ++ T.unpack err ++ "\n<<<\n"
+    T.unpack (truncLimit outputLimit out) ++ 
+    "\n<<< stderr >>>\n" ++ T.unpack (truncLimit outputLimit err) ++ "\n<<<\n"
 
 stdioTest :: TestOpts -> FilePath -> Test
-stdioTest testOpts file = testCase (encodeString file) (stdioAssertion testOpts file)
+stdioTest testOpts file = testCaseLog testOpts (encodeString file) (stdioAssertion testOpts file)
 
 stdioAssertion :: TestOpts -> FilePath -> Assertion
 stdioAssertion testOpts file = do
@@ -366,7 +398,7 @@ readProcessWithExitCode' workingDir cmd args input =
           IOError { ioe_type = ResourceVanished
                   , ioe_errno = Just ioe }
             | Errno ioe == ePIPE -> return ()
-          _ -> Ex.throwIO e
+          _ -> C.throwIO e
 
         -- wait on the output
         waitOut
@@ -418,7 +450,7 @@ checkRequiredPackages = shelly . silently $ do
 
 getEnvMay :: String -> IO (Maybe String)
 getEnvMay xs = fmap Just (getEnv xs)
-               `Ex.catch` \(_::Ex.SomeException) -> return Nothing
+               `C.catch` \(_::C.SomeException) -> return Nothing
 
 getEnvOpt :: MonadIO m => String -> m Bool
 getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)
