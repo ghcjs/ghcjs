@@ -1,9 +1,9 @@
-primOpInfo CharGtOp = mkCompare (fsLit "gtChar#") charPrimTy
-primOpInfo CharGeOp = mkCompare (fsLit "geChar#") charPrimTy
-primOpInfo CharEqOp = mkCompare (fsLit "eqChar#") charPrimTy
-primOpInfo CharNeOp = mkCompare (fsLit "neChar#") charPrimTy
-primOpInfo CharLtOp = mkCompare (fsLit "ltChar#") charPrimTy
-primOpInfo CharLeOp = mkCompare (fsLit "leChar#") charPrimTy
+primOpInfo CharGtOp = mkCompare (fsLit "gtCharI#") charPrimTy
+primOpInfo CharGeOp = mkCompare (fsLit "geCharI#") charPrimTy
+primOpInfo CharEqOp = mkCompare (fsLit "eqCharI#") charPrimTy
+primOpInfo CharNeOp = mkCompare (fsLit "neCharI#") charPrimTy
+primOpInfo CharLtOp = mkCompare (fsLit "ltCharI#") charPrimTy
+primOpInfo CharLeOp = mkCompare (fsLit "leCharI#") charPrimTy
 primOpInfo OrdOp = mkGenPrimOp (fsLit "ord#")  [] [charPrimTy] (intPrimTy)
 primOpInfo IntAddOp = mkDyadic (fsLit "+#") intPrimTy
 primOpInfo IntSubOp = mkDyadic (fsLit "-#") intPrimTy
@@ -19,12 +19,12 @@ primOpInfo NotIOp = mkMonadic (fsLit "notI#") intPrimTy
 primOpInfo IntNegOp = mkMonadic (fsLit "negateInt#") intPrimTy
 primOpInfo IntAddCOp = mkGenPrimOp (fsLit "addIntC#")  [] [intPrimTy, intPrimTy] ((mkTupleTy UnboxedTuple [intPrimTy, intPrimTy]))
 primOpInfo IntSubCOp = mkGenPrimOp (fsLit "subIntC#")  [] [intPrimTy, intPrimTy] ((mkTupleTy UnboxedTuple [intPrimTy, intPrimTy]))
-primOpInfo IntGtOp = mkCompare (fsLit ">#") intPrimTy
-primOpInfo IntGeOp = mkCompare (fsLit ">=#") intPrimTy
-primOpInfo IntEqOp = mkCompare (fsLit "==#") intPrimTy
-primOpInfo IntNeOp = mkCompare (fsLit "/=#") intPrimTy
-primOpInfo IntLtOp = mkCompare (fsLit "<#") intPrimTy
-primOpInfo IntLeOp = mkCompare (fsLit "<=#") intPrimTy
+primOpInfo IntGtOp = mkCompare (fsLit ">$#") intPrimTy
+primOpInfo IntGeOp = mkCompare (fsLit ">=$#") intPrimTy
+primOpInfo IntEqOp = mkCompare (fsLit "==$#") intPrimTy
+primOpInfo IntNeOp = mkCompare (fsLit "/=$#") intPrimTy
+primOpInfo IntLtOp = mkCompare (fsLit "<$#") intPrimTy
+primOpInfo IntLeOp = mkCompare (fsLit "<=$#") intPrimTy
 primOpInfo ChrOp = mkGenPrimOp (fsLit "chr#")  [] [intPrimTy] (charPrimTy)
 primOpInfo Int2WordOp = mkGenPrimOp (fsLit "int2Word#")  [] [intPrimTy] (wordPrimTy)
 primOpInfo Int2FloatOp = mkGenPrimOp (fsLit "int2Float#")  [] [intPrimTy] (floatPrimTy)
@@ -50,12 +50,12 @@ primOpInfo NotOp = mkMonadic (fsLit "not#") wordPrimTy
 primOpInfo SllOp = mkGenPrimOp (fsLit "uncheckedShiftL#")  [] [wordPrimTy, intPrimTy] (wordPrimTy)
 primOpInfo SrlOp = mkGenPrimOp (fsLit "uncheckedShiftRL#")  [] [wordPrimTy, intPrimTy] (wordPrimTy)
 primOpInfo Word2IntOp = mkGenPrimOp (fsLit "word2Int#")  [] [wordPrimTy] (intPrimTy)
-primOpInfo WordGtOp = mkCompare (fsLit "gtWord#") wordPrimTy
-primOpInfo WordGeOp = mkCompare (fsLit "geWord#") wordPrimTy
-primOpInfo WordEqOp = mkCompare (fsLit "eqWord#") wordPrimTy
-primOpInfo WordNeOp = mkCompare (fsLit "neWord#") wordPrimTy
-primOpInfo WordLtOp = mkCompare (fsLit "ltWord#") wordPrimTy
-primOpInfo WordLeOp = mkCompare (fsLit "leWord#") wordPrimTy
+primOpInfo WordGtOp = mkCompare (fsLit "gtWordI#") wordPrimTy
+primOpInfo WordGeOp = mkCompare (fsLit "geWordI#") wordPrimTy
+primOpInfo WordEqOp = mkCompare (fsLit "eqWordI#") wordPrimTy
+primOpInfo WordNeOp = mkCompare (fsLit "neWordI#") wordPrimTy
+primOpInfo WordLtOp = mkCompare (fsLit "ltWordI#") wordPrimTy
+primOpInfo WordLeOp = mkCompare (fsLit "leWordI#") wordPrimTy
 primOpInfo PopCnt8Op = mkMonadic (fsLit "popCnt8#") wordPrimTy
 primOpInfo PopCnt16Op = mkMonadic (fsLit "popCnt16#") wordPrimTy
 primOpInfo PopCnt32Op = mkMonadic (fsLit "popCnt32#") wordPrimTy
@@ -71,12 +71,12 @@ primOpInfo Narrow32IntOp = mkMonadic (fsLit "narrow32Int#") intPrimTy
 primOpInfo Narrow8WordOp = mkMonadic (fsLit "narrow8Word#") wordPrimTy
 primOpInfo Narrow16WordOp = mkMonadic (fsLit "narrow16Word#") wordPrimTy
 primOpInfo Narrow32WordOp = mkMonadic (fsLit "narrow32Word#") wordPrimTy
-primOpInfo DoubleGtOp = mkCompare (fsLit ">##") doublePrimTy
-primOpInfo DoubleGeOp = mkCompare (fsLit ">=##") doublePrimTy
-primOpInfo DoubleEqOp = mkCompare (fsLit "==##") doublePrimTy
-primOpInfo DoubleNeOp = mkCompare (fsLit "/=##") doublePrimTy
-primOpInfo DoubleLtOp = mkCompare (fsLit "<##") doublePrimTy
-primOpInfo DoubleLeOp = mkCompare (fsLit "<=##") doublePrimTy
+primOpInfo DoubleGtOp = mkCompare (fsLit ">$##") doublePrimTy
+primOpInfo DoubleGeOp = mkCompare (fsLit ">=$##") doublePrimTy
+primOpInfo DoubleEqOp = mkCompare (fsLit "==$##") doublePrimTy
+primOpInfo DoubleNeOp = mkCompare (fsLit "/=$##") doublePrimTy
+primOpInfo DoubleLtOp = mkCompare (fsLit "<$##") doublePrimTy
+primOpInfo DoubleLeOp = mkCompare (fsLit "<=$##") doublePrimTy
 primOpInfo DoubleAddOp = mkDyadic (fsLit "+##") doublePrimTy
 primOpInfo DoubleSubOp = mkDyadic (fsLit "-##") doublePrimTy
 primOpInfo DoubleMulOp = mkDyadic (fsLit "*##") doublePrimTy
@@ -98,12 +98,12 @@ primOpInfo DoubleCoshOp = mkMonadic (fsLit "coshDouble#") doublePrimTy
 primOpInfo DoubleTanhOp = mkMonadic (fsLit "tanhDouble#") doublePrimTy
 primOpInfo DoublePowerOp = mkDyadic (fsLit "**##") doublePrimTy
 primOpInfo DoubleDecode_2IntOp = mkGenPrimOp (fsLit "decodeDouble_2Int#")  [] [doublePrimTy] ((mkTupleTy UnboxedTuple [intPrimTy, wordPrimTy, wordPrimTy, intPrimTy]))
-primOpInfo FloatGtOp = mkCompare (fsLit "gtFloat#") floatPrimTy
-primOpInfo FloatGeOp = mkCompare (fsLit "geFloat#") floatPrimTy
-primOpInfo FloatEqOp = mkCompare (fsLit "eqFloat#") floatPrimTy
-primOpInfo FloatNeOp = mkCompare (fsLit "neFloat#") floatPrimTy
-primOpInfo FloatLtOp = mkCompare (fsLit "ltFloat#") floatPrimTy
-primOpInfo FloatLeOp = mkCompare (fsLit "leFloat#") floatPrimTy
+primOpInfo FloatGtOp = mkCompare (fsLit "gtFloatI#") floatPrimTy
+primOpInfo FloatGeOp = mkCompare (fsLit "geFloatI#") floatPrimTy
+primOpInfo FloatEqOp = mkCompare (fsLit "eqFloatI#") floatPrimTy
+primOpInfo FloatNeOp = mkCompare (fsLit "neFloatI#") floatPrimTy
+primOpInfo FloatLtOp = mkCompare (fsLit "ltFloatI#") floatPrimTy
+primOpInfo FloatLeOp = mkCompare (fsLit "leFloatI#") floatPrimTy
 primOpInfo FloatAddOp = mkDyadic (fsLit "plusFloat#") floatPrimTy
 primOpInfo FloatSubOp = mkDyadic (fsLit "minusFloat#") floatPrimTy
 primOpInfo FloatMulOp = mkDyadic (fsLit "timesFloat#") floatPrimTy
@@ -126,7 +126,7 @@ primOpInfo FloatPowerOp = mkDyadic (fsLit "powerFloat#") floatPrimTy
 primOpInfo Float2DoubleOp = mkGenPrimOp (fsLit "float2Double#")  [] [floatPrimTy] (doublePrimTy)
 primOpInfo FloatDecode_IntOp = mkGenPrimOp (fsLit "decodeFloat_Int#")  [] [floatPrimTy] ((mkTupleTy UnboxedTuple [intPrimTy, intPrimTy]))
 primOpInfo NewArrayOp = mkGenPrimOp (fsLit "newArray#")  [alphaTyVar, deltaTyVar] [intPrimTy, alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, mkMutableArrayPrimTy deltaTy alphaTy]))
-primOpInfo SameMutableArrayOp = mkGenPrimOp (fsLit "sameMutableArray#")  [deltaTyVar, alphaTyVar] [mkMutableArrayPrimTy deltaTy alphaTy, mkMutableArrayPrimTy deltaTy alphaTy] (boolTy)
+primOpInfo SameMutableArrayOp = mkGenPrimOp (fsLit "sameMutableArray#")  [deltaTyVar, alphaTyVar] [mkMutableArrayPrimTy deltaTy alphaTy, mkMutableArrayPrimTy deltaTy alphaTy] (intPrimTy)
 primOpInfo ReadArrayOp = mkGenPrimOp (fsLit "readArray#")  [deltaTyVar, alphaTyVar] [mkMutableArrayPrimTy deltaTy alphaTy, intPrimTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, alphaTy]))
 primOpInfo WriteArrayOp = mkGenPrimOp (fsLit "writeArray#")  [deltaTyVar, alphaTyVar] [mkMutableArrayPrimTy deltaTy alphaTy, intPrimTy, alphaTy, mkStatePrimTy deltaTy] (mkStatePrimTy deltaTy)
 primOpInfo SizeofArrayOp = mkGenPrimOp (fsLit "sizeofArray#")  [alphaTyVar] [mkArrayPrimTy alphaTy] (intPrimTy)
@@ -144,7 +144,7 @@ primOpInfo NewByteArrayOp_Char = mkGenPrimOp (fsLit "newByteArray#")  [deltaTyVa
 primOpInfo NewPinnedByteArrayOp_Char = mkGenPrimOp (fsLit "newPinnedByteArray#")  [deltaTyVar] [intPrimTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, mkMutableByteArrayPrimTy deltaTy]))
 primOpInfo NewAlignedPinnedByteArrayOp_Char = mkGenPrimOp (fsLit "newAlignedPinnedByteArray#")  [deltaTyVar] [intPrimTy, intPrimTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, mkMutableByteArrayPrimTy deltaTy]))
 primOpInfo ByteArrayContents_Char = mkGenPrimOp (fsLit "byteArrayContents#")  [] [byteArrayPrimTy] (addrPrimTy)
-primOpInfo SameMutableByteArrayOp = mkGenPrimOp (fsLit "sameMutableByteArray#")  [deltaTyVar] [mkMutableByteArrayPrimTy deltaTy, mkMutableByteArrayPrimTy deltaTy] (boolTy)
+primOpInfo SameMutableByteArrayOp = mkGenPrimOp (fsLit "sameMutableByteArray#")  [deltaTyVar] [mkMutableByteArrayPrimTy deltaTy, mkMutableByteArrayPrimTy deltaTy] (intPrimTy)
 primOpInfo UnsafeFreezeByteArrayOp = mkGenPrimOp (fsLit "unsafeFreezeByteArray#")  [deltaTyVar] [mkMutableByteArrayPrimTy deltaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, byteArrayPrimTy]))
 primOpInfo SizeofByteArrayOp = mkGenPrimOp (fsLit "sizeofByteArray#")  [] [byteArrayPrimTy] (intPrimTy)
 primOpInfo SizeofMutableByteArrayOp = mkGenPrimOp (fsLit "sizeofMutableByteArray#")  [deltaTyVar] [mkMutableByteArrayPrimTy deltaTy] (intPrimTy)
@@ -200,7 +200,7 @@ primOpInfo CopyByteArrayOp = mkGenPrimOp (fsLit "copyByteArray#")  [deltaTyVar] 
 primOpInfo CopyMutableByteArrayOp = mkGenPrimOp (fsLit "copyMutableByteArray#")  [deltaTyVar] [mkMutableByteArrayPrimTy deltaTy, intPrimTy, mkMutableByteArrayPrimTy deltaTy, intPrimTy, intPrimTy, mkStatePrimTy deltaTy] (mkStatePrimTy deltaTy)
 primOpInfo SetByteArrayOp = mkGenPrimOp (fsLit "setByteArray#")  [deltaTyVar] [mkMutableByteArrayPrimTy deltaTy, intPrimTy, intPrimTy, intPrimTy, mkStatePrimTy deltaTy] (mkStatePrimTy deltaTy)
 primOpInfo NewArrayArrayOp = mkGenPrimOp (fsLit "newArrayArray#")  [deltaTyVar] [intPrimTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, mkMutableArrayArrayPrimTy deltaTy]))
-primOpInfo SameMutableArrayArrayOp = mkGenPrimOp (fsLit "sameMutableArrayArray#")  [deltaTyVar] [mkMutableArrayArrayPrimTy deltaTy, mkMutableArrayArrayPrimTy deltaTy] (boolTy)
+primOpInfo SameMutableArrayArrayOp = mkGenPrimOp (fsLit "sameMutableArrayArray#")  [deltaTyVar] [mkMutableArrayArrayPrimTy deltaTy, mkMutableArrayArrayPrimTy deltaTy] (intPrimTy)
 primOpInfo UnsafeFreezeArrayArrayOp = mkGenPrimOp (fsLit "unsafeFreezeArrayArray#")  [deltaTyVar] [mkMutableArrayArrayPrimTy deltaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, mkArrayArrayPrimTy]))
 primOpInfo SizeofArrayArrayOp = mkGenPrimOp (fsLit "sizeofArrayArray#")  [] [mkArrayArrayPrimTy] (intPrimTy)
 primOpInfo SizeofMutableArrayArrayOp = mkGenPrimOp (fsLit "sizeofMutableArrayArray#")  [deltaTyVar] [mkMutableArrayArrayPrimTy deltaTy] (intPrimTy)
@@ -221,12 +221,12 @@ primOpInfo AddrSubOp = mkGenPrimOp (fsLit "minusAddr#")  [] [addrPrimTy, addrPri
 primOpInfo AddrRemOp = mkGenPrimOp (fsLit "remAddr#")  [] [addrPrimTy, intPrimTy] (intPrimTy)
 primOpInfo Addr2IntOp = mkGenPrimOp (fsLit "addr2Int#")  [] [addrPrimTy] (intPrimTy)
 primOpInfo Int2AddrOp = mkGenPrimOp (fsLit "int2Addr#")  [] [intPrimTy] (addrPrimTy)
-primOpInfo AddrGtOp = mkCompare (fsLit "gtAddr#") addrPrimTy
-primOpInfo AddrGeOp = mkCompare (fsLit "geAddr#") addrPrimTy
-primOpInfo AddrEqOp = mkCompare (fsLit "eqAddr#") addrPrimTy
-primOpInfo AddrNeOp = mkCompare (fsLit "neAddr#") addrPrimTy
-primOpInfo AddrLtOp = mkCompare (fsLit "ltAddr#") addrPrimTy
-primOpInfo AddrLeOp = mkCompare (fsLit "leAddr#") addrPrimTy
+primOpInfo AddrGtOp = mkCompare (fsLit "gtAddrI#") addrPrimTy
+primOpInfo AddrGeOp = mkCompare (fsLit "geAddrI#") addrPrimTy
+primOpInfo AddrEqOp = mkCompare (fsLit "eqAddrI#") addrPrimTy
+primOpInfo AddrNeOp = mkCompare (fsLit "neAddrI#") addrPrimTy
+primOpInfo AddrLtOp = mkCompare (fsLit "ltAddrI#") addrPrimTy
+primOpInfo AddrLeOp = mkCompare (fsLit "leAddrI#") addrPrimTy
 primOpInfo IndexOffAddrOp_Char = mkGenPrimOp (fsLit "indexCharOffAddr#")  [] [addrPrimTy, intPrimTy] (charPrimTy)
 primOpInfo IndexOffAddrOp_WideChar = mkGenPrimOp (fsLit "indexWideCharOffAddr#")  [] [addrPrimTy, intPrimTy] (charPrimTy)
 primOpInfo IndexOffAddrOp_Int = mkGenPrimOp (fsLit "indexIntOffAddr#")  [] [addrPrimTy, intPrimTy] (intPrimTy)
@@ -278,7 +278,7 @@ primOpInfo WriteOffAddrOp_Word64 = mkGenPrimOp (fsLit "writeWord64OffAddr#")  [d
 primOpInfo NewMutVarOp = mkGenPrimOp (fsLit "newMutVar#")  [alphaTyVar, deltaTyVar] [alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, mkMutVarPrimTy deltaTy alphaTy]))
 primOpInfo ReadMutVarOp = mkGenPrimOp (fsLit "readMutVar#")  [deltaTyVar, alphaTyVar] [mkMutVarPrimTy deltaTy alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, alphaTy]))
 primOpInfo WriteMutVarOp = mkGenPrimOp (fsLit "writeMutVar#")  [deltaTyVar, alphaTyVar] [mkMutVarPrimTy deltaTy alphaTy, alphaTy, mkStatePrimTy deltaTy] (mkStatePrimTy deltaTy)
-primOpInfo SameMutVarOp = mkGenPrimOp (fsLit "sameMutVar#")  [deltaTyVar, alphaTyVar] [mkMutVarPrimTy deltaTy alphaTy, mkMutVarPrimTy deltaTy alphaTy] (boolTy)
+primOpInfo SameMutVarOp = mkGenPrimOp (fsLit "sameMutVar#")  [deltaTyVar, alphaTyVar] [mkMutVarPrimTy deltaTy alphaTy, mkMutVarPrimTy deltaTy alphaTy] (intPrimTy)
 primOpInfo AtomicModifyMutVarOp = mkGenPrimOp (fsLit "atomicModifyMutVar#")  [deltaTyVar, alphaTyVar, betaTyVar, gammaTyVar] [mkMutVarPrimTy deltaTy alphaTy, (mkFunTy (alphaTy) (betaTy)), mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, gammaTy]))
 primOpInfo CasMutVarOp = mkGenPrimOp (fsLit "casMutVar#")  [deltaTyVar, alphaTyVar] [mkMutVarPrimTy deltaTy alphaTy, alphaTy, alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, intPrimTy, alphaTy]))
 primOpInfo CatchOp = mkGenPrimOp (fsLit "catch#")  [alphaTyVar, betaTyVar] [(mkFunTy (mkStatePrimTy realWorldTy) ((mkTupleTy UnboxedTuple [mkStatePrimTy realWorldTy, alphaTy]))), (mkFunTy (betaTy) ((mkFunTy (mkStatePrimTy realWorldTy) ((mkTupleTy UnboxedTuple [mkStatePrimTy realWorldTy, alphaTy]))))), mkStatePrimTy realWorldTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy realWorldTy, alphaTy]))
@@ -297,7 +297,7 @@ primOpInfo NewTVarOp = mkGenPrimOp (fsLit "newTVar#")  [alphaTyVar, deltaTyVar] 
 primOpInfo ReadTVarOp = mkGenPrimOp (fsLit "readTVar#")  [deltaTyVar, alphaTyVar] [mkTVarPrimTy deltaTy alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, alphaTy]))
 primOpInfo ReadTVarIOOp = mkGenPrimOp (fsLit "readTVarIO#")  [deltaTyVar, alphaTyVar] [mkTVarPrimTy deltaTy alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, alphaTy]))
 primOpInfo WriteTVarOp = mkGenPrimOp (fsLit "writeTVar#")  [deltaTyVar, alphaTyVar] [mkTVarPrimTy deltaTy alphaTy, alphaTy, mkStatePrimTy deltaTy] (mkStatePrimTy deltaTy)
-primOpInfo SameTVarOp = mkGenPrimOp (fsLit "sameTVar#")  [deltaTyVar, alphaTyVar] [mkTVarPrimTy deltaTy alphaTy, mkTVarPrimTy deltaTy alphaTy] (boolTy)
+primOpInfo SameTVarOp = mkGenPrimOp (fsLit "sameTVar#")  [deltaTyVar, alphaTyVar] [mkTVarPrimTy deltaTy alphaTy, mkTVarPrimTy deltaTy alphaTy] (intPrimTy)
 primOpInfo NewMVarOp = mkGenPrimOp (fsLit "newMVar#")  [deltaTyVar, alphaTyVar] [mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, mkMVarPrimTy deltaTy alphaTy]))
 primOpInfo TakeMVarOp = mkGenPrimOp (fsLit "takeMVar#")  [deltaTyVar, alphaTyVar] [mkMVarPrimTy deltaTy alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, alphaTy]))
 primOpInfo TryTakeMVarOp = mkGenPrimOp (fsLit "tryTakeMVar#")  [deltaTyVar, alphaTyVar] [mkMVarPrimTy deltaTy alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, intPrimTy, alphaTy]))
@@ -305,7 +305,7 @@ primOpInfo PutMVarOp = mkGenPrimOp (fsLit "putMVar#")  [deltaTyVar, alphaTyVar] 
 primOpInfo TryPutMVarOp = mkGenPrimOp (fsLit "tryPutMVar#")  [deltaTyVar, alphaTyVar] [mkMVarPrimTy deltaTy alphaTy, alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, intPrimTy]))
 primOpInfo ReadMVarOp = mkGenPrimOp (fsLit "readMVar#")  [deltaTyVar, alphaTyVar] [mkMVarPrimTy deltaTy alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, alphaTy]))
 primOpInfo TryReadMVarOp = mkGenPrimOp (fsLit "tryReadMVar#")  [deltaTyVar, alphaTyVar] [mkMVarPrimTy deltaTy alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, intPrimTy, alphaTy]))
-primOpInfo SameMVarOp = mkGenPrimOp (fsLit "sameMVar#")  [deltaTyVar, alphaTyVar] [mkMVarPrimTy deltaTy alphaTy, mkMVarPrimTy deltaTy alphaTy] (boolTy)
+primOpInfo SameMVarOp = mkGenPrimOp (fsLit "sameMVar#")  [deltaTyVar, alphaTyVar] [mkMVarPrimTy deltaTy alphaTy, mkMVarPrimTy deltaTy alphaTy] (intPrimTy)
 primOpInfo IsEmptyMVarOp = mkGenPrimOp (fsLit "isEmptyMVar#")  [deltaTyVar, alphaTyVar] [mkMVarPrimTy deltaTy alphaTy, mkStatePrimTy deltaTy] ((mkTupleTy UnboxedTuple [mkStatePrimTy deltaTy, intPrimTy]))
 primOpInfo DelayOp = mkGenPrimOp (fsLit "delay#")  [deltaTyVar] [intPrimTy, mkStatePrimTy deltaTy] (mkStatePrimTy deltaTy)
 primOpInfo WaitReadOp = mkGenPrimOp (fsLit "waitRead#")  [deltaTyVar] [intPrimTy, mkStatePrimTy deltaTy] (mkStatePrimTy deltaTy)

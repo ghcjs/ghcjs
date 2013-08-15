@@ -205,6 +205,7 @@ main =
                        , outputFile    = fmap mkGhcjsOutput (outputFile dflags2)
                        , dynOutputFile = fmap mkGhcjsOutput (dynOutputFile dflags2)
                        , outputHi      = fmap mkGhcjsOutput (outputHi dflags2)
+                       , ghcLink       = if oneshot then NoLink else ghcLink dflags2
                        }
           dflags3 <- getSessionDynFlags
           fixNameCache

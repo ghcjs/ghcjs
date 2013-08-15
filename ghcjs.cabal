@@ -89,7 +89,9 @@ Library
                    array          >= 0.4      && < 0.5,
                    binary         >= 0.7      && < 0.8,
                    text-binary    >= 0.1      && < 0.2,
-                   unordered-containers >= 0.2 && < 0.3
+                   unordered-containers >= 0.2 && < 0.3,
+                   cryptohash     >= 0.9      && < 0.10,
+                   base16-bytestring >= 0.1   && < 0.2
     exposed: True
     buildable: True
     hs-source-dirs: src
