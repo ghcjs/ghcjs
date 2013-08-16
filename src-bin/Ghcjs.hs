@@ -6,10 +6,7 @@
 
 module Main where
 
-import           Paths_ghcjs
-import           Data.Typeable
 import           Config (cProjectVersion, cDYNAMIC_GHC_PROGRAMS)
-import qualified GHC.Paths
 import           GHC
 import           Hooks
 import           HscMain
@@ -21,21 +18,20 @@ import           DynFlags
 import           Platform
 import           ErrUtils (fatalErrorMsg'')
 import           CorePrep (corePrepPgm)
-import           DriverPhases (HscSource (HsBootFile), Phase(..),
+import           DriverPhases (HscSource, Phase(..),
                                isHaskellSrcFilename, isHaskellUserSrcFilename,
                                isSourceFilename, startPhase)
 import           DriverPipeline
 import           DriverMkDepend ( doMkDependHS )
 import           DsMeta (templateHaskellNames)
 import           Exception
-import           HscTypes (ModGuts, CgGuts(..), HscEnv(..), Dependencies(..),
-                           NameCache (..), isBootSummary, mkSrcErr, ModGuts(..),
-                           SourceError, FindResult(..), SourceModified(..),
+import           HscTypes (CgGuts(..), HscEnv(..), Dependencies(..),
+                           NameCache (..), isBootSummary,
+                           FindResult(..),
                            mkSOName, mkHsSOName )
 import           IfaceEnv (initNameCache)
 import           LoadIface
 import           Outputable (showPpr)
-import           Packages (initPackages)
 import           Panic
 import           Module
 import           PrelInfo (wiredInThings)
@@ -89,6 +85,7 @@ import           System.Process (rawSystem)
 
 import           Compiler.Info
 import           Compiler.Variants
+import           Compiler.Hooks
 
 import qualified Gen2.Utils     as Gen2
 import qualified Gen2.Generator as Gen2
@@ -99,6 +96,9 @@ import qualified Gen2.Foreign   as Gen2
 import qualified Gen2.Object    as Object
 
 import           Finder (findImportedModule, cannotFindInterface)
+
+
+import Debug.Trace
 
 data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
                                    , gsNoNative          :: Bool
@@ -182,12 +182,14 @@ main =
         defaultFlushOut
         $ runGhc (mbMinusB `mplus` Just libDir) $
        do sdflags0 <- getSessionDynFlags
+          trace ("mbMinusB, libDdir = " ++ show (mbMinusB, libDir)) $ return ()
           let sdflags1 = sdflags0 { verbosity = 1 }
           (dflags0, fileish_args, _) <- parseDynamicFlags sdflags1 $ ignoreUnsupported argsS
           let normal_fileish_paths    = map (normalise . unLoc) fileish_args
               (srcs, objs0)           = partition_args normal_fileish_paths [] []
               (js_objs, objs)         = partition isJsFile objs0
               (hs_srcs, non_hs_srcs)  = partition haskellish srcs
+          traceShow (srcs, objs0) $ return ()
           dflags1 <- liftIO $
                         if booting
                           then return (gopt_set dflags0 Opt_ForceRecomp)
@@ -197,16 +199,9 @@ main =
           (dflags2, pkgs) <- liftIO (initPackages dflags1)
           liftIO (doPackageFallback pkgs args1)
           base <- liftIO ghcjsDataDir
+          trace ("ghcjsDataDir = " ++ base) $ return ()
           _ <- setSessionDynFlags $ setGhcjsPlatform settings js_objs base $ updateWays $ addWay' (WayCustom "js") $
-               dflags2 { objectSuf     = mkGhcjsSuf (objectSuf dflags2)
-                       , dynObjectSuf  = mkGhcjsSuf (dynObjectSuf dflags2)
-                       , hiSuf         = mkGhcjsSuf (hiSuf dflags2)
-                       , dynHiSuf      = mkGhcjsSuf (dynHiSuf dflags2)
-                       , outputFile    = fmap mkGhcjsOutput (outputFile dflags2)
-                       , dynOutputFile = fmap mkGhcjsOutput (dynOutputFile dflags2)
-                       , outputHi      = fmap mkGhcjsOutput (outputHi dflags2)
-                       , ghcLink       = if oneshot then NoLink else ghcLink dflags2
-                       }
+               setGhcjsSuffixes oneshot dflags2
           dflags3 <- getSessionDynFlags
           fixNameCache
           if oneshot || null hs_srcs
@@ -385,16 +380,9 @@ setGhcjsPlatform :: GhcjsSettings -> [FilePath] -> FilePath -> DynFlags -> DynFl
 setGhcjsPlatform set js_objs basePath df
   = addPlatformDefines basePath
       $ setDfOpts
-      $ addLogActionFilter
-      $ Gen2.installForeignHooks True
-      $ insertHookDfs LinkDynLibHook    ghcjsLinkDynLib
-      $ insertHookDfs LinkBinaryHook   (ghcjsLinkBinary set js_objs)
-      $ insertHookDfs LocateLibHook     ghcjsLocateLib
-      $ insertHookDfs PackageHsLibsHook ghcjsPackageHsLibs
-      $ installDriverHooks set
+      $ setGhcjsHooks (gsDebug set) js_objs
       $ df { settings = settings' }
   where
-    insertHookDfs h v d = d { hooks = insertHook h v (hooks d) }
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
                               , sPlatformConstants = ghcjsPlatformConstants
                               }
@@ -410,6 +398,7 @@ setGhcjsPlatform set js_objs basePath df
        , pc_CLONG_LONG_SIZE = 8
        , pc_WORDS_BIGENDIAN = False
        }
+
 
 addLogActionFilter :: DynFlags -> DynFlags
 addLogActionFilter df = df { log_action = act }
@@ -440,151 +429,6 @@ installNativeHooks settings df =
     where hooks' = insertHook PackageHsLibsHook ghcjsPackageHsLibs
                  $ insertHook LocateLibHook ghcjsLocateLib
                  $ hooks df
-
-ghcjsLinkBinary :: GhcjsSettings -> [FilePath] -> DynFlags
-                -> [FilePath] -> [PackageId] -> IO ()
-ghcjsLinkBinary settings jsFiles dflags objs dep_pkgs =
-  void $ variantLink gen2Variant dflags (gsDebug settings) exe [] deps objs jsFiles isRoot
-    where
-      isRoot _ = True
-      deps     = map (\pkg -> (pkg, packageLibPaths pkg)) dep_pkgs'
-      exe      = exeFileName dflags
-      pidMap   = pkgIdMap (pkgState dflags)
-      packageLibPaths :: PackageId -> [FilePath]
-      packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
-      -- make sure we link ghcjs-prim even when it's not a dependency
-      dep_pkgs' | any isGhcjsPrimPackage dep_pkgs = dep_pkgs
-                | otherwise                       = ghcjsPrimPackage dflags : dep_pkgs
-      isGhcjsPrimPackage pkgId = "ghcjs-prim-" `isPrefixOf` packageIdString pkgId
-
-
-ghcjsPrimPackage :: DynFlags -> PackageId
-ghcjsPrimPackage dflags =
-  case prims of
-    (x:_) -> mkPackageId x
-    _     -> error "Package `ghcjs-prim' is required to link executables" 
-  where
-    prims = reverse . sort $ filter ((PackageName "ghcjs-prim"==) . pkgName) pkgIds
-    pkgIds = map sourcePackageId . eltsUFM . pkgIdMap . pkgState $ dflags
-
-exeFileName :: DynFlags -> FilePath
-exeFileName dflags
-  | Just s <- outputFile dflags =
-      -- unmunge the extension
-      let s' = dropPrefix "js_" (drop 1 $ takeExtension s)
-      in if null s'
-           then dropExtension s <.> "jsexe"
-           else dropExtension s <.> s'
-  | otherwise =
-      if platformOS (targetPlatform dflags) == OSMinGW32
-           then "main.jsexe"
-           else "a.jsexe"
-  where
-    dropPrefix prefix xs
-      | prefix `isPrefixOf` xs = drop (length prefix) xs
-      | otherwise              = xs
-
--- we don't have dynamic libraries:
-ghcjsLinkDynLib :: DynFlags -> [FilePath] -> [PackageId] -> IO ()
-ghcjsLinkDynLib dflags o_files dep_packages = return ()
-
--- GHC API gets libs like libHSpackagename-ghcversion
--- change that to libHSpackagename-ghcjsversion_ghcversion
--- We need to do that in two places:
---    - Arguments for the system linker
---    - GHCi dynamic linker
-ghcDynLibVersionTag :: String
-ghcDynLibVersionTag   = "-ghc" ++ cProjectVersion
-
-ghcjsDynLibVersionTag :: String
-ghcjsDynLibVersionTag = "-ghcjs" ++ getCompilerVersion
-                        ++ "_ghc" ++ cProjectVersion
-
-ghcjsPackageHsLibs :: DynFlags -> PackageConfig -> [String]
-ghcjsPackageHsLibs dflags p = map fixLib (packageHsLibs' dflags p)
-  where
-    fixLib lib | "HS" `isPrefixOf` lib &&
-                 ghcDynLibVersionTag `isInfixOf` lib =
-      replace ghcDynLibVersionTag ghcjsDynLibVersionTag lib
-               | otherwise = lib
-
-ghcjsLocateLib :: DynFlags -> Bool -> [FilePath] -> String -> IO LibrarySpec
-ghcjsLocateLib dflags is_hs dirs lib
-  | not is_hs
-    -- For non-Haskell libraries (e.g. gmp, iconv):
-    --   first look in library-dirs for a dynamic library (libfoo.so)
-    --   then  look in library-dirs for a static library (libfoo.a)
-    --   then  try "gcc --print-file-name" to search gcc's search path
-    --       for a dynamic library (#5289)
-    --   otherwise, assume loadDLL can find it
-    --
-  = findDll `orElse` findArchive `orElse` tryGcc `orElse` assumeDll
-
-  | not cDYNAMIC_GHC_PROGRAMS
-    -- When the GHC package was not compiled as dynamic library
-    -- (=DYNAMIC not set), we search for .o libraries or, if they
-    -- don't exist, .a libraries.
-  = findObject `orElse` findArchive `orElse` assumeDll
-
-  | otherwise
-    -- When the GHC package was compiled as dynamic library (=DYNAMIC set),
-    -- we search for .so libraries first.
-  = findHSDll `orElse` findDynObject `orElse` assumeDll
-   where
-     mk_obj_path      dir = dir </> (lib <.> "o")
-     mk_dyn_obj_path  dir = dir </> (lib <.> "dyn_o")
-     mk_arch_path     dir = dir </> ("lib" ++ lib <.> "a")
-
-     hs_dyn_lib_name = lib ++ ghcjsDynLibVersionTag
-     mk_hs_dyn_lib_path dir = dir </> mkHsSOName platform hs_dyn_lib_name
-
-     so_name = mkSOName platform lib
-     mk_dyn_lib_path dir = dir </> so_name
-
-     findObject     = liftM (fmap Object)  $ findFile mk_obj_path        dirs
-     findDynObject  = liftM (fmap Object)  $ findFile mk_dyn_obj_path    dirs
-     findArchive    = liftM (fmap Archive) $ findFile mk_arch_path       dirs
-     findHSDll      = liftM (fmap DLLPath) $ findFile mk_hs_dyn_lib_path dirs
-     findDll        = liftM (fmap DLLPath) $ findFile mk_dyn_lib_path    dirs
-     tryGcc         = liftM (fmap DLLPath) $ searchForLibUsingGcc dflags so_name dirs
-
-     assumeDll   = return (DLL lib)
-     infixr `orElse`
-     f `orElse` g = do m <- f
-                       case m of
-                           Just x -> return x
-                           Nothing -> g
-
-     platform = targetPlatform dflags
-
-findFile :: (FilePath -> FilePath)      -- Maps a directory path to a file path
-         -> [FilePath]                  -- Directories to look in
-         -> IO (Maybe FilePath)         -- The first file path to match
-findFile _            [] = return Nothing
-findFile mk_file_path (dir : dirs)
-  = do let file_path = mk_file_path dir
-       b <- doesFileExist file_path
-       if b then return (Just file_path)
-            else findFile mk_file_path dirs
-
-searchForLibUsingGcc :: DynFlags -> String -> [FilePath] -> IO (Maybe FilePath)
-searchForLibUsingGcc dflags so dirs = do
-   str <- SysTools.askCc dflags (map (SysTools.FileOption "-L") dirs
-                          ++ [SysTools.Option "--print-file-name", SysTools.Option so])
-   let file = case lines str of
-                []  -> ""
-                l:_ -> l
-   if (file == so)
-      then return Nothing
-      else return (Just file)
-
-replace :: Eq a => [a] -> [a] -> [a] -> [a]
-replace from to xs = go xs
-  where
-    go [] = []
-    go xxs@(x:xs)
-      | from `isPrefixOf` xxs = to ++ go (drop (length from) xxs)
-      | otherwise = x : go xs
 
 runGhcjsPhase :: GhcjsSettings
               -> PhasePlus -> FilePath -> DynFlags
@@ -774,14 +618,9 @@ printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
 
 mkGhcjsOutput :: String -> String
 mkGhcjsOutput "" = ""
-mkGhcjsOutput file
-  | ext == ".hi"     = replaceExtension file ".js_hi"
-  | ext == ".o"      = replaceExtension file ".js_o"
-  | ext == ".dyn_hi" = replaceExtension file ".js_dyn_hi"
-  | ext == ".dyn_o"  = replaceExtension file ".js_dyn_o"
-  | otherwise        = replaceExtension file (".js_" ++ drop 1 ext)
+mkGhcjsOutput file = replaceExtension file ('.':mkGhcjsSuf ext)
   where
-    ext = takeExtension file
+    ext = tail $ takeExtension file
 
 mkGhcjsSuf :: String -> String
 mkGhcjsSuf "o"      = "js_o"
@@ -789,6 +628,20 @@ mkGhcjsSuf "hi"     = "js_hi"
 mkGhcjsSuf "dyn_o"  = "js_dyn_o"
 mkGhcjsSuf "dyn_hi" = "js_dyn_hi"
 mkGhcjsSuf xs       = "js_" ++ xs -- is this correct?
+
+setGhcjsSuffixes :: Bool     -- oneshot option, -c
+                 -> DynFlags
+                 -> DynFlags
+setGhcjsSuffixes oneshot df = df
+    { objectSuf     = mkGhcjsSuf (objectSuf df)
+    , dynObjectSuf  = mkGhcjsSuf (dynObjectSuf df)
+    , hiSuf         = mkGhcjsSuf (hiSuf df)
+    , dynHiSuf      = mkGhcjsSuf (dynHiSuf df)
+    , outputFile    = fmap mkGhcjsOutput (outputFile df)
+    , dynOutputFile = fmap mkGhcjsOutput (dynOutputFile df)
+    , outputHi      = fmap mkGhcjsOutput (outputHi df)
+    , ghcLink       = if oneshot then NoLink else ghcLink df
+    }
 
 doFakeNative :: DynFlags -> FilePath -> IO ()
 doFakeNative df base = do
