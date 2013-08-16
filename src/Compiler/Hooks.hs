@@ -25,10 +25,10 @@ import           Compiler.Variants
 import qualified Gen2.Foreign         as Gen2
 
 
-setGhcjsHooks :: Bool   -- ^ Debug
+installGhcjsHooks :: Bool   -- ^ Debug
               -> [FilePath]  -- JS objects
               -> DynFlags -> DynFlags
-setGhcjsHooks debug js_objs =
+installGhcjsHooks debug js_objs =
     Gen2.installForeignHooks True
     . insertHookDfs LinkDynLibHook   ghcjsLinkDynLib
     . insertHookDfs LinkBinaryHook   (ghcjsLinkBinary debug js_objs)
@@ -36,6 +36,14 @@ setGhcjsHooks debug js_objs =
     . insertHookDfs PackageHsLibsHook ghcjsPackageHsLibs
   where
     insertHookDfs h v d = d { hooks = insertHook h v (hooks d) }
+
+
+installNativeHooks :: DynFlags -> DynFlags
+installNativeHooks df =
+  Gen2.installForeignHooks False $ df { hooks = hooks' }
+    where hooks' = insertHook PackageHsLibsHook ghcjsPackageHsLibs
+                 $ insertHook LocateLibHook ghcjsLocateLib
+                 $ hooks df
 
 
 -- we don't have dynamic libraries:

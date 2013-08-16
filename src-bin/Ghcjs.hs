@@ -98,8 +98,6 @@ import qualified Gen2.Object    as Object
 import           Finder (findImportedModule, cannotFindInterface)
 
 
-import Debug.Trace
-
 data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
                                    , gsNoNative          :: Bool
                                    , gsNoJSExecutables   :: Bool
@@ -182,14 +180,12 @@ main =
         defaultFlushOut
         $ runGhc (mbMinusB `mplus` Just libDir) $
        do sdflags0 <- getSessionDynFlags
-          trace ("mbMinusB, libDdir = " ++ show (mbMinusB, libDir)) $ return ()
           let sdflags1 = sdflags0 { verbosity = 1 }
           (dflags0, fileish_args, _) <- parseDynamicFlags sdflags1 $ ignoreUnsupported argsS
           let normal_fileish_paths    = map (normalise . unLoc) fileish_args
               (srcs, objs0)           = partition_args normal_fileish_paths [] []
               (js_objs, objs)         = partition isJsFile objs0
               (hs_srcs, non_hs_srcs)  = partition haskellish srcs
-          traceShow (srcs, objs0) $ return ()
           dflags1 <- liftIO $
                         if booting
                           then return (gopt_set dflags0 Opt_ForceRecomp)
@@ -199,7 +195,6 @@ main =
           (dflags2, pkgs) <- liftIO (initPackages dflags1)
           liftIO (doPackageFallback pkgs args1)
           base <- liftIO ghcjsDataDir
-          trace ("ghcjsDataDir = " ++ base) $ return ()
           _ <- setSessionDynFlags $ setGhcjsPlatform settings js_objs base $ updateWays $ addWay' (WayCustom "js") $
                setGhcjsSuffixes oneshot dflags2
           dflags3 <- getSessionDynFlags
@@ -380,7 +375,7 @@ setGhcjsPlatform :: GhcjsSettings -> [FilePath] -> FilePath -> DynFlags -> DynFl
 setGhcjsPlatform set js_objs basePath df
   = addPlatformDefines basePath
       $ setDfOpts
-      $ setGhcjsHooks (gsDebug set) js_objs
+      $ installGhcjsHooks (gsDebug set) js_objs
       $ df { settings = settings' }
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
@@ -398,7 +393,6 @@ setGhcjsPlatform set js_objs basePath df
        , pc_CLONG_LONG_SIZE = 8
        , pc_WORDS_BIGENDIAN = False
        }
-
 
 addLogActionFilter :: DynFlags -> DynFlags
 addLogActionFilter df = df { log_action = act }
@@ -421,14 +415,6 @@ installDriverHooks settings df = df { hooks = hooks' }
   where hooks' = insertHook GhcPrimIfaceHook Gen2.ghcjsPrimIface
                $ insertHook RunPhaseHook (runGhcjsPhase settings)
                $ hooks df
-
-
-installNativeHooks :: GhcjsSettings -> DynFlags -> DynFlags
-installNativeHooks settings df =
-  Gen2.installForeignHooks False $ df { hooks = hooks' }
-    where hooks' = insertHook PackageHsLibsHook ghcjsPackageHsLibs
-                 $ insertHook LocateLibHook ghcjsLocateLib
-                 $ hooks df
 
 runGhcjsPhase :: GhcjsSettings
               -> PhasePlus -> FilePath -> DynFlags
@@ -553,7 +539,7 @@ generateNative settings oneshot argsS args1 mbMinusB =
                 (js_objs, objs)        = partition isJsFile objs0
                 (hs_srcs, non_hs_srcs) = partition haskellish srcs
                 oneshot'               = oneshot || null hs_srcs
-                dflags3 = installNativeHooks settings $
+                dflags3 = installNativeHooks $
                    dflags2 { ldInputs = map (FileOption "") objs ++ ldInputs dflags2 }
             if gsNativeExecutables settings || ghcLink dflags3 /= LinkBinary
               then setSessionDynFlags dflags3
