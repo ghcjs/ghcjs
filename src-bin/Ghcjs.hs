@@ -531,7 +531,7 @@ mkGhcjsOutput :: String -> String
 mkGhcjsOutput "" = ""
 mkGhcjsOutput file = replaceExtension file ('.':mkGhcjsSuf ext)
   where
-    ext = tail $ takeExtension file
+    ext = drop 1 $ takeExtension file
 
 mkGhcjsSuf :: String -> String
 mkGhcjsSuf "o"      = "js_o"
