@@ -92,24 +92,6 @@ ghcjsPrimPackage dflags =
     prims = reverse . sort $ filter ((PackageName "ghcjs-prim"==) . pkgName) pkgIds
     pkgIds = map sourcePackageId . eltsUFM . pkgIdMap . pkgState $ dflags
 
-exeFileName :: DynFlags -> FilePath
-exeFileName dflags
-  | Just s <- outputFile dflags =
-      -- unmunge the extension
-      let s' = dropPrefix "js_" (drop 1 $ takeExtension s)
-      in if null s'
-           then dropExtension s <.> "jsexe"
-           else dropExtension s <.> s'
-  | otherwise =
-      if platformOS (targetPlatform dflags) == OSMinGW32
-           then "main.jsexe"
-           else "a.jsexe"
-  where
-    dropPrefix prefix xs
-      | prefix `isPrefixOf` xs = drop (length prefix) xs
-      | otherwise              = xs
-
-
 ghcjsLocateLib :: DynFlags -> Bool -> [FilePath] -> String -> IO LibrarySpec
 ghcjsLocateLib dflags is_hs dirs lib
   | not is_hs

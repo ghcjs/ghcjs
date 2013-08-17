@@ -451,45 +451,44 @@ runGhcSession mbMinusB a = do
 generateNative :: GhcjsSettings -> Bool -> [Located String] -> [String] -> Maybe String -> IO ()
 generateNative settings oneshot argsS args1 mbMinusB =
   runGhcSession mbMinusB $ do
-       do   sdflags0 <- getSessionDynFlags
-            let sdflags1 = sdflags0 { verbosity = 1 }
-                oneshot = "-c" `elem` args1
-            (dflags0, fileish_args, _) <- parseDynamicFlags sdflags1 (ignoreUnsupported argsS)
-            dflags1 <- liftIO $
-                          if isJust mbMinusB
-                            then return dflags0
-                            else addPkgConf dflags0
-            (dflags2, _) <- liftIO (initPackages dflags1)
-            let normal_fileish_paths   = map (normalise . unLoc) fileish_args
-                (srcs, objs0)          = partition_args normal_fileish_paths [] []
-                (js_objs, objs)        = partition isJsFile objs0
-                (hs_srcs, non_hs_srcs) = partition haskellish srcs
-                oneshot'               = oneshot || null hs_srcs
-                dflags3 = installNativeHooks $
-                   dflags2 { ldInputs = map (FileOption "") objs ++ ldInputs dflags2 }
-            if gsNativeExecutables settings || ghcLink dflags3 /= LinkBinary
-              then setSessionDynFlags dflags3
-              else setSessionDynFlags $ dflags3 { ghcLink = NoLink
-                                                , outputFile = Nothing
-                                                }
-            dfs <- getSessionDynFlags
-            liftIO (writeIORef (canGenerateDynamicToo dfs) True)
-            liftIO (Gen2.compilationProgressMsg dfs "generating native")
-            if oneshot'
-              then sourceErrorHandler $ do
-                setSessionDynFlags $ dfs { ghcMode = OneShot }
-                env <- getSession
-                liftIO $ oneShot env StopLn srcs
-              else sourceErrorHandler $ do
-                env <- getSession
-                o_files <- mapM (\x -> liftIO $ compileFile env StopLn x) non_hs_srcs
-                dflags4 <- GHC.getSessionDynFlags
-                GHC.setSessionDynFlags $
-                   dflags4 { ldInputs = map (FileOption "") o_files ++ ldInputs dflags4 }
-                targets <- mapM (uncurry guessTarget) hs_srcs
-                setTargets targets
-                success <- load LoadAllTargets
-                when (failed success) (throw (ExitFailure 1))
+      sdflags0 <- getSessionDynFlags
+      let sdflags1 = sdflags0 { verbosity = 1 }
+      (dflags0, fileish_args, _) <- parseDynamicFlags sdflags1 (ignoreUnsupported argsS)
+      dflags1 <- liftIO $
+                 if isJust mbMinusB
+                 then return dflags0
+                 else addPkgConf dflags0
+      (dflags2, _) <- liftIO (initPackages dflags1)
+      let normal_fileish_paths   = map (normalise . unLoc) fileish_args
+          (srcs, objs0)          = partition_args normal_fileish_paths [] []
+          (js_objs, objs)        = partition isJsFile objs0
+          (hs_srcs, non_hs_srcs) = partition haskellish srcs
+          oneshot'               = oneshot || null hs_srcs
+          dflags3 = installNativeHooks $
+            dflags2 { ldInputs = map (FileOption "") objs ++ ldInputs dflags2 }
+      if gsNativeExecutables settings || ghcLink dflags3 /= LinkBinary
+          then setSessionDynFlags dflags3
+          else setSessionDynFlags $ dflags3 { ghcLink = NoLink
+                                            , outputFile = Nothing
+                                            }
+      dfs <- getSessionDynFlags
+      liftIO (writeIORef (canGenerateDynamicToo dfs) True)
+      liftIO (Gen2.compilationProgressMsg dfs "generating native")
+      if oneshot'
+          then sourceErrorHandler $ do
+            setSessionDynFlags $ dfs { ghcMode = OneShot }
+            env <- getSession
+            liftIO $ oneShot env StopLn srcs
+          else sourceErrorHandler $ do
+            env <- getSession
+            o_files <- mapM (\x -> liftIO $ compileFile env StopLn x) non_hs_srcs
+            dflags4 <- GHC.getSessionDynFlags
+            GHC.setSessionDynFlags $
+                dflags4 { ldInputs = map (FileOption "") o_files ++ ldInputs dflags4 }
+            targets <- mapM (uncurry guessTarget) hs_srcs
+            setTargets targets
+            success <- load LoadAllTargets
+            when (failed success) (throw (ExitFailure 1))
 
 -- replace primops in the name cache so that we get our correctly typed primops
 fixNameCache :: GhcMonad m => m ()
