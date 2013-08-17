@@ -1,33 +1,46 @@
-module Compiler.Hooks where
+{-# LANGUAGE OverloadedStrings #-}
+module Compiler.GhcjsHooks where
 
 import           Config               (cDYNAMIC_GHC_PROGRAMS, cProjectVersion)
+import           CoreToStg (coreToStg)
+import           CorePrep (corePrepPgm)
 import           Distribution.Package (PackageName (..))
 import           DriverPipeline
+import           DriverPhases
 import           DynFlags
 import           GHC
+import           GhcMonad
 import           Hooks
-import           HscTypes             (mkHsSOName, mkSOName)
+import           HscTypes             (mkHsSOName, mkSOName, CgGuts(..), HscEnv(..))
+import           HscMain              (HscStatus(..))
 import           Linker               (LibrarySpec (..), LocateLibHook (..))
+import           LoadIface
 import           Module
+import           Panic
 import           Packages
 import           Platform
-import           SysTools             (LinkDynLibHook (..))
+import           SysTools             (LinkDynLibHook (..), touch)
 import qualified SysTools
+import           SimplStg             (stg2stg)
 import           UniqFM               (eltsUFM)
 
 import           Control.Monad
+import qualified Data.ByteString      as B
 import           Data.List            (isInfixOf, isPrefixOf, sort)
-import           System.Directory     (doesFileExist)
+import           System.Directory     (doesFileExist, copyFile,
+                                       createDirectoryIfMissing)
 import           System.FilePath
 
 import           Compiler.Info
 import           Compiler.Variants
+import           Compiler.Util
+import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.Foreign         as Gen2
 
 
-installGhcjsHooks :: Bool   -- ^ Debug
-              -> [FilePath]  -- JS objects
-              -> DynFlags -> DynFlags
+installGhcjsHooks :: Bool        -- ^ Debug
+                  -> [FilePath]  -- JS objects
+                  -> DynFlags -> DynFlags
 installGhcjsHooks debug js_objs =
     Gen2.installForeignHooks True
     . insertHookDfs LinkDynLibHook   ghcjsLinkDynLib
@@ -146,16 +159,6 @@ ghcjsLocateLib dflags is_hs dirs lib
 
      platform = targetPlatform dflags
 
-findFile :: (FilePath -> FilePath)      -- Maps a directory path to a file path
-         -> [FilePath]                  -- Directories to look in
-         -> IO (Maybe FilePath)         -- The first file path to match
-findFile _            [] = return Nothing
-findFile mk_file_path (dir : dirs)
-  = do let file_path = mk_file_path dir
-       b <- doesFileExist file_path
-       if b then return (Just file_path)
-            else findFile mk_file_path dirs
-
 searchForLibUsingGcc :: DynFlags -> String -> [FilePath] -> IO (Maybe FilePath)
 searchForLibUsingGcc dflags so dirs = do
    str <- SysTools.askCc dflags (map (SysTools.FileOption "-L") dirs
@@ -197,4 +200,108 @@ replace from to xs = go xs
       | from `isPrefixOf` xxs = to ++ go (drop (length from) xxs)
       | otherwise = x : go xs
 
+
+--------------------------------------------------
+-- Driver hooks
+
+installDriverHooks :: Bool -> DynFlags -> DynFlags
+installDriverHooks debug df = df { hooks = hooks' }
+  where hooks' = insertHook GhcPrimIfaceHook Gen2.ghcjsPrimIface
+               $ insertHook RunPhaseHook (runGhcjsPhase debug)
+               $ hooks df
+
+
+runGhcjsPhase :: Bool
+              -> PhasePlus -> FilePath -> DynFlags
+              -> CompPipeline (PhasePlus, FilePath)
+runGhcjsPhase debug (HscOut src_flavour mod_name result) _ dflags = do
+
+        location <- getLocation src_flavour mod_name
+        setModLocation location
+
+        let o_file = ml_obj_file location -- The real object file
+            hsc_lang = hscTarget dflags
+            next_phase = hscPostBackendPhase dflags src_flavour hsc_lang
+
+        case result of
+            HscNotGeneratingCode ->
+                return (RealPhase next_phase,
+                        panic "No output filename from Hsc when no-code")
+            HscUpToDate ->
+                do liftIO $ touchObjectFile dflags o_file
+                   -- The .o file must have a later modification date
+                   -- than the source file (else we wouldn't get Nothing)
+                   -- but we touch it anyway, to keep 'make' happy (we think).
+                   return (RealPhase StopLn, o_file)
+            HscUpdateBoot ->
+                do -- In the case of hs-boot files, generate a dummy .o-boot
+                   -- stamp file for the benefit of Make
+                   liftIO $ touchObjectFile dflags o_file
+                   return (RealPhase next_phase, o_file)
+            HscRecomp cgguts mod_summary
+              -> do output_fn <- phaseOutputFilename next_phase
+
+                    PipeState{hsc_env=hsc_env'} <- getPipeState
+
+                    outputFilename <- liftIO $ ghcjsWriteModule debug hsc_env' cgguts mod_summary output_fn
+
+                    return (RealPhase next_phase, outputFilename)
+-- skip these, but copy the result
+runGhcjsPhase _ (RealPhase ph) input dflags
+  | Just next <- lookup ph skipPhases = do
+    output <- phaseOutputFilename next
+    liftIO (copyFile input output)
+    when (ph == As) (liftIO $ doFakeNative dflags (dropExtension output))
+    return (RealPhase next, output)
+  where
+    skipPhases = [ (CmmCpp, Cmm), (Cmm, As), (As, StopLn) ]
+
+-- otherwise use default
+runGhcjsPhase _ p input dflags = runPhase p input dflags
+
+touchObjectFile :: DynFlags -> FilePath -> IO ()
+touchObjectFile dflags path = do
+  createDirectoryIfMissing True $ takeDirectory path
+  SysTools.touch dflags "Touching object file" path
+
+
+ghcjsWriteModule :: Bool        -- ^ Debug
+                   -> HscEnv      -- ^ Environment in which to compile
+                   -- the module
+                   -> CgGuts      
+                   -> ModSummary   
+                   -> FilePath    -- ^ Output path
+                   -> IO FilePath
+ghcjsWriteModule debug env core mod output = do
+    B.writeFile output =<< ghcjsCompileModule debug env core mod
+    return output
+
+ghcjsCompileModule :: Bool        -- ^ Debug
+                   -> HscEnv      -- ^ Environment in which to compile
+                   -- the module
+                   -> CgGuts      
+                   -> ModSummary   
+                   -> IO B.ByteString
+ghcjsCompileModule debug env core mod 
+  | WayDyn `elem` ways dflags = do
+      return "GHCJS dummy output"
+  | otherwise = do
+      core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
+      stg <- coreToStg dflags (cg_module core) core_binds
+      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
+      let obj = variantRender gen2Variant debug dflags stg' (cg_module core)
+      return obj
+    where
+      dflags = hsc_dflags env
+
+
+doFakeNative :: DynFlags -> FilePath -> IO ()
+doFakeNative df base = do
+  b <- getEnvOpt "GHCJS_FAKE_NATIVE"
+  when b $ do
+    mapM_ backupExt ["hi", "o", "dyn_hi", "dyn_o"]
+    mapM_ touchExt  ["hi", "o", "dyn_hi", "dyn_o"]
+  where
+    backupExt ext = copyNoOverwrite (base ++ ".backup_" ++ ext) (base ++ "." ++ ext)
+    touchExt  ext = touchFile df (base ++ "." ++ ext)
 

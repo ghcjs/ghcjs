@@ -85,7 +85,8 @@ import           System.Process (rawSystem)
 
 import           Compiler.Info
 import           Compiler.Variants
-import           Compiler.Hooks
+import           Compiler.GhcjsHooks
+import           Compiler.Util
 
 import qualified Gen2.Utils     as Gen2
 import qualified Gen2.Generator as Gen2
@@ -323,22 +324,6 @@ fatalMessager str = do
     hPutStrLn stderr (str ++ "\n--- arguments: \n" ++ unwords args ++ "\n---\n")
   exitWith (ExitFailure 1)
 
-ghcjsCompileModule :: GhcjsSettings -> HscEnv -> CgGuts -> ModSummary
-                   -> FilePath -> IO FilePath
-ghcjsCompileModule settings env core mod output
-  | WayDyn `elem` ways dflags = do
-      B.writeFile output "GHCJS dummy output"
-      return output
-  | otherwise = do
-      core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
-      stg <- coreToStg dflags (cg_module core) core_binds
-      (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-      let obj = variantRender gen2Variant (gsDebug settings) dflags stg' (cg_module core)
-      B.writeFile output obj
-      return output
-    where
-      dflags = hsc_dflags env
-
 modsumToInfo :: GhcMonad m => ModSummary -> m (Maybe ModuleInfo)
 modsumToInfo ms = getModuleInfo (ms_mod ms)
 
@@ -376,6 +361,7 @@ setGhcjsPlatform set js_objs basePath df
   = addPlatformDefines basePath
       $ setDfOpts
       $ installGhcjsHooks (gsDebug set) js_objs
+      $ installDriverHooks (gsDebug set)
       $ df { settings = settings' }
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
@@ -409,66 +395,6 @@ isSuppressed span _ _
 isSuppressed _ SevOutput txt
   | "Linking " `isPrefixOf` txt = True -- would print our munged name
 isSuppressed _ _ _ = False
-
-installDriverHooks :: GhcjsSettings -> DynFlags -> DynFlags
-installDriverHooks settings df = df { hooks = hooks' }
-  where hooks' = insertHook GhcPrimIfaceHook Gen2.ghcjsPrimIface
-               $ insertHook RunPhaseHook (runGhcjsPhase settings)
-               $ hooks df
-
-runGhcjsPhase :: GhcjsSettings
-              -> PhasePlus -> FilePath -> DynFlags
-              -> CompPipeline (PhasePlus, FilePath)
-
-runGhcjsPhase settings (HscOut src_flavour mod_name result) _ dflags = do
-
-        location <- getLocation src_flavour mod_name
-        setModLocation location
-
-        let o_file = ml_obj_file location -- The real object file
-            hsc_lang = hscTarget dflags
-            next_phase = hscPostBackendPhase dflags src_flavour hsc_lang
-
-        case result of
-            HscNotGeneratingCode ->
-                return (RealPhase next_phase,
-                        panic "No output filename from Hsc when no-code")
-            HscUpToDate ->
-                do liftIO $ touchObjectFile dflags o_file
-                   -- The .o file must have a later modification date
-                   -- than the source file (else we wouldn't get Nothing)
-                   -- but we touch it anyway, to keep 'make' happy (we think).
-                   return (RealPhase StopLn, o_file)
-            HscUpdateBoot ->
-                do -- In the case of hs-boot files, generate a dummy .o-boot
-                   -- stamp file for the benefit of Make
-                   liftIO $ touchObjectFile dflags o_file
-                   return (RealPhase next_phase, o_file)
-            HscRecomp cgguts mod_summary
-              -> do output_fn <- phaseOutputFilename next_phase
-
-                    PipeState{hsc_env=hsc_env'} <- getPipeState
-
-                    outputFilename <- liftIO $ ghcjsCompileModule settings hsc_env' cgguts mod_summary output_fn
-
-                    return (RealPhase next_phase, outputFilename)
--- skip these, but copy the result
-runGhcjsPhase _ (RealPhase ph) input dflags
-  | Just next <- lookup ph skipPhases = do
-    output <- phaseOutputFilename next
-    liftIO (copyFile input output)
-    when (ph == As) (liftIO $ doFakeNative dflags (dropExtension output))
-    return (RealPhase next, output)
-  where
-    skipPhases = [ (CmmCpp, Cmm), (Cmm, As), (As, StopLn) ]
-
--- otherwise use default
-runGhcjsPhase _ p input dflags = runPhase p input dflags
-
-touchObjectFile :: DynFlags -> FilePath -> IO ()
-touchObjectFile dflags path = do
-  createDirectoryIfMissing True $ takeDirectory path
-  SysTools.touch dflags "Touching object file" path
 
 -- ghcjs builds for a strange platform: like 32 bit
 -- instead of letting autoconf doing the defines, we override them here
@@ -629,28 +555,6 @@ setGhcjsSuffixes oneshot df = df
     , ghcLink       = if oneshot then NoLink else ghcLink df
     }
 
-doFakeNative :: DynFlags -> FilePath -> IO ()
-doFakeNative df base = do
-  b <- getEnvOpt "GHCJS_FAKE_NATIVE"
-  when b $ do
-    mapM_ backupExt ["hi", "o", "dyn_hi", "dyn_o"]
-    mapM_ touchExt  ["hi", "o", "dyn_hi", "dyn_o"]
-  where
-    backupExt ext = copyNoOverwrite (base ++ ".backup_" ++ ext) (base ++ "." ++ ext)
-    touchExt  ext = touchFile df (base ++ "." ++ ext)
-
-touchFile :: DynFlags -> FilePath -> IO ()
-touchFile df file = do
---  putStrLn ("touchFile: " ++ file)
-  e <- doesFileExist file
-  when e (touch df "keep build system happy" file)
-
-copyNoOverwrite :: FilePath -> FilePath -> IO ()
-copyNoOverwrite from to = do
---  putStrLn ("copyNoOverWrite: " ++ from ++ " -> " ++ to)
-  ef <- doesFileExist from
-  et <- doesFileExist to
-  when (ef && not et) (copyFile from to)
 
 -- | generate native code only from native compiler for these packages
 --   used to support build system
