@@ -59,7 +59,8 @@ Library
                      Compiler.GhcjsPlatform,
                      Compiler.Info,
                      Compiler.Utils,
-                     Compiler.Variants
+                     Compiler.Variants,
+                     GHCJS
     other-modules: Paths_ghcjs
     build-depends: base           >= 4        && < 5,
                    Cabal,
