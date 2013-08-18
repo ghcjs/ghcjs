@@ -13,9 +13,9 @@
 -}
 
 module Gen2.Dataflow ( Graph(..), nodes, arcsIn, arcsOut, entry, nodeid, labels, idents, identsR
-                     , lookupId, lookupIdent
+                     , lookupId, lookupIdent, addIdents
                      , Node(..)
-                     , Expr(..), eBool, AExpr(..), fromA, getAnnot, exprIdents
+                     , Expr(..), eBool, AExpr(..), exprIdents, exprIdents'
                      , SimpleStat(..)
                      , Val(..)
                      , Id, IdSet
@@ -32,6 +32,7 @@ module Gen2.Dataflow ( Graph(..), nodes, arcsIn, arcsOut, entry, nodeid, labels,
                      , Forward(..), Backward(..)
                      , constForward, constBackward
                      , foldForward, foldBackward
+                     , orderedNodes
                      ) where
 
 import           Control.Arrow (second)
@@ -62,19 +63,22 @@ type IdSet = IntSet
 type IdS   = State (HashMap Ident Int)
 
 -- | Annotated expression, store identifiers so that rewrites can be applied more quickly
-data AExpr a = AExpr a Expr
+data AExpr a = AExpr { getAnnot :: a 
+                     , fromA    :: Expr
+                     }
   deriving (Show, Eq, Ord, Data, Typeable)
-
-fromA :: AExpr a -> Expr
-fromA (AExpr _ e) = e
-
-getAnnot :: AExpr a -> a
-getAnnot (AExpr x _) = x
 
 -- optimized way to get identifiers from a local function body
 -- (does not include x1 for a.x1, even though it's stored as TxtI)
 exprIdents :: Expr -> IntSet
-exprIdents = goE IS.empty
+exprIdents e = exprIdentsI IS.empty IS.insert e
+
+exprIdents' :: Expr -> IntMap Int
+exprIdents' e = exprIdentsI IM.empty (\x -> IM.insertWith (+) x 1) e
+
+{-# INLINE exprIdentsI #-}
+exprIdentsI :: a -> (Id -> a -> a) -> Expr -> a
+exprIdentsI start c e = goE start e
   where
     goE s (ValE v)   = goV s v
     goE s (SelE e _) = goE s e -- ignore the selected thing
@@ -85,7 +89,7 @@ exprIdents = goE IS.empty
     goE s (ApplE e es)     = foldl' goE s (e:es)
     go2 s e1 e2 = let s' = goE s e1
                   in  s' `seq` goE s' e2
-    goV s (Var i)   = IS.insert i s
+    goV s (Var i)   = i `c` s
     goV s (ListV es) = foldl' goE s es
     goV s (HashV m)  = foldl' goE s (M.elems m) -- ignore the keys
     goV s _         = s
@@ -381,6 +385,9 @@ isBreak :: Node a -> Bool
 isBreak (BreakNode{}) = True
 isBreak _ = False
 
+-- invariant: idents and identsR are always filled
+-- with Ids from 0..n so that we can use the
+-- Map's size to get the next one
 data Graph a = Graph { _nodes :: IntMap (Node a)
                      , _arcsIn :: IntMap (Set Arc)
                      , _arcsOut :: IntMap (Set Arc)
@@ -403,12 +410,20 @@ data ArcType = BreakArc | ContinueArc deriving (Eq, Ord, Show, Data, Typeable)
 makeLenses ''Graph
 makeLenses ''Node
 makeLenses ''Arc
+-- makePrisms ''Node
 
 lookupId :: Graph a -> Ident -> Maybe Id
 lookupId g i = HM.lookup i (g ^. identsR)
 
 lookupIdent :: Graph a -> Id -> Maybe Ident
 lookupIdent g i = IM.lookup i (g ^. idents)
+
+addIdents :: [Ident] -> Graph a -> ([Id], Graph a)
+addIdents ids g =
+  let xs = zip ids [IM.size (g ^. idents)..]
+      xs' = map (\(x,y) -> (y,x)) xs
+  in  (map snd xs, g & idents  %~ IM.union (IM.fromList xs')
+                     & identsR %~ HM.union (HM.fromList xs))
 
 -- local vars declared in the graph
 localVarsGraph :: Graph a -> IntSet
@@ -1017,4 +1032,20 @@ fixed f a | fa == a   = a
           | otherwise = fixed f fa
   where fa = f a
 
-
+-- non-SequenceNode nodes in the order in which
+-- they can be encountered in the code
+-- x before y means that (the expressions of) node y cannot
+-- be encountered before node x for the first time
+orderedNodes :: Graph a -> [NodeId]
+orderedNodes g = go (g ^. entry)
+  where
+    go nid = go' nid (lookupNode nid g)
+    go' :: NodeId -> Node a -> [NodeId]
+    go' nid (SequenceNode xs)   = concatMap go xs
+    go' nid (IfNode _ n1 n2)    = nid : go n1 ++ go n2
+    go' nid (WhileNode _ n)     = nid : go n
+    go' nid (DoWhileNode _ n)   = go n ++ [nid]
+    go' nid (ForInNode _ _ _ n) = nid : go n
+    go' nid (SwitchNode _ xs d) = nid : (concatMap (go . snd) xs) ++ go d
+    go' nid (TryNode t _ c f)   = go t ++ [nid] ++  go c ++ go f
+    go' nid _                   = [nid]

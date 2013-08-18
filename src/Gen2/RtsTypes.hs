@@ -84,6 +84,13 @@ data StgRet = Ret1 | Ret2 | Ret3 | Ret4 | Ret5 | Ret6 | Ret7 | Ret8 | Ret9 | Ret
 instance ToJExpr StgReg where
   toJExpr = (registers!)
 
+-- only the registers that have a single ident
+registersI :: Array StgReg Ident
+registersI = listArray (minBound, R32) (map (ri.(registers!)) $ enumFromTo R1 R32)
+  where
+    ri (ValExpr (JVar i)) = i
+    ri _                  = error "registersI: not an ident"
+
 registers :: Array StgReg JExpr
 registers = listArray (minBound, maxBound) (map regN (enumFrom R1))
   where

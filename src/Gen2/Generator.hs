@@ -26,6 +26,7 @@ import           TyCon
 import           Util
 import           Type hiding (typeSize)
 import           Name
+import           GHC
 import           Id
 
 import           Control.Applicative
@@ -237,9 +238,9 @@ getStaticRef = fmap (itxt.head) . genIdsI
 
 genToplevelRhs :: Id -> StgRhs -> C
 genToplevelRhs i (StgRhsCon _cc con args)
-  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 1 =
+  | isBoolTy (dataConType con) && dataConTag con == 1 =
       declIds i <> ((\id -> [j| `id` = false; |]) <$> jsId i)
-  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 2 =
+  | isBoolTy (dataConType con) && dataConTag con == 2 =
       declIds i <> ((\id -> [j| `id` = true;  |]) <$> jsId i)
   | [x] <- args, isUnboxableCon con = do
       [a] <- genArg x
@@ -597,7 +598,7 @@ genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) _ [(DataAlt{}
 genCase top bnd (StgOpApp (StgPrimOp p) args t) at@(UbxTupAlt n) alts@[(DataAlt{}, bndrs, _, e)] l srt = do
   args' <- concatMapM genArg args
   ids <- concatMapM genIds bndrs
-  case genPrim p ids args' of
+  case genPrim t p ids args' of
       PrimInline s -> mconcat (map declIds bndrs) <> return s <> genExpr top e
       PRPrimCall s -> genRet top bnd at alts l srt <> return s
 
@@ -605,7 +606,7 @@ genCase top bnd (StgOpApp (StgPrimOp p) args t) at@(UbxTupAlt n) alts@[(DataAlt{
 genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l srt = do
     args' <- concatMapM genArg args
     ids   <- genIds bnd
-    case genPrim p ids args' of
+    case genPrim t p ids args' of
       PrimInline s -> declIds bnd <> return s <> genInlinePrimCase top bnd (uTypeVt t) at alts
       PRPrimCall s -> genRet top bnd at alts l srt <> return s
 
@@ -629,19 +630,19 @@ assignj x y = [j| `x` = `y` |]
 genInlinePrimCase :: Id -> Id -> VarType -> AltType -> [StgAlt] -> C
 genInlinePrimCase top bnd tc _ [(DEFAULT, bs, used, e)] = genExpr top e
 genInlinePrimCase top bnd tc (AlgAlt dtc) alts@[(DataAlt dc,_,_,_),_]
-    | isEnumerationTyCon dtc && dataConTag dc == 2 = do
+    | isBoolTy (dataConType dc) && dataConTag dc == 2 = do
         i <- jsId bnd
         [b1,b2] <- mapM (fmap snd . mkPrimIfBranch top tc) alts
-        return [j| if(`i` === true) { `b1` } else { `b2` } |]
-    | isEnumerationTyCon dtc && dataConTag dc == 1 = do
+        return [j| if(`i`) { `b1` } else { `b2` } |]
+    | isBoolTy (dataConType dc) && dataConTag dc == 1 = do
         i <- jsId bnd
         [b1,b2] <- mapM (fmap snd . mkPrimIfBranch top tc) alts
-        return [j| if(`i` === false) { `b1` } else { `b2` } |]
+        return [j| if(`i`) { `b2` } else { `b1` } |]
 -- fixme more alts needed?
-genInlinePrimCase top bnd tc (AlgAlt dtc) alts
-    | isEnumerationTyCon dtc = do
-        i <- jsId bnd
-        mkSwitch [je| (`i`===true)?2:((typeof `i` === 'object')?(`i`.f.a):1) |] <$> mapM (mkPrimBranch top tc) alts
+-- genInlinePrimCase top bnd tc (AlgAlt dtc) alts
+--    | isBoolTy (mkTyConTyisEnumerationTyCon dtc = do
+--        i <- jsId bnd
+--        mkSwitch [je| (`i`===true)?2:((typeof `i` === 'object')?(`i`.f.a):1) |] <$> mapM (mkPrimBranch top tc) alts
     | otherwise = do
         i <- jsId bnd
         mkSwitch [je| `i`.f.a |] <$> mapM (mkPrimBranch top tc) alts
@@ -748,19 +749,19 @@ genAlts top e (UbxTupAlt n) [(_, bs, use, expr)] = loadUbxTup bs n <> genExpr to
 genAlts top e (AlgAlt tc) [alt] | isUnboxedTupleTyCon tc = error "genAlts: unexpected unboxed tuple"
 genAlts top e (AlgAlt tc) [alt] = snd <$> mkAlgBranch top e alt
 genAlts top e (AlgAlt tc) alts@[(DataAlt dc,_,_,_),_]
-  | isEnumerationTyCon tc && dataConTag dc == 2 = do
+  | isBoolTy (dataConType dc) && dataConTag dc == 2 = do
       i <- jsId e
       [b1,b2] <- mapM (fmap snd . mkAlgBranch top e) alts
-      return [j| if(`i` === true) { `b1` } else { `b2` } |]
-  | isEnumerationTyCon tc && dataConTag dc == 1 = do
+      return [j| if(`i`) { `b1` } else { `b2` } |]
+  | isBoolTy (dataConType dc) && dataConTag dc == 1 = do
       i <- jsId e
       [b1,b2] <- mapM (fmap snd . mkAlgBranch top e) alts
-      return [j| if(`i` === false) { `b1` } else { `b2` } |]
+      return [j| if(`i`) { `b2` } else { `b1` } |]
 -- fixme, add all alts
 genAlts top e (AlgAlt tc) alts
-  | isEnumerationTyCon tc = do
-      i <- jsId e
-      mkSwitch [je| (`i`===true)?2:((typeof `i` === 'object')?(`i`.f.a):1) |] <$> mapM (mkAlgBranch top e) alts
+--  | isEnumerationTyCon tc = do
+--      i <- jsId e
+--      mkSwitch [je| (`i`===true)?2:((typeof `i` === 'object')?(`i`.f.a):1) |] <$> mapM (mkAlgBranch top e) alts
   | otherwise           = do
       ei <- jsId e
       mkSwitch [je| `ei`.f.a |] <$> mapM (mkAlgBranch top e) alts
@@ -909,7 +910,7 @@ loadParams from args use = do
 genPrimOp :: PrimOp -> [StgArg] -> Type -> C
 genPrimOp op args t = do
   as <- concatMapM genArg args
-  case genPrim op rs as of
+  case genPrim t op rs as of
      PrimInline s -> return $ s <> [j| return `Stack`[`Sp`]; |]
      PRPrimCall s -> return s
     where
@@ -1093,9 +1094,9 @@ enterDataCon d = jsDcEntryId (dataConWorkId d)
 
 allocCon :: Ident -> DataCon -> [JExpr] -> C
 allocCon to con []
-  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 1 =
+  | isBoolTy (dataConType con) && dataConTag con == 1 =
       return $ decl to <> [j| `to` = false; |]
-  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 2 =
+  | isBoolTy (dataConType con) && dataConTag con == 2 =
       return $ decl to <> [j| `to` = true;  |]
   | otherwise = do
       i <- jsId (dataConWorkId con)
@@ -1112,9 +1113,9 @@ allocCon to con xs = do
 allocConStatic :: JExpr -> DataCon -> [JExpr] -> C
 -- allocConStatic to tag [] = [j| `to` = `nullaryConClosure tag`; |]
 allocConStatic to con []
-  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 1 =
+  | isBoolTy (dataConType con) && dataConTag con == 1 =
       return [j| `to` = false; |]
-  | isEnumerationTyCon (dataConTyCon con) && dataConTag con == 2 =
+  | isBoolTy (dataConType con) && dataConTag con == 2 =
       return [j| `to` = true;  |]
   | otherwise = do
       e <- enterDataCon con
