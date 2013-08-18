@@ -18,7 +18,7 @@
 *.hi
 *.o
 *.js_o
-*.gen2.jsexe
+*.jsexe
 *_stub.h
 .fuse_hidden*
 *~
