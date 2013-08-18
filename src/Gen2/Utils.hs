@@ -133,9 +133,6 @@ jBool :: Bool -> JExpr
 jBool True = jTrue
 jBool False = jFalse
 
-ghcjsSrcSpan :: SrcSpan
-ghcjsSrcSpan = UnhelpfulSpan (mkFastString "<GHCJS>")
-
 -- use instead of ErrUtils variant to prevent being suppressed
 compilationProgressMsg :: DynFlags -> String -> IO ()
 compilationProgressMsg dflags msg
@@ -145,3 +142,6 @@ ifVerbose :: DynFlags -> Int -> IO () -> IO ()
 ifVerbose dflags val act
   | verbosity dflags >= val = act
   | otherwise               = return ()
+
+ghcjsSrcSpan :: SrcSpan
+ghcjsSrcSpan = UnhelpfulSpan (mkFastString "<GHCJS>")

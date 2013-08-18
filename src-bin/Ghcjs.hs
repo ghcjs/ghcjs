@@ -86,7 +86,7 @@ import           System.Process (rawSystem)
 import           Compiler.Info
 import           Compiler.Variants
 import           Compiler.GhcjsHooks
-import           Compiler.Util
+import           Compiler.Util        as Util
 
 import qualified Gen2.Utils     as Gen2
 import qualified Gen2.Generator as Gen2
@@ -207,7 +207,7 @@ main =
                 liftIO $ oneShot env StopLn hs_srcs
                 return ()
             else sourceErrorHandler $ do
-              liftIO (Gen2.compilationProgressMsg dflags3 "generating JavaScript")
+              liftIO (Util.compilationProgressMsg dflags3 "generating JavaScript")
               targets <- mapM (uncurry guessTarget) hs_srcs
               setTargets targets
               s <- load LoadAllTargets
@@ -391,7 +391,7 @@ addLogActionFilter df = df { log_action = act }
 -- suppress some GHC API output where it would print the wrong thing
 isSuppressed :: SrcSpan -> Severity -> String -> Bool
 isSuppressed span _ _
-  | span == Gen2.ghcjsSrcSpan = False -- do not suppress our own messages
+  | span == Util.ghcjsSrcSpan = False -- do not suppress our own messages
 isSuppressed _ SevOutput txt
   | "Linking " `isPrefixOf` txt = True -- would print our munged name
 isSuppressed _ _ _ = False
@@ -473,7 +473,7 @@ generateNative settings oneshot argsS args1 mbMinusB =
                                             }
       dfs <- getSessionDynFlags
       liftIO (writeIORef (canGenerateDynamicToo dfs) True)
-      liftIO (Gen2.compilationProgressMsg dfs "generating native")
+      liftIO (Util.compilationProgressMsg dfs "generating native")
       if oneshot'
           then sourceErrorHandler $ do
             setSessionDynFlags $ dfs { ghcMode = OneShot }

@@ -1,15 +1,28 @@
 -- | Compiler utility functions, mainly dealing with IO and files
-module Compiler.Util where
+module Compiler.Util
+    (
+      -- * File utils
+      touchFile
+    , copyNoOverwrite
+    , findFile
+    , exeFileName
+      -- * Source code and JS related utilities
+    , compilationProgressMsg
+    , ghcjsSrcSpan
+    ) where
 
 import DynFlags
 import GHC
 import Platform
 import SysTools
+import SrcLoc
 
 import Control.Monad
 import Data.List         (isPrefixOf)
 import System.Directory  (doesFileExist, copyFile)
 import System.FilePath
+
+import Gen2.Utils
 
 touchFile :: DynFlags -> FilePath -> IO ()
 touchFile df file = do
