@@ -17,13 +17,13 @@ f x y = do putStrLn "------------------------"
            let d :: Double
                d = encodeFloat x y
                (xd, yd) = decodeFloat d
-           let f :: Float
+{-           let f :: Float
                f = encodeFloat x y
-               (xf, yf) = decodeFloat f
+               (xf, yf) = decodeFloat f -}
            print d
            print xd
            print yd
-           print f
-           print xf
-           print yf
+--           print f
+--           print xf
+--           print yf
 

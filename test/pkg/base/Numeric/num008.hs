@@ -14,7 +14,7 @@ main = do
              ++ map (shGFloat (Just 7)) doubles
              ++ map (shGFloat (Just 0)) doubles
              ++ map (shGFloat Nothing)  doubles
-
+{-
       flts   =  map (shEFloat (Just 7)) floats
              ++ map (shEFloat (Just 0)) floats
              ++ map (shEFloat Nothing)  floats
@@ -24,11 +24,11 @@ main = do
              ++ map (shGFloat (Just 7)) floats
              ++ map (shGFloat (Just 0)) floats
              ++ map (shGFloat Nothing)  floats
-
+-}
   putStrLn (unlines dbls)
-  putStrLn (unlines flts)
+--  putStrLn (unlines flts)
   print (map read dbls :: [Double])
-  print (map read flts :: [Double])
+--  print (map read flts :: [Double])
 
 shEFloat p f = showEFloat p f ""
 shFFloat p f = showFFloat p f ""
@@ -44,7 +44,7 @@ doubles = [ 0.0
           , 1.82173691287639817263897126389712638972163
           , 1.82173691287639817263897126389712638972163e-300
           ]
-
+{-
 floats :: [ Float ]
 floats = [ 0.0
           , 420
@@ -55,3 +55,5 @@ floats = [ 0.0
           , 1.82173691287639817263897126389712638972163
           , 1.82173691287639817263897126389712638972163e-300
           ]
+-}
+
