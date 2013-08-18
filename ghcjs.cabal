@@ -55,10 +55,11 @@ Library
                      Gen2.Object,
                      Gen2.ClosureInfo,
                      Gen2.Foreign,
-                     Compiler.Info,
-                     Compiler.Variants,
                      Compiler.GhcjsHooks,
-                     Compiler.Utils
+                     Compiler.GhcjsPlatform,
+                     Compiler.Info,
+                     Compiler.Utils,
+                     Compiler.Variants
     other-modules: Paths_ghcjs
     build-depends: base           >= 4        && < 5,
                    Cabal,

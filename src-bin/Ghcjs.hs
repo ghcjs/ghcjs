@@ -86,7 +86,8 @@ import           System.Process (rawSystem)
 import           Compiler.Info
 import           Compiler.Variants
 import           Compiler.GhcjsHooks
-import           Compiler.Utils       as Util
+import           Compiler.GhcjsPlatform
+import           Compiler.Utils         as Util
 
 import qualified Gen2.Utils     as Gen2
 import qualified Gen2.Generator as Gen2
@@ -193,8 +194,10 @@ main =
           (dflags2, pkgs) <- liftIO (initPackages dflags1)
           liftIO (doPackageFallback pkgs args1)
           base <- liftIO ghcjsDataDir
-          _ <- setSessionDynFlags $ setGhcjsPlatform settings js_objs base $ updateWays $ addWay' (WayCustom "js") $
-               setGhcjsSuffixes oneshot dflags2
+          _ <- setSessionDynFlags
+               $ setGhcjsPlatform (gsDebug settings) js_objs base
+               $ updateWays $ addWay' (WayCustom "js")
+               $ setGhcjsSuffixes oneshot dflags2
           dflags3 <- getSessionDynFlags
           fixNameCache
           if oneshot || null hs_srcs
@@ -339,41 +342,6 @@ printObj ["--print-obj", file] = Object.readObjectFile file >>= TL.putStrLn . Ob
 printObj _                     = putStrLn "usage: ghcjs --print-obj objfile"
 
 
-setOpt = gopt_set
-unsetOpt = gopt_unset
-
--- add some configs
-setDfOpts :: DynFlags -> DynFlags
-setDfOpts df = foldl' setOpt (foldl' unsetOpt df unsetList) setList
-  where
-    setList = []
-    unsetList = [Opt_SplitObjs]
-
--- | configure the GHC API for building 32 bit JavaScript code
-setGhcjsPlatform :: GhcjsSettings -> [FilePath] -> FilePath -> DynFlags -> DynFlags
-setGhcjsPlatform set js_objs basePath df
-  = addPlatformDefines basePath
-      $ setDfOpts
-      $ installGhcjsHooks (gsDebug set) js_objs
-      $ installDriverHooks (gsDebug set)
-      $ df { settings = settings' }
-  where
-    settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
-                              , sPlatformConstants = ghcjsPlatformConstants
-                              }
-    ghcjsPlatform = (sTargetPlatform (settings df))
-       { platformArch     = ArchJavaScript
-       , platformWordSize = 4
-       }
-    ghcjsPlatformConstants = (sPlatformConstants (settings df))
-       { pc_WORD_SIZE       = 4
-       , pc_DOUBLE_SIZE     = 8
-       , pc_CINT_SIZE       = 4
-       , pc_CLONG_SIZE      = 4
-       , pc_CLONG_LONG_SIZE = 8
-       , pc_WORDS_BIGENDIAN = False
-       }
-
 addLogActionFilter :: DynFlags -> DynFlags
 addLogActionFilter df = df { log_action = act }
    where
@@ -389,49 +357,6 @@ isSuppressed span _ _
 isSuppressed _ SevOutput txt
   | "Linking " `isPrefixOf` txt = True -- would print our munged name
 isSuppressed _ _ _ = False
-
--- ghcjs builds for a strange platform: like 32 bit
--- instead of letting autoconf doing the defines, we override them here
--- and try to get our own includes included instead of the library ones
-addPlatformDefines :: FilePath -> DynFlags -> DynFlags
-addPlatformDefines baseDir df = df { settings = settings1
-                                   , includePaths = includeDir : includePaths df
-                                   }
-  where
-    includeDir = baseDir ++ "/include"
-    settings0 = settings df
-    settings1 = settings0 { sOpt_P = ("-I" ++ includeDir) : map ("-D"++) defs ++ sOpt_P settings0 }
-    defs = [ "__GHCJS__"
-           , "__GHCAUTOCONF_H__=1"
-           , "__GHCCONFIG_H__=1"
-           , "SIZEOF_CHAR=1"
-           , "ALIGNMENT_CHAR=1"
-           , "SIZEOF_UNSIGNED_CHAR=1"
-           , "ALIGNMENT_UNSIGNED_CHAR=1"
-           , "SIZEOF_SHORT=2"
-           , "ALIGNMENT_SHORT=2"
-           , "SIZEOF_UNSIGNED_SHORT=2"
-           , "ALIGNMENT_UNSIGNED_SHORT=2"
-           , "SIZEOF_INT=4"
-           , "ALIGNMENT_INT=4"
-           , "SIZEOF_UNSIGNED_INT=4"
-           , "ALIGNMENT_UNSIGNED_INT=4"
-           , "SIZEOF_LONG=4"
-           , "ALIGNMENT_LONG=4"
-           , "SIZEOF_UNSIGNED_LONG=4"
-           , "ALIGNMENT_UNSIGNED_LONG=4"
-           , "HAVE_LONG_LONG=1"
-           , "SIZEOF_LONG_LONG=8"
-           , "ALIGNMENT_LONG_LONG=8"
-           , "SIZEOF_UNSIGNED_LONG_LONG=8"
-           , "ALIGNMENT_UNSIGNED_LONG_LONG=8"
-           , "SIZEOF_VOID_P=4"
-           , "ALIGNMENT_VOID_P=4"
-           , "SIZEOF_DOUBLE=8"
-           , "ALIGNMENT_DOUBLE=8"
-           , "SIZEOF_FLOAT=4"
-           , "ALIGNMENT_FLOAT=4"
-           ]
 
 runGhcSession mbMinusB a = do
      libDir <- getGlobalPackageBase
@@ -514,7 +439,7 @@ printIface ["--show-iface", iface] = do
      runGhcSession Nothing $ do
        sdflags <- getSessionDynFlags
        base <- liftIO ghcjsDataDir
-       setSessionDynFlags $ setGhcjsPlatform mempty [] base sdflags
+       setSessionDynFlags $ setGhcjsPlatform (gsDebug mempty) [] base sdflags
        env <- getSession
        liftIO $ showIface env iface
 printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
