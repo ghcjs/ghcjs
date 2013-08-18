@@ -86,7 +86,7 @@ import           System.Process (rawSystem)
 import           Compiler.Info
 import           Compiler.Variants
 import           Compiler.GhcjsHooks
-import           Compiler.Util        as Util
+import           Compiler.Utils       as Util
 
 import qualified Gen2.Utils     as Gen2
 import qualified Gen2.Generator as Gen2
@@ -97,7 +97,7 @@ import qualified Gen2.Foreign   as Gen2
 import qualified Gen2.Object    as Object
 
 import           Finder (findImportedModule, cannotFindInterface)
-
+import Debug.Trace
 
 data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
                                    , gsNoNative          :: Bool
@@ -183,10 +183,7 @@ main =
        do sdflags0 <- getSessionDynFlags
           let sdflags1 = sdflags0 { verbosity = 1 }
           (dflags0, fileish_args, _) <- parseDynamicFlags sdflags1 $ ignoreUnsupported argsS
-          let normal_fileish_paths    = map (normalise . unLoc) fileish_args
-              (srcs, objs0)           = partition_args normal_fileish_paths [] []
-              (js_objs, objs)         = partition isJsFile objs0
-              (hs_srcs, non_hs_srcs)  = partition haskellish srcs
+          let (hs_srcs, non_hs_srcs, js_objs, objs) = partition_args_js fileish_args
           dflags1 <- liftIO $
                         if booting
                           then return (gopt_set dflags0 Opt_ForceRecomp)
@@ -212,9 +209,6 @@ main =
               setTargets targets
               s <- load LoadAllTargets
               when (failed s) (throw $ ExitFailure 1)
-
-isJsFile :: FilePath -> Bool
-isJsFile = (==".js") . takeExtension
 
 addPkgConf :: DynFlags -> IO DynFlags
 addPkgConf df = do
@@ -459,13 +453,11 @@ generateNative settings oneshot argsS args1 mbMinusB =
                  then return dflags0
                  else addPkgConf dflags0
       (dflags2, _) <- liftIO (initPackages dflags1)
-      let normal_fileish_paths   = map (normalise . unLoc) fileish_args
-          (srcs, objs0)          = partition_args normal_fileish_paths [] []
-          (js_objs, objs)        = partition isJsFile objs0
-          (hs_srcs, non_hs_srcs) = partition haskellish srcs
-          oneshot'               = oneshot || null hs_srcs
-          dflags3 = installNativeHooks $
-            dflags2 { ldInputs = map (FileOption "") objs ++ ldInputs dflags2 }
+      let (hs_srcs, non_hs_srcs, js_objs, objs) = partition_args_js fileish_args
+          srcs     = hs_srcs ++ non_hs_srcs
+          oneshot' = oneshot || null hs_srcs
+          dflags3  = installNativeHooks $
+              dflags2 { ldInputs = map (FileOption "") objs ++ ldInputs dflags2 }
       if gsNativeExecutables settings || ghcLink dflags3 /= LinkBinary
           then setSessionDynFlags dflags3
           else setSessionDynFlags $ dflags3 { ghcLink = NoLink
@@ -628,56 +620,4 @@ abiHash' strs0 = do
 
   putStrLn (showPpr dflags f)
 
-
-haskellish :: (String, Maybe Phase) -> Bool
-haskellish (f,Nothing) =
-  looksLikeModuleName f || isHaskellUserSrcFilename f || '.' `notElem` f
-haskellish (_,Just phase) =
-  phase `notElem` [As, Cc, Cobjc, Cobjcpp, CmmCpp, Cmm, StopLn]
-
--- -----------------------------------------------------------------------------
--- Splitting arguments into source files and object files.  This is where we
--- interpret the -x <suffix> option, and attach a (Maybe Phase) to each source
--- file indicating the phase specified by the -x option in force, if any.
-
-partition_args :: [String] -> [(String, Maybe Phase)] -> [String]
-               -> ([(String, Maybe Phase)], [String])
-partition_args [] srcs objs = (reverse srcs, reverse objs)
-partition_args ("-x":suff:args) srcs objs
-  | "none" <- suff      = partition_args args srcs objs
-  | StopLn <- phase     = partition_args args srcs (slurp ++ objs)
-  | otherwise           = partition_args rest (these_srcs ++ srcs) objs
-        where phase = startPhase suff
-              (slurp,rest) = break (== "-x") args
-              these_srcs = zip slurp (repeat (Just phase))
-partition_args (arg:args) srcs objs
-  | looks_like_an_input arg = partition_args args ((arg,Nothing):srcs) objs
-  | otherwise               = partition_args args srcs (arg:objs)
-
-    {-
-      We split out the object files (.o, .dll) and add them
-      to ldInputs for use by the linker.
-
-      The following things should be considered compilation manager inputs:
-
-       - haskell source files (strings ending in .hs, .lhs or other
-         haskellish extension),
-
-       - module names (not forgetting hierarchical module names),
-
-       - things beginning with '-' are flags that were not recognised by
-         the flag parser, and we want them to generate errors later in
-         checkOptions, so we class them as source files (#5921)
-
-       - and finally we consider everything not containing a '.' to be
-         a comp manager input, as shorthand for a .hs or .lhs filename.
-
-      Everything else is considered to be a linker object, and passed
-      straight through to the linker.
-    -}
-looks_like_an_input :: String -> Bool
-looks_like_an_input m =  isSourceFilename m
-                      || looksLikeModuleName m
-                      || "-" `isPrefixOf` m
-                      || '.' `notElem` m
 

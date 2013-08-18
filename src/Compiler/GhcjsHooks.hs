@@ -33,7 +33,7 @@ import           System.FilePath
 
 import           Compiler.Info
 import           Compiler.Variants
-import           Compiler.Util
+import           Compiler.Utils
 import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.Foreign         as Gen2
 
