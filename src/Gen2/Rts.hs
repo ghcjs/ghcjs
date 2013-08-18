@@ -14,6 +14,7 @@ import           Gen2.RtsTypes
 import           Gen2.Utils
 import           Gen2.ClosureInfo
 
+import           Data.Array
 import           Data.Bits
 import           Data.Char                        (toLower, toUpper)
 import qualified Data.List                        as L
@@ -102,6 +103,7 @@ declRegs :: JStat
 declRegs = [j| var !h$regs = []; |]
         <> mconcat (map declReg (enumFromTo R1 R32))
         <> regGettersSetters
+        <> loadRegs
     where
       declReg r = (decl . TxtI . T.pack . ("h$"++) . map toLower . show) r <> [j| `r` = 0; |]
 
@@ -119,6 +121,32 @@ regGettersSetters =
       map (\r -> (toJExpr (regNum r), [j| return  `r`; |])) (enumFrom R1)
     setRegCases v =
       map (\r -> (toJExpr (regNum r), [j| `r` = `v`; return; |])) (enumFrom R1)
+
+loadRegs :: JStat
+loadRegs = mconcat $ map mkLoad [1..32]
+  where
+    mkLoad :: Int -> JStat
+    mkLoad n = let args   = map (TxtI . T.pack . ("x"++) . show) [1..n]
+                   assign = zipWith (\a r -> [j| `r` = `a`; |]) 
+                              args (reverse $ take n (enumFrom R1))
+                   fname  = TxtI $ T.pack ("h$l" ++ show n)
+                   fun    = JFunc args (mconcat assign)
+               in decl fname <> [j| `fname` = `fun`; |]
+
+-- assign registers R1 ... Rn
+-- assigns Rn first
+assignRegs :: [JExpr] -> JStat
+assignRegs [] = mempty
+assignRegs xs
+  | l <= 32 && not rtsInlineLoadRegs
+      = ApplStat (ValExpr (JVar $ assignRegs'!l)) (reverse xs)
+  | otherwise = mconcat . reverse $
+      zipWith (\r e -> [j| `r` = `e` |]) (take l $ enumFrom R1) xs
+  where
+    l = length xs
+
+assignRegs' :: Array Int Ident
+assignRegs' = listArray (1,32) (map (TxtI . T.pack . ("h$l"++) . show) [1..32])
 
 declRets :: JStat
 declRets = mconcat $ map (decl . TxtI . T.pack . ("h$"++) . map toLower . show) (enumFrom Ret1)

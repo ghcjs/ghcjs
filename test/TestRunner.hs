@@ -115,6 +115,7 @@ requiredPackages = [ "ghc-prim"
                    , "QuickCheck"
                    , "old-time"
                    , "vector"
+                   , "stm"
                    ]
 
 -- settings for the test suite

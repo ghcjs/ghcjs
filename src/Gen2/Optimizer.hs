@@ -23,10 +23,12 @@ import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
 
+import           Data.Array
 import           Data.Bits
 import           Data.Data
 import           Data.Data.Lens
 import           Data.Default
+import qualified Data.Foldable as F
 import qualified Data.IntSet as IS
 import           Data.Int
 import           Data.IntMap (IntMap)
@@ -41,8 +43,12 @@ import           Data.Monoid
 
 import           Language.Javascript.JMacro
 
+import           Gen2.Rts
+import           Gen2.RtsTypes
 import           Gen2.Utils
 import           Gen2.Dataflow
+
+import           Debug.Trace
 
 optimize :: JStat -> JStat
 #ifdef DISABLE_OPTIMIZER
@@ -206,7 +212,8 @@ liveVarsE f e                      = template (liveVarsE f) e
 
 data Annot = Annot { aIdents      :: IdSet -- identifiers in the expression
                    , aSideEffects :: Bool  -- can the expression have side effects
-                   } deriving (Data, Typeable, Eq)
+                   , aUse         :: IntMap Int -- identifiers with number of occurrences
+                   } deriving (Data, Typeable, Eq, Show)
 
 type Graph'      = Graph Annot
 type Node'       = Node  Annot
@@ -219,36 +226,41 @@ data Cache = Cache { cachedKnownFuns :: IntMap IdSet
                    }
 
 cache :: Graph' -> Cache
-cache g = Cache (knownFuns g) (knownPureFuns g)
+cache g = Cache (knownFuns g)
+                (knownPureFuns g)
 
 -- empty annotation to get started, replace this with a proper annotations before rewriting
 emptyAnnot :: Annot
-emptyAnnot = Annot (error "emptyAnnot: empty annotation") (error "emptyAnnot: empty annotation")
+emptyAnnot = Annot (error "emptyAnnot: empty annotation")
+                   (error "emptyAnnot: empty annotation")
+                   (error "emptyAnnot: empty annotation")
 
 annotate :: Cache -> Expr -> AExpr'
-annotate c e = AExpr (Annot (exprIdents e) (mightHaveSideeffects c e)) e
+annotate c e = AExpr (Annot (exprIdents e) (mightHaveSideeffects c e) (exprIdents' e)) e
 
 noAnnot :: Graph' -> Expr -> AExpr'
 noAnnot _ e = AExpr emptyAnnot e
 
 normalizeAnnot :: Cache -> Graph' -> Graph'
-normalizeAnnot c g = g & nodes . tinplate %~ normalizeAExpr
+normalizeAnnot c g = g & nodes . traverse %~ normalizeAExprs
   where
-    normalizeAExpr :: AExpr' -> AExpr'
-    normalizeAExpr ae = annotate c (normalize g $ fromA ae)
+    normalizeAExprs :: Node' -> Node'
+    normalizeAExprs = rewriteNodeExprs
+      (\isCond -> annotate c . normalize isCond c g . fromA)
 
 dataflow :: JStat -> JStat
 dataflow = thisFunction . nestedFuns %~ f
   where f d@(args, stat)
           | noDataflow stat = d
-          | otherwise       = ung stat . liveness args' locals
+          | otherwise       = ung stat . optimizeSequences c
+                                       . liveness args' locals
                                        . constants args' locals c
                                        . constants args' locals c
                                        . constants args' locals c
                                        . propagateStack args' locals c
                                        $ g1
           where
-            g0 = cfg noAnnot stat
+            g0 = flattenSequences (cfg noAnnot stat)
             c  = cache g0
             g1 :: Graph'
             g1 = normalizeAnnot c g0
@@ -256,7 +268,7 @@ dataflow = thisFunction . nestedFuns %~ f
             args' = IS.fromList $ catMaybes (map (lookupId g0) args)
             locals = localVarsGraph g0
             ung _ g = (args, unCfg g)
-            -- ung _ g = (args, [j| if(runOptimized) { `unCfg g` } else { `stat` } |])
+            -- ung _ g = (args, [j| if(runOptimized) { `unCfg g` } else { `stat` } |]) -- use this for utils/testOptimizer.hs
 
 -----------------------------------------------------------
 -- detect some less frequently used constructs that we
@@ -291,7 +303,7 @@ liveness args locals g = g & nodes %~ IM.mapWithKey updNode
 -- Id -> use
 data Liveness = Liveness { lUse   :: IntMap Use -- normal uses
                          , lExcep :: IntMap Use -- if the statement generates an exception uses
-                         } deriving (Eq)
+                         } deriving (Eq, Show)
 
 instance Default Liveness where
   def = Liveness IM.empty IM.empty
@@ -301,7 +313,7 @@ data Use = Once | Multiple deriving (Show, Eq, Bounded, Ord, Enum)
 -- fixme for trystat probably
 
 livenessFacts :: Graph Annot -> Facts Liveness
-livenessFacts = foldBackward c f def def
+livenessFacts g = {- dumpLive g $ -} foldBackward c f def def g
   where
     c :: Liveness -> Liveness -> Liveness
     c (Liveness x1 y1) (Liveness x2 y2) = Liveness (IM.unionWith lUb x1 x2) (IM.unionWith lUb y1 y2)
@@ -333,7 +345,7 @@ livenessFacts = foldBackward c f def def
     cb e (x1, x2) = (x1 `c` x2) `p` exprL e
 
     exprL :: AExpr' -> Liveness
-    exprL e = Liveness (IM.fromList . map (,Once) . IS.toList . exprDeps $ e) IM.empty
+    exprL e = Liveness (fmap (\x -> if x <= 1 then Once else Multiple) . aUse . getAnnot $ e) IM.empty
 
     simple :: SimpleStat' -> Liveness -> Liveness
     simple (DeclS _) l = l
@@ -361,10 +373,14 @@ lUb _    _    = Multiple
 
 data CVals = CUnreached
            | CReached (IntMap CFact)
-  deriving (Eq, Data, Typeable)
+  deriving (Eq, Data, Typeable, Show)
 
-newtype CFact = CKnown AExpr'  -- known value
-  deriving (Eq, Data, Typeable)
+newtype CMods = CMods IdSet
+  deriving (Eq, Data, Typeable, Show)
+
+-- known value, and whether this value may be used multiple times
+data CFact = CKnown AExpr' Bool
+  deriving (Eq, Data, Typeable, Show)
 
 (%%) :: (IntMap CFact -> IntMap CFact) -> CVals -> CVals
 _ %% CUnreached = CUnreached
@@ -380,12 +396,6 @@ constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
     nodeFact :: NodeId -> CVals
     nodeFact nid = lookupFact CUnreached nid 2 fs
 
-    rewriteExprs :: CVals -> Node' -> Node'
-    rewriteExprs cv = template %~ propagateExpr cv
-
-    updExpr :: CVals -> AExpr' -> AExpr'
-    updExpr fact e = propagateExpr fact $ e
-
     rewriteNode :: NodeId -> Node' -> Node'
     rewriteNode nid _
       | lookupFact CUnreached nid 0 fs == CUnreached = SequenceNode [] -- unreachable code
@@ -395,45 +405,47 @@ constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
       where
         s  = mightHaveSideeffects' e'
         c  = exprCond' e'
-        e' = updExpr (nodeFact nid) e
+        e' = propagateExpr (nodeFact nid) True e
     rewriteNode nid (WhileNode e s1)  -- loop body unreachable
       | Just False <- exprCond' e', not (mightHaveSideeffects' e') = SequenceNode []
       where
-        e' = updExpr (nodeFact nid) e
+        e' = propagateExpr (nodeFact nid) True e
     rewriteNode nid n@(SimpleNode (AssignS e1 e2))
       | (ValE (Var x)) <- fromA e1, (ValE (Var y)) <- fromA e2, x == y
           = SequenceNode []
       | (ValE (Var _)) <- fromA e1
-          = SimpleNode (AssignS e1 (propagateExpr (nodeFact nid) e2))
-    rewriteNode nid n = rewriteExprs (nodeFact nid) n
+          = SimpleNode (AssignS e1 (propagateExpr (nodeFact nid) False e2))
+    rewriteNode nid n = rewriteNodeExprs (propagateExpr (nodeFact nid)) n
 
     -- apply our facts to an expression
-    propagateExpr :: CVals -> AExpr' -> AExpr'
-    propagateExpr CUnreached ae = ae
-    propagateExpr cv@(CReached{}) ae
+    propagateExpr :: CVals -> Bool -> AExpr' -> AExpr'
+    propagateExpr CUnreached isCond ae = ae
+    propagateExpr cv@(CReached{}) isCond ae
       | not hasKnownDeps = ae
-      | e@(ApplE (ValE _) args) <- fromA ae = annotate c . normalize g $
+      | e@(ApplE (ValE _) args) <- fromA ae = annotate c . normalize isCond c g $
           propagateExpr' (maybe (CReached IM.empty) (`deleteConstants` cv) (IS.unions <$> mapM (mutated c) args)) e
-      | otherwise = annotate c . normalize g $
+      | otherwise = annotate c . normalize isCond c g $
           propagateExpr' (maybe (CReached IM.empty) (`deleteConstants` cv) (mutated c (fromA ae))) (fromA ae)
       where
         hasKnownDeps = not . IS.null $ exprDeps ae `IS.intersection` knownValues cv
 
     propagateExpr' :: CVals -> Expr -> Expr
-    propagateExpr' (CReached cv) e = transformOf template f e
+    propagateExpr' (CReached cv) e = let e' = transformOf template f e
+                                     in {- Debug.Trace.trace (p e') -} e'
       where
         f :: Expr -> Expr
-        f (ValE (Var i)) | Just (CKnown ae) <- IM.lookup i cv = fromA ae
+        f (ValE (Var i)) | Just (CKnown ae _) <- IM.lookup i cv = fromA ae
         f x = x
+        p e' = "propagating:\n" ++ show e ++ "\n" ++ show (e'::Expr)
 
 -- set of identifiers with known values
 knownValues :: CVals -> IdSet
-knownValues (CReached cv) = IS.fromList . (\xs -> [ x | (x, CKnown _) <- xs]) . IM.toList $ cv
+knownValues (CReached cv) = IS.fromList . (\xs -> [ x | (x, CKnown _ _) <- xs]) . IM.toList $ cv
 knownValues _             = IS.empty
 
 -- constant and variable assignment propagation
 constantsFacts :: Facts Liveness -> Cache -> Graph' -> Facts CVals
-constantsFacts lfs c g = foldForward combineConstants f0 (CReached IM.empty) CUnreached g
+constantsFacts lfs c g = {- dumpFacts g $ -} foldForward combineConstants f0 (CReached IM.empty) CUnreached g
   where
     f0 :: Forward Annot CVals
     f0 = def { fIf      = removeMutated1t
@@ -456,20 +468,24 @@ constantsFacts lfs c g = foldForward combineConstants f0 (CReached IM.empty) CUn
     simple nid (DeclS{}) m = m
     simple nid (ExprS e) m = removeMutated e m
     simple nid (AssignS e1 e2) m
-       | (ValE (Var i)) <- fromA e1, (ValE (IntV _))                <- fromA e2 = IM.insert i (CKnown e2) %% dc i m'
-       | (ValE (Var i)) <- fromA e1, (ValE (DoubleV _))             <- fromA e2 = IM.insert i (CKnown e2) %% dc i m'
-       | (ValE (Var i)) <- fromA e1, (ValE (Var _))                 <- fromA e2 = IM.insert i (CKnown e2) %% dc i m'
+       | (ValE (Var i)) <- fromA e1, (ValE (IntV _))                <- fromA e2 = IM.insert i (CKnown e2 True) %% dc i m'
+       | (ValE (Var i)) <- fromA e1, (ValE (DoubleV _))             <- fromA e2 = IM.insert i (CKnown e2 True) %% dc i m'
+       | (ValE (Var i)) <- fromA e1, (ValE (Var j))                 <- fromA e2,
+         Just c@(CKnown _ b) <- vfact j , (usedOnce nid i || b)             = IM.insert i c {- (CKnown e2 b) -} %% dc i m'
        | (ValE (Var i)) <- fromA e1, (ApplE (ValE (Var fun)) args)  <- fromA e2, isKnownPureFun c fun
-           && usedOnce nid i && i `IS.notMember` (IS.unions $ map exprDeps' args) = IM.insert i (CKnown e2) %% dc i m'
+           && usedOnce nid i && i `IS.notMember` (IS.unions $ map exprDeps' args) = IM.insert i (CKnown e2 False) %% dc i m'
        | (ValE (Var i)) <- fromA e1, not (mightHaveSideeffects' e2)
-           && usedOnce nid i && i `IS.notMember` exprDeps e2                    = IM.insert i (CKnown e2) %% dc i m'
+           && usedOnce nid i && i `IS.notMember` exprDeps e2                    = IM.insert i (CKnown e2 False) %% dc i m'
        | (ValE (Var i)) <- fromA e1, (SelE (ValE (Var j)) field) <- fromA e2,
-           not (mightHaveSideeffects' e2) && usedOnce nid i                     = IM.insert i (CKnown e1) %% dc i m'
+           not (mightHaveSideeffects' e2) && usedOnce nid i                     = IM.insert i (CKnown e1 False) %% dc i m'
        | (ValE (Var i)) <- fromA e1                                             = dc i m'
        | (IdxE (ValE (Var i)) _) <- fromA e1                                    = dc i m'
        | (SelE (ValE (Var i)) _) <- fromA e1                                    = dc i m'
        | otherwise = removeMutated e1 m'
        where m' = removeMutated e2 m
+             vfact v = case m' of
+                         CUnreached -> Nothing
+                         CReached x -> IM.lookup v x
     tup x = (x,x)
     removeMutated1t _ s    = tup . removeMutated s
     removeMutated1 _       = removeMutated
@@ -486,7 +502,7 @@ constantsFacts lfs c g = foldForward combineConstants f0 (CReached IM.empty) CUn
     combineConstants (CReached m1) (CReached m2) =
       CReached (IM.mergeWithKey f (const IM.empty) (const IM.empty) m1 m2)
         where
-          f k x y | x == y    = Just x
+          f k (CKnown x dx)  (CKnown y dy) | x == y    = Just (CKnown x (dx || dy))
                   | otherwise = Nothing
     combineConstants CUnreached x = x
     combineConstants x          _ = x
@@ -503,9 +519,9 @@ deleteConstants :: IdSet -> CVals -> CVals
 deleteConstants s (CReached m) = CReached (IM.filterWithKey f m)
   where
     f :: Id -> CFact -> Bool
-    f k _           | k `IS.member` s                                 = False
-    f _ (CKnown ae) | not . IS.null $ exprDeps ae `IS.intersection` s = False
-    f _ _                                                             = True
+    f k _             | k `IS.member` s                                 = False
+    f _ (CKnown ae _) | not . IS.null $ exprDeps ae `IS.intersection` s = False
+    f _ _                                                               = True
 deleteConstants _ CUnreached = CUnreached
 
 -- returns Nothing if it does things that we aren't sure of
@@ -548,8 +564,17 @@ knownPureFuns g = IS.fromList $ catMaybes (map (lookupId g) knownPure)
   where
     knownPure = map (TxtI . T.pack . ("h$"++)) $
           ("c" : map (('c':).show) [(1::Int)..32]) ++
-          map (('d':).show) [(1::Int)..32]
-
+          map (('d':).show) [(1::Int)..32] ++
+          [ "tagToEnum"
+          , "mulInt32"
+          , "mulWord32", "quotWord32", "remWord32"
+          , "popCnt32", "popCnt64"
+          , "bswap64"
+          , "newByteArray", "newArray"
+          , "hs_eqWord64", "hs_neWord64", "hs_leWord64", "hs_ltWord64", "hs_geWord64", "hs_gtWord64"
+          , "hs_eqInt64",  "hs_neInt64",  "hs_leInt64",  "hs_ltInt64",  "hs_geInt64",  "hs_gtInt64"
+          , "hs_word64ToWord", "hs_int64ToInt"
+          ]
 
 isKnownPureFun :: Cache -> Id -> Bool
 isKnownPureFun c i = IS.member i (cachedKnownPure c)
@@ -571,8 +596,8 @@ mightHaveSideeffects c e = any f (universeOf template e)
     sideEffectOps = S.fromList [DeleteOp, NewOp, PreInc, PostInc, PreDec, PostDec]
 
 -- constant folding and other bottom up rewrites
-foldExpr :: Expr -> Expr
-foldExpr = transformOf template f
+foldExpr :: Cache -> Expr -> Expr
+foldExpr c = transformOf template f
   where
     f (BOpE LOrOp v1 v2) = lorOp v1 v2
     f (BOpE LAndOp v1 v2) = landOp v1 v2
@@ -588,6 +613,7 @@ foldExpr = transformOf template f
     f (UOpE NegOp (ValE (IntV i))) = ValE (IntV $ negate i)
     f (UOpE NegOp (ValE (DoubleV i))) = ValE (DoubleV $ negate i)
     f (UOpE NotOp e) | Just b <- exprCond e = eBool (not b)
+    -- y ? a : b === a  -> y == true
     f (BOpE eqOp (CondE c (ValE (IntV v1)) (ValE (IntV v2))) (ValE (IntV v3)))
        | isEqOp eqOp = f (constIfEq eqOp c v1 v2 v3)
     f (BOpE eqOp (ValE (IntV v3)) (CondE c (ValE (IntV v1)) (ValE (IntV v2))))
@@ -602,8 +628,8 @@ constIfEq :: BinOp -> Expr -> Integer -> Integer -> Integer -> Expr
 constIfEq op c v1 v2 v3
   | not (neqOp || eqOp) = error ("constIfEq: not an equality operator: " ++ show op)
   | v1 == v2  = ValE (BoolV $ eqOp == (v1 == v3))
-  | v3 == v1  = if eqOp then c else UOpE NotOp c
-  | v3 == v2  = if eqOp then UOpE NotOp c else c
+  | v3 == v1  = if eqOp then BOpE EqOp c (ValE (BoolV True)) else UOpE NotOp c
+  | v3 == v2  = if eqOp then UOpE NotOp c else BOpE EqOp c (ValE (BoolV True))
   | otherwise = ValE (BoolV False)
   where
     neqOp = op == NeqOp || op == StrictNeqOp
@@ -638,8 +664,30 @@ isVar _ = False
 isConstOrVar :: Expr -> Bool
 isConstOrVar x = isConst x || isVar x
 
-normalize :: Graph' -> Expr -> Expr
-normalize g = rewriteOf template assoc . rewriteOf template comm . foldExpr
+normalize :: Bool -> Cache -> Graph' -> Expr -> Expr
+normalize True = normalizeCond
+normalize _    = normalizeReg
+
+-- somewhat stronger normalize for expressions in conditions where the
+-- top level is forced to be bool
+-- if(x == true) -> if(x)
+-- if(c ? 1 : 0) -> if(c)
+normalizeCond :: Cache -> Graph' -> Expr -> Expr
+normalizeCond c g e = go0 e
+  where
+    go0 e = go (normalizeReg c g e)
+    go e
+      | Just b <- exprCond e = ValE (BoolV b)
+    go (BOpE op (ValE (BoolV b)) e)
+      | (op == EqOp && b) || (op == NeqOp && not b) = go0 e
+    go (BOpE op e (ValE (BoolV b)))
+      | (op == EqOp && b) || (op == NeqOp && not b) = go0 e
+    go (CondE c e1 e2)
+      | Just True <- exprCond e1, Just False <- exprCond e2 = go0 c
+    go e = e
+
+normalizeReg :: Cache -> Graph' -> Expr -> Expr
+normalizeReg cache g = rewriteOf template assoc . rewriteOf template comm . foldExpr cache
   where
     comm :: Expr -> Maybe Expr
     comm e | not (allowed e) = Nothing
@@ -665,8 +713,8 @@ normalize g = rewriteOf template assoc . rewriteOf template comm . foldExpr
     associates op  = op `elem` [AddOp] -- ["*", "+"]                            -- (a * b) * cv = a * (b * c)
     associates2a op1 op2 = (op1,op2) `elem` [(SubOp, AddOp)] -- , ("/", "*")] -- (a + b) - c  = a + (b - c)  -- (a*b)/c = a*(b/c)
     associates2b op1 op2 = (op1,op2) `elem` [(AddOp, SubOp)] -- , ("*", "/")] -- (a - b) + c  = a + (c - b)
-    cf = rewriteOf template comm . foldExpr
-    f  = Just . foldExpr
+    cf = rewriteOf template comm . foldExpr cache
+    f  = Just . foldExpr cache
     allowed e = IS.null (exprDeps' e IS.\\ x) && all isSmall (e ^.. tinplate)
        where
          x = IS.fromList $ catMaybes (map (lookupId g) [TxtI "h$sp" , TxtI "h$stack"])
@@ -705,6 +753,8 @@ intInfixOp DivOp i1 i2
   where
     d = i1 `div` i2
 intInfixOp ModOp       i1 i2 = ValE (IntV (i1 `mod` i2)) -- not rem?
+intInfixOp LeftShiftOp i1 i2 = bitwiseInt' shiftL i1 i2
+intInfixOp RightShiftOp i1 i2 = bitwiseInt' shiftR i1 i2
 intInfixOp BAndOp      i1 i2 = bitwiseInt (.&.) i1 i2
 intInfixOp BOrOp       i1 i2 = bitwiseInt (.|.) i1 i2
 intInfixOp BXorOp      i1 i2 = bitwiseInt xor   i1 i2
@@ -735,6 +785,11 @@ doubleInfixOp op d1 d2 = BOpE op (ValE (DoubleV d1)) (ValE (DoubleV d2))
 
 bitwiseInt :: (Int32 -> Int32 -> Int32) -> Integer -> Integer -> Expr
 bitwiseInt op i1 i2 =
+  let i = fromIntegral i1 `op` fromIntegral i2
+  in ValE (IntV $ fromIntegral i)
+
+bitwiseInt' :: (Int32 -> Int -> Int32) -> Integer -> Integer -> Expr
+bitwiseInt' op i1 i2 =
   let i = fromIntegral i1 `op` fromIntegral i2
   in ValE (IntV $ fromIntegral i)
 
@@ -769,7 +824,8 @@ propagateStack args locals c g
 
     sf = stackFacts c g
     g' :: Graph'
-    g' = foldl' (\g (k,v) -> updNode k v g) g (IM.toList $ g^.nodes)
+    g' = normalizeAnnot c
+       $ foldl' (\g (k,v) -> updNode k v g) g (IM.toList $ g^.nodes)
 
     updNode :: NodeId -> Node' -> Graph' -> Graph'
     updNode nid e@(IfNode _ n1 _) g
@@ -819,7 +875,7 @@ propagateStack args locals c g
               sp = ValE (Var spI)
               newNodes = IM.fromList
                 [ (nid,     SequenceNode [newId, newId+1])
-                , (newId,   SimpleNode (AssignS (annotate c sp) (annotate c . normalize g $ BOpE AddOp sp (ValE (IntV x)))))
+                , (newId,   SimpleNode (AssignS (annotate c sp) (annotate c . normalize False c g $ BOpE AddOp sp (ValE (IntV x)))))
                 , (newId+1, n)
                 ]
           in  (nodeid %~ (+2)) . (nodes %~ IM.union newNodes) $ g
@@ -890,4 +946,119 @@ stackFacts c g = foldForward combineStack f0 (SFOffset 0) SFUnknownB g
     combineStack ox@(SFOffset x) (SFOffset y)
       | x == y    = ox
       | otherwise = SFUnknownT
+
+-- apply the rewriter to the expressions in this node
+-- first argument is true when the expression is used in a boolean condition
+rewriteNodeExprs :: (Bool -> AExpr' -> AExpr') -> Node' -> Node'
+rewriteNodeExprs f (SimpleNode s)       = SimpleNode (rewriteSimpleStatExprs (f False) s)
+rewriteNodeExprs f (IfNode e s1 s2)     = IfNode (f True e) s1 s2
+rewriteNodeExprs f (WhileNode e i)      = WhileNode (f True e) i
+rewriteNodeExprs f (DoWhileNode e i)    = DoWhileNode (f True e) i
+rewriteNodeExprs f (ForInNode b i e s ) = ForInNode b i (f False e) s
+rewriteNodeExprs f (SwitchNode e cs i)  = SwitchNode (f False e) (cs & traverse . _1 %~ f False) i
+rewriteNodeExprs f (ReturnNode e)       = ReturnNode (f False e)
+rewriteNodeExprs _ n                    = n -- other nodes don't contain expressions
+
+rewriteSimpleStatExprs :: (AExpr' -> AExpr') -> SimpleStat' -> SimpleStat'
+rewriteSimpleStatExprs f (ExprS e)       = ExprS (f e)
+rewriteSimpleStatExprs f (AssignS e1 e2) = AssignS (f e1) (f e2)
+rewriteSimpleStatExprs _ s               = s
+
+
+-- optimize sequences of assignments:
+-- h$r3 = x
+-- h$r2 = y
+-- h$r1 = z
+-- -> h$l3(x,y,z)
+-- (only if y,z don't refer to the new value of h$r3)
+optimizeSequences :: Cache -> Graph' -> Graph'
+optimizeSequences c g0 = foldl' transformNodes g (IM.elems $ g ^. nodes)
+  where
+    (ls, g1) = addIdents (map (assignRegs'!) [1..32]) g0
+    g = flattenSequences g1
+
+    transformNodes :: Graph' -> Node' -> Graph'
+    transformNodes g' (SequenceNode xs) =
+      let xs' = f (map (\nid -> fromMaybe (error $ "optimizeSequences, invalid node: " ++ show nid)
+                                (IM.lookup nid $ g ^. nodes)) xs)
+      in  foldr (\(nid,n) -> nodes %~ IM.insert nid n) g' (zip xs xs')
+    transformNodes g' _ = g'
+
+    regN :: IntMap Int
+    regN = IM.fromList . catMaybes $
+       map (\r -> (,1 + fromEnum r) <$> lookupId g (registersI!r)) (enumFromTo R1 R32)
+    reg x = IM.lookup x regN
+    regBetween :: Int -> Int -> Int -> Bool
+    regBetween x y r = maybe False (\n -> n >= x && n <= y) (IM.lookup r regN)
+
+    f :: [Node'] -> [Node']
+    f (x@(SimpleNode (AssignS ae@(AExpr _ (ValE (Var r))) e)):xs)
+      | Just n <- reg r, n > 1 && not (mightHaveSideeffects' e) = f' (n-1) n [(fromA e,x)] xs
+    f (x:xs) = x : f xs
+    f [] = []
+
+    f' :: Int -> Int -> [(Expr, Node')] -> [Node'] -> [Node']
+    f' 0 start exprs xs = mkAssign exprs : replicate (start-1) (SequenceNode []) ++ f xs
+    f' n start exprs (x@(SimpleNode (AssignS ae@(AExpr _ (ValE (Var r))) e)):xs)
+       |  Just k <- reg r, k == n && not (mightHaveSideeffects' e)
+              && not (F.any (regBetween (k+1) start) (IS.toList $ exprDeps ae))
+           = f' (n-1) start ((fromA e,x):exprs) xs
+    f' n start exprs xs = map snd (reverse exprs) ++ f xs
+
+    mkAssign :: [(Expr, Node')] -> Node'
+    mkAssign xs = SimpleNode (ExprS . annotate c $ ApplE (ValE (Var i)) (reverse $ map fst xs))
+      where i = ls !! (length xs - 1)
+
+flattenSequences :: Graph' -> Graph'
+flattenSequences g = g & nodes %~ (\n -> foldl' flatten n (IM.toList n))
+  where
+    flatten :: IntMap Node' -> (NodeId, Node') -> IntMap Node'
+    flatten ns (nid, SequenceNode xs) =
+      case IM.lookup nid ns of
+        Nothing -> ns -- already removed
+        Just _  -> let (xs', ns') = foldl' f ([], ns) xs
+                   in  IM.insert nid (SequenceNode $ reverse xs') ns'
+    flatten ns _ = ns
+    f :: ([NodeId], IntMap Node') -> NodeId -> ([NodeId], IntMap Node')
+    f (xs, ns) nid
+      | Just (SequenceNode ys) <- IM.lookup nid ns =
+           let (xs', ns') = foldl' f (xs, ns) ys
+           in  (xs', IM.delete nid ns')
+      | otherwise = (nid : xs, ns)
+
+
+--------------------------------------------------------------------------
+-- some debugging things, remove later or add proper reporting mechanism
+--------------------------------------------------------------------------
+
+dumpLive :: Graph' -> Facts Liveness -> Facts Liveness
+dumpLive g l@(Facts l0) = Debug.Trace.trace (show g ++ "\n" ++ l') l
+  where
+    l' = concatMap f (M.toList l0)
+    f ((nid,0),v) = show nid ++ " -> " ++ showLive g v ++ "\n"
+    f _           = ""
+
+dumpFacts :: Graph' -> Facts CVals -> Facts CVals
+dumpFacts g c@(Facts c0) = Debug.Trace.trace ({- show g ++ "\n" ++ -} c') c
+  where
+    c' = concatMap f (M.toList c0)
+    f ((nid,0),v) = show nid ++ " -> " ++ showCons g v ++ "\n"
+    f _           = ""
+
+showLive :: Graph' -> Liveness -> String
+showLive gr (Liveness l le) = "live: " ++ f l ++ " excep: " ++ f le
+  where
+    f im = L.intercalate ", " $  map g (IM.toList im)
+    g (i,u) = show i ++ ":" ++ showId gr i ++ ":" ++ show u
+
+showId :: Graph' -> Id -> String
+showId g i = case lookupIdent g i of
+                 Nothing        -> "<unknown>"
+                 Just (TxtI i') -> T.unpack i'
+
+showCons :: Graph' -> CVals -> String
+showCons g CUnreached = "<unreached>"
+showCons g (CReached imf) = "\n" ++ (L.unlines $ map (\x -> "   " ++ f x) (IM.toList imf))
+  where
+    f (i,v) = showId g i ++ ":" ++ show v
 

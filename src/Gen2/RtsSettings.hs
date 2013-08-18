@@ -63,6 +63,10 @@ rtsInlineEnter = False
 rtsInlinePush :: Bool
 rtsInlinePush = False
 
+-- inline h$r1 = x; h$r2 = y; h$r3 = z; .. for function acpplication
+rtsInlineLoadRegs :: Bool
+rtsInlineLoadRegs = False
+
 ------------------------------------------------------------------------------
 -- end of settings
 {-
