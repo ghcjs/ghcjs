@@ -2,24 +2,57 @@
 module GHCJS
     (
       runGhcSession
+    , runGhcjsSession
+    , setGhcjsSuffixes
     , sourceErrorHandler
+    , addPkgConf
     , module GHC
     ) where
 
-import DynFlags
-import ErrUtils           (fatalErrorMsg'')
-import Exception
-import GHC
-import MonadUtils
-import Panic              (handleGhcException)
+import           DsMeta                 (templateHaskellNames)
+import           DynFlags
+import           ErrUtils               (fatalErrorMsg'')
+import           Exception
+import           GHC
+import           HscTypes
+import           IfaceEnv               (initNameCache)
+import           MonadUtils
+import           Packages
+import           Panic                  (handleGhcException)
+import           PrelInfo               (wiredInThings)
+import           PrelNames              (basicKnownKeyNames)
+import           PrimOp                 (allThePrimOps)
 
-import Control.Monad
-import System.Environment (getArgs)
-import System.Exit        (ExitCode (..), exitWith)
-import System.IO          (hPutStrLn, stderr)
+import           Control.Monad
+import           Data.IORef
+import           Data.Maybe             (isJust)
+import           System.Environment     (getArgs)
+import           System.Exit            (ExitCode (..), exitWith)
+import           System.IO              (hPutStrLn, stderr)
 
-import Compiler.Info
-import Compiler.Variants
+import           Compiler.GhcjsPlatform
+import           Compiler.Info
+import           Compiler.Utils
+import qualified Gen2.PrimIface         as Gen2
+
+runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
+                   -- like the -B GHC's argument
+                -> Bool            -- ^ Debug mode
+                -> Ghc b           -- ^ Action to perform
+                -> IO b
+runGhcjsSession mbMinusB debug m = runGhcSession mbMinusB $ do
+    base <- liftIO ghcjsDataDir
+    dflags <- getSessionDynFlags
+    dflags2 <- if isJust mbMinusB
+               then return dflags
+               else liftIO (addPkgConf dflags)
+    (dflags3,_) <- liftIO $ initPackages dflags2
+    _ <- setSessionDynFlags
+         $ setGhcjsPlatform debug [] base
+         $ updateWays $ addWay' (WayCustom "js")
+         $ setGhcjsSuffixes False dflags3
+    fixNameCache
+    m
 
 runGhcSession :: Maybe FilePath -> Ghc b -> IO b
 runGhcSession mbMinusB a = do
@@ -65,6 +98,7 @@ errorHandler fm (FlushOut flushOut) inner =
             ) $
   inner
 
+sourceErrorHandler :: GhcMonad m => m a -> m a
 sourceErrorHandler m = handleSourceError (\e -> do
   GHC.printException e
   liftIO $ exitWith (ExitFailure 1)) m
@@ -77,3 +111,44 @@ fatalMessager str = do
     args <- getArgs
     hPutStrLn stderr (str ++ "\n--- arguments: \n" ++ unwords args ++ "\n---\n")
   exitWith (ExitFailure 1)
+
+
+-- TODO: move the code below somewhere more appropriate
+
+-- | Sets up GHCJS package databases, requires a call to initPackages
+addPkgConf :: DynFlags -> IO DynFlags
+addPkgConf df = do
+  db1 <- getGlobalPackageDB
+  db2 <- getUserPackageDB
+  base <- getGlobalPackageBase
+  return $ df { extraPkgConfs = const [PkgConfFile db1, PkgConfFile db2] }
+
+
+setGhcjsSuffixes :: Bool     -- oneshot option, -c
+                 -> DynFlags
+                 -> DynFlags
+setGhcjsSuffixes oneshot df = df
+    { objectSuf     = mkGhcjsSuf (objectSuf df)
+    , dynObjectSuf  = mkGhcjsSuf (dynObjectSuf df)
+    , hiSuf         = mkGhcjsSuf (hiSuf df)
+    , dynHiSuf      = mkGhcjsSuf (dynHiSuf df)
+    , outputFile    = fmap mkGhcjsOutput (outputFile df)
+    , dynOutputFile = fmap mkGhcjsOutput (dynOutputFile df)
+    , outputHi      = fmap mkGhcjsOutput (outputHi df)
+    , ghcLink       = if oneshot then NoLink else ghcLink df
+    }
+
+
+-- replace primops in the name cache so that we get our correctly typed primops
+fixNameCache :: GhcMonad m => m ()
+fixNameCache = do
+  sess <- getSession
+  liftIO $ modifyIORef (hsc_NC sess) $ \(NameCache u _) ->
+    (initNameCache u knownNames)
+    where
+      knownNames = map getName (filter (not.isPrimOp) wiredInThings) ++
+                      basicKnownKeyNames ++
+                      templateHaskellNames ++
+                      map (getName . AnId . Gen2.mkGhcjsPrimOpId) allThePrimOps
+      isPrimOp (AnId i) = isPrimOpId i
+      isPrimOp _        = False

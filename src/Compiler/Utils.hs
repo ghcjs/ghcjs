@@ -6,6 +6,8 @@ module Compiler.Utils
     , copyNoOverwrite
     , findFile
     , exeFileName
+    , mkGhcjsSuf
+    , mkGhcjsOutput
       -- * Source code and JS related utilities
     , ghcjsSrcSpan
     , partition_args_js
@@ -144,3 +146,21 @@ haskellish (_,Just phase) =
 
 isJsFile :: FilePath -> Bool
 isJsFile = (==".js") . takeExtension
+
+mkGhcjsOutput :: String -> String
+mkGhcjsOutput "" = ""
+mkGhcjsOutput file
+  | ext == ".hi"     = replaceExtension file ".js_hi"
+  | ext == ".o"      = replaceExtension file ".js_o"
+  | ext == ".dyn_hi" = replaceExtension file ".js_dyn_hi"
+  | ext == ".dyn_o"  = replaceExtension file ".js_dyn_o"
+  | otherwise        = replaceExtension file (".js_" ++ drop 1 ext)
+  where
+    ext = takeExtension file
+mkGhcjsSuf :: String -> String
+mkGhcjsSuf "o"      = "js_o"
+mkGhcjsSuf "hi"     = "js_hi"
+mkGhcjsSuf "dyn_o"  = "js_dyn_o"
+mkGhcjsSuf "dyn_hi" = "js_dyn_hi"
+mkGhcjsSuf xs       = "js_" ++ xs -- is this correct?
+
