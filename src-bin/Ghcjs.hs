@@ -214,9 +214,7 @@ addPkgConf df = do
   db1 <- getGlobalPackageDB
   db2 <- getUserPackageDB
   base <- getGlobalPackageBase
-  return $ df { extraPkgConfs = const [PkgConfFile db1, PkgConfFile db2]
-              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
-              }
+  return $ df { extraPkgConfs = const [PkgConfFile db1, PkgConfFile db2] }
   where
     isNotGlobal GlobalPkgConf = False
     isNotGlobal _ = True

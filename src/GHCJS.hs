@@ -7,16 +7,16 @@ module GHCJS
     ) where
 
 import DynFlags
-import GHC
-import Panic (handleGhcException)
-import MonadUtils
+import ErrUtils           (fatalErrorMsg'')
 import Exception
-import           ErrUtils (fatalErrorMsg'')
+import GHC
+import MonadUtils
+import Panic              (handleGhcException)
 
 import Control.Monad
-import System.Exit (exitWith, ExitCode(..))
 import System.Environment (getArgs)
-import System.IO (stderr, hPutStrLn)
+import System.Exit        (ExitCode (..), exitWith)
+import System.IO          (hPutStrLn, stderr)
 
 import Compiler.Info
 import Compiler.Variants
