@@ -415,9 +415,17 @@ constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
     rewriteNode nid n@(SimpleNode (AssignS e1 e2))
       | (ValE (Var x)) <- fromA e1, (ValE (Var y)) <- fromA e2, x == y
           = SequenceNode []
+      | (ValE (Var x)) <- fromA e1, not (live x (lookupFact def nid 0 lfs))
+         && not (mightHaveSideeffects' e2)
+         && x `IS.member` la = SequenceNode []
       | (ValE (Var _)) <- fromA e1
           = SimpleNode (AssignS e1 (propagateExpr (nodeFact nid) False e2))
     rewriteNode nid n = rewriteNodeExprs (propagateExpr (nodeFact nid)) n
+
+    la = args `IS.union` locals
+
+    live :: Id -> Liveness -> Bool
+    live i (Liveness x y) = i `IM.member` x || i `IM.member` y
 
     -- apply our facts to an expression
     propagateExpr :: CVals -> Bool -> AExpr' -> AExpr'
