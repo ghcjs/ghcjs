@@ -231,9 +231,11 @@ handleCommandline settings args minusBargs
                 mapM_ putStrLn (supportedLanguagesAndExtensions ++
                   ["JavaScriptFFI", "NoJavaScriptFFI"]))
             , ("--version", printVersion)
-            , ("--numeric-version", printNumericVersion)
-                 -- the ghc version this was compiled with
+            , ("--numeric-ghcjs-version", printNumericVersion)
+                 -- the GHC version this was compiled with
             , ("--numeric-ghc-version", putStrLn getGhcCompilerVersion)
+                 -- the GHC version again, for better Cabal support
+            , ("--numeric-version", putStrLn getGhcCompilerVersion)
             , ("--info", print =<< getCompilerInfo)
             , ("--print-libdir", putStrLn =<< getGlobalPackageInst)
             , ("--abi-hash", abiHash args minusBargs)
@@ -242,6 +244,7 @@ handleCommandline settings args minusBargs
             , ("--print-deps", printDeps args)
             , ("--print-obj", printObj args)
             , ("--show-iface", printIface args)
+            , ("--install-executable", installExecutable args)
             ]
 
 printVersion :: IO ()
@@ -269,28 +272,11 @@ printRts = putStrLn Gen2.rtsStr >> exitSuccess
 
 printDeps :: [String] -> IO ()
 printDeps ["--print-deps", file] = Object.readDepsFile file >>= TL.putStrLn . Object.showDeps
-printDeps _                    = putStrLn "usage: ghcjs --print-deps objfile"
+printDeps _                    = putStrLn "usage: ghcjs --print-deps objfile" >> exitFailure
 
 printObj :: [String] -> IO ()
 printObj ["--print-obj", file] = Object.readObjectFile file >>= TL.putStrLn . Object.showObject
-printObj _                     = putStrLn "usage: ghcjs --print-obj objfile"
-
-
-addLogActionFilter :: DynFlags -> DynFlags
-addLogActionFilter df = df { log_action = act }
-   where
-     act :: LogAction
-     act dfs severity span style doc
-       | isSuppressed span severity (showSDocOneLine dfs doc) = return ()
-       | otherwise = log_action df dfs severity span style doc
-
--- suppress some GHC API output where it would print the wrong thing
-isSuppressed :: SrcSpan -> Severity -> String -> Bool
-isSuppressed span _ _
-  | span == Util.ghcjsSrcSpan = False -- do not suppress our own messages
-isSuppressed _ SevOutput txt
-  | "Linking " `isPrefixOf` txt = True -- would print our munged name
-isSuppressed _ _ _ = False
+printObj _                     = putStrLn "usage: ghcjs --print-obj objfile" >> exitFailure
 
 -- also generate native code, compile with regular GHC settings, but make sure
 -- that generated files don't clash with ours
@@ -444,4 +430,7 @@ abiHash' strs0 = do
 
   putStrLn (showPpr dflags f)
 
-
+installExecutable :: [String] -> IO ()
+installExecutable ["--install-executable", "-from", from, "-to", to] =
+                      putStrLn "installing executables not yet implemented"
+installExecutable _ = putStrLn "usage: ghcjs --install-executable -from <from> -to <to>" >> exitFailure

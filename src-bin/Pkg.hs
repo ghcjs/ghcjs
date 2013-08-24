@@ -34,6 +34,15 @@ ghcjsPkg args pkgArgs gPkgConf uPkgConf
     | any (=="inituser") args     =
         ghcPkg gPkgConf uPkgConf ["init", uPkgConf]
     | any (=="--version") args    = do
+        putStrLn $ "GHCJS package manager version " ++ getGhcCompilerVersion
+        exitSuccess
+    | any (=="--numeric-ghc-version") args    = do
+        putStrLn getGhcCompilerVersion
+        exitSuccess
+    | any (=="--ghc-version") args    = do
+        putStrLn $ "GHCJS package manager version " ++ getGhcCompilerVersion
+        exitSuccess
+    | any (=="--ghcjs-version") args    = do
         putStrLn $ "GHCJS package manager version " ++ getCompilerVersion
         exitSuccess
     | any (`elem`["--global-package-db","--no-user-package-conf","--no-user-package-db"]) args =

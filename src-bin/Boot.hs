@@ -188,8 +188,9 @@ installBootPackages settings = do
                buildPkg pkg
       installRts
       mapM_ (installPkg ghcjs ghcjspkg) corePkgs
+      -- for now we install the same libs as GHC
       renameLibraries
-      installFakes
+      -- installFakes
       installUnlit
       cd p
       checkShims
@@ -403,7 +404,7 @@ renameLibraries = do
         fileT = toTextIgnore file'
     ghcTag   = T.pack ("-ghc" ++ cProjectVersion)
     ghcjsTag = T.pack $
-      "-ghcjs" ++ getCompilerVersion ++ "_ghc" ++ cProjectVersion
+      "-ghcjs" ++ cProjectVersion -- getCompilerVersion ++ "_ghc" ++ cProjectVersion
 
 
 isPathPrefix :: Text -> FilePath -> Bool

@@ -255,7 +255,9 @@ dataflow = thisFunction . nestedFuns %~ f
           | otherwise       = ung stat . optimizeSequences c
                                        . liveness args' locals
                                        . constants args' locals c
+                                       . liveness args' locals
                                        . constants args' locals c
+                                       . liveness args' locals
                                        . constants args' locals c
                                        . propagateStack args' locals c
                                        $ g1
@@ -413,9 +415,17 @@ constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
     rewriteNode nid n@(SimpleNode (AssignS e1 e2))
       | (ValE (Var x)) <- fromA e1, (ValE (Var y)) <- fromA e2, x == y
           = SequenceNode []
+      | (ValE (Var x)) <- fromA e1, not (live x (lookupFact def nid 0 lfs))
+         && not (mightHaveSideeffects' e2)
+         && x `IS.member` la = SequenceNode []
       | (ValE (Var _)) <- fromA e1
           = SimpleNode (AssignS e1 (propagateExpr (nodeFact nid) False e2))
     rewriteNode nid n = rewriteNodeExprs (propagateExpr (nodeFact nid)) n
+
+    la = args `IS.union` locals
+
+    live :: Id -> Liveness -> Bool
+    live i (Liveness x y) = i `IM.member` x || i `IM.member` y
 
     -- apply our facts to an expression
     propagateExpr :: CVals -> Bool -> AExpr' -> AExpr'
@@ -470,6 +480,10 @@ constantsFacts lfs c g = {- dumpFacts g $ -} foldForward combineConstants f0 (CR
     simple nid (AssignS e1 e2) m
        | (ValE (Var i)) <- fromA e1, (ValE (IntV _))                <- fromA e2 = IM.insert i (CKnown e2 True) %% dc i m'
        | (ValE (Var i)) <- fromA e1, (ValE (DoubleV _))             <- fromA e2 = IM.insert i (CKnown e2 True) %% dc i m'
+       -- start experimental
+       | (ValE (Var i)) <- fromA e1, (ValE (Var j))                 <- fromA e2,
+         Nothing <- vfact j                                                 = IM.insert i (CKnown e2 True) %% dc i m'
+       -- end experimental
        | (ValE (Var i)) <- fromA e1, (ValE (Var j))                 <- fromA e2,
          Just c@(CKnown _ b) <- vfact j , (usedOnce nid i || b)             = IM.insert i c {- (CKnown e2 b) -} %% dc i m'
        | (ValE (Var i)) <- fromA e1, (ApplE (ValE (Var fun)) args)  <- fromA e2, isKnownPureFun c fun
@@ -715,11 +729,17 @@ normalizeReg cache g = rewriteOf template assoc . rewriteOf template comm . fold
     associates2b op1 op2 = (op1,op2) `elem` [(AddOp, SubOp)] -- , ("*", "/")] -- (a - b) + c  = a + (c - b)
     cf = rewriteOf template comm . foldExpr cache
     f  = Just . foldExpr cache
-    allowed e = IS.null (exprDeps' e IS.\\ x) && all isSmall (e ^.. tinplate)
+    allowed e 
+        | IdxE (ValE (Var st)) e' <- e, Just st == stack = allowed' e'
+        | otherwise                                      = allowed' e
        where
-         x = IS.fromList $ catMaybes (map (lookupId g) [TxtI "h$sp" , TxtI "h$stack"])
+         allowed' e = IS.null (exprDeps' e IS.\\ x) && all isSmall (e ^.. tinplate)
+         stack = lookupId g (TxtI "h$stack")
+         sp    = lookupId g (TxtI "h$sp")
+         x = IS.fromList $ catMaybes [sp]
          isSmall (DoubleV (SaneDouble d)) = abs d < 10000
          isSmall (IntV x)                 = abs x < 10000
+         isSmall (StrV _)                 = False
          isSmall _                        = True
 
 lorOp :: Expr -> Expr -> Expr
