@@ -162,9 +162,9 @@ searchForLibUsingGcc dflags so dirs = do
 ghcDynLibVersionTag :: String
 ghcDynLibVersionTag   = "-ghc" ++ cProjectVersion
 
+-- for now, Cabal installs libs with the GHC version
 ghcjsDynLibVersionTag :: String
-ghcjsDynLibVersionTag = "-ghcjs" ++ getCompilerVersion
-                        ++ "_ghc" ++ cProjectVersion
+ghcjsDynLibVersionTag = "-ghcjs" ++ cProjectVersion
 
 ghcjsPackageHsLibs :: DynFlags -> PackageConfig -> [String]
 ghcjsPackageHsLibs dflags p = map fixLib (packageHsLibs' dflags p)
