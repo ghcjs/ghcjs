@@ -220,6 +220,8 @@ installRts = do
   sub $ cd (Paths.libdir </> "rts-1.0") >> cp_r "." rtsLib
   cp (Paths.libdir </> "settings")          (lib </> "settings")
   cp (Paths.libdir </> "platformConstants") (lib </> "platformConstants")
+  cp (Paths.libdir </> "settings")          (base </> "settings")
+  cp (Paths.libdir </> "platformConstants") (base </> "platformConstants")
   -- required for integer-gmp
   cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
 
