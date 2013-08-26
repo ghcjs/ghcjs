@@ -222,6 +222,7 @@ installRts = do
   cp (Paths.libdir </> "platformConstants") (lib </> "platformConstants")
   cp (Paths.libdir </> "settings")          (base </> "settings")
   cp (Paths.libdir </> "platformConstants") (base </> "platformConstants")
+  cp (Paths.libdir </> "unlit")             (base </> "unlit")
   -- required for integer-gmp
   cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
 
