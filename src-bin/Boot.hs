@@ -38,7 +38,6 @@ main = do
                              "perhaps you need to run `ghcjs-boot --init' or run from\n" <>
                              "a directory with an initialized `ghcjs-boot' repository")
       initPackageDB
-      when (initTree s) (initSourceTree e)
       dir <- pwd
       echo ("booting from: " <> toTextIgnore dir)
       pjs <- test_f ("data" </> "primops-js.txt")
@@ -189,7 +188,8 @@ buildGmpConstants :: Sh ()
 buildGmpConstants = sub $ do
   cd ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants")
   ghc ["-no-hs-main", "-o", "mkGmpDerivedConstants", "mkGmpDerivedConstants.c"]
-  constants <- run "./mkGmpDerivedConstants" []
+  p <- pwd
+  constants <- run (p </> "mkGmpDerivedConstants") []
   writefile "GmpDerivedConstants.h" constants
 
 patchPackage :: FilePath -> String -> Sh ()
