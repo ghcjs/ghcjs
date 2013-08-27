@@ -1,277 +1,273 @@
-{-# LANGUAGE ExtendedDefaultRules,
-             NoImplicitPrelude,
-             NoMonomorphismRestriction,
-             OverloadedStrings,
-             CPP,
-             ScopedTypeVariables #-}
-
-{-
-   Boot program to build the GHCJS core libraries from a configured GHC source tree
-
-   steps:
-   1. download ghc sources and extract to temp directory (only if autobooting)
-   2. make stage1 compiler and tools (only if autobooting)
-   3. generate inplace/bin/ghcjs and inplace/bin/ghcjs-pkg wrappers
-   4. build libraries with ghcjs
-   5. install libraries with ghc-cabal
-   6. copy .js files for libraries to installation locations
--}
-
+{-# LANGUAGE ExtendedDefaultRules, OverloadedStrings #-}
 module Main where
 
-import           Compiler.Info
-import           Config
-import           Control.Monad             (forM, forM_)
-import qualified Data.ByteString.Lazy      as L
-import           Data.Char
-import           Data.Maybe                (catMaybes)
-import           Data.Monoid
-import           Data.Text.Lazy            (Text)
-import qualified Data.Text.Lazy            as T
-import           Filesystem.Path.CurrentOS (empty, stripPrefix, encodeString, decodeString, replaceExtension, filename, hasExtension)
-import           Prelude                   hiding (FilePath)
-import           Shelly
+import Compiler.Info
+import Prelude hiding (FilePath)
+import Shelly
+import qualified GHC.Paths as Paths
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Monoid
+import Data.Maybe
+import Data.Char
+import Control.Applicative
+import Control.Monad
+import Options.Applicative
+import qualified Control.Exception as Ex
+import System.Exit (exitSuccess)
 
-import           Distribution.Simple.Utils (withTempDirectory, installExecutableFile)
-import           Distribution.Verbosity    (normal)
-import           Network                   (withSocketsDo)
-import           System.Directory
-import           System.Environment
+default (Text)
 
-import qualified Codec.Archive.Tar         as Tar
-import qualified Codec.Archive.Tar.Check   as Tar
+main = do
+    settings <- execParser optParser'
+    r <- (shellyNoDir $ actions settings `catchany_sh` (return . Just))
+    maybe exitSuccess Ex.throwIO r
+  where
+    actions :: BootSettings -> Sh (Maybe Ex.SomeException)
+    actions s = verbosely . tracing False $ do
+      e <- test_f ("data" </> "primops.txt.pp")
+      if initTree s
+        then initSourceTree e
+        else when (not e) $ do
+          cdBase
+          e' <- test_d ("ghcjs-boot")
+          if e' then cd "ghcjs-boot"
+                else do
+                  p <- pwd
+                  errorExit ("cannot find `" <> toTextIgnore (p </> "ghcjs-boot") <> "'\n" <>
+                             "perhaps you need to run `ghcjs-boot --init' or run from\n" <>
+                             "a directory with an initialized `ghcjs-boot' repository")
+      initPackageDB
+      dir <- pwd
+      echo ("booting from: " <> toTextIgnore dir)
+      pjs <- test_f ("data" </> "primops-js.txt")
+      when (not pjs) (errorExit $ "Cannot find `data/primops-js.txt': the source tree appears to have\n" <>
+                                  "not been initialized. Run `ghcjs-boot --init' first." )
+      installRts
+      installFakes
+      installBootPackages s
+      removeFakes
+      when (not $ skipExtra s) (installExtraPackages s)
+      when (not (skipExtra s) && not (skipGhcjs s)) (installGhcjsPackages s)
+      checkShims
+      return Nothing
 
-import qualified Control.Exception         as Ex
-import           Control.Monad
-import           Data.Conduit              (unwrapResumable, ($$), ($=), (=$=))
-import           Data.Conduit.BZlib
-import           Data.Conduit.Lazy         (lazyConsume)
-import           Data.Maybe (listToMaybe)
-import           Network.HTTP.Conduit
-import           System.Directory          (Permissions (..), getPermissions,
-                                            setPermissions)
-
-import           Options.Applicative
-
-ghcDownloadLocation :: String -> String
-ghcDownloadLocation ver =
-    "http://www.haskell.org/ghc/dist/" ++ ver ++ "/ghc-" ++ ver ++ "-src.tar.bz2"
-
-data BootSettings = BootSettings { skipRts   :: Bool -- ^ skip building the rts
-                                 , noBuild   :: Bool -- ^ do not build, only reset the packages
-                                 , initTree  :: Bool -- ^ initialize the source tree: configure/build native ghc first
-                                 , onlyBasic :: Bool -- ^ only build basic packages: ghc-prim, integer-gmp, base
-                                 , reboot    :: Bool -- ^ reboot using log of old ghcjs invocations
-                                 , autoBoot  :: Bool
-                                 , preBuilt  :: Bool
+data BootSettings = BootSettings { initTree  :: Bool -- ^ initialize the source tree
+                                 , preBuilt  :: Bool -- ^ download prebuilt archive if available
+                                 , skipExtra :: Bool -- ^ skip the extra package (Cabal etc)
+                                 , skipGhcjs :: Bool -- ^ skip the ghcjs base packages
+                                 , verbose   :: Bool
                                  } deriving (Ord, Eq)
 
 optParser' :: ParserInfo BootSettings
 optParser' = info (helper <*> optParser) ( fullDesc <>
-                  header "GHCJS booter, build base libraries for the compiler" )
+                  header "GHCJS booter, build base libraries for the compiler" <>
+                  progDesc description
+                  )
+
+description :: String
+description = unlines
+  [ "ghcjs-boot builds the base libraries for GHCJS."
+  , "If `ghcjs-boot' is run in a directory containing the `ghcjs-boot' [1] repository,"
+  , "the sources from the current directory are used. Otherwise, `ghcjs-boot'"
+  , "makes a global copy in `~/.ghcjs'"
+  , ""
+  , "[1] https://github.com/ghcjs/ghcjs-boot"
+  ]
 
 optParser :: Parser BootSettings
 optParser = BootSettings
-            <$> switch ( long "skipRts"   <> short 's' <>
-                  help "skip building the RTS" )
-            <*> switch ( long "noBuild"   <> short 'n' <>
-                  help "do not build, only reinstall packages" )
-            <*> switch ( long "init"      <> short 'i' <>
-                  help "initialize the GHC source tree for first time build" )
-            <*> switch ( long "onlyBasic" <> short 'b' <>
-                  help "only build ghc-prim, integer-gmp and base" )
-            <*> switch ( long "reboot"    <> short 'r' <>
-                  help "reboot using the same settings as last time (can be invoked from any directory)" )
-            <*> switch ( long "auto"      <> short 'a' <>
-                  help "attempt fully automated boot, download GHC sources" )
+            <$> switch ( long "init"      <> short 'i' <>
+                  help "initialize the boot tree for first time build (or update an existing one)" )
             <*> switch ( long "preBuilt"  <> short 'p' <>
                   help "download prebuilt libraries for compiler (might not be available)" )
+            <*> switch ( long "skipExtra" <> short 'e' <>
+                  help "skip installing extra libraries, like Cabal" )
+            <*> switch ( long "skipGhcjs" <> short 'g' <>
+                  help "skip installing the GHCJS base libraries (ghcjs-prim, ghcjs-base)" )
+            <*> switch ( long "verbose"   <> short 'v' <>
+                  help "verbose output" )
 
-main = withSocketsDo $ do
-  tmp <- getTemporaryDirectory
-  withTempDirectory normal False tmp "ghcjs-boot" mainTmp
+initPackageDB :: Sh ()
+initPackageDB = do
+  echo "creating package databases"
+  base <- liftIO getGlobalPackageBase
+  inst <- liftIO getGlobalPackageInst
+  rm_rf . fromString =<< liftIO getGlobalPackageDB
+  rm_rf . fromString =<< liftIO getUserPackageDB
+  mkdir_p (fromString base)
+  mkdir_p (fromString inst)
+  ghcjs_pkg ["initglobal"] `catchany_sh` const (return ())
+  ghcjs_pkg ["inituser"] `catchany_sh` const (return ())
 
-mainTmp tmpDir = execParser optParser' >>= \s -> shelly $ do
-    when (autoBoot s) (doAutoBoot $ fromString tmpDir)
-    when (initTree s && not (autoBoot s)) setupBuild
-    ignoreExcep $ installBootPackages s
+-- | these need to be installed in the boot setting:
+--   fake Cabal package registered, GHCJS_BOOTING environment variable set
+bootPackages :: [String]
+bootPackages = [ "ghc-prim"
+               , "integer-gmp"
+               , "base"
+               , "deepseq"
+               , "containers"
+               , "template-haskell"
+               , "array"
+               , "pretty"
+               ]
 
-fromString :: String -> FilePath
-fromString = fromText . T.pack
+-- | We need to pretend that these are installed while building bootPackages
+--   GHCJS itself will call GHC when any of these are used
+--   these are removed again after booting
+fakePackages :: [String]
+fakePackages = [ "Cabal"
+               ]
 
-toString :: FilePath -> String
-toString = T.unpack . toTextIgnore
+-- | these are extra packages that are installed after we have a real Cabal
+--   library
+extraPackages :: [String]
+extraPackages = []
 
-ignoreExcep a = a `catchany_sh` (\e -> echo $ "exception: " <> T.pack (show e))
+-- | the GHCJS base libraries
+ghcjsPackages :: [String]
+ghcjsPackages = [ "ghcjs-prim"
+                , "ghcjs-base"
+                ]
 
--- autoboots roll out
--- download and configure a fresh ghc source tree
-doAutoBoot :: FilePath -> ShIO ()
-doAutoBoot tmp = shelly $ do
-  ghcVer <- T.unpack . T.strip <$> run "ghc" ["--numeric-version"]
-  let ghcDir = "ghc-" ++ ghcVer
-  cd tmp
-  liftIO $ do
-    putStrLn $ "fetching GHC: " ++ ghcDownloadLocation ghcVer
-    request <- parseUrl (ghcDownloadLocation ghcVer)
-    withManager $ \manager -> do
-                          response <- http request manager
-                          (src',_) <- unwrapResumable (responseBody response)
-                          tar <- lazyConsume (src' =$= bunzip2)
-                          liftIO $ putStrLn "unpacking tar"
-                          liftIO $ Tar.unpack (toString tmp)  (Tar.read $ L.fromChunks tar) -- (Tar.checkTarbomb ("ghc-" ++ ghcVer) $ Tar.read tar)
-  cd (tmp </> T.pack ghcDir)
-  setupBuild
-
-setupBuild :: ShIO ()
-setupBuild = do
-  mk <- readfile "mk/build.mk.sample"
-  writefile "mk/build.mk" $ T.unlines ["BuildFlavour = quick", mk] -- "DYNAMIC_GHC_PROGS = NO", mk]
-  run_ "sh" ["configure","--enable-bootstrap-with-devel-snapshot"]
-  ignoreExcep $ run_ "make" ["-j4"] -- for some reason this still fails after a succesful build
-
-corePackages :: Bool -> [Text]
-corePackages True = [ "ghc-prim", "integer-gmp", "base" ]
-corePackages _ = [ "ghc-prim"
-                 , "integer-gmp"
-                 , "base"
-                 , "array"
-                 , "deepseq"
-                 , "containers"
-                 , "pretty"
-                 , "template-haskell"
-                 ]
-
--- to be called from a configured and built (at least stage 1) ghc tree
-installBootPackages :: BootSettings -> ShIO ()
-installBootPackages settings = do
-  mghcjs <- which "ghcjs"
-  mghcjspkg <- which "ghcjs-pkg"
-  case (mghcjs, mghcjspkg) of
-    (Just ghcjs, Just ghcjspkg) -> do
-      echo $ "Booting: " <> toTextIgnore ghcjs <> " (" <> toTextIgnore ghcjspkg <> ")"
+initSourceTree :: Bool -> Sh ()
+initSourceTree currentDir = do
+  if currentDir
+    then do
       p <- pwd
-      ghcjsVer <- T.strip <$> run ghcjs ["--numeric-version"]
-      base  <- liftIO getGlobalPackageBase
-      let commandLog = base </> "boot.log"
-      when (not (noBuild settings || reboot settings)) $ do
-        addWrappers ghcjs (toTextIgnore commandLog) ghcjspkg
-      initPackageDB
-      let corePkgs = corePackages (onlyBasic settings)
-      when (not (skipRts settings || noBuild settings || reboot settings)) $ do
-           echo "Building RTS"
-           run_ "make" ["all_rts","-j4"] `catchany_sh` (const (return ()))
-           replacePrimOps
-      if reboot settings
-        then do
-          echo "Rebooting"
-          lines <- T.lines <$> readfile commandLog
-          case lines of
-            (wd:cmds) -> do
-              cd (fromText wd)
-              setenv "GHCJS_BOOTING" "1"
-              setenv "GHCJS_NO_NATIVE" "1"
-              setenv "GHCJS_FALLBACK_PLAIN" "1"
-              forM_ cmds $ \r ->
-                let args = T.words r
-                in  when (isRebootCmd args) $ do
-                      echo ("replaying: ghcjs " <> r)
-                      (run_ "ghcjs" (T.words r))
-            _ -> error "can't reboot, invalid boot log"
-        else do
-          when (not $ noBuild settings) $ do
-             rm_f commandLog
-             p <- pwd
-             writefile commandLog (toTextIgnore p <> "\n")
-             forM_ corePkgs $ \pkg -> do
-               echo $ "Building package: " <> pkg
-               buildPkg pkg
-      installRts
-      mapM_ (installPkg ghcjs ghcjspkg) corePkgs
-      -- for now we install the same libs as GHC
-      renameLibraries
-      -- installFakes
-      installUnlit
-      cd p
-      checkShims
-    _ -> echo "Error: ghcjs and ghcjs-pkg must be in the PATH"
+      echo $ "preparing local boot tree ( " <> toTextIgnore p <> " )"
+      echo "boot tree in current dir: not git pulling automatically"
+      isGit <- test_d ".git"
+      when isGit $ do
+        git ["submodule", "update", "--init", "--recursive"]
+        git ["submodule", "foreach", "git", "reset", "--hard"]
+    else do
+      cdBase
+      p <- pwd
+      echo $ "preparing global boot tree ( " <> toTextIgnore (p </> "ghcjs-boot") <> " )"
+      e <- test_d "ghcjs-boot"
+      if e then do
+           cd "ghcjs-boot"
+           isGit <- test_d ".git"
+           if isGit
+             then do
+               echo "updating existing tree"
+               git ["submodule", "foreach", "git", "reset", "--hard"]
+               git ["pull", "--recurse-submodules"]
+             else echo "ghcjs-boot is not a git repository, not updating"
+         else do
+           echo "cloning new tree"
+           git ["clone", "http://github.com/ghcjs/ghcjs-boot"]
+           cd "ghcjs-boot"
+           git ["submodule", "update", "--init", "--recursive"]
+  forM_ bootPackages  (patchPackage "boot")
+  forM_ extraPackages (patchPackage "extra")
+  preparePrimops
+  buildGenPrim
+  buildGmpConstants
 
--- when rebooting, we replay the log of ghcjs calls
--- but some of them are for package configuration
--- testing features etc, filter them out here
-isRebootCmd :: [Text] -> Bool
-isRebootCmd args
-  | any (`elem` args)
-        [ "-M"
-        , "--info"
-        , "--numeric-version"
-        , "--print-libdir"
-        , "--supported-languages"
-        ] = False
-  | any isTmpCSource args = False
-  | otherwise = True
-  where
-    isTmpCSource a = "/tmp/" `T.isPrefixOf` a &&
-                     ".c" `T.isSuffixOf` a
+-- | preprocess primops.txt.pp, one version for the JS platform
+--   one for native
+preparePrimops :: Sh ()
+preparePrimops = sub $ do
+  cd "data"
+  mkdir_p "native"
+  cp (Paths.libdir </> "include" </> "MachDeps.h") "native"
+  cp (Paths.libdir </> "include" </> "ghcautoconf.h") "native"
+  cp (Paths.libdir </> "include" </> "ghcplatform.h") ("native" </> "ghc_boot_platform.h")
+  cpp ["-P", "-Ijs", "primops.txt.pp", "-o", "primops-js.txt"]
+  cpp ["-P", "-Inative", "primops.txt.pp", "-o", "primops-native.txt"]
 
--- add inplace/bin/ghcjs and inplace/bin/ghcjs-pkg wrappers
-addWrappers :: FilePath -> Text -> FilePath -> ShIO ()
-addWrappers ghcjs log ghcjspkg = do
-    ghcwrapper <- readfile "inplace/bin/ghc-stage1"
-    writefile "inplace/bin/ghcjs" (fixGhcWrapper ghcwrapper log ghcjs)
-    makeExecutable "inplace/bin/ghcjs"
-    pkgwrapper <- readfile "inplace/bin/ghc-pkg"
-    writefile "inplace/bin/ghcjs-pkg" (fixPkgWrapper pkgwrapper ghcjspkg)
-    makeExecutable "inplace/bin/ghcjs-pkg"
- where
-    makeExecutable f = liftIO $ do
-        p <- getPermissions f
-        setPermissions f (p {executable = True})
 
-fixGhcWrapper :: Text -> Text -> FilePath -> Text
-fixGhcWrapper wrapper log ghcjs = T.unlines . concatMap fixLine . T.lines $ wrapper
-    where
-      exec = "executablename="
-      fixLine line
-          | exec `T.isPrefixOf` line =
-              [ exec <> "\"" <> toTextIgnore ghcjs <> "\""
-              , "export GHCJS_WITH_GHC=" <> T.drop (T.length exec) line
-              , "export GHCJS_FALLBACK_PLAIN=1"
-              , "export GHCJS_BOOTING=1"
-              , "export GHCJS_NO_NATIVE=1"
-              , "export GHCJS_FAKE_NATIVE=1"
-              , "export GHCJS_LOG_COMMANDLINE=1"
-              , "export GHCJS_LOG_COMMANDLINE_NAME=" <> log
-              ]
-          | otherwise                             = [line]
+-- | build the genprimopcode tool, this requires alex and happy
+buildGenPrim :: Sh ()
+buildGenPrim = sub $ do
+  cd ("utils" </> "genprimopcode")
+  e <- test_f "genprimopcode"
+  when (not e) $ do
+    alex  ["Lexer.x"]
+    happy ["Parser.y"]
+    ghc   ["-o", "genprimopcode", "-O", "Main.hs"]
 
-fixPkgWrapper :: Text -> FilePath -> Text
-fixPkgWrapper wrapper ghcjspkg = T.unlines . map fixLine . T.lines $ wrapper
-    where
-      fixLine line
-          | "/" `T.isPrefixOf` line = T.unwords $ toTextIgnore ghcjspkg : tail (T.words line)
-          | otherwise = line
+buildGmpConstants :: Sh ()
+buildGmpConstants = sub $ do
+  cd ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants")
+  ghc ["-no-hs-main", "-o", "mkGmpDerivedConstants", "mkGmpDerivedConstants.c"]
+  p <- pwd
+  constants <- run (p </> "mkGmpDerivedConstants") []
+  writefile "GmpDerivedConstants.h" constants
 
-installRts :: ShIO ()
+patchPackage :: FilePath -> String -> Sh ()
+patchPackage base pkg = sub $ do
+  let p = "patches" </> fromString pkg <.> "patch"
+  e <- test_f p
+  when e $ do
+    echo $ "applying patch: " <> toTextIgnore p
+    readfile p >>= setStdin
+    cd (base </> fromString pkg)
+    ignoreExcep $ patch ["-p1", "-N"]
+
+installRts :: Sh ()
 installRts = do
   echo "installing RTS"
   dest <- liftIO getGlobalPackageDB
-  base  <- liftIO getGlobalPackageBase
-  let inc = base </> "include"
-      lib = base </> "lib/rts-1.0"
-  rtsConf <- readfile "rts/dist/package.conf.inplace"
+  base <- liftIO getGlobalPackageBase
+  let lib    = base </> "lib"
+      inc    = lib  </> "include"
+      rtsLib = lib  </> "rts-1.0"
+  rtsConf <- readfile (Paths.libdir </> "package.conf.d" </> "builtin_rts.conf")
   writefile (dest </> "builtin_rts.conf") $
-                 fixRtsConf (toTextIgnore inc) (toTextIgnore lib) rtsConf
-  run_ "ghcjs-pkg" ["recache", "--global"]
-  mkdir_p inc
-  sub $ cd "includes" >> cp_r "." inc
+                 fixRtsConf (toTextIgnore inc) (toTextIgnore rtsLib) rtsConf
+  ghcjs_pkg ["recache", "--global"]
   mkdir_p lib
-  sub $ cd "rts/dist/build" >> cp_r "." lib
-  cp "settings" (base </> "settings")
-  cp "settings" (base </> "lib" </> "settings")
-  cp "inplace/lib/platformConstants" (base </> "platformConstants")
-  cp "inplace/lib/platformConstants" (base </> "lib" </> "platformConstants")
+  mkdir_p inc
+  sub $ cd (Paths.libdir </> "include") >> cp_r "." inc
+  sub $ cd (Paths.libdir </> "rts-1.0") >> cp_r "." rtsLib
+  cp (Paths.libdir </> "settings")          (lib </> "settings")
+  cp (Paths.libdir </> "platformConstants") (lib </> "platformConstants")
+  cp (Paths.libdir </> "settings")          (base </> "settings")
+  cp (Paths.libdir </> "platformConstants") (base </> "platformConstants")
+  cp (Paths.libdir </> "unlit")             (base </> "unlit")
+  -- required for integer-gmp
+  cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
 
+installBootPackages :: BootSettings -> Sh ()
+installBootPackages s = sub $ do
+  echo "installing boot packages"
+  let v = if verbose s then ["-v"] else []
+  cd "boot"
+  forM_ bootPackages preparePackage
+  when (not $ null bootPackages)
+    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ v ++ map (T.pack.("./"++)) bootPackages)
+
+installExtraPackages :: BootSettings -> Sh ()
+installExtraPackages s = sub $ do
+  echo "installing extra packages"
+  let v = if verbose s then ["-v"] else []
+  cd "extra"
+  sub (cd ("cabal" </> "Cabal") >> cabal ["clean"])
+  cabal $ ["install", "--ghcjs", "./cabal/Cabal"] ++ v
+  forM_ extraPackages preparePackage
+  when (not $ null extraPackages)
+    (cabal $ ["install", "--ghcjs"] ++ v ++ map (T.pack.("./"++)) extraPackages)
+
+installGhcjsPackages :: BootSettings -> Sh ()
+installGhcjsPackages s = sub $ do
+  echo "installing GHCJS-specific base libraries"
+  let v = if verbose s then ["-v"] else []
+  cd "ghcjs"
+  forM_ ghcjsPackages preparePackage
+  when (not $ null ghcjsPackages)
+    (cabal $ ["install", "--ghcjs"] ++ v ++ map (T.pack.("./"++)) ghcjsPackages)
+
+preparePackage :: String -> Sh ()
+preparePackage pkg = sub $ do
+  cd (fromString pkg)
+  conf   <- test_f "configure"
+  confac <- test_f "configure.ac"
+  when (confac && not conf) (run_ "autoreconf" [])
+  cabal ["clean"]
 
 fixRtsConf :: Text -> Text -> Text -> Text
 fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
@@ -281,14 +277,16 @@ fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
           | "include-dirs:" `T.isPrefixOf` l = "include-dirs: " <> incl
           | otherwise                        = l
 
--- | make fake, empty packages to keep the build system happy
-installFakes :: ShIO ()
+-- | register fake, empty packages to be able to build packages
+--   that depend on Cabal
+installFakes :: Sh ()
 installFakes = silently $ do
   base <- T.pack <$> liftIO getGlobalPackageBase
   db   <- T.pack <$> liftIO getGlobalPackageDB
   installed <- T.words <$> run "ghc-pkg" ["list", "--simple-output"]
   dumped <- T.lines <$> run "ghc-pkg" ["dump"]
-  forM_ fakePkgs $ \pkg ->
+  let fakes = map T.pack fakePackages
+  forM_ fakes $ \pkg ->
     case reverse (filter ((pkg<>"-") `T.isPrefixOf`) installed) of
       [] -> error (T.unpack $ "required package " <> pkg <> " not found in host GHC")
       (x:_) -> do
@@ -298,16 +296,7 @@ installFakes = silently $ do
           Just pkgId -> do
             let conf = fakeConf base base pkg version pkgId
             writefile (db </> (pkgId <.> "conf")) conf
-  run_ "ghcjs-pkg" ["recache", "--global"]
-
-checkShims :: ShIO ()
-checkShims = do
-  base <- T.pack <$> liftIO getGlobalPackageBase
-  e <- test_f (base </> "shims" </> "base" <.> "yaml")
-  when (not e) $ do
-    echo "GHCJS has been booted, but the shims repository is still missing, to install:"
-    echo ("cd " <> base)
-    echo "git clone https://github.com/ghcjs/shims.git"
+  ghcjs_pkg ["recache", "--global"]
 
 findPkgId:: [Text] -> Text -> Text -> Maybe Text
 findPkgId dump pkg version =
@@ -315,8 +304,6 @@ findPkgId dump pkg version =
     where
       pkgVer = pkg <> "-" <> version <> "-"
       ids = map (T.dropWhile isSpace . T.drop 3) $ filter ("id:" `T.isPrefixOf`) dump
-
-fakePkgs = [ "Cabal" ]
 
 fakeConf :: Text -> Text -> Text -> Text -> Text -> Text
 fakeConf incl lib name version pkgId = T.unlines
@@ -331,158 +318,49 @@ fakeConf incl lib name version pkgId = T.unlines
             , "exposed:        False"
             ]
 
-initPackageDB :: ShIO ()
-initPackageDB = do
-  echo "creating package databases"
-  base <- liftIO getGlobalPackageBase
-  inst <- liftIO getGlobalPackageInst
-  rm_rf . fromString =<< liftIO getGlobalPackageDB
-  rm_rf . fromString =<< liftIO getUserPackageDB
-  mkdir_p (fromString base)
-  mkdir_p (fromString inst)
-  run_ "ghcjs-pkg" ["initglobal"] `catchany_sh` const (return ())
-  run_ "ghcjs-pkg" ["inituser"] `catchany_sh` const (return ())
+-- | remove the fakes after we're done with them
+removeFakes :: Sh ()
+removeFakes = do
+  let fakes = map (T.pack . (++"-")) fakePackages
+  pkgs <- T.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
+  forM_ pkgs $ \p -> when (any (`T.isPrefixOf` p) fakes)
+    (echo ("unregistering " <> p) >> ghcjs_pkg ["unregister", p])
 
+checkShims :: Sh ()
+checkShims = sub $ do
+  cdBase
+  e <- test_f ("shims" </> "base" <.> "yaml")
+  if e then sub $ do
+              echo "shims repository already exists, be sure to keep it updated"
+       else sub $ do
+              echo "GHCJS has been booted, but the shims repository is still missing, fetching"
+              git ["clone", "https://github.com/ghcjs/shims.git"]
 
-installPkg :: FilePath -> FilePath -> Text -> ShIO ()
-installPkg ghcjs ghcjspkg pkg = verbosely $ do
-  echo $ "installing package: " <> pkg
-  base <- liftIO getGlobalPackageBase
-  dest <- liftIO getGlobalPackageInst
-  run_ "inplace/bin/ghc-cabal" [ "copy"
-                               , "libraries/" <> pkg
-                               , "dist-install"
-                               , "strip"
-                               , ""
-                               , T.pack base
-                               , T.pack dest
-                               , T.pack base <> "/doc"
-                               ]
-  run_ "inplace/bin/ghc-cabal" [ "register"
-                               , "libraries/" <> pkg -- directory
-                               , "dist-install" -- distDir
-                               , toTextIgnore ghcjs     -- ghc
-                               , toTextIgnore ghcjspkg  -- ghcpkg
-                               , T.pack dest -- topdir
-                               , "" -- myDestDir
-                               , T.pack base -- myPrefix
-                               , T.pack dest -- myLibDir
-                               , T.pack base <> "/doc" -- myDocDir
-                               , "NO" -- relocatablebuild
-                               ]
-  -- now install the JavaScript files
-  dirs <- chdir (fromString dest) (ls "")
-  case filter (\x -> (pkg <> "-") `T.isPrefixOf` toTextIgnore x) dirs of
-    (d:_) -> do
-      echo $ "found installed version: " <> toTextIgnore d
-      sub $ do
-        cd ("libraries" </> pkg </> "dist-install" </> "build")
-        files <- findWhen (return . isGhcjsFile) "."
-        forM_ files $ \file -> do
-           echo $ "installing " <> toTextIgnore file
-           ignoreExcep $ cp file (dest </> d </> file)
-    _ -> errorExit $ "could not find installed package " <> pkg
-  echo "done"
+cpp          = run_ "cpp"
+gcc          = run_ "gcc"
+git          = run_ "git"
+alex         = run_ "alex"
+happy        = run_ "happy"
+ghc          = run_ "ghc"
+path         = run_ "patch"
+ghcjs_pkg    = run_ "ghcjs-pkg"
+cabalBoot xs = sub (setenv "GHCJS_BOOTING" "1" >> run_ "cabal" xs)
+cabal        = run_ "cabal"
+patch        = run_ "patch"
 
-renameLibraries :: ShIO ()
-renameLibraries = do
-  echo $ "renaming shared libraries"
-  dest <- liftIO getGlobalPackageInst
-  libs <- findWhen (return . isHsDynLib) (fromString dest)
-  mapM_ replaceTag libs
-  where
-    replaceTag file = do
-      let file' = fromText (T.replace ghcTag ghcjsTag (toTextIgnore file))
-      echo $ "renaming shared lib:\n   " <> toTextIgnore file 
-           <> " ->\n   " <> toTextIgnore file'
-      mv file file'
-    isHsDynLib file = "libHS" `T.isPrefixOf` fileT &&
-                      ghcTag `T.isInfixOf` fileT &&
-                      (any (hasExtension file') ["so", "dll"])
-      where
-        file' = filename file
-        fileT = toTextIgnore file'
-    ghcTag   = T.pack ("-ghc" ++ cProjectVersion)
-    ghcjsTag = T.pack $
-      "-ghcjs" ++ cProjectVersion -- getCompilerVersion ++ "_ghc" ++ cProjectVersion
+ignoreExcep a = a `catchany_sh` (\e -> echo $ "ignored exception: " <> T.pack (show e))
 
+cdBase :: Sh ()
+cdBase = do
+  base <- fromString <$> liftIO getGlobalPackageBase
+  mkdir_p base
+  cd base
 
-isPathPrefix :: Text -> FilePath -> Bool
-isPathPrefix t file = t `T.isPrefixOf` toTextIgnore file
+cdBoot :: Sh ()
+cdBoot = cdBase >> cd "ghcjs-boot"
 
-isGhcjsFile :: FilePath -> Bool
-isGhcjsFile file = any (`T.isSuffixOf` toTextIgnore file) [".js_o", ".js_hi", ".js_dyn_o", ".js_dyn_hi"]
+fromString :: String -> FilePath
+fromString = fromText . T.pack
 
--- | make sure primops.txt is the one from our data, configured for
---   JavaScript building
-replacePrimOps :: ShIO ()
-replacePrimOps = do
-   base <- liftIO (decodeString <$> ghcjsDataDir)
-   mapM_ (cp (base </> ("include/prim/primops-" ++ cProjectVersionInt) <.> "txt")) targets
-   where
-     -- not sure which of these are really necessary
-     targets = [ "compiler/stage1/build/primops.txt"
-               , "compiler/stage2/build/primops.txt"
-               , "compiler/prelude/primops.txt"
-               ]
-
-buildPkg :: Text -> ShIO ()
-buildPkg pkg = do
-   patchPkg pkg
-   cleanPkg pkg
-   run_ "make" ["all_libraries/" <> pkg, "GHC_STAGE1=inplace/bin/ghcjs"]
-
--- | some packages need to be patched to run with GHCJS, for GHC 7.8.1:
---    try packagename-708_1.patch first, then packagename-708.patch
-patchPkg :: Text -> ShIO ()
-patchPkg pkg = do
-  mfile <- findPatchFile pkg $ map T.pack
-                                [ cProjectVersionInt ++ "_" ++ cProjectPatchLevel
-                                , cProjectVersionInt
-                                ]
-  case mfile of
-    Nothing -> return () -- no patch
-    Just p -> sub $ do
-      echo $ "applying patch: " <> toTextIgnore p
-      cd ("libraries" </> pkg)
-      readfile p >>= setStdin
-      ignoreExcep $ run_ "patch" ["-p1", "-N"] -- ignore already applied patches
-
-findPatchFile :: Text -> [Text] -> ShIO (Maybe FilePath)
-findPatchFile pkg variants = liftIO $ do
-  base <- decodeString <$> ghcjsDataDir
-  listToMaybe <$> filterM (doesFileExist . encodeString)
-    (map (\x -> base </> "patch" </> (pkg <> "-" <> x) <.> "patch") variants)
-
--- | remove files that we want to regenerate, backup .hi to make that things get rebuilt
-cleanPkg :: Text -> ShIO ()
-cleanPkg pkg = do
-  mapM_ backupExt ["hi", "o", "dyn_hi", "dyn_o"]
-  findWhen isRemovedFile pkgDir >>= mapM_ rm
-    where
-      backupExt ext = findWhen (toBackup ext) pkgDir >>= mapM_
-         (\file -> mvNoOverwrite file $ replaceExtension file ("backup_" <> T.toStrict ext))
-      pkgDir = "libraries" </> pkg </> "dist-install" </> "build"
-      isRemovedFile file = return $ any (hasExtension file) ["hs", "lhs", "p_hi"]
-      toBackup ext file
-        | hasExt ext file =
-            (||) <$> test_f (replaceExtension file "hi")
-                 <*> test_f (replaceExtension file "backup_hi")
-        | otherwise = return False
-
-mvNoOverwrite :: FilePath -> FilePath -> ShIO ()
-mvNoOverwrite from to = do
-  to' <- absPath to
-  e <- test_f to'
-  if e
-    then rm from
-    else mv from to
-
-installUnlit :: ShIO ()
-installUnlit = do
-  p <- pwd
-  base <- liftIO getGlobalPackageBase
-  liftIO $ installExecutableFile normal
-             (encodeString $ p </> "inplace" </> "lib" </> "unlit")
-             (base ++ "/unlit")
-
+toString :: FilePath -> String
+toString = T.unpack . toTextIgnore

@@ -76,7 +76,7 @@ import           Options.Applicative.Builder.Internal
 
 import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory,
                                    doesFileExist, copyFile)
-import           System.Environment (getArgs, getEnv)
+import           System.Environment (getArgs, getEnv, getEnvironment)
 import           System.Exit
 import           System.FilePath
 import           System.IO
@@ -113,6 +113,32 @@ instance Monoid GhcjsSettings where
   mappend (GhcjsSettings ne1 nn1 nj1 lc1 gh1 dbg1)
           (GhcjsSettings ne2 nn2 nj2 lc2 gh2 dbg2) =
           GhcjsSettings (ne1 || ne2) (nn1 || nn2) (nj1 || nj2) (lc1 <> lc2) (gh1 <> gh2) (dbg1 || dbg2)
+
+{- |
+  Check if we're building a Cabal Setup script, in which case automatically
+  switch to building a native executable and skip building all JS
+
+  Detection is a bit tricky:
+  - compilation mode is --make
+  - Cabal doesn't manage dependencies for Setup.hs, so -hide-all-packages is not used
+  - There is one Haskell source file, named Setup.hs or Setup.lhs
+  - executable is named setup or setup.exe in a setup subdir
+  - object and hi output dirs end with a setup subdir
+-}
+buildingCabalSetup :: [FilePath] -> DynFlags -> Bool
+buildingCabalSetup [hs_src] dflags
+  = ghcMode dflags == CompManager         &&
+    not (gopt Opt_HideAllPackages dflags) &&
+    isSetupOutput (outputFile dflags)     &&
+    isSetupDir    (objectDir  dflags)     &&
+    isSetupDir    (hiDir      dflags)     &&
+    isSetupSource hs_src
+  where
+    isSetupOutput = maybe False (("/setup/setup" `isSuffixOf`) . dropExtension)
+    isSetupDir    = maybe False ("/setup" `isSuffixOf`)
+    isSetupSource = (`elem` ["Setup.hs", "Setup.lhs"]) . takeFileName
+buildingCabalSetup _ _ = False
+
 
 getGhcjsSettings :: [String] -> IO ([String], GhcjsSettings)
 getGhcjsSettings args
@@ -173,22 +199,16 @@ main =
      handleCommandline settings args1 mbMinusB
      when (isNothing mbMinusB) checkIsBooted
      (argsS, _) <- parseStaticFlags (map noLoc args1)
-     booting <- getEnvOpt "GHCJS_BOOTING"
-     when (not noNative || (booting && any (".c" `isSuffixOf`) args1)) $
-       generateNative settings oneshot argsS args1 mbMinusB
+     when (not noNative) $ do
+       skipJs <- generateNative settings oneshot argsS args1 mbMinusB
+       when skipJs exitSuccess
      runGhcSession mbMinusB $
        do sdflags0 <- getSessionDynFlags
           let sdflags1 = sdflags0 { verbosity = 1 }
           (dflags0, fileish_args, _) <- parseDynamicFlags sdflags1 $ ignoreUnsupported argsS
           let (hs_srcs, non_hs_srcs, js_objs, objs) = partition_args_js fileish_args
-          dflags1 <- liftIO $
-                        if booting
-                          then return (gopt_set dflags0 Opt_ForceRecomp)
-                          else if isJust mbMinusB
-                               then return dflags0
-                               else addPkgConf dflags0
+          dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
           (dflags2, pkgs) <- liftIO (initPackages dflags1)
-          liftIO (doPackageFallback pkgs args1)
           base <- liftIO ghcjsDataDir
           _ <- setSessionDynFlags
                $ setGhcjsPlatform (gsDebug settings) js_objs base
@@ -223,7 +243,9 @@ ignoreUnsupported =
 handleCommandline :: GhcjsSettings -> [String] -> Maybe String -> IO ()
 handleCommandline settings args minusBargs
     | Just act <- lookupAct = act >> exitSuccess
-    | otherwise             = return ()
+    | otherwise             = do
+        booting <- getEnvOpt "GHCJS_BOOTING"
+        when (booting && any ("Cabal-" `isPrefixOf`) args) bootstrapFallback
    where
      lookupAct = getFirst . mconcat . map (First . (`lookup` acts)) $ args
      acts :: [(String, IO ())]
@@ -253,10 +275,7 @@ printVersion = putStrLn $
      getCompilerVersion ++ " (GHC " ++ getGhcCompilerVersion ++ ")"
 
 printNumericVersion :: IO ()
-printNumericVersion = do
-  booting <- getEnvOpt "GHCJS_BOOTING"
-  if booting then putStrLn getGhcCompilerVersion
-             else putStrLn getCompilerVersion
+printNumericVersion = putStrLn getCompilerVersion
 
 modsumToInfo :: GhcMonad m => ModSummary -> m (Maybe ModuleInfo)
 modsumToInfo ms = getModuleInfo (ms_mod ms)
@@ -280,7 +299,7 @@ printObj _                     = putStrLn "usage: ghcjs --print-obj objfile" >> 
 
 -- also generate native code, compile with regular GHC settings, but make sure
 -- that generated files don't clash with ours
-generateNative :: GhcjsSettings -> Bool -> [Located String] -> [String] -> Maybe String -> IO ()
+generateNative :: GhcjsSettings -> Bool -> [Located String] -> [String] -> Maybe String -> IO Bool
 generateNative settings oneshot argsS args1 mbMinusB =
   runGhcSession mbMinusB $ do
       sdflags0 <- getSessionDynFlags
@@ -296,7 +315,8 @@ generateNative settings oneshot argsS args1 mbMinusB =
           oneshot' = oneshot || null hs_srcs
           dflags3  = installNativeHooks $
               dflags2 { ldInputs = map (FileOption "") objs ++ ldInputs dflags2 }
-      if gsNativeExecutables settings || ghcLink dflags3 /= LinkBinary
+          buildingSetup = buildingCabalSetup (map fst hs_srcs) dflags3
+      if gsNativeExecutables settings || ghcLink dflags3 /= LinkBinary || buildingSetup
           then setSessionDynFlags dflags3
           else setSessionDynFlags $ dflags3 { ghcLink = NoLink
                                             , outputFile = Nothing
@@ -319,6 +339,7 @@ generateNative settings oneshot argsS args1 mbMinusB =
             setTargets targets
             success <- load LoadAllTargets
             when (failed success) (throw (ExitFailure 1))
+      return buildingSetup
 
 -- replace primops in the name cache so that we get our correctly typed primops
 fixNameCache :: GhcMonad m => m ()
@@ -357,19 +378,12 @@ printIface ["--show-iface", iface] = do
        liftIO $ showIface env iface
 printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
 
--- | generate native code only from native compiler for these packages
---   used to support build system
-doPackageFallback :: [PackageId] -> [String] -> IO ()
-doPackageFallback pkgs args
-  | any isFallbackPkg pkgs = do
+-- | when booting GHCJS, we pretend to have the Cabal lib installed
+--   call GHC to compile our Setup.hs
+bootstrapFallback :: IO ()
+bootstrapFallback = do
     ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
     getArgs >>= rawSystem ghc >>= exitWith -- run without GHCJS package args
-  | otherwise = return ()
-  where
-    isFallbackPkg pkgid =
-      let pkgname = takeWhile (/='-') (packageIdString pkgid)
-      in  pkgname `elem` ["Cabal"]
-
 
 generateDeps :: [String] -> Maybe String -> IO ()
 generateDeps args mbMinusB = do

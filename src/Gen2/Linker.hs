@@ -23,7 +23,7 @@ import           Data.List                ( partition, isSuffixOf, isPrefixOf
                                           , intercalate, group, sort)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
-import           Data.Maybe               (fromMaybe)
+import           Data.Maybe               (fromMaybe, listToMaybe)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
@@ -71,9 +71,12 @@ link dflags debug out include pkgs objFiles jsFiles isRootFun = do
         concatMap (M.keys . depsDeps) objDeps
       rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
   -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
-  compilationProgressMsg dflags $ "Linking " ++ out ++ " (" ++ intercalate "," rootMods ++ ")"
+  compilationProgressMsg dflags $
+    "Linking " ++ out ++ " (" ++ intercalate "," rootMods ++ ")"
   c <- newMVar M.empty
-  (allDeps, src, infos) <- collectDeps (lookupFun c $ zip objDeps objFiles) (roots `S.union` rtsDeps)
+  (allDeps, src, infos) <-
+    collectDeps (lookupFun c $ zip objDeps objFiles) 
+                (roots `S.union` rtsDeps (map fst pkgs))
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (renderLinker debug src infos)
   writeFile (out </> "rts.js") rtsStr
@@ -251,12 +254,16 @@ funPkgTxtNoVer :: Fun -> Text
 funPkgTxtNoVer = packageName . funPackage
 
 -- dependencies for the RTS, these need to be always linked
-rtsDeps :: Set Fun
-rtsDeps =
+rtsDeps :: [PackageId] -> Set Fun
+rtsDeps pkgs =
  let mkDep (p,m,s) = Fun (Package p "") m s
+     pkgs'     = map packageIdString pkgs
+     pkgErr p  = error ("Package `" ++ p ++ "' is required for linking, but was not found")
+     findPkg p = maybe (pkgErr p) T.pack (listToMaybe $ filter (p `isPrefixOf`) pkgs')
+     primPkg   = findPkg "ghcjs-prim"
+     basePkg   = findPkg "base"
  in S.fromList $ map mkDep
-     [ ("base",       "GHC.Conc.Sync",          "h$baseZCGHCziConcziSynczireportError")
-     , ("base",       "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )
-     , ("ghcjs-prim", "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSRef")
+     [ (basePkg, "GHC.Conc.Sync",          "h$baseZCGHCziConcziSynczireportError")
+     , (basePkg, "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )
+     , (primPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSRef")
      ]
-
