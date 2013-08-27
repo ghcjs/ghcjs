@@ -138,18 +138,24 @@ initSourceTree currentDir = do
       p <- pwd
       echo $ "preparing local boot tree ( " <> toTextIgnore p <> " )"
       echo "boot tree in current dir: not git pulling automatically"
-      git ["submodule", "update", "--init", "--recursive"]
-      git ["submodule", "foreach", "git", "reset", "--hard"]
+      isGit <- test_d ".git"
+      when isGit $ do
+        git ["submodule", "update", "--init", "--recursive"]
+        git ["submodule", "foreach", "git", "reset", "--hard"]
     else do
       cdBase
       p <- pwd
       echo $ "preparing global boot tree ( " <> toTextIgnore (p </> "ghcjs-boot") <> " )"
       e <- test_d "ghcjs-boot"
       if e then do
-           echo "updating existing tree"
            cd "ghcjs-boot"
-           git ["submodule", "foreach", "git", "reset", "--hard"]
-           git ["pull", "--recurse-submodules"]
+           isGit <- test_d ".git"
+           if isGit
+             then do
+               echo "updating existing tree"
+               git ["submodule", "foreach", "git", "reset", "--hard"]
+               git ["pull", "--recurse-submodules"]
+             else echo "ghcjs-boot is not a git repository, not updating"
          else do
            echo "cloning new tree"
            git ["clone", "http://github.com/ghcjs/ghcjs-boot"]
