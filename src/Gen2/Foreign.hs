@@ -496,7 +496,7 @@ isGhcjsFFIImportResultTy dflags ty = isFFIImportResultTy dflags ty
 isGhcjsFFITy :: DynFlags -> Type -> Bool
 isGhcjsFFITy dflags ty = checkRepTyCon f ty
   where
-    f tc = any (\(p,m,n) -> pkg `isPrefixOf` p && m == mod && n == name) ffiTys
+    f tc = any (\(p,m,n) -> p `isPrefixOf` pkg && m == mod && n == name) ffiTys
       where
         -- comparing strings is probably not too fast, perhaps search
         -- for the types first and use some cache
@@ -507,7 +507,7 @@ isGhcjsFFITy dflags ty = checkRepTyCon f ty
                                   , moduleNameString (moduleName m))
         name = occNameString (nameOccName n)
     ffiTys :: [(String, String, String)]
-    ffiTys = [ ("ghcjs-prim", "GHCJS", "JSRef") ]
+    ffiTys = [ ("ghcjs-prim", "GHCJS.Prim", "JSRef") ]
 
 -- normaliseFfiType gets run before checkRepTyCon, so we don't
 -- need to worry about looking through newtypes or type functions
