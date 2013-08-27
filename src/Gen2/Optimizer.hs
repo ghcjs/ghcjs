@@ -37,9 +37,10 @@ import           Data.List (foldl')
 import qualified Data.List as L
 import qualified Data.Map as M
 import           Data.Maybe
+import           Data.Monoid
 import qualified Data.Set as S
 import qualified Data.Text as T
-import           Data.Monoid
+import           Data.Word
 
 import           Language.Javascript.JMacro
 
@@ -765,28 +766,29 @@ exprCond' = exprCond . fromA
 
 -- constant folding and other bottom up rewrites
 intInfixOp :: BinOp -> Integer -> Integer -> Expr
-intInfixOp AddOp i1 i2 = ValE (IntV (i1+i2))
-intInfixOp SubOp i1 i2 = ValE (IntV (i1-i2))
-intInfixOp MulOp i1 i2 = ValE (IntV (i1*i2))
-intInfixOp DivOp i1 i2
+intInfixOp AddOp         i1 i2 = ValE (IntV (i1+i2))
+intInfixOp SubOp         i1 i2 = ValE (IntV (i1-i2))
+intInfixOp MulOp         i1 i2 = ValE (IntV (i1*i2))
+intInfixOp DivOp         i1 i2
   | i2 /= 0 && d * i2 == i1 = ValE (IntV d)
   where
     d = i1 `div` i2
-intInfixOp ModOp       i1 i2 = ValE (IntV (i1 `mod` i2)) -- not rem?
-intInfixOp LeftShiftOp i1 i2 = bitwiseInt' shiftL i1 i2
-intInfixOp RightShiftOp i1 i2 = bitwiseInt' shiftR i1 i2
-intInfixOp BAndOp      i1 i2 = bitwiseInt (.&.) i1 i2
-intInfixOp BOrOp       i1 i2 = bitwiseInt (.|.) i1 i2
-intInfixOp BXorOp      i1 i2 = bitwiseInt xor   i1 i2
-intInfixOp GtOp        i1 i2 = eBool (i1 > i2)
-intInfixOp LtOp        i1 i2 = eBool (i1 < i2)
-intInfixOp LeOp        i1 i2 = eBool (i1 <= i2)
-intInfixOp GeOp        i1 i2 = eBool (i1 >= i2)
-intInfixOp StrictEqOp  i1 i2 = eBool (i1 == i2)
-intInfixOp StrictNeqOp i1 i2 = eBool (i1 /= i2)
-intInfixOp EqOp        i1 i2 = eBool (i1 == i2)
-intInfixOp NeqOp       i1 i2 = eBool (i1 /= i2)
-intInfixOp op          i1 i2 = BOpE op (ValE (IntV i1)) (ValE (IntV i2))
+intInfixOp ModOp         i1 i2 = ValE (IntV (i1 `mod` i2)) -- not rem?
+intInfixOp LeftShiftOp   i1 i2 = bitwiseInt' shiftL i1 (i2 .&. 31)
+intInfixOp RightShiftOp  i1 i2 = bitwiseInt' shiftR i1 (i2 .&. 31)
+intInfixOp ZRightShiftOp i1 i2 = bitwiseWord shiftR i1 (i2 .&. 31)
+intInfixOp BAndOp        i1 i2 = bitwiseInt (.&.) i1 i2
+intInfixOp BOrOp         i1 i2 = bitwiseInt (.|.) i1 i2
+intInfixOp BXorOp        i1 i2 = bitwiseInt xor   i1 i2
+intInfixOp GtOp          i1 i2 = eBool (i1 > i2)
+intInfixOp LtOp          i1 i2 = eBool (i1 < i2)
+intInfixOp LeOp          i1 i2 = eBool (i1 <= i2)
+intInfixOp GeOp          i1 i2 = eBool (i1 >= i2)
+intInfixOp StrictEqOp    i1 i2 = eBool (i1 == i2)
+intInfixOp StrictNeqOp   i1 i2 = eBool (i1 /= i2)
+intInfixOp EqOp          i1 i2 = eBool (i1 == i2)
+intInfixOp NeqOp         i1 i2 = eBool (i1 /= i2)
+intInfixOp op            i1 i2 = BOpE op (ValE (IntV i1)) (ValE (IntV i2))
 
 doubleInfixOp :: BinOp -> SaneDouble -> SaneDouble -> Expr
 doubleInfixOp AddOp (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1+d2))
@@ -812,6 +814,13 @@ bitwiseInt' :: (Int32 -> Int -> Int32) -> Integer -> Integer -> Expr
 bitwiseInt' op i1 i2 =
   let i = fromIntegral i1 `op` fromIntegral i2
   in ValE (IntV $ fromIntegral i)
+
+bitwiseWord :: (Word32 -> Int -> Word32) -> Integer -> Integer -> Expr
+bitwiseWord op i1 i2 =
+  let i = fromIntegral i1 `op` fromIntegral i2
+      i' :: Int32
+      i' = fromIntegral i
+  in ValE (IntV $ fromIntegral i')
 
 -----------------------------------------------------------
 -- stack and stack pointer magic
