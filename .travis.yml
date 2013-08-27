@@ -22,15 +22,9 @@ install:
     - pwd
     - export REPOSITORY_DIR=`pwd`
     - cabal install --enable-executable-dynamic 
-    - cabal install stm QuickCheck
-    - ghcjs-boot --reboot
+    - ghcjs-boot --init
     - cabal install -j2 --ghcjs stm random syb transformers text parallel QuickCheck old-time vector
     - cd
-    - git clone git://github.com/ghcjs/ghcjs-prim.git
-    - git clone git://github.com/ghcjs/ghcjs-base.git
-    - cabal install -j2 --ghcjs ./ghcjs-prim ./ghcjs-base
-    - cd $HOME/.ghcjs/x86*
-    - git clone git://github.com/ghcjs/shims.git
     - ghcjs-pkg list
     - cd $REPOSITORY_DIR
 
