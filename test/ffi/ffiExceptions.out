@@ -1,0 +1,18 @@
+running unsafe no handler
+before
+uncaught exception in Haskell thread: unsafe exception
+running unsafe handler
+before
+uncaught exception in Haskell thread: unsafe exception
+running safe no handler
+before
+running safe handler
+before
+got exception: JavaScript exception: safe exception
+after
+running interruptible no handler
+before
+running interruptible handler
+before
+got exception: JavaScript exception: interruptible exception
+after

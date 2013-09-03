@@ -55,6 +55,7 @@ import qualified Gen2.Compactor           as Compactor
 import           Gen2.ClosureInfo         hiding (Fun)
 import           Gen2.Object
 import           Gen2.Utils
+import           Gen2.RtsTypes
 
 link :: DynFlags
      -> Bool
@@ -86,7 +87,16 @@ link dflags debug out include pkgs objFiles jsFiles isRootFun = do
   return []
   where
     pkgPaths :: Map Text [FilePath]
-    pkgPaths = M.fromList (traverse . _1 %~ T.pack . packageIdString $ pkgs)
+    pkgPaths = M.fromList pkgs'
+      where
+        pkgs' = concatMap (\(pkg, dirs) -> map (,dirs) (packageIdToStrings pkg)) pkgs
+
+    packageIdToStrings :: PackageId -> [Text]
+    packageIdToStrings pkg
+      | isWiredInPackage xs = [ T.pack xs, dropVersion . T.pack $ xs ]
+      | otherwise           = [ T.pack xs ]
+      where
+        xs = packageIdString pkg
 
     lookupFun :: MVar (Map (Package, Text, String) FilePath)
               -> [(Deps,FilePath)]
@@ -259,11 +269,23 @@ rtsDeps pkgs =
  let mkDep (p,m,s) = Fun (Package p "") m s
      pkgs'     = map packageIdString pkgs
      pkgErr p  = error ("Package `" ++ p ++ "' is required for linking, but was not found")
-     findPkg p = maybe (pkgErr p) T.pack (listToMaybe $ filter (p `isPrefixOf`) pkgs')
-     primPkg   = findPkg "ghcjs-prim"
-     basePkg   = findPkg "base"
+     findPkg p | null (filter (p `isPrefixOf`) pkgs') = pkgErr p
+               | otherwise                            = T.pack p
+     ghcjsPrimPkg   = findPkg "ghcjs-prim"
+     ghcPrimPkg     = findPkg "ghc-prim"
+     basePkg        = findPkg "base"
+     
  in S.fromList $ map mkDep
-     [ (basePkg, "GHC.Conc.Sync",          "h$baseZCGHCziConcziSynczireportError")
-     , (basePkg, "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )
-     , (primPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSRef")
+     [ (basePkg,      "GHC.Conc.Sync",          "h$baseZCGHCziConcziSynczireportError")
+     , (basePkg,      "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )
+     , (basePkg,      "GHC.Exception",          "h$baseZCGHCziExceptionziSomeException_con_e")
+     , (ghcPrimPkg,   "GHC.Types",              "h$ghczmprimZCGHCziTypesziZC_con_e")
+     , (ghcPrimPkg,   "GHC.Types",              "h$ghczmprimZCGHCziTypesziZMZN")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfExceptionJSExceptionzuzdTypeable")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfShowJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfExceptionJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdTypeableJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfExceptionJSExceptionzuzdShow")
      ]

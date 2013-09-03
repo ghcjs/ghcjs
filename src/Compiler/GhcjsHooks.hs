@@ -34,6 +34,7 @@ import           System.FilePath
 import           Compiler.Info
 import           Compiler.Variants
 import           Compiler.Utils
+import qualified Compiler.Utils       as Utils
 import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.Foreign         as Gen2
 
@@ -65,16 +66,17 @@ ghcjsLinkDynLib dflags o_files dep_packages = return ()
 
 ghcjsLinkBinary :: Bool     -- Debug mode
                 -> [FilePath]
+                -> Bool     -- link statically
                 -> DynFlags
                 -> [FilePath]
                 -> [PackageId]
                 -> IO ()
-ghcjsLinkBinary debug jsFiles dflags objs dep_pkgs =
+ghcjsLinkBinary debug jsFiles static dflags objs dep_pkgs =
   void $ variantLink gen2Variant dflags debug exe [] deps objs jsFiles isRoot
     where
       isRoot _ = True
       deps     = map (\pkg -> (pkg, packageLibPaths pkg)) dep_pkgs'
-      exe      = exeFileName dflags
+      exe      = Utils.exeFileName dflags
       pidMap   = pkgIdMap (pkgState dflags)
       packageLibPaths :: PackageId -> [FilePath]
       packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
