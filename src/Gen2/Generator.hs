@@ -203,8 +203,11 @@ moduleNameText m
     where xs = moduleNameString . moduleName $ m
 
 modulePackageText :: Module -> Object.Package
-modulePackageText m = Object.Package n v
+modulePackageText m 
+  | isWiredInPackage pkgStr = Object.Package n ""
+  | otherwise               = Object.Package n v
   where
+    pkgStr = packageIdString (modulePackageId m)
     (n, v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
 
 genToplevel :: StgBinding -> C
@@ -585,13 +588,13 @@ genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt t
   do
     ids <- genIds bnd
     declIds bnd <>
-      parseFFIPattern False False ("h$" ++ unpackFS lbl) t ids args <>
+      parseFFIPattern False False False ("h$" ++ unpackFS lbl) t ids args <>
       genAlts top bnd at alts
 
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) _ [(DataAlt{}, bndrs, _, e)] l srt = do
   ids <- concatMapM genIds bndrs
   concatMapM declIds bndrs <>
-     parseFFIPattern False False ("h$" ++ unpackFS lbl) t ids args <>
+     parseFFIPattern False False False ("h$" ++ unpackFS lbl) t ids args <>
      genExpr top e
 
 -- pattern match on an unboxed tuple
@@ -1210,17 +1213,18 @@ typeComment i
 -- fixme: what if the call returns a thunk?
 genPrimCall :: PrimCall -> [StgArg] -> Type -> C
 genPrimCall (PrimCall lbl _) args t =
-  parseFFIPattern False False ("h$" ++ unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
+  parseFFIPattern False False False ("h$" ++ unpackFS lbl) t tgt args <> return [j| return `Stack`[`Sp`]; |]
   where
     tgt = map toJExpr . take (typeSize t) $ enumFrom R1
 
 genForeignCall0 :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, Bool)
 genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) JavaScriptCallConv safe)) t tgt args
-  = (,async) <$> parseFFIPattern async True (unpackFS clbl) t tgt args
+  = (,async) <$> parseFFIPattern catchExcep async True (unpackFS clbl) t tgt args
   where
-    async = playSafe safe
+    catchExcep = playSafe safe || playInterruptible safe
+    async      = playInterruptible safe
 genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) t tgt args
-  = (,False) <$> parseFFIPattern False False lbl t tgt args
+  = (,False) <$> parseFFIPattern False False False lbl t tgt args
     where
       cl = unpackFS clbl
       lbl | wrapperPrefix `L.isPrefixOf` cl =
@@ -1249,16 +1253,35 @@ genForeignCall0 _ _ _ _ = error "genForeignCall0: unsupported foreign call"
   2. $r1, $r2                binary return
   3. $r1, $r2, $r3_1, $r3_2  unboxed tuple return
  -}
-parseFFIPattern :: Bool  -- ^ async (only valid with javascript calling conv)
-                -> Bool  -- ^ javascript calling conv
+parseFFIPattern :: Bool  -- ^ catch exception and convert them to haskell exceptions
+                -> Bool  -- ^ async (only valid with javascript calling conv)
+                -> Bool  -- ^ using javascript calling convention
                 -> String
                 -> Type
                 -> [JExpr]
                 -> [StgArg]
                 -> C
+parseFFIPattern catchExcep async jscc pat t es as
+  | catchExcep = do
+      c <- parseFFIPatternA async jscc pat t es as
+      return [j| try {
+                   `c`;
+                 } catch(e) {
+                   return h$throwJSException(e);
+                 }
+               |]
+  | otherwise  = parseFFIPatternA async jscc pat t es as
+
+parseFFIPatternA :: Bool  -- ^ async (only valid with javascript calling conv)
+                 -> Bool  -- ^ javascript calling conv
+                 -> String
+                 -> Type
+                 -> [JExpr]
+                 -> [StgArg]
+                 -> C
 -- async calls get an extra callback argument
 -- call it with the result
-parseFFIPattern True True pat t es as  = do
+parseFFIPatternA True True pat t es as  = do
   cb <- makeIdent
   stat <- parseFFIPattern' (Just (toJExpr cb)) True pat t es as
   return [j| `decl cb`;
@@ -1279,17 +1302,17 @@ parseFFIPattern True True pat t es as  = do
      where nrst = typeSize t
            copyResult d = mconcat $ zipWith
               (\r i -> [j| `r` = `d`[`i`]; |]) (enumFrom R1) [0..nrst-1]
-parseFFIPattern False javascriptCc pat t es as =
+parseFFIPatternA False javascriptCc pat t es as =
   parseFFIPattern' Nothing javascriptCc pat t es as
-parseFFIPattern _ _ _ _ _ _ = error "parseFFIPattern: non-JavaScript pattern must be synchronous"
+parseFFIPatternA _ _ _ _ _ _ = error "parseFFIPattern: non-JavaScript pattern must be synchronous"
 
 parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
-                -> Bool     -- ^ javascript calling convention used
-                -> String   -- ^ pattern called
-                -> Type     -- ^ return type
-                -> [JExpr]  -- ^ expressions to return in (may be more than necessary)
-                -> [StgArg] -- ^ arguments
-                -> C
+                 -> Bool        -- ^ javascript calling convention used
+                 -> String      -- ^ pattern called
+                 -> Type        -- ^ return type
+                 -> [JExpr]     -- ^ expressions to return in (may be more than necessary)
+                 -> [StgArg]    -- ^ arguments
+                 -> C
 parseFFIPattern' callback javascriptCc pat t ret args
   | not javascriptCc = mkApply pat
   | otherwise = do

@@ -439,9 +439,11 @@ ghcjsTcForeignImports decls
                                filter isForeignImport decls
        ; return (ids, decls, unionManyBags gres) }
 
+{-
 isForeignImport :: LForeignDecl name -> Bool
 isForeignImport (L _ (ForeignImport _ _ _ _)) = True
 isForeignImport _                             = False
+-}
 
 foreignDeclCtxt :: ForeignDecl Name -> SDoc
 foreignDeclCtxt fo

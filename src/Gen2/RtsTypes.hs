@@ -243,11 +243,11 @@ data IdScope = Register !StgReg
 
 -- makeLenses ''GenScope
 
-currentModule :: G String
-currentModule = moduleNameString . moduleName <$> use gsModule
+-- currentModule :: G String
+--currentModule = moduleNameString . moduleName <$> use gsModule
 
-currentModulePkg :: G String
-currentModulePkg = showPpr' =<< use gsModule
+-- currentModulePkg :: G String
+-- currentModulePkg = showPpr' =<< use gsModule
 
 
 -- arguments that the trampoline calls our funcs with
@@ -494,10 +494,28 @@ jsIdIdent' i mn suffix0 = do
       name = fmap ('.':) . showPpr' . localiseName . getName $ i
       mkPrefixU
         | isExportedId i, Just x <- (nameModule_maybe . getName) i = do
-           xstr <- showPpr' x
+           let xstr = showModule x
            return (zEncodeString xstr, "")
-        | otherwise = (,('_':) . encodeUnique . getKey . getUnique $ i) . ('$':) . zEncodeString
-                        <$> currentModulePkg
+        | otherwise = (,('_':) . encodeUnique . getKey . getUnique $ i) . ('$':)
+                    . zEncodeString . showModule <$> use gsModule
+      showModule m
+        | any (`L.isPrefixOf` pkg) wiredInPackages = dropVersion pkg ++ ":" ++ modName
+        | otherwise                                = pkg ++ ":" ++ modName
+        where
+          modName     = moduleNameString (moduleName m)
+          pkg         = packageIdString (modulePackageId m)
+          dropVersion = reverse . drop 1 . dropWhile (/='-') . reverse
+
+{-
+   some packages are wired into GHCJS, but not GHC
+   make sure we don't version them in the output
+   since the RTS uses thins from them
+-}
+wiredInPackages :: [String]
+wiredInPackages = [ "ghcjs-prim" ]
+
+isWiredInPackage :: String -> Bool
+isWiredInPackage pkg = any (`L.isPrefixOf` pkg) wiredInPackages
 
 idTypeSuffix :: IdType -> String
 idTypeSuffix IdPlain = ""
