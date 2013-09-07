@@ -55,6 +55,7 @@ Library
                      Gen2.Object,
                      Gen2.ClosureInfo,
                      Gen2.Foreign,
+                     Gen2.GHC.CoreToStg,
                      Compiler.GhcjsHooks,
                      Compiler.GhcjsPlatform,
                      Compiler.Info,

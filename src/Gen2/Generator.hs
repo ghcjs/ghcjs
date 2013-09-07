@@ -116,7 +116,7 @@ pass df m ss = go 1 Object.emptySymbolTable ss
                     -> Int
                     -> G (Object.SymbolTable, ([Text], BL.ByteString), ([Id], [Id]))
       generateBlock st decl n = do
-        tl      <- genToplevel (removeNoEscape decl)
+        tl      <- genToplevel decl
         extraTl <- use gsToplevelStats
         ci      <- use gsClosureInfo
         resetToplevel
