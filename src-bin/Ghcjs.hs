@@ -10,9 +10,6 @@ import           Config (cProjectVersion, cDYNAMIC_GHC_PROGRAMS)
 import           GHC
 import           Hooks
 import           HscMain
-import           TidyPgm (tidyProgram)
-import           CoreToStg (coreToStg)
-import           SimplStg (stg2stg)
 import           UniqFM (eltsUFM)
 import           DynFlags
 import           Platform

@@ -98,7 +98,7 @@ tests onlyOpt onlyUnopt log = do
          ]
 
 -- warn if any of these are not installed
-requiredPackages :: [TL.Text]
+requiredPackages :: [Text]
 requiredPackages = [ "ghc-prim"
                    , "integer-gmp"
                    , "base"
@@ -329,7 +329,7 @@ runGhcjsResult opts file = do
           Nothing    -> assertFailure "cannot find ghcjs"
           Just (r,_) -> assertEqual "compile error" ExitSuccess (stdioExit r)
         forM_ (tsCopyFiles settings) $ \cfile ->
-          let cfile' = fromText (TL.pack cfile)
+          let cfile' = fromText (T.pack cfile)
           in  copyFile (directory file </> cfile') (cd </> outputG2 </> cfile')
         nodeResult <-
           case tsDisableNode settings of
@@ -443,9 +443,9 @@ readExitCode = fmap convert . readMaybe . T.unpack
 
 checkRequiredPackages :: IO ()
 checkRequiredPackages = shelly . silently $ do
-  installedPackages <- TL.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
+  installedPackages <- T.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
   forM_ requiredPackages $ \pkg -> do
-    when (not $ any ((pkg <> "-") `TL.isPrefixOf`) installedPackages) $ do
+    when (not $ any ((pkg <> "-") `T.isPrefixOf`) installedPackages) $ do
       echo ("warning: package `" <> pkg <> "' is required by the test suite but is not installed")
 --      liftIO exitFailure
 
