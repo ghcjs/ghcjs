@@ -12,7 +12,7 @@ data Action = NewEmptyMVar | NewMVar Int | TakeMVar | ReadMVar | PutMVar Int
 
 main = do 
   t <- myThreadId
-  forkIO (threadDelay 1000000 >> killThread t)
+  forkIO (threadDelay 20000000 >> killThread t)
 	-- just in case we deadlock
   testMVar
 
