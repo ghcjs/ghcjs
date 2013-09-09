@@ -9,6 +9,7 @@ module Gen2.Generator (generate) where
 import           ForeignCall
 import           FastString
 import           BasicTypes
+import           PrelNames
 import           DynFlags
 import           Encoding
 import           TysPrim
@@ -357,10 +358,24 @@ might_be_a_function ty
   | otherwise
   = True
 
--- fixme if static thing is a thunk it's never a con, check can go!
--- fixme: if we know some id has already been pattern matched, just return the stack, no check needed?
--- fixme: idArity x for a function with implicit args doesn't report those!
 genApp :: Bool -> Bool -> Id -> [StgArg] -> C
+-- special cases for unpacking C Strings, avoid going through a typed array when possible
+genApp _ _ i [StgLitArg (MachStr bs)]
+    | getUnique i == unpackCStringIdKey, Right d <- T.decodeUtf8' bs =
+        return [j| `R1` = h$toHsStringA(`d`);
+                   return `Stack`[`Sp`];
+                 |]
+    | getUnique i == unpackCStringUtf8IdKey, Right d <- T.decodeUtf8' bs =
+        return [j| `R1` = h$toHsString(`d`);
+                   return `Stack`[`Sp`];
+                 |]
+ -- we could handle unpackNBytes# here, but that's probably not common enough to warrant a special case
+genApp _ _ i [StgLitArg (MachStr bs), x]
+    | getUnique i == unpackCStringAppendIdKey, Right d <- T.decodeUtf8' bs = do
+        a <- genArg x
+        return [j| `R1` = h$appendToHsStringA(`d`, `a`);
+                   return `Stack`[`Sp`];
+                 |]
 genApp force mstackTop i a
     | isPrimitiveType (idType i) || isStrictType (idType i)
             = r1 <> return [j| return `Stack`[`Sp`]; |]
