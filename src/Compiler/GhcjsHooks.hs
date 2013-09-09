@@ -267,8 +267,8 @@ ghcjsCompileModule :: Bool        -- ^ Debug
                    -> ModSummary   
                    -> IO B.ByteString
 ghcjsCompileModule debug env core mod 
-  | WayDyn `elem` ways dflags = do
-      return "GHCJS dummy output"
+--  | WayDyn `elem` ways dflags = do
+--      return "GHCJS dummy output"
   | otherwise = do
       core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
       stg <- coreToStg dflags (cg_module core) core_binds
