@@ -632,29 +632,26 @@ assignj x y = [j| `x` = `y` |]
 -- simple inline prim case, no return function needed
 genInlinePrimCase :: Id -> Id -> VarType -> AltType -> [StgAlt] -> C
 genInlinePrimCase top bnd tc _ [(DEFAULT, bs, used, e)] = genExpr top e
-genInlinePrimCase top bnd tc (AlgAlt dtc) alts@[(DataAlt dc,_,_,_),_]
-    | isBoolTy (dataConType dc) && dataConTag dc == 2 = do
-        i <- jsId bnd
-        [b1,b2] <- mapM (fmap snd . mkPrimIfBranch top tc) alts
-        return [j| if(`i`) { `b1` } else { `b2` } |]
+-- some primops return ADT's, we can assume they're in WHNF
+genInlinePrimCase top bnd tc (AlgAlt dtc) alts@[_,(DataAlt dc,_,_,_)]
     | isBoolTy (dataConType dc) && dataConTag dc == 1 = do
         i <- jsId bnd
         [b1,b2] <- mapM (fmap snd . mkPrimIfBranch top tc) alts
+        return [j| if(`i`) { `b1` } else { `b2` } |]
+    | isBoolTy (dataConType dc) && dataConTag dc == 2 = do
+        i <- jsId bnd
+        [b1,b2] <- mapM (fmap snd . mkPrimIfBranch top tc) alts
         return [j| if(`i`) { `b2` } else { `b1` } |]
--- fixme more alts needed?
--- genInlinePrimCase top bnd tc (AlgAlt dtc) alts
---    | isBoolTy (mkTyConTyisEnumerationTyCon dtc = do
---        i <- jsId bnd
---        mkSwitch [je| (`i`===true)?2:((typeof `i` === 'object')?(`i`.f.a):1) |] <$> mapM (mkPrimBranch top tc) alts
-    | otherwise = do
+genInlinePrimCase top bnd tc (AlgAlt _) alts = do
         i <- jsId bnd
         mkSwitch [je| `i`.f.a |] <$> mapM (mkPrimBranch top tc) alts
 genInlinePrimCase top bnd tc (PrimAlt ptc) alts
     | isMatchable tc    = liftM2 mkSwitch (jsId bnd) (mapM (mkPrimBranch top tc) alts)
     | otherwise         = liftM2 mkIfElse (genIdArg bnd) (mapM (mkPrimIfBranch top tc) alts)
--- genInlinePrimCase top bnd tc (UbxTupAlt n) [(DataAlt _, bndrs, _, body)] =
---   genLoadUbxTup n bndrs <> genExpr top e
-genInlinePrimCase _ _ _ _ alt = error ("genInlinePrimCase: unhandled alt: " ++ show alt)
+genInlinePrimCase top bnd tc (UbxTupAlt n) [(DataAlt _, bndrs, _, body)] =
+    loadUbxTup bndrs n <> genExpr top body
+genInlinePrimCase _ _ _ at alt = error ("genInlinePrimCase: unhandled alt: (" ++ 
+   show at ++ "," ++ show (length alt) ++ "]) " ++ show alt)
 
 
 genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
