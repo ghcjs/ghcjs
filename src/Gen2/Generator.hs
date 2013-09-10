@@ -212,15 +212,15 @@ modulePackageText m
     (n, v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
 
 genToplevel :: StgBinding -> C
-genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs -- (lookupStaticRefs bndr srts)
-genToplevel (StgRec bs)          = mconcat $ map (\(bndr, rhs) -> genToplevelDecl bndr rhs) bs
+genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs False -- (lookupStaticRefs bndr srts)
+genToplevel (StgRec bs)          = mconcat $ map (\(bndr, rhs) -> genToplevelDecl bndr rhs True) bs
 
 lookupStaticRefs :: Id -> [(Id, [Id])] -> StaticRefs
 lookupStaticRefs i xs = fromMaybe [] (lookup i xs)
 
-genToplevelDecl :: Id -> StgRhs -> C
-genToplevelDecl i rhs
-  = resetSlots (genToplevelConEntry i rhs) <> resetSlots (genToplevelRhs i rhs)
+genToplevelDecl :: Id -> StgRhs -> Bool -> C
+genToplevelDecl i rhs rec
+  = resetSlots (genToplevelConEntry i rhs) <> resetSlots (genToplevelRhs i rhs rec)
 
 genToplevelConEntry :: Id -> StgRhs -> C
 genToplevelConEntry i (StgRhsCon _cc con args)
@@ -240,8 +240,9 @@ genStaticRefs (SRT n e bmp) =
 
 getStaticRef = fmap (itxt.head) . genIdsI
 
-genToplevelRhs :: Id -> StgRhs -> C
-genToplevelRhs i (StgRhsCon _cc con args)
+-- the rec argument is whether this rhs comes from an StgRec binding or not
+genToplevelRhs :: Id -> StgRhs -> Bool -> C
+genToplevelRhs i (StgRhsCon _cc con args) rec
   | isBoolTy (dataConType con) && dataConTag con == 1 =
       declIds i <> ((\id -> [j| `id` = false; |]) <$> jsId i)
   | isBoolTy (dataConType con) && dataConTag con == 2 =
@@ -255,10 +256,9 @@ genToplevelRhs i (StgRhsCon _cc con args)
     do
       id <- jsId i
       eid <- jsEntryIdI i
-      as <- mapM genArg args
       ec <- enterDataCon con
-      return (decl eid <> [j| `eid` = `ec` |]) <> declIds i <> (allocConStatic id con . concat $ as)
-genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) = do
+      return (decl eid <> [j| `eid` = `ec` |]) <> declIds i <> (allocConStatic id con rec args)
+genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) _ = do
         eid <- jsEnIdI i
         eid' <- jsEnId i
         idi <- jsIdI i
@@ -273,7 +273,7 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) = do
                    `decl id`;
                    `id` = h$static_thunk(`eid`);
                  |]
-genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
+genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) _ = do
         eid <- jsEnIdI i
         eid' <- jsEnId i
         idi <- jsIdI   i
@@ -1125,24 +1125,37 @@ allocCon to con xs = do
 -- nullaryConClosure tag = ValExpr (JVar . TxtI . T.pack $ "data_static_0_" ++ show tag ++ "_c")
 
 -- allocConStatic cl f n = decl' cl [je| static_con(`f`,`n`) |]
-allocConStatic :: JExpr -> DataCon -> [JExpr] -> C
+allocConStatic :: JExpr -> DataCon -> Bool -> [GenStgArg Id] -> C
 -- allocConStatic to tag [] = [j| `to` = `nullaryConClosure tag`; |]
-allocConStatic to con []
-  | isBoolTy (dataConType con) && dataConTag con == 1 =
-      return [j| `to` = false; |]
-  | isBoolTy (dataConType con) && dataConTag con == 2 =
-      return [j| `to` = true;  |]
-  | otherwise = do
-      e <- enterDataCon con
-      return [j| `to` = h$c(`e`); |]
+allocConStatic to con rec args = do
+  as <- mapM genArg args
+  allocConStatic' . concat $ as
+  where
+    allocConStatic' []
+      | isBoolTy (dataConType con) && dataConTag con == 1 =
+        return [j| `to` = false; |]
+      | isBoolTy (dataConType con) && dataConTag con == 2 =
+        return [j| `to` = true;  |]
+      | otherwise = do
+        e <- enterDataCon con
+        return [j| `to` = h$c(`e`); |]
 --      return [j| `to` = { f: `e`, d1: null, d2: null }; |]
-allocConStatic to con [x]
-  | isUnboxableCon con = return [j| `to` = `x` |]
-allocConStatic to con xs = do
-  e <- enterDataCon con
-  return [j| `to` = h$c(`e`);
-             h$sti(\ -> `JList (to:xs)`);
-           |]
+    allocConStatic' [x]
+      | isUnboxableCon con = return [j| `to` = `x` |]
+    allocConStatic' xs = do
+      mod <- use gsModule
+      if rec || any (isExternalArg mod) args then do
+        e <- enterDataCon con
+        return [j| `to` = h$c(`e`);
+                 h$sti(\ -> `JList (to:xs)`);
+               |]
+      else do
+        e <- enterDataCon con
+        let closure = ApplExpr (ValExpr . JVar . TxtI . T.pack $ "h$c" ++ (show $ length xs)) (e:xs)
+        return [j| `to` = `closure`; |]
+
+    isExternalArg mod (StgVarArg i) = maybe False (/= mod) (nameModule_maybe . idName $ i)
+    isExternalArg _ _ = False
 {-x
              h$initStatic.push( \ { h$init_closure(`to`, `JList xs`); } );
            |]
