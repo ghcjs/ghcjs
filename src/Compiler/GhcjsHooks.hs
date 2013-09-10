@@ -83,16 +83,18 @@ ghcjsLinkBinary debug jsFiles static dflags objs dep_pkgs =
       -- make sure we link ghcjs-prim even when it's not a dependency
       dep_pkgs' | any isGhcjsPrimPackage dep_pkgs = dep_pkgs
                 | otherwise                       = ghcjsPrimPackage dflags : dep_pkgs
-      isGhcjsPrimPackage pkgId = "ghcjs-prim-" `isPrefixOf` packageIdString pkgId
+
+isGhcjsPrimPackage :: PackageId -> Bool
+isGhcjsPrimPackage pkgId = "ghcjs-prim-" `isPrefixOf` packageIdString pkgId
 
 ghcjsPrimPackage :: DynFlags -> PackageId
 ghcjsPrimPackage dflags =
   case prims of
-    (x:_) -> mkPackageId x
+    (x:_) -> x
     _     -> error "Package `ghcjs-prim' is required to link executables"
   where
-    prims = reverse . sort $ filter ((PackageName "ghcjs-prim"==) . pkgName) pkgIds
-    pkgIds = map sourcePackageId . eltsUFM . pkgIdMap . pkgState $ dflags
+    prims = reverse . sort $ filter isGhcjsPrimPackage pkgIds
+    pkgIds = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
 
 ghcjsLocateLib :: DynFlags -> Bool -> [FilePath] -> String -> IO LibrarySpec
 ghcjsLocateLib dflags is_hs dirs lib

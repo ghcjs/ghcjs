@@ -79,6 +79,7 @@ addPlatformDefines baseDir df = df { settings = settings1
                                    }
   where
     includeDir = baseDir ++ "/include"
+    -- ^ fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
     settings0 = settings df
     settings1 = settings0 { sOpt_P = ("-I" ++ includeDir) : map ("-D"++) defs ++ sOpt_P settings0 }
     defs = [ "__GHCJS__"

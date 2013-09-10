@@ -226,20 +226,6 @@ main =
               s <- load LoadAllTargets
               when (failed s) (throw $ ExitFailure 1)
 
-addPkgConf :: DynFlags -> IO DynFlags
-addPkgConf df = do
-  db1 <- getGlobalPackageDB
-  db2 <- getUserPackageDB
-  base <- getGlobalPackageBase
-  return $ df { extraPkgConfs = const [PkgConfFile db1, PkgConfFile db2]
-              , includePaths  = (base ++ "/include") : includePaths df -- fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
-              }
-  where
-    isNotGlobal GlobalPkgConf = False
-    isNotGlobal _ = True
-    isNotUser UserPkgConf = False
-    isNotUser _ = True
-
 ignoreUnsupported :: [Located String] -> [Located String]
 ignoreUnsupported =
   removeBy (`elem` unsup) .
@@ -388,33 +374,6 @@ printIface ["--show-iface", iface] = do
        env <- getSession
        liftIO $ showIface env iface
 printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
-
-mkGhcjsOutput :: String -> String
-mkGhcjsOutput "" = ""
-mkGhcjsOutput file = replaceExtension file ('.':mkGhcjsSuf ext)
-  where
-    ext = drop 1 $ takeExtension file
-
-mkGhcjsSuf :: String -> String
-mkGhcjsSuf "o"      = "js_o"
-mkGhcjsSuf "hi"     = "js_hi"
-mkGhcjsSuf "dyn_o"  = "js_dyn_o"
-mkGhcjsSuf "dyn_hi" = "js_dyn_hi"
-mkGhcjsSuf xs       = "js_" ++ xs -- is this correct?
-
-setGhcjsSuffixes :: Bool     -- oneshot option, -c
-                 -> DynFlags
-                 -> DynFlags
-setGhcjsSuffixes oneshot df = df
-    { objectSuf     = mkGhcjsSuf (objectSuf df)
-    , dynObjectSuf  = mkGhcjsSuf (dynObjectSuf df)
-    , hiSuf         = mkGhcjsSuf (hiSuf df)
-    , dynHiSuf      = mkGhcjsSuf (dynHiSuf df)
-    , outputFile    = fmap mkGhcjsOutput (outputFile df)
-    , dynOutputFile = fmap mkGhcjsOutput (dynOutputFile df)
-    , outputHi      = fmap mkGhcjsOutput (outputHi df)
-    , ghcLink       = if oneshot then NoLink else ghcLink df
-    }
 
 -- | when booting GHCJS, we pretend to have the Cabal lib installed
 --   call GHC to compile our Setup.hs
