@@ -97,8 +97,8 @@ initPackageDB = do
   rm_rf . fromString =<< liftIO getUserPackageDB
   mkdir_p (fromString base)
   mkdir_p (fromString inst)
-  ghcjs_pkg ["initglobal"] `catchany_sh` const (return ())
-  ghcjs_pkg ["inituser"] `catchany_sh` const (return ())
+  ghcjs_pkg ["init", T.pack base <> "/package.conf.d"] `catchany_sh` const (return ())
+  ghcjs_pkg ["init", T.pack inst <> "/package.conf.d"] `catchany_sh` const (return ())
 
 -- | these need to be installed in the boot setting:
 --   fake Cabal package registered, GHCJS_BOOTING environment variable set
