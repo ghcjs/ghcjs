@@ -126,21 +126,20 @@ Executable ghcjs-pkg
     Main-Is:          Pkg.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
-    Build-Depends:    base              >= 4 && < 5,
-                      ghcjs,
-                      process,
-                      directory,
-                      filepath
-
-Executable ghcjs-gcc-stub
-    if flag(compiler-only)
-      Buildable:      False
-    Main-Is:          GccStub.hs
-    Default-Language: Haskell2010
-    Hs-Source-Dirs:   src-bin
-    Build-Depends:    base              >= 4 && < 5,
+    Build-Depends:    ghcjs,
+                      base       >= 4   && < 5,
+                      directory  >= 1   && < 1.3,
+                      process    >= 1   && < 1.3,
                       filepath,
-                      directory
+                      Cabal,
+                      binary,
+                      bin-package-db,
+                      bytestring
+    if !os(windows)
+        Build-Depends: unix,
+                       terminfo
+    if os(windows)
+        c-sources: cbits/CRT_noglob.c
 
 Executable ghcjs-boot
     if flag(compiler-only)
