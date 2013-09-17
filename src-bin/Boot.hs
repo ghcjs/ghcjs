@@ -46,16 +46,21 @@ main = do
       installRts
       installFakes
       installBootPackages s
-      removeFakes
-      when (not $ skipExtra s) (installExtraPackages s)
-      when (not (skipExtra s) && not (skipGhcjs s)) (installGhcjsPackages s)
+      if quick s then do
+                   installGhcjsPackages s
+                   removeFakes
+                 else do
+                   removeFakes
+                   installExtraPackages s
+                   installGhcjsPackages s
       checkShims
       return Nothing
 
-data BootSettings = BootSettings { initTree  :: Bool -- ^ initialize the source tree
-                                 , preBuilt  :: Bool -- ^ download prebuilt archive if available
-                                 , skipExtra :: Bool -- ^ skip the extra package (Cabal etc)
-                                 , skipGhcjs :: Bool -- ^ skip the ghcjs base packages
+data BootSettings = BootSettings { initTree  :: Bool      -- ^ initialize the source tree
+                                 , preBuilt  :: Bool      -- ^ download prebuilt archive if available
+                                 , quick     :: Bool      -- ^ skip Cabal and ghcjs-base
+                                 , jobs      :: Int       -- ^ number of parallel jobs
+                                 , debug     :: Bool      -- ^ build debug version of the libraries
                                  , verbose   :: Bool
                                  } deriving (Ord, Eq)
 
@@ -81,10 +86,12 @@ optParser = BootSettings
                   help "initialize the boot tree for first time build (or update an existing one)" )
             <*> switch ( long "preBuilt"  <> short 'p' <>
                   help "download prebuilt libraries for compiler (might not be available)" )
-            <*> switch ( long "skipExtra" <> short 'e' <>
-                  help "skip installing extra libraries, like Cabal" )
-            <*> switch ( long "skipGhcjs" <> short 'g' <>
-                  help "skip installing the GHCJS base libraries (ghcjs-prim, ghcjs-base)" )
+            <*> switch ( long "quick"     <> short 'q' <>
+                  help "quick boot (no Cabal or ghcjs-base, but enough to compile basic tests)" )
+            <*> option ( long "jobs"   <> short 'j' <> metavar "JOBS" <> value 1 <>
+                  help "number of jobs to run in parallel" )
+            <*> switch ( long "debug"   <> short 'd' <>
+                  help "build debug libraries with extra checks" )
             <*> switch ( long "verbose"   <> short 'v' <>
                   help "verbose output" )
 
@@ -130,6 +137,10 @@ ghcjsPackages :: [String]
 ghcjsPackages = [ "ghcjs-prim"
                 , "ghcjs-base"
                 ]
+
+-- | reduced set of packages for quick boot
+ghcjsQuickPackages = [ "ghcjs-prim"
+                     ]
 
 initSourceTree :: Bool -> Sh ()
 initSourceTree currentDir = do
@@ -232,34 +243,44 @@ installRts = do
   -- required for integer-gmp
   cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
 
+cabalFlags :: Bool -- ^ pass -j argument to GHC instead of cabal?
+           -> BootSettings 
+           -> [Text]
+cabalFlags parGhc s = v ++ j ++ d
+  where
+    v = if verbose s then ["-v"] else []
+    j = if jobs s /= 1 then [if parGhc then jGhc else jCabal] else []
+    d = if debug s then ["--ghcjs-options=--debug"] else []
+    jGhc   = T.pack $ "--ghcjs-options=-j" ++ show (jobs s)
+    jCabal = T.pack $ "-j" ++ show (jobs s)
+
 installBootPackages :: BootSettings -> Sh ()
 installBootPackages s = sub $ do
   echo "installing boot packages"
-  let v = if verbose s then ["-v"] else []
   cd "boot"
   forM_ bootPackages preparePackage
   when (not $ null bootPackages)
-    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ v ++ map (T.pack.("./"++)) bootPackages)
+    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
 
 installExtraPackages :: BootSettings -> Sh ()
 installExtraPackages s = sub $ do
   echo "installing extra packages"
-  let v = if verbose s then ["-v"] else []
   cd "extra"
   sub (cd ("cabal" </> "Cabal") >> cabal ["clean"])
-  cabal $ ["install", "--ghcjs", "./cabal/Cabal"] ++ v
+  cabal $ ["install", "--ghcjs", "./cabal/Cabal"] ++ cabalFlags False s
   forM_ extraPackages preparePackage
   when (not $ null extraPackages)
-    (cabal $ ["install", "--ghcjs"] ++ v ++ map (T.pack.("./"++)) extraPackages)
+    (cabal $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) extraPackages)
 
 installGhcjsPackages :: BootSettings -> Sh ()
 installGhcjsPackages s = sub $ do
   echo "installing GHCJS-specific base libraries"
-  let v = if verbose s then ["-v"] else []
+  let pkgs = if quick s then ghcjsQuickPackages else ghcjsPackages
+      c    = if quick s then cabalBoot else cabal
   cd "ghcjs"
-  forM_ ghcjsPackages preparePackage
-  when (not $ null ghcjsPackages)
-    (cabal $ ["install", "--ghcjs"] ++ v ++ map (T.pack.("./"++)) ghcjsPackages)
+  forM_ pkgs preparePackage
+  when (not $ null pkgs)
+    (c $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) pkgs)
 
 preparePackage :: String -> Sh ()
 preparePackage pkg = sub $ do
@@ -267,6 +288,7 @@ preparePackage pkg = sub $ do
   conf   <- test_f "configure"
   confac <- test_f "configure.ac"
   when (confac && not conf) (run_ "autoreconf" [])
+  rm_rf "dist"
   cabal ["clean"]
 
 fixRtsConf :: Text -> Text -> Text -> Text
