@@ -32,20 +32,46 @@ import           Encoding
           use h$c1, h$c2, h$c3, ... h$c24 instead of making objects manually
   so layouts and fields can be changed more easily
  -}
-closureConstructors :: JStat
-closureConstructors =
-  [j| fun h$c f { return { f: f, d1: null, d2: null, m: 0 }; }
-      fun h$c0 f { return { f: f, d1: null, d2: null, m: 0 }; }
-      fun h$c1 f x1 { return { f: f, d1: x1, d2: null, m: 0 }; }
-      fun h$c2 f x1 x2 { return {f: f, d1: x1, d2: x2, m: 0 }; }
+closureConstructors :: Bool -> JStat
+closureConstructors debug =
+  [j| fun h$c f { `checkC`; return { f: f, d1: null, d2: null, m: 0 }; }
+      fun h$c0 f { `checkC`; return { f: f, d1: null, d2: null, m: 0 }; }
+      fun h$c1 f x1 { `checkC`; return { f: f, d1: x1, d2: null, m: 0 }; }
+      fun h$c2 f x1 x2 { `checkC`; return {f: f, d1: x1, d2: x2, m: 0 }; }
     |] <> mconcat (map mkClosureCon [3..24])
        <> mconcat (map mkDataFill [1..24])
   where
+    -- only JSRef can typically contain undefined or null
+    -- although it's possible (and legal) to make other Haskell types
+    -- to contain JS refs directly 
+    -- this can cause false positives here
+    checkC | debug = [j| if(arguments[0] !== h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e) {
+                           for(var i=1;i<arguments.length;i++) {
+                             if(arguments[i] === null || arguments[i] === undefined) {
+                               var msg = "warning: undefined or null in argument: " 
+                                      + i + " allocating closure: " + arguments[0].n;
+                               log(msg);
+                               if(console && console.trace) { console.trace(msg); }
+                             }
+                           }
+                         }
+                       |]
+           | otherwise = mempty
+    -- h$d is never used for JSRef (since it's only for constructors with
+    -- at least three fields, so we always warn here
+    checkD | debug = [j| for(var i=0;i<arguments.length;i++) {
+                           if(arguments[i] === null || arguments[i] === undefined) {
+                             var msg = "warning: undefined or null in argument: " + i + " allocating fields";
+                             if(console && console.trace) { console.trace(msg); }
+                           }
+                         }
+                       |]
+           | otherwise = mempty
     mkClosureCon :: Int -> JStat
     mkClosureCon n = let funName = TxtI $ T.pack ("h$c" ++ show n)
                          vals   = map (TxtI . T.pack . ('x':) . show) [(1::Int)..n]
                          fun    = JFunc (TxtI "f" : vals) funBod
-                         funBod = [j| return { f: f, m: 0, d1: x1, d2: `obj` }; |]
+                         funBod = [j| `checkC`; return { f: f, m: 0, d1: x1, d2: `obj` }; |]
                          obj    = JHash . M.fromList . zip
                                     (map (T.pack . ('d':) . show) [(1::Int)..]) $
                                     (map (toJExpr . TxtI . T.pack . ('x':) . show) [2..n])
@@ -54,7 +80,7 @@ closureConstructors =
     mkDataFill n = let funName = TxtI $ T.pack ("h$d" ++ show n)
                        ds      = map (T.pack . ('d':) . show) [(1::Int)..n]
                        obj     = JHash . M.fromList . zip ds $ map (toJExpr . TxtI) ds
-                       fun     = JFunc (map TxtI ds) [j| return `obj` |]
+                       fun     = JFunc (map TxtI ds) [j| `checkD`; return `obj` |]
                    in decl funName <> [j| `funName` = `fun` |]
 
 stackManip :: JStat
@@ -168,7 +194,7 @@ closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> clo
                         |]
     ifCT :: JExpr -> CType -> JStat
     ifCT arg ct = [j| if(`arg` === `ct`) { return `show ct`; } |]
-
+{-
 hsCall :: JExpr -> JStat
 hsCall c = [j| `jstatIf rtsTraceCalls $ logCall c`;
                `jstatIf rtsTraceStack logStack`;
@@ -180,16 +206,18 @@ logCall c = [j| h$logCall(`c`); |]
 
 logStack :: JStat
 logStack = [j| h$logStack(); |]
+-}
 
+-- rtsDebug = renderJs (addDebug $ jsSaturate (Just "h$RTS") rts')
 
-rts = jsSaturate (Just "RTS") rts'
-rtsDebug = renderJs (addDebug $ jsSaturate (Just "RTS") rts')
+rtsText :: Bool -> TL.Text
+rtsText debug = displayT . renderPretty 0.8 150 . pretty $ rts debug
 
-rtsStr :: String
-rtsStr = TL.unpack . displayT . renderPretty 0.8 150 . pretty $ rts
+rts :: Bool -> JStat
+rts debug = jsSaturate (Just "h$RTS") (rts' debug)
 
-rts' :: JStat
-rts' = [j|
+rts' :: Bool -> JStat
+rts' debug = [j|
 
 // make logging work in browser, node, v8 and spidermonkey, browser also logs to
 // <div id="output"> if jquery is detected
@@ -232,7 +260,7 @@ var !h$currentThread = null;
 `declRets`;
 
 // use these things instead of building objects manually
-`closureConstructors`;
+`closureConstructors debug`;
 
 `stackManip`;
 

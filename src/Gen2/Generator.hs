@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, TupleSections, CPP, OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell, QuasiQuotes, TupleSections, CPP, OverloadedStrings, LambdaCase #-}
 
 {-
   Main generator module
@@ -8,6 +8,7 @@ module Gen2.Generator (generate) where
 
 import           ForeignCall
 import           FastString
+import           TysWiredIn
 import           BasicTypes
 import           PrelNames
 import           DynFlags
@@ -19,10 +20,12 @@ import           Literal
 import           DataCon
 import           CoreSyn
 import           TcType
+import           UniqFM
 import           Unique
 import           StgSyn
 import           PrimOp
 import           Module
+import           VarSet
 import           TyCon
 import           Util
 import           Type hiding (typeSize)
@@ -72,19 +75,21 @@ import qualified Gen2.Linker as Linker
 import           Gen2.ClosureInfo
 import qualified Gen2.Optimizer as O
 import qualified Gen2.Object    as Object
-
+import           Gen2.Sinker
 
 type StgPgm     = [StgBinding]
 type StaticRefs = [Id]
 
 generate :: Bool -> DynFlags -> StgPgm -> Module -> ByteString
-generate debug df s m = flip evalState (initState df m) $ do
-  (st, g) <- pass df m s
-  let (p, d) = unzip g
-      (st', dbg) = dumpAst st debug s
-  deps <- genMetaData d
-  return . BL.toStrict $
-    Object.object' st' deps (dbg ++ p)
+generate debug df s m =
+  let (uf, s') = sinkPgm m s
+  in  flip evalState (initState df m uf) $ do
+        (st, g) <- pass df m s'
+        let (p, d) = unzip g
+            (st', dbg) = dumpAst st debug s'
+        deps <- genMetaData d
+        return . BL.toStrict $
+          Object.object' st' deps (dbg ++ p)
 
 dumpAst :: Object.SymbolTable
         -> Bool
@@ -120,8 +125,9 @@ pass df m ss = go 1 Object.emptySymbolTable ss
         tl      <- genToplevel decl
         extraTl <- use gsToplevelStats
         ci      <- use gsClosureInfo
+        unf     <- use gsUnfloated
         resetToplevel
-        let allDeps = collectIds decl
+        let allDeps = collectIds unf decl
             topDeps = collectTopIds decl
         (st', ss, bs) <- objectEntry m st topDeps ci
                            . O.optimize
@@ -146,8 +152,8 @@ collectTopIds :: StgBinding -> [Id]
 collectTopIds (StgNonRec b _) = [b]
 collectTopIds (StgRec bs) = map fst bs
 
-collectIds :: StgBinding -> [Id]
-collectIds b = filter acceptId $ S.toList (bindingRefs b)
+collectIds :: UniqFM StgExpr -> StgBinding -> [Id]
+collectIds unfloated b = filter acceptId $ S.toList (bindingRefs unfloated b)
   where
     acceptId i = all ($ i) [not . isForbidden] -- fixme test this: [isExported[isGlobalId, not.isForbidden]
     -- the GHC.Prim module has no js source file
@@ -219,8 +225,11 @@ lookupStaticRefs :: Id -> [(Id, [Id])] -> StaticRefs
 lookupStaticRefs i xs = fromMaybe [] (lookup i xs)
 
 genToplevelDecl :: Id -> StgRhs -> Bool -> C
-genToplevelDecl i rhs rec
-  = resetSlots (genToplevelConEntry i rhs) <> resetSlots (genToplevelRhs i rhs rec)
+genToplevelDecl i rhs isRecursive = do
+  s1 <- resetSlots (genToplevelConEntry i rhs)
+  s2 <- resetSlots (genToplevelRhs i rhs isRecursive)
+  addInitialized i
+  return (s1 <> s2)
 
 genToplevelConEntry :: Id -> StgRhs -> C
 genToplevelConEntry i (StgRhsCon _cc con args)
@@ -233,7 +242,8 @@ genToplevelConEntry _ _ = mempty
 genStaticRefs :: SRT -> G CIStatic
 genStaticRefs NoSRT = return CINoStatic
 genStaticRefs (SRTEntries s) = do
-  let xs = uniqSetToList s
+  unfloated <- use gsUnfloated
+  let xs = filter (\x -> not $ elemUFM x unfloated) (uniqSetToList s)
   CIStaticRefs <$> mapM getStaticRef xs
 genStaticRefs (SRT n e bmp) =
   error "genStaticRefs: unexpected SRT"
@@ -242,7 +252,7 @@ getStaticRef = fmap (itxt.head) . genIdsI
 
 -- the rec argument is whether this rhs comes from an StgRec binding or not
 genToplevelRhs :: Id -> StgRhs -> Bool -> C
-genToplevelRhs i (StgRhsCon _cc con args) rec
+genToplevelRhs i (StgRhsCon _cc con args) isRecursive
   | isBoolTy (dataConType con) && dataConTag con == 1 =
       declIds i <> ((\id -> [j| `id` = false; |]) <$> jsId i)
   | isBoolTy (dataConType con) && dataConTag con == 2 =
@@ -250,14 +260,14 @@ genToplevelRhs i (StgRhsCon _cc con args) rec
   | [x] <- args, isUnboxableCon con = do
       [a] <- genArg x
       id  <- jsId i
-      declIds i <> return [j| `id` = `a` |]
+      declIds i <> return [j| `id` = `a`; |]
   | otherwise =
     typeComment i <>
     do
-      id <- jsId i
+      id <- jsIdI i
       eid <- jsEntryIdI i
       ec <- enterDataCon con
-      return (decl eid <> [j| `eid` = `ec` |]) <> declIds i <> (allocConStatic id con rec args)
+      return (decl eid <> [j| `eid` = `ec` |]) <> declIds i <> allocConStatic id con args isRecursive
 genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) _ = do
         eid <- jsEnIdI i
         eid' <- jsEnId i
@@ -379,11 +389,8 @@ genApp _ _ i [StgLitArg (MachStr bs), x]
 genApp force mstackTop i a
     | isPrimitiveType (idType i) || isStrictType (idType i)
             = r1 <> return [j| return `Stack`[`Sp`]; |]
---    | n == 0 && isBoolTy (idType i) -- simple bool tagging: remove one indirection
---          = r1 <> return [j| if(`R1` === `HFalse` || `R1` === `HTrue`) { return `Stack`[`Sp`]; } else { return `R1`; } |]
-
-    | idArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do -- (not hasFree || not (isLocalId i))
-          ii <- jsIdI i
+    | idArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do
+          ii <- enterId
           if rtsInlineEnter
              then return [j| var t = `ii`.f;
                              var tt = t.t;
@@ -399,7 +406,7 @@ genApp force mstackTop i a
              else return [j| return h$e(`ii`); |]
     | idArity i == 0 && n == 0 && not (might_be_a_function (idType i))
           = do
-             ii <- jsIdI i
+             ii <- enterId
              if rtsInlineEnter
                 then return [j| var t = `ii`.f;
                                 var tt = t.t;
@@ -420,17 +427,19 @@ genApp force mstackTop i a
          let (reg,over) = splitAt (idArity i) a
          in  do
            reg' <- concatMapM genArg reg
-           pushCont over <> (jumpToII i reg' =<< r1)-- (concatMap genArg reg)
+           pushCont over <> (jumpToII i reg' =<< r1)
     | otherwise = jumpToFast a =<< r1
   where
-    stackTop = [je| `Stack`[`Sp`] |] -- fixme, use known val? fromMaybe [je| stack[sp]; |] mstackTop
+    stackTop = [je| `Stack`[`Sp`] |]
+    enterId :: G JExpr
+    enterId = genArg (StgVarArg i) >>=
+                \case
+                   [x] -> return x
+                   _   -> error "genApp: unexpected multi-var argument"
     r1 :: C
     r1 = do
       ids <- genIds i
       return $ mconcat $ zipWith (\r u -> [j| `r`=`u`; |]) (enumFrom R1) ids
-
---    fr1 = if hasFree then r1 else mempty
-    ji = jsId i
     n = length a
 
 
@@ -665,7 +674,7 @@ genInlinePrimCase top bnd tc (PrimAlt ptc) alts
     | otherwise         = liftM2 mkIfElse (genIdArg bnd) (mapM (mkPrimIfBranch top tc) alts)
 genInlinePrimCase top bnd tc (UbxTupAlt n) [(DataAlt _, bndrs, _, body)] =
     loadUbxTup bndrs n <> genExpr top body
-genInlinePrimCase _ _ _ at alt = error ("genInlinePrimCase: unhandled alt: (" ++ 
+genInlinePrimCase _ _ _ at alt = error ("genInlinePrimCase: unhandled alt: (" ++
    show at ++ "," ++ show (length alt) ++ "]) " ++ show alt)
 
 
@@ -937,15 +946,67 @@ genStackArg a@(StgVarArg i) = zipWith f [1..] <$> genArg a
   where
     f :: Int -> JExpr -> (JExpr, StackSlot)
     f n e = (e, SlotId i n)
- 
+
 genArg :: StgArg -> G [JExpr]
 genArg (StgLitArg l) = genLit l
-genArg a@(StgVarArg i)
-    | isVoid r     = return []
-    | isMultiVar r = mapM (jsIdN i) [1..varSize r]
-    | otherwise    = (:[]) <$> jsId i
+genArg a@(StgVarArg i) = do
+  unFloat <- use gsUnfloated
+  case lookupUFM unFloat i of
+    Nothing -> reg
+    Just expr -> unfloated expr
    where
      r = uTypeVt . stgArgType $ a
+     reg
+       | isVoid r     = return []
+       | i == trueDataConId  = return [ [je| true  |] ]
+       | i == falseDataConId = return [ [je| false |] ]
+       | isMultiVar r = mapM (jsIdN i) [1..varSize r]
+       | otherwise    = (:[]) <$> jsId i
+
+     unfloated :: StgExpr -> G [JExpr]
+     unfloated (StgLit l) = genLit l
+--     unfloated (StgConApp dc [h,t])
+--       | dc == consDataCon = (:[]) <$> allocateList [h] t
+     unfloated (StgConApp dc args)
+       | isBoolTy (dataConType dc) || isUnboxableCon dc =
+           (:[]) . allocUnboxedCon dc . concat <$> mapM genArg args
+       | null args = (:[]) <$> jsId (dataConWorkId dc)
+       | otherwise = do
+           as <- concat <$> mapM genArg args
+           e  <- enterDataCon dc
+           return [allocDynamicE e as]
+     unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
+
+allocateList :: [StgArg] -> StgArg -> G JExpr
+allocateList xs a@(StgVarArg i)
+  | isDataConId_maybe i == Just nilDataCon = listAlloc xs Nothing
+  | otherwise = do
+      unFloat <- use gsUnfloated
+      case lookupUFM unFloat i of
+        Just (StgConApp dc [h,t])
+          | dc == consDataCon -> allocateList (h:xs) t
+        _ -> listAlloc xs (Just a)
+  where
+    listAlloc :: [StgArg] -> Maybe StgArg -> G JExpr
+    -- use regular allocator for one element
+    listAlloc [h] (Just t) = do
+      as <- concat <$> mapM genArg [h,t]
+      c  <- jsDcEntryId (dataConWorkId consDataCon)
+      return $ allocDynamicE c as
+    listAlloc [h] Nothing = do
+      as <- concat <$> mapM genArg [h,StgVarArg (dataConWorkId nilDataCon)]
+      c  <- jsDcEntryId (dataConWorkId consDataCon)
+      return $ allocDynamicE c as
+    listAlloc xs Nothing  = do
+      as <- concat . reverse <$> mapM genArg xs
+      return [je| h$cl(`as`) |]
+    listAlloc xs (Just r) = do
+      as <- concat . reverse <$> mapM genArg xs
+      rs <- genArg r
+      case rs of
+        [r] -> return [je| h$clr(`as`,`r`) |]
+        _   -> error "allocateList: unexpected multi-var list tail"
+allocateList _ _ = error "allocateList: unexpected literal in list"
 
 -- generate arg to be passed to FFI call, with marshalling JStat to be run before the call
 -- currently marshalling:
@@ -1108,26 +1169,26 @@ enterDataCon :: DataCon -> G JExpr
 enterDataCon d = jsDcEntryId (dataConWorkId d)
 
 allocCon :: Ident -> DataCon -> [JExpr] -> C
-allocCon to con []
-  | isBoolTy (dataConType con) && dataConTag con == 1 =
-      return $ decl to <> [j| `to` = false; |]
-  | isBoolTy (dataConType con) && dataConTag con == 2 =
-      return $ decl to <> [j| `to` = true;  |]
-  | otherwise = do
+allocCon to con xs
+  | isBoolTy (dataConType con) || isUnboxableCon con = do
+      return $ decl to <> [j| `to` = `allocUnboxedCon con xs`; |]
+  | null xs = do
       i <- jsId (dataConWorkId con)
       return $ decl to <> [j| `to` = `i`; |]
-allocCon to con [x]
-  | isUnboxableCon con = return $ decl to <> [j| `to` = `x` |]
-allocCon to con xs = do
-  e <- enterDataCon con
-  return $ allocDynamic True to e xs
+  | otherwise = do
+      e <- enterDataCon con
+      return $ allocDynamic True to e xs
 
--- nullaryConClosure tag = ValExpr (JVar . TxtI . T.pack $ "data_static_0_" ++ show tag ++ "_c")
+allocUnboxedCon :: DataCon -> [JExpr] -> JExpr
+allocUnboxedCon con []
+  | isBoolTy (dataConType con) && dataConTag con == 1 = [je| false |]
+  | isBoolTy (dataConType con) && dataConTag con == 2 = [je| true  |]
+allocUnboxedCon con [x]
+  | isUnboxableCon con = x
+allocUnboxedCon con _ = error ("allocUnboxedCon: not an unboxed constructor: " ++ show con)
 
--- allocConStatic cl f n = decl' cl [je| static_con(`f`,`n`) |]
-allocConStatic :: JExpr -> DataCon -> Bool -> [GenStgArg Id] -> C
--- allocConStatic to tag [] = [j| `to` = `nullaryConClosure tag`; |]
-allocConStatic to con rec args = do
+allocConStatic :: Ident -> DataCon -> [GenStgArg Id] -> Bool -> C
+allocConStatic to con args isRecursive = do
   as <- mapM genArg args
   allocConStatic' . concat $ as
   where
@@ -1139,27 +1200,36 @@ allocConStatic to con rec args = do
       | otherwise = do
         e <- enterDataCon con
         return [j| `to` = h$c(`e`); |]
---      return [j| `to` = { f: `e`, d1: null, d2: null }; |]
     allocConStatic' [x]
       | isUnboxableCon con = return [j| `to` = `x` |]
     allocConStatic' xs = do
       mod <- use gsModule
-      if rec || any (isExternalArg mod) args then do
+      ini <- use gsInitialised
+      unf <- use gsUnfloated
+      if any (argNeedDelayed mod unf ini) args then do
         e <- enterDataCon con
         return [j| `to` = h$c(`e`);
-                 h$sti(\ -> `JList (to:xs)`);
+                 h$sti(\ -> `toJExpr to:xs`);
                |]
       else do
-        e <- enterDataCon con
-        let closure = ApplExpr (ValExpr . JVar . TxtI . T.pack $ "h$c" ++ (show $ length xs)) (e:xs)
-        return [j| `to` = `closure`; |]
+        if con == consDataCon
+          then do
+            e <- allocateList [args !! 0] (args !! 1)
+            return [j| `to` = `e`; |]
+          else do
+            e <- enterDataCon con
+            return (allocDynamic False to e xs)
 
-    isExternalArg mod (StgVarArg i) = maybe False (/= mod) (nameModule_maybe . idName $ i)
-    isExternalArg _ _ = False
-{-x
-             h$initStatic.push( \ { h$init_closure(`to`, `JList xs`); } );
-           |]
--}
+-- we track what variables we have already initialized
+argNeedDelayed :: Module -> UniqFM StgExpr -> VarSet -> StgArg -> Bool
+argNeedDelayed _ _ _ (StgLitArg{}) = False
+argNeedDelayed mod unfloat initialised a@(StgVarArg i)
+  | isLocalId = case lookupUFM unfloat i of
+                  Nothing -> not (elementOfUniqSet i initialised)
+                  Just _  -> False -- we inline init, so it's ok
+  | otherwise = needDelayedInit mod a
+  where
+    isLocalId = maybe True (== mod) (nameModule_maybe . idName $ i)
 
 -- avoid one indirection for global ids
 -- fixme in many cases we can also jump directly to the entry for local?

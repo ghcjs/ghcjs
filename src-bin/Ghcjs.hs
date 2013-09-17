@@ -33,7 +33,7 @@ import           Module
 import           PrelInfo (wiredInThings)
 import           PrelNames (basicKnownKeyNames)
 import           PrimOp (allThePrimOps)
-import           SysTools (touch, LinkDynLibHook(..))
+import           SysTools ( touch )
 import           Packages
 import           MkIface
 import           GhcMonad
@@ -45,7 +45,6 @@ import           Util (looksLikeModuleName)
 import           Outputable hiding ((<>))
 import           MonadUtils (MonadIO(..))
 import qualified SysTools
-import           Linker (locateLib', LocateLibHook(..), LibrarySpec(..))
 import           Control.Applicative
 import qualified Control.Exception as Ex
 import           Control.Monad
@@ -160,7 +159,7 @@ getGhcjsSettings args
                                 <*> pure False
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
                                 <*> getEnvMay "GHCJS_WITH_GHC"
-                                <*> pure False
+                                <*> getEnvOpt "GHCJS_DEBUG"
 
 optParser' :: ParserInfo GhcjsSettings
 optParser' = info (helper <*> optParser) fullDesc
@@ -217,7 +216,7 @@ main =
             then sourceErrorHandler $ do
                 setSessionDynFlags $ dflags3 { ghcMode = OneShot }
                 env <- getSession
-                liftIO $ oneShot env StopLn hs_srcs
+                liftIO $ ghcjsOneShot env StopLn hs_srcs
                 return ()
             else sourceErrorHandler $ do
               liftIO (Util.compilationProgressMsg dflags3 "generating JavaScript")
@@ -283,7 +282,7 @@ collectDeps mis = nub $ concatMap pkgs mis
       pkgs mi = maybe [] (map fst . dep_pkgs . mi_deps) $ modInfoIface mi
 
 printRts :: IO ()
-printRts = putStrLn Gen2.rtsStr >> exitSuccess
+printRts = TL.putStrLn (Gen2.rtsText False) >> exitSuccess
 
 
 printDeps :: [String] -> IO ()
@@ -325,7 +324,7 @@ generateNative settings oneshot argsS args1 mbMinusB =
           then sourceErrorHandler $ do
             setSessionDynFlags $ dfs { ghcMode = OneShot }
             env <- getSession
-            liftIO $ oneShot env StopLn srcs
+            liftIO $ ghcjsOneShot env StopLn srcs
           else sourceErrorHandler $ do
             env <- getSession
             o_files <- mapM (\x -> liftIO $ compileFile env StopLn x) non_hs_srcs

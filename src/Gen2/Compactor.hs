@@ -44,7 +44,7 @@ renameInternals debug stat ci = evalState doRename
   (RenamerState (map (\(TxtI xs) -> TxtI ("h$$"<>xs)) Optimizer.newLocals) M.empty)
   where
     doRename = do
-       s'  <- tinplate renameVar stat
+       s'  <- if debug then return stat else tinplate renameVar stat
        rci <- renderClosureInfo debug ci
        return (s' <> rci)
 

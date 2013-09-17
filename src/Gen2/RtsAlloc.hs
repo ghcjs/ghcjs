@@ -59,12 +59,19 @@ allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
               | otherwise = mempty
 
 allocDynamic :: Bool -> Ident -> JExpr -> [JExpr] -> JStat
-allocDynamic haveDecl to entry free
+allocDynamic haveDecl to entry free =
+  dec to <> [j| `to` = `allocDynamicE entry free`; |]
+    where
+      dec i | haveDecl  = decl i
+            | otherwise = mempty
+
+allocDynamicE :: JExpr -> [JExpr] -> JExpr
+allocDynamicE entry free
   | rtsInlineAlloc || length free > 24
-      = dec to <> [j| `to` = { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |] <> checkObj
-  | otherwise = dec to <> [j| `to` = `ApplExpr allocFun (toJExpr entry : free)`; |]
+      = [je| { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |]
+  | otherwise = ApplExpr allocFun (toJExpr entry : free)
   where
-    allocFun = allocClsA ! length free -- toJExpr $ StrI ("h$c" ++ show (length free))
+    allocFun = allocClsA ! length free
     (fillObj1,fillObj2)
        = case free of
                 []  -> (jnull, jnull)
@@ -72,10 +79,6 @@ allocDynamic haveDecl to entry free
                 [x,y] -> (x,y)
                 (x:xs) -> (x,toJExpr (JHash $ M.fromList (zip dataFields xs)))
     dataFields = map (T.pack . ('d':) . show) [(1::Int)..]
-    dec i | haveDecl  = decl i
-          | otherwise = mempty
-    checkObj | rtsDebug = [j| h$checkObj(`to`); |]
-             | otherwise = mempty
 
 -- fixme push unupdate thunks?
 {-

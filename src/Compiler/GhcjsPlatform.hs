@@ -28,7 +28,6 @@ setGhcjsPlatform :: Bool        -- ^ Debug
 setGhcjsPlatform debug js_objs basePath df
   = addPlatformDefines basePath
       $ setDfOpts
-      $ addLogActionFilter
       $ installGhcjsHooks debug js_objs
       $ installDriverHooks debug
       $ df { settings = settings' }
@@ -56,22 +55,6 @@ setDfOpts df = foldl' setOpt (foldl' unsetOpt df unsetList) setList
   where
     setList = []
     unsetList = [Opt_SplitObjs]
-
-addLogActionFilter :: DynFlags -> DynFlags
-addLogActionFilter df = df { log_action = act }
-   where
-     act :: LogAction
-     act dfs severity span style doc
-       | isSuppressed span severity (showSDocOneLine dfs doc) = return ()
-       | otherwise = log_action df dfs severity span style doc
-
--- suppress some GHC API output where it would print the wrong thing
-isSuppressed :: SrcSpan -> Severity -> String -> Bool
-isSuppressed span _ _
-  | span == Util.ghcjsSrcSpan = False -- do not suppress our own messages
-isSuppressed _ SevOutput txt
-  | "Linking " `isPrefixOf` txt = True -- would print our munged name
-isSuppressed _ _ _ = False
 
 addPlatformDefines :: FilePath -> DynFlags -> DynFlags
 addPlatformDefines baseDir df = df { settings = settings1

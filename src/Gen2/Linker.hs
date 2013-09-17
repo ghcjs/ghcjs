@@ -33,6 +33,7 @@ import qualified Data.Text.Encoding       as TE
 import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.IO             as T
 import qualified Data.Text.Lazy           as TL
+import qualified Data.Text.Lazy.IO        as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
 import qualified Data.Vector              as V
 
@@ -48,7 +49,7 @@ import           Module                   (PackageId, packageIdString, ModuleNam
 
 import           Compiler.Info
 import           Gen2.StgAst
-import           Gen2.Rts                 (rtsStr)
+import           Gen2.Rts                 (rtsText)
 import           Gen2.Shim
 import           Gen2.Printer             (pretty)
 import qualified Gen2.Compactor           as Compactor
@@ -58,7 +59,7 @@ import           Gen2.Utils
 import           Gen2.RtsTypes
 
 link :: DynFlags
-     -> Bool
+     -> Bool                      -- ^ debug build
      -> FilePath                  -- ^ output file/directory
      -> [FilePath]                -- ^ include path for home package
      -> [(PackageId, [FilePath])] -- ^ directories to load package modules
@@ -80,7 +81,7 @@ link dflags debug out include pkgs objFiles jsFiles isRootFun = do
                 (roots `S.union` rtsDeps (map fst pkgs))
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (renderLinker debug src infos)
-  writeFile (out </> "rts.js") rtsStr
+  TL.writeFile (out </> "rts.js") (rtsText debug)
   getShims jsFiles (map fst pkgs) (out </> "lib.js", out </> "lib1.js")
   writeHtml out
   combineFiles out
@@ -242,8 +243,11 @@ collectDeps :: (String -> Fun -> IO FilePath)
             -> Set Fun
             -> IO (Set Fun, JStat, [ClosureInfo])
 collectDeps lookup roots = do
-  (allDeps, srcs) <- getDepsSources lookup roots
-  (stats, infos) <- unzip <$> mapM (uncurry extractDeps) srcs
+  (allDeps, srcs0) <- getDepsSources lookup roots
+  -- read ghc-prim first, since we depend on that for static initialization
+  let (primSrcs, srcs) = partition isPrimSrc  srcs0
+      isPrimSrc (_, fs) = (=="ghc-prim") . packageName . funPackage . head . S.toList $ fs
+  (stats, infos) <- unzip <$> mapM (uncurry extractDeps) (primSrcs ++ srcs)
   return (allDeps, mconcat stats, concat infos)
 
 extractDeps :: FilePath -> Set Fun -> IO (JStat, [ClosureInfo])

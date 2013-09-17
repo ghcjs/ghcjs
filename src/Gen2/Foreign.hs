@@ -62,15 +62,17 @@ import TcRnMonad
 import TcHsType
 
 installForeignHooks :: Bool -> DynFlags -> DynFlags
-installForeignHooks generatingJs df = df { hooks = f generatingJs (hooks df) }
-  where
-    f True  = insertHook DsForeignsHook       ghcjsDsForeigns
-            . insertHook TcForeignImportsHook ghcjsTcForeignImports
-            . insertHook TcForeignExportsHook ghcjsTcForeignExports
-    f False = insertHook DsForeignsHook       ghcjsNativeDsForeigns
-            . insertHook TcForeignImportsHook ghcjsNativeTcForeignImports
-            . insertHook TcForeignExportsHook ghcjsTcForeignExports
-
+installForeignHooks generatingJs dflags =
+  flip setHooks dflags . f generatingJs . getHooks $ dflags
+    where
+      f True h  = h { dsForeignsHook       = Just ghcjsDsForeigns
+                    , tcForeignImportsHook = Just ghcjsTcForeignImports
+                    , tcForeignExportsHook = Just ghcjsTcForeignExports
+                    }
+      f False h = h { dsForeignsHook       = Just ghcjsNativeDsForeigns
+                    , tcForeignImportsHook = Just ghcjsNativeTcForeignImports
+                    , tcForeignExportsHook = Just ghcjsTcForeignExports
+                    }
 {-
    desugar foreign declarations for JavaScript
 -}

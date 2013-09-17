@@ -38,6 +38,10 @@ import           StgSyn
 import           TyCon
 import           Type
 import           Unique
+import           UniqFM
+import           VarSet
+import           UniqSet
+import           TysWiredIn
 
 import           Gen2.ClosureInfo
 import qualified Gen2.Object as Object
@@ -129,14 +133,16 @@ emptyIdCache = IdCache M.empty
 
 -- | the current code generator state
 data GenState = GenState
-  { _gsModule        :: Module        -- | the module we're compiling, used for generating names
-  , _gsToplevel      :: Maybe Id      -- | the toplevel function group we're generating
-  , _gsToplevelStats :: [JStat]       -- | extra toplevel statements that our current function emits
-  , _gsClosureInfo   :: [ClosureInfo] -- | closure information in the current function group
-  , _gsId            :: Int           -- | integer for the id generator
-  , _gsDynFlags      :: DynFlags      -- | the DynFlags, used for prettyprinting etc
-  , _gsStack         :: [StackSlot]   -- | what's currently on the stack, above h$sp
-  , _gsIdents        :: IdCache       -- | hash consing for identifiers from a Unique
+  { _gsModule        :: Module         -- | the module we're compiling, used for generating names
+  , _gsToplevel      :: Maybe Id       -- | the toplevel function group we're generating
+  , _gsToplevelStats :: [JStat]        -- | extra toplevel statements that our current function emits
+  , _gsClosureInfo   :: [ClosureInfo]  -- | closure information in the current function group
+  , _gsId            :: Int            -- | integer for the id generator
+  , _gsDynFlags      :: DynFlags       -- | the DynFlags, used for prettyprinting etc
+  , _gsStack         :: [StackSlot]    -- | what's currently on the stack, above h$sp
+  , _gsIdents        :: IdCache        -- | hash consing for identifiers from a Unique
+  , _gsUnfloated     :: UniqFM StgExpr -- | unfloated arguments
+  , _gsInitialised   :: IdSet          -- | already initialized idents in this module
   }
 
 type C   = State GenState JStat
@@ -197,6 +203,12 @@ withStack m = do
   setSlots s
   return r
 
+addInitialized :: Id -> G ()
+addInitialized i = gsInitialised %= flip addOneToUniqSet i
+
+isInitialized :: Id -> G Bool
+isInitialized i = elementOfUniqSet i <$> use gsInitialised
+
 encodeUnique :: Int -> String
 encodeUnique = reverse . go  -- reversed is more compressible
   where
@@ -217,11 +229,11 @@ data GenScope = GenScope
 -- emptyScope :: GenScope
 -- emptyScope = GenScope mempty mempty
 
-initState :: DynFlags -> Module -> GenState
-initState df m = GenState m Nothing [] [] 1 df [] emptyIdCache
+initState :: DynFlags -> Module -> UniqFM StgExpr -> GenState
+initState df m unfloat = GenState m Nothing [] [] 1 df [] emptyIdCache unfloat emptyVarSet
 
-runGen :: DynFlags -> Module -> G a -> a
-runGen df m = flip evalState (initState df m)
+runGen :: DynFlags -> Module -> UniqFM StgExpr -> G a -> a
+runGen df m unfloat = flip evalState (initState df m unfloat)
 
 {-
 -- | run an action in the initial state, useful for making one-off 
@@ -525,11 +537,10 @@ idTypeSuffix IdConEntry = "_con_e"
 jsVar :: String -> JExpr
 jsVar v = ValExpr . JVar . TxtI . T.pack $ v
 
--- regular id, shortcut for bools!
 jsId :: Id -> G JExpr
 jsId i
---  | isTrueCon i  = return $ toJExpr HTrue
---  | isFalseCon i = return $ toJExpr HFalse
+--  | i == trueDataConId  = return $ toJExpr HTrue
+--  | i == falseDataConId = return $ toJExpr HFalse
   | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing IdPlain
 
 -- entry id

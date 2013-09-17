@@ -80,18 +80,14 @@ instance Show Name where
                   Nothing -> show (nameOccName n)
                   Just m  -> show m ++ "." ++ show (nameOccName n)
 instance Show OccName where show = occNameString
-#if __GLASGOW_HASKELL__ >= 706
 instance Show DataCon where show d = show (dataConName d)
 instance Show Var where show v = "(" ++ show (Var.varName v) ++ " :: " ++ show (Var.varType v) ++ ")"
-#endif
 
 deriving instance Show UpdateFlag
 
-#if __GLASGOW_HASKELL__ >= 706
 deriving instance Show Literal
 deriving instance Show PrimOp
 deriving instance Show AltCon
-#endif
 deriving instance Show AltType
 deriving instance Show PrimCall
 deriving instance Show ForeignCall
@@ -107,34 +103,36 @@ deriving instance Show StgOp
 instance Show (GenStgArg Var) where
   show a@(StgVarArg occ) = "StgVarArg " ++ show occ ++ " :: " ++ show (stgArgType a)
   show (StgLitArg l)   = "StgLitArg " ++ show l
---  show (StgTypeArg t)  = "StgTypeArg " ++ showPpr t
 
 s = S.singleton
 l = F.foldMap
 
 -- | collect Ids that this binding refers to
 --   (does not include the bindees themselves)
-bindingRefs :: StgBinding -> Set Id
-bindingRefs (StgNonRec _ rhs) = rhsRefs rhs
-bindingRefs (StgRec bs)       = l (rhsRefs . snd) bs
+-- first argument is Id -> StgExpr map for unfloated arguments
+bindingRefs :: UniqFM StgExpr -> StgBinding -> Set Id
+bindingRefs u (StgNonRec _ rhs) = rhsRefs u rhs
+bindingRefs u (StgRec bs)       = l (rhsRefs u . snd) bs
 
-rhsRefs :: StgRhs -> Set Id
-rhsRefs (StgRhsClosure _ _ _ _ _ _ body) = exprRefs body
-rhsRefs (StgRhsCon _ d args) = l s (dataConImplicitIds d) <> l argRefs args
+rhsRefs :: UniqFM StgExpr -> StgRhs -> Set Id
+rhsRefs u (StgRhsClosure _ _ _ _ _ _ body) = exprRefs u body
+rhsRefs u (StgRhsCon _ d args) = l s (dataConImplicitIds d) <> l (argRefs u) args
 
-exprRefs :: StgExpr -> Set Id
-exprRefs (StgApp f args) = s f <> l argRefs args
-exprRefs (StgConApp d args) = l s (dataConImplicitIds d) <> l argRefs args
-exprRefs (StgOpApp _ args _) = l argRefs args
-exprRefs (StgLit {}) = mempty
-exprRefs (StgLam {}) = mempty
-exprRefs (StgCase expr _ _ _ _ _ alts) = exprRefs expr <> alts^.folded._4.to exprRefs
-exprRefs (StgLet bnd expr) = bindingRefs bnd <> exprRefs expr
-exprRefs (StgLetNoEscape _ _ bnd expr) = bindingRefs bnd <> exprRefs expr
-exprRefs (StgSCC _ _ _ expr) = exprRefs expr
-exprRefs (StgTick _ _ expr) = exprRefs expr
+exprRefs :: UniqFM StgExpr -> StgExpr -> Set Id
+exprRefs u (StgApp f args) = s f <> l (argRefs u) args
+exprRefs u (StgConApp d args) = l s (dataConImplicitIds d) <> l (argRefs u) args
+exprRefs u (StgOpApp _ args _) = l (argRefs u) args
+exprRefs u (StgLit {}) = mempty
+exprRefs u (StgLam {}) = mempty
+exprRefs u (StgCase expr _ _ _ _ _ alts) = exprRefs u expr <> alts^.folded._4.to (exprRefs u)
+exprRefs u (StgLet bnd expr) = bindingRefs u bnd <> exprRefs u expr
+exprRefs u (StgLetNoEscape _ _ bnd expr) = bindingRefs u bnd <> exprRefs u expr
+exprRefs u (StgSCC _ _ _ expr) = exprRefs u expr
+exprRefs u (StgTick _ _ expr) = exprRefs u expr
 
-argRefs :: StgArg -> Set Id
-argRefs (StgVarArg id) = s id
-argRefs _ = mempty
+argRefs :: UniqFM StgExpr -> StgArg -> Set Id
+argRefs u (StgVarArg id)
+  | Just e <- lookupUFM u id = exprRefs u e
+  | otherwise                = s id
+argRefs u _ = mempty
 
