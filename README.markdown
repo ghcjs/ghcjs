@@ -33,7 +33,7 @@ If you're not so lucky, the easiest way to install GHCJS is with the vagrant scr
 
     $ git clone https://github.com/ghcjs/ghcjs-build.git
     $ cd ghcjs-build
-    $ git checkout prebuilt
+    $ git checkout -b prebuilt origin/prebuilt
     $ vagrant up
 
 Or to build everything completely from source (takes a few hours):
