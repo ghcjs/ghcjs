@@ -41,7 +41,7 @@ installGhcjsHooks :: Bool        -- ^ Debug
                   -> [FilePath]  -- JS objects
                   -> DynFlags -> DynFlags
 installGhcjsHooks debug js_objs dflags =
-  Gen2.installForeignHooks True . flip setHooks dflags . addHooks . getHooks $ dflags
+  Gen2.installForeignHooks True $ dflags { hooks = addHooks (hooks dflags) }
     where
       addHooks h = h { linkHook               = Just (Gen2.ghcjsLink debug js_objs True)
                      , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
@@ -50,7 +50,7 @@ installGhcjsHooks debug js_objs dflags =
 
 installNativeHooks :: DynFlags -> DynFlags
 installNativeHooks dflags =
-  Gen2.installForeignHooks False . flip setHooks dflags . addHooks . getHooks $ dflags
+  Gen2.installForeignHooks False $ dflags { hooks = addHooks (hooks dflags) }
     where
       addHooks h = h { linkHook               = Just (Gen2.ghcjsLink False [] False)
                      , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
@@ -70,10 +70,10 @@ ghcjsOneShot hsc_env stop_phase srcs = do
 -- Driver hooks
 
 installDriverHooks :: Bool -> DynFlags -> DynFlags
-installDriverHooks debug df = setHooks hooks' df
-  where hooks' = (getHooks df) { runPhaseHook     = Just (runGhcjsPhase debug)
-                               , ghcPrimIfaceHook = Just Gen2.ghcjsPrimIface
-                               }
+installDriverHooks debug df = df { hooks = hooks' }
+  where hooks' = (hooks df) { runPhaseHook     = Just (runGhcjsPhase debug)
+                            , ghcPrimIfaceHook = Just Gen2.ghcjsPrimIface
+                            }
 
 runGhcjsPhase :: Bool
               -> PhasePlus -> FilePath -> DynFlags

@@ -63,7 +63,7 @@ import TcHsType
 
 installForeignHooks :: Bool -> DynFlags -> DynFlags
 installForeignHooks generatingJs dflags =
-  flip setHooks dflags . f generatingJs . getHooks $ dflags
+  dflags { hooks = f generatingJs $ hooks dflags }
     where
       f True h  = h { dsForeignsHook       = Just ghcjsDsForeigns
                     , tcForeignImportsHook = Just ghcjsTcForeignImports
