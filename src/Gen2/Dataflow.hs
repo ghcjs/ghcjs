@@ -39,6 +39,7 @@ import           Control.Arrow (second)
 import           Control.Applicative
 import           Control.Lens hiding (op)
 import           Control.Monad.State
+import           Data.Bits (shiftL, shiftR, (.|.), (.&.))
 import           Data.Default
 import qualified Data.HashMap.Strict as HM
 import           Data.HashMap.Strict (HashMap)
@@ -671,21 +672,30 @@ fromSimpleStat m (AssignS e1 e2) = AssignStat (toJExpr' m e1) (toJExpr' m e2)
 -- index 0: combined fact when entering for the first time (continue, looping excluded)
 -- index 1: combined fact leaving the node
 -- index 2: facts just before the expressions in the node, if any
--- index n: other interesting positions, depend on node
-newtype Facts a = Facts (Map (NodeId,Int) a)
+-- index n, n > 2, n <= 15: other interesting positions, depend on node
+newtype Facts a = Facts (IntMap a)
   deriving (Eq)
 
 instance Show a => Show (Facts a) where
-  show (Facts xs) = unlines . map (\(k,v) -> show k ++ " -> " ++ show v) . M.toList $ xs
+  show (Facts xs) = unlines . map (\(k,v) -> show (unFactKey k) ++ " -> " ++ show v) . IM.toList $ xs
 
 noFacts :: Facts a
-noFacts = Facts M.empty
+noFacts = Facts IM.empty
 
 addFact :: NodeId -> Int -> a -> Facts a -> Facts a
-addFact node idx x (Facts m) = Facts $ M.insert (node,idx) x m
+addFact node idx x (Facts m) = Facts $ IM.insert (factKey "addFact" node idx) x m
 
 lookupFact :: a -> NodeId -> Int -> Facts a -> a
-lookupFact z node idx (Facts m) = fromMaybe z (M.lookup (node,idx) m)
+lookupFact z node idx (Facts m)
+  = fromMaybe z (IM.lookup (factKey "lookupFact" node idx) m)
+
+factKey :: String -> NodeId -> Int -> Int
+factKey xs node idx
+  | idx < 0 || idx > 15 = error (xs ++ ": invalid fact position")
+  | otherwise           = shiftL node 4 .|. idx
+
+unFactKey :: Int -> (NodeId, Int)
+unFactKey k = (shiftR k 4, k .&. 15)
 
 data Forward a b =
   Forward { fIf       :: NodeId -> AExpr a                   -> b -> (b, b)  -- condition true, false

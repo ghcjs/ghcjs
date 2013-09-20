@@ -133,7 +133,7 @@ pass df m ss = go 1 Object.emptySymbolTable ss
                            . O.optimize
                            . jsSaturate (Just $ modulePrefix m n)
                            $ tl <> mconcat (reverse extraTl)
-        return (st', (ss, bs), (topDeps, allDeps))
+        return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq` (st', (ss, bs), (topDeps, allDeps))
 
 objectEntry :: Module
             -> Object.SymbolTable
@@ -171,17 +171,18 @@ data MetadataCache = MDC
 genMetaData :: [([Id], [Id])] -> G Object.Deps
 genMetaData p1 = do
   m <- use gsModule
-  (ds, (MDC pkgs funs)) <- runStateT (concat <$> mapM oneDep p1) (MDC IM.empty IM.empty)
+  (ds, (MDC pkgs funs)) <- runStateT (sequence (zipWith oneDep p1 [0..])) (MDC IM.empty IM.empty)
   let sp = S.fromList (IM.elems pkgs)
       sf = S.fromList (IM.elems funs)
-  return $ Object.Deps (modulePackageText m) (moduleNameText m) (M.fromList ds)
+      (dl, blocks) = unzip ds
+      ba = listArray (0, length blocks - 1) blocks
+      dm = M.fromList (concat dl)
+  return $ Object.Deps (modulePackageText m) (moduleNameText m) ba dm
    where
-    oneDep (symbs, deps) = mapM (symbDep deps) symbs
-    symbDep deps symb = do
-      ds <- mapM idFun deps
-      st <- idFun symb
-      return (st, S.fromList ds)
-    -- makes an Object.Fun from an Id, from cache if possible
+    oneDep (symbs, deps) n = do
+      ds <- S.fromList <$> mapM idFun deps
+      ss <- mapM idFun symbs
+      return (map (,n) ss, ds)
     idFun i = do
       let k = getKey . getUnique $ i
       (MDC ps is) <- get

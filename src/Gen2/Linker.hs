@@ -1,7 +1,8 @@
 {-# LANGUAGE DefaultSignatures,
              OverloadedStrings,
              TupleSections,
-             LambdaCase  #-}
+             LambdaCase,
+             TemplateHaskell #-}
 {-
   GHCJS linker, collects dependencies from
     the object files (.js_o), which contain linkable 
@@ -14,6 +15,7 @@ import           Control.Lens hiding ((<.>))
 import           Control.Monad
 import           Control.Concurrent.MVar
 
+import           Data.Array
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
@@ -27,6 +29,7 @@ import           Data.Maybe               (fromMaybe, listToMaybe)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
+import qualified Data.IntSet              as IS
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
@@ -39,6 +42,7 @@ import qualified Data.Vector              as V
 
 
 import           Language.Javascript.JMacro
+import           Language.Haskell.TH
 import           System.FilePath          (dropExtension, splitPath, (<.>), (</>))
 import           System.Directory         (createDirectoryIfMissing, doesFileExist)
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
@@ -58,6 +62,9 @@ import           Gen2.Object
 import           Gen2.Utils
 import           Gen2.RtsTypes
 
+type LinkableUnit = (Package, Module, Int) -- module and the index of the block
+type Module       = Text
+
 link :: DynFlags
      -> Bool                      -- ^ debug build
      -> FilePath                  -- ^ output file/directory
@@ -70,18 +77,18 @@ link :: DynFlags
 link dflags debug out include pkgs objFiles jsFiles isRootFun = do
   objDeps <- mapM readDepsFile objFiles
   let roots = S.fromList . filter isRootFun $
-        concatMap (M.keys . depsDeps) objDeps
+        concatMap (map fst . M.toList . depsDeps) objDeps
       rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
   -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
   compilationProgressMsg dflags $
     "Linking " ++ out ++ " (" ++ intercalate "," rootMods ++ ")"
   c <- newMVar M.empty
   (allDeps, src, infos) <-
-    collectDeps (lookupFun c $ zip objDeps objFiles) 
+    collectDeps (lookupFun c $ zip objDeps objFiles)
                 (roots `S.union` rtsDeps (map fst pkgs))
   createDirectoryIfMissing False out
   BL.writeFile (out </> "out.js") (renderLinker debug src infos)
-  TL.writeFile (out </> "rts.js") (rtsText debug)
+  TL.writeFile (out </> "rts.js") (rtsText' debug)
   getShims jsFiles (map fst pkgs) (out </> "lib.js", out </> "lib1.js")
   writeHtml out
   combineFiles out
@@ -101,33 +108,33 @@ link dflags debug out include pkgs objFiles jsFiles isRootFun = do
 
     lookupFun :: MVar (Map (Package, Text, String) FilePath)
               -> [(Deps,FilePath)]
-              -> String -> Fun -> IO FilePath
-    lookupFun cache objs = lCached
+              -> String -> Package -> Module -> IO FilePath
+    lookupFun cache objs = {-# SCC "lookupFun" #-} lCached
       where
-        lCached :: String -> Fun -> IO FilePath
-        lCached ext fun = do
+        lCached :: String -> Package -> Module -> IO FilePath
+        lCached ext pkg mod = do
           c <- takeMVar cache
-          let k = (funPackage fun, funModule fun, ext)
+          let k = (pkg, mod, ext)
           case M.lookup k c of
             Just p -> putMVar cache c >> return p
             Nothing -> do
-              p <- l ext fun
+              p <- l ext pkg mod
               -- putStrLn ("looked up: " ++ p)
               putMVar cache (M.insert k p c)
               return p
-        objs' = M.fromList $ map (\(Deps pkg m _, p) -> ((pkg,m),p)) objs
-        l ext fun
+        objs' = M.fromList $ map (\(Deps pkg m _ _, p) -> ((pkg,m),p)) objs
+        l ext pkg mod
            -- already loaded objects
-           | Just p   <- M.lookup (funPackage fun, funModule fun) objs' = return p
+           | Just p    <- M.lookup (pkg, mod) objs' = return p
            -- known package in dependencies
-           | Just pkg <- M.lookup (funPkgTxt fun) pkgPaths = searchPaths [] pkg
+           | Just pkg' <- M.lookup (pkgTxt pkg) pkgPaths = searchPaths [] pkg'
            -- known wired-in package (no version)
-           | Just pkg <- M.lookup (funPkgTxtNoVer fun) pkgPaths = searchPaths [] pkg
+           | Just pkg' <- M.lookup (packageName pkg) pkgPaths = searchPaths [] pkg'
            -- search in include dirs
            | otherwise = searchPaths [] include
            where
-             modPath = (T.unpack $ T.replace "." "/" (funModule fun)) <.> ext
-             searchPaths searched [] = error $ "cannot find symbol: " ++ showFun fun
+             modPath = (T.unpack $ T.replace "." "/" mod) <.> ext
+             searchPaths searched [] = error $ "cannot find module: " ++ T.unpack (pkgTxt pkg <> ":" <> mod)
                                             ++ "\nsearched in:\n" ++ unlines searched
              searchPaths searched (x:xs) =
                 let p = x </> modPath
@@ -140,6 +147,14 @@ renderLinker :: Bool -> JStat -> [ClosureInfo] -> BL.ByteString
 renderLinker debug stat infos
    = TLE.encodeUtf8 . displayT . renderPretty 0.8 150 . pretty $
        Compactor.compact debug stat infos
+
+rtsText' :: Bool -> TL.Text
+rtsText' = rtsText
+{- prerender RTS for faster linking (fixme this results in a build error, why?)
+rtsText' debug = if debug
+                   then TL.pack $ $(runQ $ litE (StringL . TL.unpack . rtsText $ True))
+                   else TL.pack $ $(runQ $ litE (StringL . TL.unpack . rtsText $ False))
+-}
 
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
@@ -212,48 +227,65 @@ splitVersion t
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
-modFuns (Deps p m d) = map fst (M.toList d)
+modFuns (Deps p m a d) = map fst (M.toList d)
 
 -- | get all dependencies for a given set of roots
-getDeps :: (String -> Fun -> IO FilePath) -> Set Fun -> IO (Set Fun)
-getDeps lookup fun = go S.empty M.empty (S.toList fun)
+getDeps :: (String -> Package -> Module -> IO FilePath)
+        -> Set Fun
+        -> IO (Set LinkableUnit)
+getDeps lookup fun = go' S.empty M.empty [] (S.toList fun) --  fun M.empty (S.toList fun)
   where
-    go :: Set Fun -> Map (Package, Text) Deps -> [Fun] -> IO (Set Fun)
-    go result _    []         = return result
-    go result deps ffs@(f:fs) =
+    go :: Set LinkableUnit -> Map (Package, Module) Deps -> [LinkableUnit] -> IO (Set LinkableUnit)
+    go result _    [] = return result
+    go result deps lls@((lpkg,lmod,n):ls) =
+      let key = (lpkg, lmod)
+      in  case M.lookup (lpkg,lmod) deps of
+            Nothing -> lookup "js_o" lpkg lmod >>= readDepsFile >>=
+                         \d -> go result (M.insert key d deps) lls
+            Just (Deps _ _ a _) -> go' result deps ls (S.toList $ a ! n)
+
+    go' :: Set LinkableUnit -> Map (Package, Module) Deps -> [LinkableUnit] -> [Fun] -> IO (Set LinkableUnit)
+    go' result deps open [] = go result deps open
+    go' result deps open ffs@(f:fs) =
       let key = (funPackage f, funModule f)
       in  case M.lookup key deps of
-            Nothing -> lookup "js_o" f >>= readDepsFile >>=
-                           \d -> go result (M.insert key d deps) ffs
-            Just (Deps _ _ d)  -> let ds = filter (`S.notMember` result)
-                                           (maybe [] S.toList $ M.lookup f d)
-                              in  go (S.insert f result) deps (ds++fs)
+            Nothing -> lookup "js_o" (funPackage f) (funModule f) >>= readDepsFile >>=
+                           \d -> go' result (M.insert key d deps) open ffs
+            Just (Deps p m a d) ->
+               let lu = maybe err (p,m,) (M.lookup f d)
+                   -- fixme, deps include nonexported symbols,
+                   -- add error again when those have been removed
+                   -- err = error ("getDeps: unknown symbol: " ++ showFun f ++ "\n" ++ (unlines $ map show (M.toList d)))
+                   err = (p,m,-1)
+               in if lu `S.member` result || lu == err
+                    then go' result deps open fs
+                    else go' (S.insert lu result) deps (lu:open) fs
 
 -- | get all modules used by the roots and deps
-getDepsSources :: (String -> Fun -> IO FilePath)
+getDepsSources :: (String -> Package -> Module -> IO FilePath)
                -> Set Fun
-               -> IO (Set Fun, [(FilePath, Set Fun)])
+               -> IO (Set LinkableUnit, [(FilePath, Set LinkableUnit)])
 getDepsSources lookup roots = do
   allDeps <- getDeps lookup roots
-  allPaths <- mapM (\x -> (,S.singleton x) <$> lookup "js_o" x) (S.toList allDeps)
+  allPaths <- mapM (\x@(pkg,mod,_) -> (,S.singleton x) <$> lookup "js_o" pkg mod) (S.toList allDeps)
   return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
 
 -- | collect dependencies for a set of roots
-collectDeps :: (String -> Fun -> IO FilePath)
+collectDeps :: (String -> Package -> Module -> IO FilePath)
             -> Set Fun
-            -> IO (Set Fun, JStat, [ClosureInfo])
+            -> IO (Set LinkableUnit, JStat, [ClosureInfo])
 collectDeps lookup roots = do
   (allDeps, srcs0) <- getDepsSources lookup roots
   -- read ghc-prim first, since we depend on that for static initialization
-  let (primSrcs, srcs) = partition isPrimSrc  srcs0
-      isPrimSrc (_, fs) = (=="ghc-prim") . packageName . funPackage . head . S.toList $ fs
+  let (primSrcs, srcs) = partition isPrimSrc srcs0
+      isPrimSrc (_, fs) = (=="ghc-prim") . (\(p,_,_) -> packageName p) . head . S.toList $ fs
   (stats, infos) <- unzip <$> mapM (uncurry extractDeps) (primSrcs ++ srcs)
   return (allDeps, mconcat stats, concat infos)
 
-extractDeps :: FilePath -> Set Fun -> IO (JStat, [ClosureInfo])
-extractDeps file funs = do
-  let symbs = S.fromList $ map funSymbol (S.toList funs)
-  l <- readObjectFileKeys (any (`S.member` symbs)) file
+extractDeps :: FilePath -> Set LinkableUnit -> IO (JStat, [ClosureInfo])
+extractDeps file units = do
+  let symbs = IS.fromList . map (\(_,_,n) -> n) . S.toList $ units
+  l <- readObjectFileKeys (\n _ -> n `IS.member` symbs) file
   return (mconcat (map oiStat l), concatMap oiClInfo l)
 
 pkgTxt :: Package -> Text
@@ -282,15 +314,14 @@ rtsDeps pkgs =
  in S.fromList $ map mkDep
      [ (basePkg,      "GHC.Conc.Sync",          "h$baseZCGHCziConcziSynczireportError")
      , (basePkg,      "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )
-     , (basePkg,      "GHC.Exception",          "h$baseZCGHCziExceptionziSomeException_con_e")
-     , (ghcPrimPkg,   "GHC.Types",              "h$ghczmprimZCGHCziTypesziZC_con_e")
+     , (basePkg,      "GHC.Exception",          "h$baseZCGHCziExceptionziSomeException")
+     , (ghcPrimPkg,   "GHC.Types",              "h$ghczmprimZCGHCziTypesziZC")
      , (ghcPrimPkg,   "GHC.Types",              "h$ghczmprimZCGHCziTypesziZMZN")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e")
      , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSRef")
      , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSException")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfExceptionJSExceptionzuzdTypeable")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfTypeableJSException")
      , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfShowJSException")
      , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfExceptionJSException")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdTypeableJSException")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfExceptionJSExceptionzuzdShow")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfTypeableJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfShowJSException")
      ]

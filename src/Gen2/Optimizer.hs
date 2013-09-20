@@ -1059,7 +1059,7 @@ flattenSequences g = g & nodes %~ (\n -> foldl' flatten n (IM.toList n))
 --------------------------------------------------------------------------
 -- some debugging things, remove later or add proper reporting mechanism
 --------------------------------------------------------------------------
-
+{-
 dumpLive :: Graph' -> Facts Liveness -> Facts Liveness
 dumpLive g l@(Facts l0) = Debug.Trace.trace (show g ++ "\n" ++ l') l
   where
@@ -1090,4 +1090,5 @@ showCons g CUnreached = "<unreached>"
 showCons g (CReached imf) = "\n" ++ (L.unlines $ map (\x -> "   " ++ f x) (IM.toList imf))
   where
     f (i,v) = showId g i ++ ":" ++ show v
+-}
 
