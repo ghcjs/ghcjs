@@ -50,8 +50,7 @@ main = do
                    installGhcjsPackages s
                    removeFakes
                  else do
-                   removeFakes
-                   installExtraPackages s
+                   installExtraPackages s -- this removes the fake Cabal
                    installGhcjsPackages s
       checkShims
       return Nothing
@@ -127,11 +126,6 @@ fakePackages :: [String]
 fakePackages = [ "Cabal"
                ]
 
--- | these are extra packages that are installed after we have a real Cabal
---   library
-extraPackages :: [String]
-extraPackages = []
-
 -- | the GHCJS base libraries
 ghcjsPackages :: [String]
 ghcjsPackages = [ "ghcjs-prim"
@@ -173,7 +167,6 @@ initSourceTree currentDir = do
            cd "ghcjs-boot"
            git ["submodule", "update", "--init", "--recursive"]
   forM_ bootPackages  (patchPackage "boot")
-  forM_ extraPackages (patchPackage "extra")
   preparePrimops
   buildGenPrim
   buildGmpConstants
@@ -262,15 +255,32 @@ installBootPackages s = sub $ do
   when (not $ null bootPackages)
     (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
 
+-- | extra packages are not hardcoded but live in two files:
+--     extra/extra0  -- installed before Cabal (list Cabal dependencies here)
+--     extra/extra1  -- installed after Cabal
+-- remember that you can install cabal packages from a url, but only
+-- local packages (starting with ./) are 'prepared'
 installExtraPackages :: BootSettings -> Sh ()
 installExtraPackages s = sub $ do
-  echo "installing extra packages"
+  echo "installing Cabal and extra packages"
   cd "extra"
+  installExtra cabalBoot =<< readExtra "extra0"
   sub (cd ("cabal" </> "Cabal") >> cabal ["clean"])
+  cabal $ ["install", "--ghcjs", "./cabal/Cabal", "--only-dependencies"]
+  removeFakes
   cabal $ ["install", "--ghcjs", "./cabal/Cabal"] ++ cabalFlags False s
-  forM_ extraPackages preparePackage
-  when (not $ null extraPackages)
-    (cabal $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) extraPackages)
+  installExtra cabal =<< readExtra "extra1"
+    where
+      ignored x = T.null x || "#" `T.isPrefixOf` x
+      readExtra file =
+        filter (not . ignored) . map T.strip . T.lines <$> readfile file
+      installExtra c pkgs = do
+        forM_ pkgs $ \pkg -> when ("./" `T.isPrefixOf` pkg) $ do
+          let pkg' = T.unpack (T.drop 2 pkg)
+          when (initTree s) $ sub (cd ".." >> patchPackage "extra" pkg')
+          preparePackage pkg'
+        when (not $ null pkgs)
+          (c $ ["install", "--ghcjs"] ++ cabalFlags False s ++ pkgs)
 
 installGhcjsPackages :: BootSettings -> Sh ()
 installGhcjsPackages s = sub $ do
