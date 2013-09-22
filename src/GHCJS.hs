@@ -43,14 +43,10 @@ runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
 runGhcjsSession mbMinusB debug m = runGhcSession mbMinusB $ do
     base <- liftIO ghcjsDataDir
     dflags <- getSessionDynFlags
-    dflags2 <- if isJust mbMinusB
-               then return dflags
-               else liftIO (addPkgConf dflags)
-    (dflags3,_) <- liftIO $ initPackages dflags2
     _ <- setSessionDynFlags
          $ setGhcjsPlatform debug [] base
          $ updateWays $ addWay' (WayCustom "js")
-         $ setGhcjsSuffixes False dflags3
+         $ setGhcjsSuffixes False dflags
     fixNameCache
     m
 
@@ -120,8 +116,10 @@ addPkgConf :: DynFlags -> IO DynFlags
 addPkgConf df = do
   db1 <- getGlobalPackageDB
   db2 <- getUserPackageDB
-  base <- getGlobalPackageBase
-  return $ df { extraPkgConfs = const [PkgConfFile db1, PkgConfFile db2] }
+  let replaceConf GlobalPkgConf = PkgConfFile db1
+      replaceConf UserPkgConf   = PkgConfFile db2
+      replaceConf x             = x
+  return $ df { extraPkgConfs = map replaceConf . extraPkgConfs df }
 
 
 setGhcjsSuffixes :: Bool     -- oneshot option, -c
