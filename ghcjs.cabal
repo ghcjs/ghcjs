@@ -58,6 +58,7 @@ Library
                      Gen2.DynamicLinking,
                      Gen2.GHC.CoreToStg,
                      Gen2.GHC.Linker,
+                     Gen2.GHC.SysTools,
                      Compiler.GhcjsHooks,
                      Compiler.GhcjsPlatform,
                      Compiler.Info,

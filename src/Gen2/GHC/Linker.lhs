@@ -51,7 +51,8 @@ import UniqSet
 import FastString
 import Config
 import Platform
-import SysTools
+import SysTools hiding ( linkDynLib )
+import Gen2.GHC.SysTools
 import PrelNames
 
 -- Standard libraries
