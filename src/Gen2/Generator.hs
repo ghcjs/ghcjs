@@ -89,7 +89,7 @@ generate debug df s m =
             (st', dbg) = dumpAst st debug s'
         deps <- genMetaData d
         return . BL.toStrict $
-          Object.object' st' deps (dbg ++ p)
+          Object.object' st' deps (p ++ dbg) -- p first, so numbering of linkable units lines up
 
 dumpAst :: Object.SymbolTable
         -> Bool
@@ -132,7 +132,7 @@ pass df m ss = go 1 Object.emptySymbolTable ss
         (st', ss, bs) <- objectEntry m st topDeps ci
                            . O.optimize
                            . jsSaturate (Just $ modulePrefix m n)
-                           $ tl <> mconcat (reverse extraTl)
+                           $ mconcat (reverse extraTl) <> tl
         return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq` (st', (ss, bs), (topDeps, allDeps))
 
 objectEntry :: Module

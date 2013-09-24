@@ -41,7 +41,7 @@ rtsApply = mconcat $  map (uncurry stackApply) applySpec
 -- specialized apply for these
 -- make sure that once you are in spec, you stay there
 applySpec :: [(Int,Int)] -- regs,arity
-applySpec = [ (regs,arity)  | arity <- [1..6], regs <- [max 0 (arity-1)..(arity*2)]]
+applySpec = [ (regs,arity)  | arity <- [1..8], regs <- [max 0 (arity-1)..(arity*2)]]
 
 specApply :: Bool -> Int -> Int -> Maybe JExpr
 specApply fast n r
@@ -55,7 +55,7 @@ specApply fast n r
                | otherwise = ""
 
 paps :: [Int]
-paps = [0..32]
+paps = [0..64]
 
 mkApplyArr =
   [j| var !h$apply = [];
@@ -109,6 +109,7 @@ genericStackApply =
           var ar = `arity` & 0xFF;
           var myAr = myArity & 0xFF;
           var myRegs = myArity >> 8;
+          `traceRts $ t"h$ap_gen: args: " |+ myAr |+ t" regs: " |+ myRegs`;
           if(myAr == ar) {
             `traceRts $ t"h$ap_gen: exact"`;
             for(var i=0;i<myRegs;i++) {
@@ -117,13 +118,15 @@ genericStackApply =
             `Sp` = `Sp` - myRegs - 2;
             return `c`;
           } else if(myAr > ar) {
-            `traceRts $ t"h$ap_gen: oversat"`;
-            var regs = arity >> 8;
+            var regs = `arity` >> 8;
+            `traceRts $ t"h$ap_gen: oversat: arity: " |+ ar |+ t" regs: " |+ regs`;
             for(var i=0;i<regs;i++) {
+              `traceRts $ t"h$ap_gen: loading register: " |+ i`;
               h$setReg(i+2,`Stack`[`Sp`-2-i]);
             }
-            var newTag = ((myRegs-regs)<<8)|(myArity-ar);
+            var newTag = ((myRegs-regs)<<8)|(myAr-ar);
             var newAp = h$apply[newTag];
+            `traceRts $ t"h$ap_gen: next: " |+ (newAp|."n")`;
             if(newAp === h$ap_gen) {
               `Sp` = `Sp` - regs;
               `Stack`[`Sp`-1] = newTag;
@@ -201,15 +204,17 @@ genericFastApply =
       [j| var ar = `arity` & 0xFF;
           var myAr = `tag` & 0xFF;
           var myRegs = `tag` >> 8;
+          `traceRts $ t"h$ap_gen_fast: args: " |+ myAr |+ t" regs: " |+ myRegs`;
           if(myAr === ar) {
             // call the function directly
             `traceRts $ t"h$ap_gen_fast: exact"`;
             return `c`;
           } else if(myAr > ar) {
             // push stack frame with remaining args, then call fun
-            `traceRts $ t"h$ap_gen_fast: oversat"`;
+            `traceRts $ t"h$ap_gen_fast: oversat " |+ Sp`;
             var regsStart = (`arity` >> 8)+1;
-            `Sp` = `Sp` + myRegs - regsStart;
+            `Sp` = `Sp` + myRegs - regsStart + 1;
+            `traceRts $ t"h$ap_gen_fast: oversat " |+ Sp`;
             `pushArgs regsStart myRegs`;
             var newTag = (((myRegs-(`arity`>>8))<<8))|(myAr-ar);
             var newAp = h$apply[newTag];
@@ -220,6 +225,7 @@ genericFastApply =
               `Sp` = `Sp` + 1;
             }
             `Stack`[`Sp`] = newAp;
+            return `c`;
           } else {
             `traceRts $ t"h$ap_gen_fast: undersat: " |+ myRegs |+ t" " |+ tag`; // build PAP and return stack top
             if(`tag` != 0) {
@@ -247,9 +253,11 @@ genericFastApply =
     pushArgs :: JExpr -> JExpr -> JStat
     pushArgs start end =
       [j| for(var i=`end`;i>=`start`;i--) {
-             `Stack`[`Sp`-i-2] = h$getReg(i+1);
+             `traceRts $ ((t"pushing register: " |+ i)::JExpr)`;
+             `Stack`[`Sp`+`start`-i] = h$getReg(i+1);
           }
         |]
+
 
 stackApply :: Int -> -- ^ number of registers in stack frame
               Int -> -- ^ number of arguments
