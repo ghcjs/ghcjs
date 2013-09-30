@@ -28,6 +28,7 @@ import Type
 import TysPrim
 import TysWiredIn
 import Unique
+import CmmType
 
 ghcjsPrimIface :: ModIface
 ghcjsPrimIface
