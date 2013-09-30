@@ -46,13 +46,14 @@ main = do
       installRts
       installFakes
       installBootPackages s
+      installGhcjsPrim s
+      checkShims
       if quick s then do
                    installGhcjsPackages s
                    removeFakes
                  else do
                    installExtraPackages s -- this removes the fake Cabal
                    installGhcjsPackages s
-      checkShims
       return Nothing
 
 data BootSettings = BootSettings { initTree  :: Bool      -- ^ initialize the source tree
@@ -126,15 +127,14 @@ fakePackages :: [String]
 fakePackages = [ "Cabal"
                ]
 
--- | the GHCJS base libraries
+-- | the GHCJS base libraries to install, except ghcjs-prim which is
+--   installed earlier
 ghcjsPackages :: [String]
-ghcjsPackages = [ "ghcjs-prim"
-                , "ghcjs-base"
+ghcjsPackages = [ "ghcjs-base"
                 ]
 
 -- | reduced set of packages for quick boot
-ghcjsQuickPackages = [ "ghcjs-prim"
-                     ]
+ghcjsQuickPackages = [ ]
 
 initSourceTree :: Bool -> Sh ()
 initSourceTree currentDir = do
@@ -282,6 +282,15 @@ installExtraPackages s = sub $ do
         when (not $ null pkgs)
           (c $ ["install", "--ghcjs"] ++ cabalFlags False s ++ pkgs)
 
+installGhcjsPrim :: BootSettings -> Sh ()
+installGhcjsPrim s = sub $ do
+  echo "installing ghcjs-prim"
+  let pkgs = ["ghcjs-prim"]
+  cd "ghcjs"
+  forM_ pkgs preparePackage
+  when (not $ null pkgs)
+    (cabalBoot $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) pkgs)
+
 installGhcjsPackages :: BootSettings -> Sh ()
 installGhcjsPackages s = sub $ do
   echo "installing GHCJS-specific base libraries"
@@ -365,7 +374,7 @@ checkShims = sub $ do
   if e then sub $ do
               echo "shims repository already exists, be sure to keep it updated"
        else sub $ do
-              echo "GHCJS has been booted, but the shims repository is still missing, fetching"
+              echo "The shims repository is missing, fetching"
               git ["clone", "https://github.com/ghcjs/shims.git"]
 
 cpp          = run_ "cpp"
