@@ -84,7 +84,7 @@ instance Show DataCon where show d = show (dataConName d)
 instance Show Var where show v = "(" ++ show (Var.varName v) ++ " :: " ++ show (Var.varType v) ++ ")"
 
 deriving instance Show UpdateFlag
-
+deriving instance Show PrimOpVecCat
 deriving instance Show Literal
 deriving instance Show PrimOp
 deriving instance Show AltCon
