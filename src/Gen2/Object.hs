@@ -115,7 +115,7 @@ data Package = Package { packageName    :: !Text
                        , packageVersion :: !Text
                        } deriving (Eq, Ord, Show)
 
--- we need to store the size separately, since HashMap's size is O(n)
+-- we need to store the size separately, since getting a HashMap's size is O(n)
 data SymbolTable  = SymbolTable !Int !(HashMap Text Int)
 
 emptySymbolTable :: SymbolTable
@@ -202,10 +202,7 @@ object ds units = object' symbs ds xs
 serializeStat :: SymbolTable -> [ClosureInfo] -> JStat -> (SymbolTable, ByteString)
 serializeStat st ci s = let (st', bs) = runPutS st (put ci >> put s)
                             bs' = B.toStrict bs
-                            msg1 = "serializing: " ++ T.unpack (T.intercalate "" $ map ciVar ci)
-                            msg2 = "done: " ++ show (length ci)
-                            t m = trace m ()
-                        in  {- t msg1 `seq` bs' `seq` st' `seq` t msg2 `seq` -} (st', B.fromChunks [bs'])
+                        in  (st', B.fromChunks [bs'])
 
 object' :: SymbolTable -> Deps -> [([Text],ByteString)] -> ByteString
 object' st0 deps0 os = rnf deps0 `seq` (hdr <> symbs <> deps1 <> idx <> mconcat (map snd os))
@@ -340,13 +337,13 @@ putHeader (Header sl dl il) = DB.runPut $ do
 -- prettyprint object similar to how the old text based
 -- objects worked
 showObject :: [ObjUnit] -> TL.Text
-showObject xs = mconcat (map showSymbol xs)
+showObject xs = mconcat (zipWith showSymbol xs [0..])
   where
-    showSymbol (ObjUnit symbs cis stat)
+    showSymbol (ObjUnit symbs cis stat) n
       | "h$debug" `elem` symbs = 
            "/*\n" <> (TL.fromStrict $ T.unlines ( stat ^.. template . _JStr )) <> "\n*/\n"
       | otherwise = TL.unlines
-        [ "// begin: [" <> TL.intercalate "," (map TL.fromStrict symbs) <> "]"
+        [ "// begin: [" <> TL.intercalate "," (map TL.fromStrict symbs) <> "] (" <> TL.pack (show n) <> ")"
         , displayT . renderPretty 0.8 150 . pretty $ (stat <> mconcat (map toStat cis))
         , "// end: [" <> TL.intercalate "," (map TL.fromStrict symbs) <> "]"
         ]
@@ -357,9 +354,10 @@ showDeps (Deps p m a d) =
   "module: "  <> TL.fromStrict m <> "\n" <>
   "deps:\n"   <> TL.unlines (map dumpDep $ M.toList d)
   where
-    dumpDep (s, n) = TL.fromStrict (funSymbol s) <> " -> \n" <>
+    dumpDep (s, n) = TL.fromStrict (funSymbol s) <> " -> " <> TL.pack (show n) <> "\n" <> 
       F.foldMap (\(Fun fp fm fs) -> "   "
-        <> showPkg fp <> ":" <> TL.fromStrict fm <> "." <> TL.fromStrict fs <> "\n") (a ! n)
+      <> showPkg fp <> ":" <> TL.fromStrict fm <> "." <> TL.fromStrict fs <> "\n") (a ! n)
+
 
 showPkg :: Package -> TL.Text
 showPkg (Package name ver)

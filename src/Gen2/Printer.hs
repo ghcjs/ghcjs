@@ -6,9 +6,12 @@
 -}
 module Gen2.Printer where
 
+import           Data.Char (isAlpha, isDigit)
+import qualified Data.Map                     as M
 import qualified Data.Text.Lazy               as TL
-import           Language.Javascript.JMacro   (Ident, JExpr (..), JStat (..),
-                                               JVal (..), jsToDoc)
+import qualified Data.Text                    as T
+import           Language.Javascript.JMacro   (Ident, JExpr(..), JStat(..),
+                                               JVal(..), jsToDocR, RenderJs(..), defaultRenderJs)
 import           Text.PrettyPrint.Leijen.Text (Doc, align, char, comma, empty,
                                                fillSep, hcat, nest, parens,
                                                punctuate, text, vcat, (<+>),
@@ -17,103 +20,110 @@ import qualified Text.PrettyPrint.Leijen.Text as PP
 
 
 pretty :: JStat -> Doc
-pretty (BlockStat xs) = prettyBlock (flattenBlocks xs)
--- these things contain other statements, rewire them to use our prettyprinter
---- (fixme remove this if possible)
-pretty (IfStat cond x y) = text "if" <> parens (jsToDoc cond) <+> braceNest'' (pretty x) <+> mbElse
-        where mbElse | y == BlockStat []  = PP.empty
-                     | otherwise = text "else" <+> braceNest'' (pretty y)
-pretty (WhileStat False p b)  = text "while" <> parens (jsToDoc p) <+> braceNest'' (pretty b)
-pretty (WhileStat True  p b)  = (text "do" <+> braceNest'' (pretty b)) <+> text "while" <+> parens (jsToDoc p)
-pretty (TryStat s i s1 s2) = text "try" <+> braceNest' (pretty s) $$ mbCatch $$ mbFinally
-        where mbCatch | s1 == BlockStat [] = PP.empty
-                      | otherwise = text "catch" <> parens (jsToDoc i) $$ braceNest' (pretty s1)
-              mbFinally | s2 == BlockStat [] = PP.empty
-                        | otherwise = text "finally" $$ braceNest' (pretty s2)
-pretty (SwitchStat e l d) = text "switch" <+> parens (jsToDoc e) <+> braceNest'' cases
-        where l' = map (\(c,s) -> (text "case" <+> parens (jsToDoc c) <> char ':') $$$ (pretty s)) l ++ [text "default:" $$$ (pretty d)]
-              cases = vcat l'
-pretty (ForInStat each i e b) = text txt <> parens (text "var" <+> jsToDoc i <+> text "in" <+> jsToDoc e) <+> braceNest'' (pretty b)
-        where txt | each = "for each"
-                  | otherwise = "for"
--- these are unsupported for ghcjs
-pretty (ForeignStat{}) = error "unexpected foreign stat"
-pretty (AntiStat {})   = error "unexpected antiquotation"
-pretty (UnsatBlock {}) = error "unexpected unsaturated block"
-pretty b               = jsToDoc b
+pretty = jsToDocR ghcjsRenderJs
 
-prettyBlock :: [JStat] -> Doc
-prettyBlock xs = vcat $ map addSemi (prettyBlock' xs)
+ghcjsRenderJs :: RenderJs
+ghcjsRenderJs = defaultRenderJs { renderJsV = ghcjsRenderJsV
+                                , renderJsS = ghcjsRenderJsS
+                                }
+
+-- attempt to resugar some of the common constructs
+ghcjsRenderJsS :: RenderJs -> JStat -> Doc
+ghcjsRenderJsS r (BlockStat xs) = prettyBlock r (flattenBlocks xs)
+ghcjsRenderJsS r s              = renderJsS defaultRenderJs r s
+
+-- don't quote keys in our object literals, so closure compiler works
+ghcjsRenderJsV :: RenderJs -> JVal -> Doc
+ghcjsRenderJsV r (JHash m)
+  | M.null m  = text "{}"
+  | otherwise = braceNest . fillSep . punctuate comma .
+                          map (\(x,y) -> quoteIfRequired x <> PP.colon <+> jsToDocR r y) $ M.toList m
+  where
+    quoteIfRequired x
+      | isUnquotedKey x = text (TL.fromStrict x)
+      | otherwise       = PP.squotes (text (TL.fromStrict x))
+
+    isUnquotedKey x | T.null x        = False
+                    | T.all isDigit x = True
+                    | otherwise       = validFirstIdent (T.head x) && T.all validOtherIdent (T.tail x)
+
+    -- fixme, this will quote some idents that don't really need to be quoted
+    validFirstIdent c = c == '_' || c == '$' || isAlpha c
+    validOtherIdent c = isAlpha c || isDigit c
+ghcjsRenderJsV r v = renderJsV defaultRenderJs r v
+
+prettyBlock :: RenderJs -> [JStat] -> Doc
+prettyBlock r xs = vcat $ map addSemi (prettyBlock' r xs)
 
 -- recognize common patterns in a block and convert them to more idiomatic/concise javascript
-prettyBlock' :: [JStat] -> [Doc]
+prettyBlock' :: RenderJs -> [JStat] -> [Doc]
 -- resugar for loops with/without var declaration
-prettyBlock' ( (DeclStat i _)
-             : (AssignStat (ValExpr (JVar i')) v0)
-             : (WhileStat False p (BlockStat bs))
-             : xs
-             )
-    | i == i' && not (null flat) && isForUpdStat (last flat)
-    = mkFor True i v0 p (last flat) (init flat) : prettyBlock' xs
-       where
-         flat = flattenBlocks bs
-prettyBlock' ( (AssignStat (ValExpr (JVar i)) v0)
-             : (WhileStat False p (BlockStat bs))
-             : xs
-             )
-    | not (null flat) && isForUpdStat (last flat)
-    = mkFor False i v0 p (last flat) (init flat) : prettyBlock' xs
-       where
-         flat = flattenBlocks bs
+prettyBlock' r ( (DeclStat i _)
+              : (AssignStat (ValExpr (JVar i')) v0)
+              : (WhileStat False p (BlockStat bs))
+              : xs
+              )
+     | i == i' && not (null flat) && isForUpdStat (last flat)
+     = mkFor r True i v0 p (last flat) (init flat) : prettyBlock' r xs
+        where
+          flat = flattenBlocks bs
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) v0)
+               : (WhileStat False p (BlockStat bs))
+               : xs
+               )
+     | not (null flat) && isForUpdStat (last flat)
+     = mkFor r False i v0 p (last flat) (init flat) : prettyBlock' r xs
+        where
+          flat = flattenBlocks bs
 
 -- global function (does not preserve semantics but works for GHCJS)
-prettyBlock' ( (DeclStat i _)
-             : (AssignStat (ValExpr (JVar i')) (ValExpr (JFunc is b)))
-             : xs
-             )
-    | i == i' = (text "function" <+> jsToDoc i
-                 <> parens (fillSep . punctuate comma . map jsToDoc $ is)
-                 $$ braceNest' (pretty b)
-                ) : prettyBlock' xs
+prettyBlock' r ( (DeclStat i _)
+               : (AssignStat (ValExpr (JVar i')) (ValExpr (JFunc is b)))
+               : xs
+               )
+      | i == i' = (text "function" <+> jsToDocR r i
+                   <> parens (fillSep . punctuate comma . map (jsToDocR r) $ is)
+                   $$ braceNest' (jsToDocR r b)
+                  ) : prettyBlock' r xs
 -- declare/assign
-prettyBlock' ( (DeclStat i _)
-             : (AssignStat (ValExpr (JVar i')) v)
-             : xs
-             )
-    | i == i' = (text "var" <+> jsToDoc i <+> char '=' <+> jsToDoc v) : prettyBlock' xs
+prettyBlock' r ( (DeclStat i _)
+               : (AssignStat (ValExpr (JVar i')) v)
+               : xs
+               )
+      | i == i' = (text "var" <+> jsToDocR r i <+> char '=' <+> jsToDocR r v) : prettyBlock' r xs
 
 -- modify/assign operators (fixme this should be more general, but beware of side effects like PPostExpr)
-prettyBlock' ( (AssignStat (ValExpr (JVar i)) (InfixExpr "+" (ValExpr (JVar i')) (ValExpr (JInt 1))))
-             : xs
-             )
-    | i == i' = ("++" <> jsToDoc i) : prettyBlock' xs
-prettyBlock' ( (AssignStat (ValExpr (JVar i)) (InfixExpr "-" (ValExpr (JVar i')) (ValExpr (JInt 1))))
-             : xs
-             )
-    | i == i' = ("--" <> jsToDoc i) : prettyBlock' xs
-prettyBlock' ( (AssignStat (ValExpr (JVar i)) (InfixExpr "+" (ValExpr (JVar i')) e))
-             : xs
-             )
-    | i == i' = (jsToDoc i <+> text "+=" <+> jsToDoc e) : prettyBlock' xs
-prettyBlock' ( (AssignStat (ValExpr (JVar i)) (InfixExpr "-" (ValExpr (JVar i')) e))
-             : xs
-             )
-    | i == i' = (jsToDoc i <+> text "-=" <+> jsToDoc e) : prettyBlock' xs
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr "+" (ValExpr (JVar i')) (ValExpr (JInt 1))))
+               : xs
+               )
+      | i == i' = ("++" <> jsToDocR r i) : prettyBlock' r xs
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr "-" (ValExpr (JVar i')) (ValExpr (JInt 1))))
+               : xs
+               )
+      | i == i' = ("--" <> jsToDocR r i) : prettyBlock' r xs
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr "+" (ValExpr (JVar i')) e))
+               : xs
+               )
+      | i == i' = (jsToDocR r i <+> text "+=" <+> jsToDocR r e) : prettyBlock' r xs
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr "-" (ValExpr (JVar i')) e))
+               : xs
+               )
+      | i == i' = (jsToDocR r i <+> text "-=" <+> jsToDocR r e) : prettyBlock' r xs
 
--- nothing special: use regular pretty
-prettyBlock' (x:xs) = pretty x : prettyBlock' xs
-prettyBlock' [] = []
+
+prettyBlock' r (x:xs) = jsToDocR r x : prettyBlock' r xs
+prettyBlock' _ [] = []
 
 -- build the for block
-mkFor :: Bool -> Ident -> JExpr -> JExpr -> JStat -> [JStat] -> Doc
-mkFor decl i v0 p s1 sb = text "for" <> forCond <+> braceNest'' (pretty $ BlockStat sb)
+mkFor :: RenderJs -> Bool -> Ident -> JExpr -> JExpr -> JStat -> [JStat] -> Doc
+mkFor r decl i v0 p s1 sb = text "for" <> forCond <+> braceNest'' (jsToDocR r $ BlockStat sb)
     where
-      c0 | decl      = text "var" <+> jsToDoc i <+> char '=' <+> jsToDoc v0
-         | otherwise =                jsToDoc i <+> char '=' <+> jsToDoc v0
+      c0 | decl      = text "var" <+> jsToDocR r i <+> char '=' <+> jsToDocR r v0
+         | otherwise =                jsToDocR r i <+> char '=' <+> jsToDocR r v0
       forCond = parens $ hcat $ interSemi
                             [ c0
-                            , jsToDoc p
-                            , parens (pretty s1)
+                            , jsToDocR r p
+                            , parens (jsToDocR r s1)
                             ]
 
 -- check if a statement is suitable to be converted to something in the for(;;x) position

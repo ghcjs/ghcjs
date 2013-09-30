@@ -40,7 +40,6 @@ import qualified Data.Text.Lazy.IO        as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
 import qualified Data.Vector              as V
 
-
 import           Language.Javascript.JMacro
 import           Language.Haskell.TH
 import           System.FilePath          (dropExtension, splitPath, (<.>), (</>))
@@ -255,9 +254,9 @@ getDeps lookup fun = go' S.empty M.empty [] (S.toList fun) --  fun M.empty (S.to
                let lu = maybe err (p,m,) (M.lookup f d)
                    -- fixme, deps include nonexported symbols,
                    -- add error again when those have been removed
-                   -- err = error ("getDeps: unknown symbol: " ++ showFun f ++ "\n" ++ (unlines $ map show (M.toList d)))
                    err = (p,m,-1)
-               in if lu `S.member` result || lu == err
+                   -- err = trace ("getDeps: unknown symbol: " ++ showFun f) (p,m,-1)
+               in if lu `S.member` result || (\(_,_,n) -> n== -1) lu
                     then go' result deps open fs
                     else go' (S.insert lu result) deps (lu:open) fs
 
