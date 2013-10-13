@@ -6,7 +6,7 @@
 
 module Main where
 
-import           Config (cProjectVersion, cDYNAMIC_GHC_PROGRAMS)
+import           Config (cProjectVersion)
 import           GHC
 import           Hooks
 import           HscMain

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Compiler.GhcjsHooks where
 
-import           Config               (cDYNAMIC_GHC_PROGRAMS, cProjectVersion)
+import           Config               (cProjectVersion)
 import           Gen2.GHC.CoreToStg (coreToStg) -- version that does not generate StgLetNoEscape
 import           CorePrep (corePrepPgm)
 import           Distribution.Package (PackageName (..))
