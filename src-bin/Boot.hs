@@ -180,9 +180,10 @@ preparePrimops = sub $ do
   cp (Paths.libdir </> "include" </> "MachDeps.h") "native"
   cp (Paths.libdir </> "include" </> "ghcautoconf.h") "native"
   cp (Paths.libdir </> "include" </> "ghcplatform.h") ("native" </> "ghc_boot_platform.h")
-  cpp ["-P", "-Ijs", "primops.txt.pp", "-o", "primops-js.txt"]
-  cpp ["-P", "-Inative", "primops.txt.pp", "-o", "primops-native.txt"]
-
+  primopsJs <- cpp ["-P", "-Ijs", "primops.txt.pp"]
+  writefile "primops-js.txt" primopsJs
+  primopsNative <- cpp ["-P", "-Inative", "primops.txt.pp"]
+  writefile "primops-native.txt" primopsNative
 
 -- | build the genprimopcode tool, this requires alex and happy
 buildGenPrim :: Sh ()
@@ -192,7 +193,7 @@ buildGenPrim = sub $ do
   when (not e) $ do
     alex  ["Lexer.x"]
     happy ["Parser.y"]
-    ghc   ["-o", "genprimopcode", "-O", "Main.hs"]
+    ghc   ["-o", "genprimopcode", "-O", "Main.hs", "+RTS", "-K128M"]
 
 buildGmpConstants :: Sh ()
 buildGmpConstants = sub $ do
@@ -377,7 +378,7 @@ checkShims = sub $ do
               echo "The shims repository is missing, fetching"
               git ["clone", "https://github.com/ghcjs/shims.git"]
 
-cpp          = run_ "cpp"
+cpp          = run  "cpp"
 gcc          = run_ "gcc"
 git          = run_ "git"
 alex         = run_ "alex"
