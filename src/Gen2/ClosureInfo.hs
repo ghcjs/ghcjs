@@ -151,6 +151,7 @@ primTypeVt t = case repType t of
     | st == pr "Weak#" = WeakV
     | st == pr "StablePtr#" = AddrV
     | st == pr "StableName#" = ObjV
+    | st == pr "Proxy#" = VoidV
     | st == pr "MutVar#" = ArrV -- MutVarV
     | st == pr "BCO#" = ObjV -- fixme what do we need here?
     | st == pr "~#" = VoidV -- coercion token?
