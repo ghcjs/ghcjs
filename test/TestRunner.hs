@@ -57,13 +57,17 @@ main = do
     C.throwIO e
 
 checkBooted :: IO ()
-checkBooted = do
-  (ec, _, _) <- readProcessWithExitCode "ghcjs" ["-c", "x.hs"] ""
-  case ec of
-    (ExitFailure 87) -> do
-      putStrLn "GHCJS is not booted, skipping tests"
-      exitSuccess
-    _ -> return ()
+checkBooted = check `C.catch` \(e::C.SomeException) -> do
+    putStrLn ("Error running GHCJS, skipping tests:\n" ++ show e)
+    exitSuccess
+  where
+    check = do
+      (ec, _, _) <- readProcessWithExitCode "ghcjs" ["-c", "x.hs"] ""
+      case ec of
+        (ExitFailure 87) -> do
+          putStrLn "GHCJS is not booted, skipping tests"
+          exitSuccess
+        _ -> return ()
 
 main' log = do
   args <- getArgs
