@@ -108,9 +108,9 @@ Library
     GHC-Options:    -O -fno-warn-orphans -auto-all
 
 Executable ghcjs
-    Main-Is:        Ghcjs.hs
+    Main-Is:        Main.hs
     Default-Language: Haskell2010
-    Hs-Source-Dirs: src-bin
+    hs-source-dirs: src-bin
     Build-Depends:  base                >= 4    &&  < 5,
                     ghcjs,
                     ghc,
