@@ -27,9 +27,9 @@ import           Prelude hiding (FilePath)
 import qualified Prelude
 import           Shelly
 import           System.Environment (getArgs, getEnv)
-import           System.Exit (ExitCode(..), exitFailure)
+import           System.Exit (ExitCode(..), exitFailure, exitSuccess)
 import           System.Process ( createProcess, proc, CreateProcess(..), StdStream(..)
-                                , terminateProcess, waitForProcess)
+                                , terminateProcess, waitForProcess, readProcessWithExitCode )
 import           System.Random (randomRIO)
 import           Test.Framework
 import           Test.Framework.Providers.HUnit (testCase)
@@ -44,15 +44,10 @@ import           System.IO.Error
 import           Control.DeepSeq
 import           GHC.IO.Exception(IOErrorType(..), IOException(..))
 import qualified Control.Exception as C
-#if __GLASGOW_HASKELL__ >= 707
 import           Text.Read (readMaybe)
-#else
-import           Safe
-
-readMaybe = readMay
-#endif
 
 main = do
+  checkBooted
   log <- newIORef []
   main' log `C.catch` \(e::ExitCode) -> do
     errs <- readIORef log
@@ -60,6 +55,15 @@ main = do
       putStrLn "\nFailed tests:"
       mapM_ putStrLn (reverse errs)
     C.throwIO e
+
+checkBooted :: IO ()
+checkBooted = do
+  (ec, _, _) <- readProcessWithExitCode "ghcjs" ["-c", "x.hs"] ""
+  case ec of
+    (ExitFailure 87) -> do
+      putStrLn "GHCJS is not booted, skipping tests"
+      exitSuccess
+    _ -> return ()
 
 main' log = do
   args <- getArgs

@@ -358,8 +358,9 @@ checkIsBooted = do
   e <- doesFileExist settingsFile
   when (not e) $ do
     hPutStrLn stderr $ "cannot find `" ++ settingsFile ++ "'\n" ++
-                       "please install the GHCJS core libraries. See README for details"
-    exitWith (ExitFailure 1)
+                       "please install the GHCJS core libraries. See README for details\n" ++
+                       "(running `ghcjs-boot --init' might fix this)"
+    exitWith (ExitFailure 87)
 
 -- we might generate .hi files for a different bitness than native GHC,
 -- make sure we can show then
