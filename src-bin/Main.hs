@@ -57,9 +57,11 @@ import           Data.Char (toLower)
 import           Data.IORef (modifyIORef, writeIORef)
 import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub,
                             intercalate, foldl', isInfixOf, sort)
+import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Monoid
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import qualified Data.Text.Encoding as T
@@ -84,31 +86,19 @@ import           Compiler.Info
 import           Compiler.Variants
 import           Compiler.GhcjsHooks
 import           Compiler.GhcjsPlatform
+import           Compiler.Settings
 import           Compiler.Utils         as Util
 
 import qualified Gen2.Utils     as Gen2
 import qualified Gen2.Generator as Gen2
 import qualified Gen2.Linker    as Gen2
+import qualified Gen2.Shim      as Gen2
 import qualified Gen2.Rts       as Gen2
 import qualified Gen2.PrimIface as Gen2
 import qualified Gen2.Foreign   as Gen2
 import qualified Gen2.Object    as Object
 
 import           Finder (findImportedModule, cannotFindInterface)
-
-data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
-                                   , gsNoNative          :: Bool
-                                   , gsNoJSExecutables   :: Bool
-                                   , gsLogCommandLine    :: Maybe FilePath
-                                   , gsGhc               :: Maybe FilePath
-                                   , gsDebug             :: Bool
-                                   } deriving (Eq, Show)
-
-instance Monoid GhcjsSettings where
-  mempty = GhcjsSettings False False False Nothing Nothing False
-  mappend (GhcjsSettings ne1 nn1 nj1 lc1 gh1 dbg1)
-          (GhcjsSettings ne2 nn2 nj2 lc2 gh2 dbg2) =
-          GhcjsSettings (ne1 || ne2) (nn1 || nn2) (nj1 || nj2) (lc1 <> lc2) (gh1 <> gh2) (dbg1 || dbg2)
 
 {- |
   Check if we're building a Cabal Setup script, in which case automatically
@@ -160,6 +150,7 @@ getGhcjsSettings args
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
                                 <*> getEnvMay "GHCJS_WITH_GHC"
                                 <*> getEnvOpt "GHCJS_DEBUG"
+                                <*> pure False
 
 optParser' :: ParserInfo GhcjsSettings
 optParser' = info (helper <*> optParser) fullDesc
@@ -172,6 +163,7 @@ optParser = GhcjsSettings
             <*> optStr ( long "log-commandline" )
             <*> optStr ( long "with-ghc" )
             <*> switch ( long "debug" )
+            <*> switch ( long "only-out" )
 
 optStr :: Mod OptionFields (Maybe String) -> Parser (Maybe String)
 optStr m = nullOption $ value Nothing <> reader (Right . str)  <> m
@@ -207,7 +199,7 @@ main =
           (dflags2, pkgs) <- liftIO (initPackages dflags1)
           base <- liftIO ghcjsDataDir
           _ <- setSessionDynFlags
-               $ setGhcjsPlatform (gsDebug settings) js_objs base
+               $ setGhcjsPlatform settings js_objs base
                $ updateWays $ addWay' (WayCustom "js")
                $ setGhcjsSuffixes oneshot dflags2
           dflags3 <- getSessionDynFlags
@@ -246,8 +238,7 @@ handleCommandline settings args minusBargs
      lookupAct = getFirst . mconcat . map (First . (`lookup` acts)) $ args
      acts :: [(String, IO ())]
      acts = [ ("--supported-languages",
-                mapM_ putStrLn (supportedLanguagesAndExtensions ++
-                  ["JavaScriptFFI", "NoJavaScriptFFI"]))
+                mapM_ putStrLn (supportedLanguagesAndExtensions))
             , ("--version", printVersion)
             , ("--numeric-ghcjs-version", printNumericVersion)
                  -- the GHC version this was compiled with
@@ -263,6 +254,7 @@ handleCommandline settings args minusBargs
             , ("--print-obj", printObj args)
             , ("--show-iface", printIface args)
             , ("--install-executable", installExecutable args)
+            , ("--generate-lib", generateLib args minusBargs)
             ]
 
 printVersion :: IO ()
@@ -309,7 +301,7 @@ generateNative settings oneshot argsS args1 mbMinusB =
       let (hs_srcs, non_hs_srcs, js_objs, objs) = partition_args_js fileish_args
           srcs     = hs_srcs ++ non_hs_srcs
           oneshot' = oneshot || null hs_srcs
-          dflags3  = installNativeHooks $
+          dflags3  = installNativeHooks settings $
               dflags2 { ldInputs = map (FileOption "") objs ++ ldInputs dflags2 }
           buildingSetup = buildingCabalSetup (map fst hs_srcs) dflags3
       if gsNativeExecutables settings || ghcLink dflags3 /= LinkBinary || buildingSetup
@@ -370,7 +362,7 @@ printIface ["--show-iface", iface] = do
      runGhcSession Nothing $ do
        sdflags <- getSessionDynFlags
        base <- liftIO ghcjsDataDir
-       setSessionDynFlags $ setGhcjsPlatform (gsDebug mempty) [] base sdflags
+       setSessionDynFlags $ setGhcjsPlatform mempty [] base sdflags
        env <- getSession
        liftIO $ showIface env iface
 printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
@@ -444,4 +436,35 @@ abiHash' strs0 = do
 installExecutable :: [String] -> IO ()
 installExecutable ["--install-executable", "-from", from, "-to", to] =
                       putStrLn "installing executables not yet implemented"
-installExecutable _ = putStrLn "usage: ghcjs --install-executable -from <from> -to <to>" >> exitFailure
+installExecutable _ = do
+  putStrLn "usage: ghcjs --install-executable -from <from> -to <to>"
+  exitFailure
+
+{-
+  Generate lib.js and lib1.js for the latest version of all installed
+  packages
+
+  fixme: make this variant-aware?
+ -}
+generateLib :: [String] -> Maybe String -> IO ()
+generateLib args mbMinusB = do
+  (argsS, _) <- parseStaticFlags (map noLoc args)
+  runGhcSession mbMinusB $
+    do sdflags0 <- getSessionDynFlags
+       let sdflags1 = sdflags0 { verbosity = 1 }
+       (dflags0, _, _) <- parseDynamicFlags sdflags1 $ ignoreUnsupported argsS
+       liftIO $ do
+         dflags1 <- if isJust mbMinusB then return dflags0 else addPkgConf dflags0
+         (dflags2, _) <- initPackages dflags1
+         let pkgs =  map sourcePackageId . eltsUFM . pkgIdMap . pkgState $ dflags2
+         base <- (</> "shims") <$> getGlobalPackageBase
+         let convertPkg p = let PackageName n = pkgName p
+                                v = map fromIntegral (versionBranch $ pkgVersion p)
+                            in (T.pack n, v)
+             pkgs' = M.toList $ M.fromListWith max (map convertPkg pkgs)
+         ((before, _), (after, _)) <- Gen2.collectShims base pkgs'
+         T.writeFile "lib.js" before
+         T.writeFile "lib1.js" after
+         putStrLn "generated lib.js and lib1.js for:"
+         mapM_ (\(p,v) -> putStrLn $ "    " ++ T.unpack p ++ 
+           if null v then "" else ("-" ++ intercalate "." (map show v))) pkgs'

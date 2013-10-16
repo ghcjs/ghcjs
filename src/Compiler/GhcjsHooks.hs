@@ -30,29 +30,31 @@ import           System.Directory     (doesFileExist, copyFile,
 import           System.FilePath
 
 import           Compiler.Info
+import           Compiler.Settings
 import           Compiler.Variants
 import           Compiler.Utils
 import qualified Compiler.Utils       as Utils
+
 import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.Foreign         as Gen2
 import qualified Gen2.DynamicLinking  as Gen2
 
-installGhcjsHooks :: Bool        -- ^ Debug
-                  -> [FilePath]  -- JS objects
+installGhcjsHooks :: GhcjsSettings
+                  -> [FilePath]  -- ^ JS objects
                   -> DynFlags -> DynFlags
-installGhcjsHooks debug js_objs dflags =
+installGhcjsHooks settings js_objs dflags =
   Gen2.installForeignHooks True $ dflags { hooks = addHooks (hooks dflags) }
     where
-      addHooks h = h { linkHook               = Just (Gen2.ghcjsLink debug js_objs True)
+      addHooks h = h { linkHook               = Just (Gen2.ghcjsLink settings js_objs True)
                      , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
                      , hscCompileCoreExprHook = Just Gen2.ghcjsCompileCoreExpr
                      }
 
-installNativeHooks :: DynFlags -> DynFlags
-installNativeHooks dflags =
+installNativeHooks :: GhcjsSettings -> DynFlags -> DynFlags
+installNativeHooks settings dflags =
   Gen2.installForeignHooks False $ dflags { hooks = addHooks (hooks dflags) }
     where
-      addHooks h = h { linkHook               = Just (Gen2.ghcjsLink False [] False)
+      addHooks h = h { linkHook               = Just (Gen2.ghcjsLink settings [] False)
                      , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
                      , hscCompileCoreExprHook = Just Gen2.ghcjsCompileCoreExpr
                      }
@@ -69,16 +71,16 @@ ghcjsOneShot hsc_env stop_phase srcs = do
 --------------------------------------------------
 -- Driver hooks
 
-installDriverHooks :: Bool -> DynFlags -> DynFlags
-installDriverHooks debug df = df { hooks = hooks' }
-  where hooks' = (hooks df) { runPhaseHook     = Just (runGhcjsPhase debug)
+installDriverHooks :: GhcjsSettings -> DynFlags -> DynFlags
+installDriverHooks settings df = df { hooks = hooks' }
+  where hooks' = (hooks df) { runPhaseHook     = Just (runGhcjsPhase settings)
                             , ghcPrimIfaceHook = Just Gen2.ghcjsPrimIface
                             }
 
-runGhcjsPhase :: Bool
+runGhcjsPhase :: GhcjsSettings
               -> PhasePlus -> FilePath -> DynFlags
               -> CompPipeline (PhasePlus, FilePath)
-runGhcjsPhase debug (HscOut src_flavour mod_name result) _ dflags = do
+runGhcjsPhase settings (HscOut src_flavour mod_name result) _ dflags = do
 
         location <- getLocation src_flavour mod_name
         setModLocation location
@@ -107,7 +109,7 @@ runGhcjsPhase debug (HscOut src_flavour mod_name result) _ dflags = do
 
                     PipeState{hsc_env=hsc_env'} <- getPipeState
 
-                    outputFilename <- liftIO $ ghcjsWriteModule debug hsc_env' cgguts mod_summary output_fn
+                    outputFilename <- liftIO $ ghcjsWriteModule settings hsc_env' cgguts mod_summary output_fn
 
                     return (RealPhase next_phase, outputFilename)
 -- skip these, but copy the result
@@ -129,31 +131,29 @@ touchObjectFile dflags path = do
   SysTools.touch dflags "Touching object file" path
 
 
-ghcjsWriteModule :: Bool        -- ^ Debug
-                   -> HscEnv      -- ^ Environment in which to compile
-                   -- the module
-                   -> CgGuts      
-                   -> ModSummary   
-                   -> FilePath    -- ^ Output path
-                   -> IO FilePath
-ghcjsWriteModule debug env core mod output = do
-    B.writeFile output =<< ghcjsCompileModule debug env core mod
+ghcjsWriteModule :: GhcjsSettings
+                 -> HscEnv      -- ^ Environment in which to compile
+                 -- the module
+                 -> CgGuts
+                 -> ModSummary
+                 -> FilePath    -- ^ Output path
+                 -> IO FilePath
+ghcjsWriteModule settings env core mod output = do
+    B.writeFile output =<< ghcjsCompileModule settings env core mod
     return output
 
-ghcjsCompileModule :: Bool        -- ^ Debug
+ghcjsCompileModule :: GhcjsSettings
                    -> HscEnv      -- ^ Environment in which to compile
                    -- the module
-                   -> CgGuts      
-                   -> ModSummary   
+                   -> CgGuts
+                   -> ModSummary
                    -> IO B.ByteString
-ghcjsCompileModule debug env core mod 
---  | WayDyn `elem` ways dflags = do
---      return "GHCJS dummy output"
+ghcjsCompileModule settings env core mod
   | otherwise = do
       core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
       stg <- coreToStg dflags (cg_module core) core_binds
       (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-      let obj = variantRender gen2Variant debug dflags stg' (cg_module core)
+      let obj = variantRender gen2Variant settings dflags stg' (cg_module core)
       return obj
     where
       dflags = hsc_dflags env

@@ -31,23 +31,30 @@ import qualified Data.Text as T
 
 import           Language.Javascript.JMacro
 
+import           Compiler.Settings
+
 import           Gen2.Utils
 import           Gen2.ClosureInfo
 import qualified Gen2.Optimizer as Optimizer
 
-compact :: Bool -> JStat -> [ClosureInfo] -> JStat
-compact debug input ci = renameInternals debug input ci
+compact :: GhcjsSettings -> [(JStat,[ClosureInfo])] -> ([JStat],JStat)
+compact settings input = renameInternals settings input
 
 data RenamerState = RenamerState [Ident] (Map Text Ident)
 
-renameInternals :: Bool -> JStat -> [ClosureInfo] -> JStat
-renameInternals debug stat ci = evalState doRename
+renameInternals :: GhcjsSettings -> [(JStat,[ClosureInfo])] -> ([JStat], JStat)
+renameInternals settings stats = evalState renamed
   (RenamerState (map (\(TxtI xs) -> TxtI ("h$$"<>xs)) Optimizer.newLocals) M.empty)
   where
-    doRename = do
-       s'  <- if debug then return stat else identsS renameVar stat
-       rci <- renderClosureInfo debug ci
-       return (s' <> rci)
+    renamed = (,) <$> mapM doRename stats <*> metadata (stats >>= snd)
+    doRename (stat, ci)
+      | gsDebug settings = do
+         rci <- renderClosureInfo settings ci
+         return (stat <> rci)
+      | otherwise = identsS renameVar stat
+    metadata cis
+      | gsDebug settings = return mempty -- encoded for each block separately
+      | otherwise        = renderClosureInfo settings cis
 
 renameVar :: Ident -> State RenamerState Ident
 renameVar i@(TxtI xs)
@@ -58,9 +65,9 @@ renameVar i@(TxtI xs)
         Nothing -> put (RenamerState ys (M.insert xs y m)) >> return y
   | otherwise = return i
 
-renderClosureInfo :: Bool -> [ClosureInfo] -> State RenamerState JStat
-renderClosureInfo debug cis =
-   fmap (renderInfoBlock debug . renameClosureInfo cis) get
+renderClosureInfo :: GhcjsSettings -> [ClosureInfo] -> State RenamerState JStat
+renderClosureInfo settings cis =
+   fmap (renderInfoBlock settings . renameClosureInfo cis) get
 
 renameClosureInfo :: [ClosureInfo] -> RenamerState -> [ClosureInfo]
 renameClosureInfo cis (RenamerState _ m) =
@@ -72,9 +79,9 @@ renameClosureInfo cis (RenamerState _ m) =
     h _ CINoStatic = CINoStatic
     h m0 (CIStaticRefs rs) = CIStaticRefs (map (\sr -> fromMaybe sr $ M.lookup sr m0) rs)
 
-renderInfoBlock :: Bool -> [ClosureInfo] -> JStat
-renderInfoBlock debug infos
-  | debug = mconcat (map (closureInfoStat True) infos)
+renderInfoBlock :: GhcjsSettings -> [ClosureInfo] -> JStat
+renderInfoBlock settings infos
+  | gsDebug settings = mconcat (map (closureInfoStat True) infos)
   | otherwise =
       [j| h$initStatic.push(\ {
             var !h$functions = `funArr`;

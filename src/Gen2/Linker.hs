@@ -21,8 +21,10 @@ import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Char                (isDigit)
 import qualified Data.Foldable            as F
+import           Data.Function            (on)
+import           Data.Int
 import           Data.List                ( partition, isSuffixOf, isPrefixOf
-                                          , intercalate, group, sort)
+                                          , intercalate, group, sort, groupBy)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe               (fromMaybe, listToMaybe)
@@ -51,6 +53,8 @@ import           Config
 import           Module                   (PackageId, packageIdString, ModuleName, moduleNameString)
 
 import           Compiler.Info
+import           Compiler.Settings
+
 import           Gen2.StgAst
 import           Gen2.Rts                 (rtsText)
 import           Gen2.Shim
@@ -64,8 +68,11 @@ import           Gen2.RtsTypes
 type LinkableUnit = (Package, Module, Int) -- module and the index of the block
 type Module       = Text
 
+-- number of bytes linked per module
+type LinkerStats  = Map (Package, Module) Int64
+
 link :: DynFlags
-     -> Bool                      -- ^ debug build
+     -> GhcjsSettings
      -> FilePath                  -- ^ output file/directory
      -> [FilePath]                -- ^ include path for home package
      -> [(PackageId, [FilePath])] -- ^ directories to load package modules
@@ -73,24 +80,28 @@ link :: DynFlags
      -> [FilePath]                -- ^ extra js files to include
      -> (Fun -> Bool)             -- ^ functions from the objects to use as roots (include all their deps)
      -> IO [String]               -- ^ arguments for the closure compiler to minify our result
-link dflags debug out include pkgs objFiles jsFiles isRootFun = do
+link dflags settings out include pkgs objFiles jsFiles isRootFun = do
   objDeps <- mapM readDepsFile objFiles
-  let roots = S.fromList . filter isRootFun $
+  let debug = gsDebug settings
+      roots = S.fromList . filter isRootFun $
         concatMap (map fst . M.toList . depsDeps) objDeps
       rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
   -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
   compilationProgressMsg dflags $
     "Linking " ++ out ++ " (" ++ intercalate "," rootMods ++ ")"
   c <- newMVar M.empty
-  (allDeps, src, infos) <-
+  (allDeps, code) <-
     collectDeps (lookupFun c $ zip objDeps objFiles)
                 (roots `S.union` rtsDeps (map fst pkgs))
   createDirectoryIfMissing False out
-  BL.writeFile (out </> "out.js") (renderLinker debug src infos)
-  TL.writeFile (out </> "rts.js") (rtsText' debug)
-  getShims jsFiles (map fst pkgs) (out </> "lib.js", out </> "lib1.js")
-  writeHtml out
-  combineFiles out
+  let (outJs, metaSize, stats) = renderLinker settings code
+  BL.writeFile (out </> "out.js") outJs
+  when (not $ gsOnlyOut settings) $ do
+    TL.writeFile (out </> "rts.js") (rtsText' debug)
+    TL.writeFile (out </> "out.stats") (linkerStats metaSize stats)
+    getShims jsFiles (map fst pkgs) (out </> "lib.js", out </> "lib1.js")
+    writeHtml out
+    combineFiles out
   return []
   where
     pkgPaths :: Map Text [FilePath]
@@ -142,10 +153,36 @@ link dflags debug out include pkgs objFiles jsFiles isRootFun = do
                          False -> searchPaths (p:searched) xs
                          True  -> return p
 
-renderLinker :: Bool -> JStat -> [ClosureInfo] -> BL.ByteString
-renderLinker debug stat infos
-   = TLE.encodeUtf8 . displayT . renderPretty 0.8 150 . pretty $
-       Compactor.compact debug stat infos
+renderLinker :: GhcjsSettings
+             -> [(Package, Module, JStat, [ClosureInfo])] -- ^ linked code per module
+             -> (BL.ByteString, Int64, LinkerStats)
+renderLinker settings code =
+  let (compacted, meta) = Compactor.compact settings (map (\(_,_,s,ci) -> (s,ci)) code)
+      pe = TLE.encodeUtf8 . (<>"\n") . displayT . renderPretty 0.8 150 . pretty
+      rendered  = map pe compacted
+      renderedMeta = pe meta
+      mkStat (p,m,_,_) b = ((p,m), BL.length b)
+  in ( mconcat rendered <> renderedMeta
+     , BL.length renderedMeta
+     , M.fromList $ zipWith mkStat code rendered
+     )
+
+linkerStats :: Int64         -- ^ code size of packed metadata
+            -> LinkerStats   -- ^ code size per module
+            -> TL.Text
+linkerStats meta s =
+  TL.intercalate "\n\n" [packageStats, moduleStats, metaStats] <> "\n\n"
+  where
+    ps = M.fromListWith (+) . map (\((p,_),s) -> (p,s)) . M.toList $ s
+    pad n t = let l = TL.length t
+              in  if l < n then t <> TL.replicate (n-l) " " else t
+    pkgMods = groupBy ((==) `on` (fst . fst)) (M.toList s)
+    showMod ((_,m),s) = pad 40 ("    " <> TL.fromStrict m <> ":") <> TL.pack (show s)
+    packageStats = "code size summary per package:\n\n" <>
+      TL.unlines (map (\(p,s) -> pad 25 (showPkg p <> ":") <> TL.pack (show s)) $ M.toList ps)
+    moduleStats = "code size per module:\n\n" <> TL.unlines
+      (map (\xs@(((p,_),_):_) -> showPkg p <> "\n" <> TL.unlines (map showMod xs)) pkgMods)
+    metaStats = "packed metadata: " <> TL.pack (show meta)
 
 rtsText' :: Bool -> TL.Text
 rtsText' = rtsText
@@ -170,9 +207,11 @@ getShims extraFiles deps (fileBefore, fileAfter) = do
   T.writeFile fileAfter (T.unlines $ after : t')
   writeFile (fileAfter <.> "files") (unlines $ afterFiles ++ extraFiles)
     where
-      convertPkg p =
-        let (n,v) = splitVersion . T.pack . packageIdString $ p
-        in  (n, fromMaybe [] $ parseVersion v)
+
+convertPkg :: PackageId -> (Text, Version)
+convertPkg p =
+  let (n,v) = splitVersion . T.pack . packageIdString $ p
+  in  (n, fromMaybe [] $ parseVersion v)
 
 -- convenience: combine lib.js, rts.js, lib1.js, out.js to all.js that can be run
 -- directly with node or spidermonkey
@@ -234,7 +273,10 @@ getDeps :: (String -> Package -> Module -> IO FilePath)
         -> IO (Set LinkableUnit)
 getDeps lookup fun = go' S.empty M.empty [] (S.toList fun) --  fun M.empty (S.toList fun)
   where
-    go :: Set LinkableUnit -> Map (Package, Module) Deps -> [LinkableUnit] -> IO (Set LinkableUnit)
+    go :: Set LinkableUnit
+       -> Map (Package, Module) Deps
+       -> [LinkableUnit]
+       -> IO (Set LinkableUnit)
     go result _    [] = return result
     go result deps lls@((lpkg,lmod,n):ls) =
       let key = (lpkg, lmod)
@@ -243,7 +285,11 @@ getDeps lookup fun = go' S.empty M.empty [] (S.toList fun) --  fun M.empty (S.to
                          \d -> go result (M.insert key d deps) lls
             Just (Deps _ _ a _) -> go' result deps ls (S.toList $ a ! n)
 
-    go' :: Set LinkableUnit -> Map (Package, Module) Deps -> [LinkableUnit] -> [Fun] -> IO (Set LinkableUnit)
+    go' :: Set LinkableUnit
+        -> Map (Package, Module) Deps
+        -> [LinkableUnit]
+        -> [Fun]
+        -> IO (Set LinkableUnit)
     go' result deps open [] = go result deps open
     go' result deps open ffs@(f:fs) =
       let key = (funPackage f, funModule f)
@@ -266,26 +312,30 @@ getDepsSources :: (String -> Package -> Module -> IO FilePath)
                -> IO (Set LinkableUnit, [(FilePath, Set LinkableUnit)])
 getDepsSources lookup roots = do
   allDeps <- getDeps lookup roots
-  allPaths <- mapM (\x@(pkg,mod,_) -> (,S.singleton x) <$> lookup "js_o" pkg mod) (S.toList allDeps)
+  allPaths <- mapM (\x@(pkg,mod,_) ->
+    (,S.singleton x) <$> lookup "js_o" pkg mod) (S.toList allDeps)
   return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
 
 -- | collect dependencies for a set of roots
 collectDeps :: (String -> Package -> Module -> IO FilePath)
             -> Set Fun
-            -> IO (Set LinkableUnit, JStat, [ClosureInfo])
+            -> IO (Set LinkableUnit, [(Package, Module, JStat, [ClosureInfo])])
 collectDeps lookup roots = do
   (allDeps, srcs0) <- getDepsSources lookup roots
   -- read ghc-prim first, since we depend on that for static initialization
   let (primSrcs, srcs) = partition isPrimSrc srcs0
       isPrimSrc (_, fs) = (=="ghc-prim") . (\(p,_,_) -> packageName p) . head . S.toList $ fs
-  (stats, infos) <- unzip <$> mapM (uncurry extractDeps) (primSrcs ++ srcs)
-  return (allDeps, mconcat stats, concat infos)
+  code <- mapM (uncurry extractDeps) (primSrcs ++ srcs)
+  return (allDeps, code)
 
-extractDeps :: FilePath -> Set LinkableUnit -> IO (JStat, [ClosureInfo])
+extractDeps :: FilePath
+            -> Set LinkableUnit
+            -> IO (Package, Module, JStat, [ClosureInfo])
 extractDeps file units = do
-  let symbs = IS.fromList . map (\(_,_,n) -> n) . S.toList $ units
+  let symbs     = IS.fromList . map (\(_,_,n) -> n) . S.toList $ units
+      (p, m, _) = S.elemAt 0 units
   l <- readObjectFileKeys (\n _ -> n `IS.member` symbs) file
-  return (mconcat (map oiStat l), concatMap oiClInfo l)
+  return (p, m, mconcat (map oiStat l), concatMap oiClInfo l)
 
 pkgTxt :: Package -> Text
 pkgTxt p = packageName p <> "-" <> packageVersion p
@@ -309,7 +359,7 @@ rtsDeps pkgs =
      ghcjsPrimPkg   = findPkg "ghcjs-prim"
      ghcPrimPkg     = findPkg "ghc-prim"
      basePkg        = findPkg "base"
-     
+
  in S.fromList $ map mkDep
      [ (basePkg,      "GHC.Conc.Sync",          "h$baseZCGHCziConcziSynczireportError")
      , (basePkg,      "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )

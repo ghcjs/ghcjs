@@ -32,19 +32,21 @@ import           System.IO              (hPutStrLn, stderr)
 
 import           Compiler.GhcjsPlatform
 import           Compiler.Info
+import           Compiler.Settings
 import           Compiler.Utils
+
 import qualified Gen2.PrimIface         as Gen2
 
 runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
-                   -- like the -B GHC's argument
-                -> Bool            -- ^ Debug mode
+                   -- like GHC's -B argument
+                -> GhcjsSettings
                 -> Ghc b           -- ^ Action to perform
                 -> IO b
-runGhcjsSession mbMinusB debug m = runGhcSession mbMinusB $ do
+runGhcjsSession mbMinusB settings m = runGhcSession mbMinusB $ do
     base <- liftIO ghcjsDataDir
     dflags <- getSessionDynFlags
     _ <- setSessionDynFlags
-         $ setGhcjsPlatform debug [] base
+         $ setGhcjsPlatform settings [] base
          $ updateWays $ addWay' (WayCustom "js")
          $ setGhcjsSuffixes False dflags
     fixNameCache

@@ -42,7 +42,7 @@ module Gen2.Object ( object
                    , ObjUnit (..)
                    , Deps (..)
                    , Fun (..), showFun
-                   , Package (..)
+                   , Package (..), showPkg
                    ) where
 
 import           Control.Applicative

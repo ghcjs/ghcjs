@@ -16,20 +16,22 @@ import Outputable (showSDocOneLine)
 
 import Data.List (foldl', isPrefixOf)
 
+import Compiler.Settings
 import Compiler.GhcjsHooks
+
 import qualified Compiler.Utils as Util
 
 -- | configure the GHC API for building 32 bit JavaScript code
-setGhcjsPlatform :: Bool        -- ^ Debug
+setGhcjsPlatform :: GhcjsSettings
                  -> [FilePath]  -- ^ JS objects for linking against
                  -> FilePath
                  -- ^ GHCJS base dir, usually "~/.ghcjs/platform-version"
                  -> DynFlags -> DynFlags
-setGhcjsPlatform debug js_objs basePath df
+setGhcjsPlatform set js_objs basePath df
   = addPlatformDefines basePath
       $ setDfOpts
-      $ installGhcjsHooks debug js_objs
-      $ installDriverHooks debug
+      $ installGhcjsHooks set js_objs
+      $ installDriverHooks set
       $ df { settings = settings' }
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform

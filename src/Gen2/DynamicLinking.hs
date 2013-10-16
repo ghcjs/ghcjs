@@ -52,13 +52,14 @@ import Data.List ( isPrefixOf, isInfixOf, sort )
 import System.FilePath
 import System.Directory
 
+import Compiler.Settings
 import Compiler.Variants
 import qualified Compiler.Utils as Utils
 
 -------------------------------------------------------------------------------------------
 -- Link libraries
 
-ghcjsLink :: Bool       -- ^ debug mode
+ghcjsLink :: GhcjsSettings
           -> [FilePath] -- ^ extra JS files
           -> Bool       -- ^ build JavaScript?
           -> GhcLink    -- ^ what to link
@@ -70,17 +71,17 @@ ghcjsLink _ _ _ LinkInMemory _ _ _     = return Succeeded
 ghcjsLink _ _ _ NoLink _ _ _           = return Succeeded
 ghcjsLink _ _ True LinkStaticLib _ _ _ = return Succeeded
 ghcjsLink _ _ True LinkDynLib _ _ _    = return Succeeded
-ghcjsLink debug extraJs buildJs _ dflags batch_attempt_linking pt =
-  link' debug extraJs buildJs dflags batch_attempt_linking pt
+ghcjsLink settings extraJs buildJs _ dflags batch_attempt_linking pt =
+  link' settings extraJs buildJs dflags batch_attempt_linking pt
 
-ghcjsLinkJsBinary :: Bool     -- Debug mode
+ghcjsLinkJsBinary :: GhcjsSettings
                   -> [FilePath]
                   -> DynFlags
                   -> [FilePath]
                   -> [PackageId]
                   -> IO ()
-ghcjsLinkJsBinary debug jsFiles dflags objs dep_pkgs =
-  void $ variantLink gen2Variant dflags debug exe [] deps objs jsFiles isRoot
+ghcjsLinkJsBinary settings jsFiles dflags objs dep_pkgs =
+  void $ variantLink gen2Variant dflags settings exe [] deps objs jsFiles isRoot
     where
       isRoot _ = True
       deps     = map (\pkg -> (pkg, packageLibPaths pkg)) dep_pkgs'
@@ -105,7 +106,7 @@ ghcjsPrimPackage dflags =
     pkgIds = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
 
 
-link' :: Bool                    -- debug
+link' :: GhcjsSettings
       -> [FilePath]              -- extra js files
       -> Bool                    -- building JavaScript
       -> DynFlags                -- dynamic flags
@@ -113,7 +114,7 @@ link' :: Bool                    -- debug
       -> HomePackageTable        -- what to link
       -> IO SuccessFlag
 
-link' debug extraJs buildJs dflags batch_attempt_linking hpt
+link' settings extraJs buildJs dflags batch_attempt_linking hpt
    | batch_attempt_linking
    = do
         let
@@ -154,7 +155,7 @@ link' debug extraJs buildJs dflags batch_attempt_linking hpt
 
         -- Don't showPass in Batch mode; doLink will do that for us.
         let link = case ghcLink dflags of
-                LinkBinary    -> if buildJs then ghcjsLinkJsBinary debug extraJs else linkBinary
+                LinkBinary    -> if buildJs then ghcjsLinkJsBinary settings extraJs else linkBinary
                 LinkStaticLib -> linkStaticLibCheck
                 LinkDynLib    -> linkDynLibCheck
                 other         -> panicBadLink other

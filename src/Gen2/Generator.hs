@@ -63,6 +63,8 @@ import           Data.Text (Text)
 import           Language.Javascript.JMacro
 import qualified Text.Parsec as P
 
+import           Compiler.Settings
+
 import           Gen2.Utils
 import           Gen2.Prim
 import           Gen2.Rts
@@ -80,36 +82,51 @@ import           Gen2.Sinker
 type StgPgm     = [StgBinding]
 type StaticRefs = [Id]
 
-generate :: Bool -> DynFlags -> StgPgm -> Module -> ByteString
-generate debug df s m =
+generate :: GhcjsSettings
+         -> DynFlags
+         -> StgPgm
+         -> Module
+         -> ByteString -- ^ binary data for the .js_o object file
+generate settings df s m =
   let (uf, s') = sinkPgm m s
   in  flip evalState (initState df m uf) $ do
         (st, g) <- pass df m s'
         let (p, d) = unzip g
-            (st', dbg) = dumpAst st debug s'
+            (st', dbg) = dumpAst st settings s'
         deps <- genMetaData d
         return . BL.toStrict $
           Object.object' st' deps (p ++ dbg) -- p first, so numbering of linkable units lines up
 
+{- |
+  Generate an extra linkable unit for the object file if --debug is active.
+  this unit is never actually linked, but it contains the optimized STG AST
+  so it can be easily reviewed using ghcjs --print-obj to aid in solving
+  code generator problems.
+ -}
 dumpAst :: Object.SymbolTable
-        -> Bool
+        -> GhcjsSettings
         -> StgPgm
         -> (Object.SymbolTable, [([Text], BL.ByteString)])
-dumpAst st debug s
-  | debug     = (st', [(["h$debug", "h$dumpAst"], bs)])
-  | otherwise = (st, [])
+dumpAst st settings s
+  | gsDebug settings = (st', [(["h$debug", "h$dumpAst"], bs)])
+  | otherwise        = (st, [])
       where
         (st', bs) = Object.serializeStat st [] [j| h$dumpAst = `x` |]
         x = (intercalate "\n\n" (map showIndent s))
 
 -- | variable prefix for the nth block in module
 modulePrefix :: Module -> Int -> Text
-modulePrefix m n = T.pack $ "h$" ++ (zEncodeString . moduleNameString . moduleName $ m) ++ "_id_" ++ show n
+modulePrefix m n =
+  let encMod = zEncodeString . moduleNameString . moduleName $ m
+  in  T.pack $ "h$" ++ encMod ++ "_id_" ++ show n
 
 pass :: DynFlags
      -> Module
      -> StgPgm
-     -> G (Object.SymbolTable, [(([Text], BL.ByteString), ([Id], [Id]))])
+     -> G ( Object.SymbolTable                         -- object file symbol names table
+          , [(([Text], BL.ByteString), ([Id], [Id]))]
+          )
+
 pass df m ss = go 1 Object.emptySymbolTable ss
     where
       go n st (x:xs) = do
@@ -133,7 +150,8 @@ pass df m ss = go 1 Object.emptySymbolTable ss
                            . O.optimize
                            . jsSaturate (Just $ modulePrefix m n)
                            $ mconcat (reverse extraTl) <> tl
-        return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq` (st', (ss, bs), (topDeps, allDeps))
+        return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq`
+                    (st', (ss, bs), (topDeps, allDeps))
 
 objectEntry :: Module
             -> Object.SymbolTable
@@ -219,8 +237,9 @@ modulePackageText m
     (n, v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
 
 genToplevel :: StgBinding -> C
-genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs False -- (lookupStaticRefs bndr srts)
-genToplevel (StgRec bs)          = mconcat $ map (\(bndr, rhs) -> genToplevelDecl bndr rhs True) bs
+genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs False
+genToplevel (StgRec bs)          =
+  mconcat $ map (\(bndr, rhs) -> genToplevelDecl bndr rhs True) bs
 
 lookupStaticRefs :: Id -> [(Id, [Id])] -> StaticRefs
 lookupStaticRefs i xs = fromMaybe [] (lookup i xs)
@@ -251,8 +270,10 @@ genStaticRefs (SRT n e bmp) =
 
 getStaticRef = fmap (itxt.head) . genIdsI
 
--- the rec argument is whether this rhs comes from an StgRec binding or not
-genToplevelRhs :: Id -> StgRhs -> Bool -> C
+genToplevelRhs :: Id
+               -> StgRhs
+               -> Bool   -- ^ is this a recursive binding group?
+               -> C
 genToplevelRhs i (StgRhsCon _cc con args) isRecursive
   | isBoolTy (dataConType con) && dataConTag con == 1 =
       declIds i <> ((\id -> [j| `id` = false; |]) <$> jsId i)
@@ -380,7 +401,8 @@ genApp _ _ i [StgLitArg (MachStr bs)]
         return [j| `R1` = h$toHsString(`d`);
                    return `Stack`[`Sp`];
                  |]
- -- we could handle unpackNBytes# here, but that's probably not common enough to warrant a special case
+ -- we could handle unpackNBytes# here, but that's probably not common
+ -- enough to warrant a special case
 genApp _ _ i [StgLitArg (MachStr bs), x]
     | getUnique i == unpackCStringAppendIdKey, Right d <- T.decodeUtf8' bs = do
         a <- genArg x
@@ -486,7 +508,7 @@ genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlo
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
   body <- genBody top args body upd_flag i
-  let f = JFunc funArgs (preamble {- <> [j| log("entry: " + `showIndent cl`); |] -} <> ll <> upd <> body)
+  let f = JFunc funArgs (preamble <> ll <> upd <> body)
   ei <- jsEntryIdI i
   et <- genEntryType args
   sr <- genStaticRefs srt
@@ -607,7 +629,7 @@ genCase top bnd (StgOpApp (StgFCallOp fc _) args t) at alts l srt =
    (fc, async) <- genForeignCall0 fc t ids args
    case async of
      False -> declIds bnd <> return fc <> genAlts top bnd at alts
-     True -> genRet top bnd at alts l srt <> return fc
+     True  -> genRet top bnd at alts l srt <> return fc
 
 genCase top bnd (StgOpApp (StgPrimCallOp (PrimCall lbl _)) args t) at@(PrimAlt tc) alts l srt =
   do
@@ -646,7 +668,9 @@ genCase top bnd x@(StgConApp c as) at [(DataAlt{}, bndrs, _, e)] l srt = do
 genCase top bnd expr at@PolyAlt alts l srt = do
   genRet top bnd at alts l srt <> genExpr top expr
 
-genCase _ _ x at alts _ _ = error ("unhandled genCase format: " ++ show x ++ "\n" ++ show at ++ "\n" ++ show alts)
+genCase _ _ x at alts _ _ =
+  error $ "unhandled genCase format: " ++ show x ++ "\n"
+             ++ show at ++ "\n" ++ show alts
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
 assignAll xs ys = mconcat (zipWith assignj xs ys)
@@ -729,7 +753,9 @@ optimizeFree ids = do
       l    = length ids'
   slots <- take l . (++repeat SlotUnknown) <$> getSlots
   let slm                = M.fromList (zip slots [0..])
-      (remaining, fixed) = partitionEithers $ map (\inp@(i,n) -> maybe (Left inp) (\j -> Right (i,n,j,True)) (M.lookup (SlotId i n) slm)) ids'
+      (remaining, fixed) = partitionEithers $
+         map (\inp@(i,n) -> maybe (Left inp) (\j -> Right (i,n,j,True))
+            (M.lookup (SlotId i n) slm)) ids'
       takenSlots         = S.fromList (fixed ^.. traverse . _3)
       freeSlots          = filter (`S.notMember` takenSlots) [0..l-1]
       remaining'         = zipWith (\(i,n) j -> (i,n,j,False)) remaining freeSlots
@@ -739,7 +765,7 @@ optimizeFree ids = do
 
 pushRetArgs :: [(Id,Int,Bool)] -> JExpr -> C
 pushRetArgs free fun = do
-  c <- comment . ("slots: " ++) . show <$> (mapM showSlot =<< getSlots)
+--  c <- comment . ("slots: " ++) . show <$> (mapM showSlot =<< getSlots)
   p <- pushOptimized . (++[(fun,False)]) =<< mapM (\(i,n,b) -> (\es->(es!!(n-1),b)) <$> genIdArg i) free
 --  p <- push . (++[fun]) =<< mapM (\(i,n,b) -> (\es->es!!(n-1)) <$> genIdArg i) free
   return ({- c <> -} p)
