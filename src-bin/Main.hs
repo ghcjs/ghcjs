@@ -198,8 +198,9 @@ main =
           dflags1 <- liftIO $ if isJust mbMinusB then return dflags0 else addPkgConf dflags0
           (dflags2, pkgs) <- liftIO (initPackages dflags1)
           base <- liftIO ghcjsDataDir
+          jsEnv <- liftIO newGhcjsEnv
           _ <- setSessionDynFlags
-               $ setGhcjsPlatform settings js_objs base
+               $ setGhcjsPlatform settings jsEnv js_objs base
                $ updateWays $ addWay' (WayCustom "js")
                $ setGhcjsSuffixes oneshot dflags2
           dflags3 <- getSessionDynFlags
@@ -362,7 +363,8 @@ printIface ["--show-iface", iface] = do
      runGhcSession Nothing $ do
        sdflags <- getSessionDynFlags
        base <- liftIO ghcjsDataDir
-       setSessionDynFlags $ setGhcjsPlatform mempty [] base sdflags
+       jsEnv <- liftIO newGhcjsEnv
+       setSessionDynFlags $ setGhcjsPlatform mempty jsEnv [] base sdflags
        env <- getSession
        liftIO $ showIface env iface
 printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"

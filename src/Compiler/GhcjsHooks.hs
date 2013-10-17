@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TupleSections #-}
 module Compiler.GhcjsHooks where
 
 import           Config               (cProjectVersion)
@@ -22,9 +22,12 @@ import qualified SysTools
 import           SimplStg             (stg2stg)
 import           UniqFM               (eltsUFM)
 
+import           Control.Applicative
+import           Control.Concurrent.MVar
 import           Control.Monad
 import qualified Data.ByteString      as B
 import           Data.List            (isInfixOf, isPrefixOf, sort)
+import qualified Data.Map             as M
 import           System.Directory     (doesFileExist, copyFile,
                                        createDirectoryIfMissing)
 import           System.FilePath
@@ -71,16 +74,17 @@ ghcjsOneShot hsc_env stop_phase srcs = do
 --------------------------------------------------
 -- Driver hooks
 
-installDriverHooks :: GhcjsSettings -> DynFlags -> DynFlags
-installDriverHooks settings df = df { hooks = hooks' }
-  where hooks' = (hooks df) { runPhaseHook     = Just (runGhcjsPhase settings)
+installDriverHooks :: GhcjsSettings -> GhcjsEnv -> DynFlags -> DynFlags
+installDriverHooks settings env df = df { hooks = hooks' }
+  where hooks' = (hooks df) { runPhaseHook     = Just (runGhcjsPhase settings env)
                             , ghcPrimIfaceHook = Just Gen2.ghcjsPrimIface
                             }
 
 runGhcjsPhase :: GhcjsSettings
+              -> GhcjsEnv
               -> PhasePlus -> FilePath -> DynFlags
               -> CompPipeline (PhasePlus, FilePath)
-runGhcjsPhase settings (HscOut src_flavour mod_name result) _ dflags = do
+runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
 
         location <- getLocation src_flavour mod_name
         setModLocation location
@@ -109,11 +113,13 @@ runGhcjsPhase settings (HscOut src_flavour mod_name result) _ dflags = do
 
                     PipeState{hsc_env=hsc_env'} <- getPipeState
 
-                    outputFilename <- liftIO $ ghcjsWriteModule settings hsc_env' cgguts mod_summary output_fn
+                    outputFilename <- liftIO $
+                      ghcjsWriteModule settings env
+                        hsc_env' cgguts mod_summary output_fn
 
                     return (RealPhase next_phase, outputFilename)
 -- skip these, but copy the result
-runGhcjsPhase _ (RealPhase ph) input dflags
+runGhcjsPhase _ _ (RealPhase ph) input dflags
   | Just next <- lookup ph skipPhases = do
     output <- phaseOutputFilename next
     liftIO (copyFile input output)
@@ -123,7 +129,7 @@ runGhcjsPhase _ (RealPhase ph) input dflags
     skipPhases = [ (CmmCpp, Cmm), (Cmm, As), (As, StopLn) ]
 
 -- otherwise use default
-runGhcjsPhase _ p input dflags = runPhase p input dflags
+runGhcjsPhase _ _ p input dflags = runPhase p input dflags
 
 touchObjectFile :: DynFlags -> FilePath -> IO ()
 touchObjectFile dflags path = do
@@ -132,32 +138,45 @@ touchObjectFile dflags path = do
 
 
 ghcjsWriteModule :: GhcjsSettings
+                 -> GhcjsEnv
                  -> HscEnv      -- ^ Environment in which to compile
                  -- the module
                  -> CgGuts
                  -> ModSummary
                  -> FilePath    -- ^ Output path
                  -> IO FilePath
-ghcjsWriteModule settings env core mod output = do
-    B.writeFile output =<< ghcjsCompileModule settings env core mod
+ghcjsWriteModule settings jsEnv env core mod output = do
+    B.writeFile output =<< ghcjsCompileModule settings jsEnv env core mod
     return output
 
 ghcjsCompileModule :: GhcjsSettings
+                   -> GhcjsEnv
                    -> HscEnv      -- ^ Environment in which to compile
                    -- the module
                    -> CgGuts
                    -> ModSummary
                    -> IO B.ByteString
-ghcjsCompileModule settings env core mod
-  | otherwise = do
+-- dynamic-too will invoke this twice, cache results in GhcjsEnv
+ghcjsCompileModule settings jsEnv env core mod =
+  ifGeneratingDynamicToo dflags genDynToo genOther
+  where
+    genDynToo = do
+      result <- compile
+      modifyMVar_ cms (return . M.insert mod' result)
+      return result
+    genOther =
+      join $ modifyMVar cms $ \m -> do
+        case M.lookup mod' m of
+          Nothing -> return (m, compile)
+          Just r  -> return (M.delete mod' m, return r)
+    mod'   = ms_mod mod
+    cms    = compiledModules jsEnv
+    dflags = hsc_dflags env
+    compile = do
       core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
       stg <- coreToStg dflags (cg_module core) core_binds
       (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-      let obj = variantRender gen2Variant settings dflags stg' (cg_module core)
-      return obj
-    where
-      dflags = hsc_dflags env
-
+      return $ variantRender gen2Variant settings dflags stg' (cg_module core)
 
 doFakeNative :: DynFlags -> FilePath -> IO ()
 doFakeNative df base = do

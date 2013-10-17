@@ -45,8 +45,9 @@ runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
 runGhcjsSession mbMinusB settings m = runGhcSession mbMinusB $ do
     base <- liftIO ghcjsDataDir
     dflags <- getSessionDynFlags
+    jsEnv <- liftIO newGhcjsEnv
     _ <- setSessionDynFlags
-         $ setGhcjsPlatform settings [] base
+         $ setGhcjsPlatform settings jsEnv [] base
          $ updateWays $ addWay' (WayCustom "js")
          $ setGhcjsSuffixes False dflags
     fixNameCache

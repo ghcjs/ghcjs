@@ -23,15 +23,16 @@ import qualified Compiler.Utils as Util
 
 -- | configure the GHC API for building 32 bit JavaScript code
 setGhcjsPlatform :: GhcjsSettings
+                 -> GhcjsEnv
                  -> [FilePath]  -- ^ JS objects for linking against
                  -> FilePath
                  -- ^ GHCJS base dir, usually "~/.ghcjs/platform-version"
                  -> DynFlags -> DynFlags
-setGhcjsPlatform set js_objs basePath df
+setGhcjsPlatform set js_env js_objs basePath df
   = addPlatformDefines basePath
       $ setDfOpts
       $ installGhcjsHooks set js_objs
-      $ installDriverHooks set
+      $ installDriverHooks set js_env
       $ df { settings = settings' }
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform

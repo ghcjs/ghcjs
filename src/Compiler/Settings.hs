@@ -1,7 +1,14 @@
 module Compiler.Settings where
 
+import Control.Applicative
+import Control.Concurrent.MVar
 import Control.Monad
 import Data.Monoid
+import Data.ByteString (ByteString)
+import Data.Map (Map)
+import qualified Data.Map as M
+
+import Module
 
 data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
                                    , gsNoNative          :: Bool
@@ -24,3 +31,9 @@ instance Monoid GhcjsSettings where
                         (dbg1 || dbg2)
                         (oo1  || oo2)
 
+data GhcjsEnv = GhcjsEnv
+  { compiledModules :: MVar (Map Module ByteString)
+  }
+
+newGhcjsEnv :: IO GhcjsEnv
+newGhcjsEnv = GhcjsEnv <$> newMVar M.empty
