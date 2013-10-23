@@ -15,16 +15,24 @@ module Gen2.Compactor where
 
 import           Control.Applicative
 import           Control.Lens
-import           Control.Monad.State
+import           Control.Monad.State.Strict
 
+import           Data.Array
+import qualified Data.Binary as DB
+import qualified Data.Binary.Get as DB
+import qualified Data.Binary.Put as DB
+import qualified Data.ByteString.Lazy as BL
 import           Data.Char (chr)
 import           Data.Data.Lens
 import           Data.Function (on)
 import           Data.List
 import           Data.Map (Map)
 import qualified Data.Map as M
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HM
 import           Data.Maybe
 import           Data.Monoid
+import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -35,17 +43,31 @@ import           Compiler.Settings
 
 import           Gen2.Utils
 import           Gen2.ClosureInfo
+import           Gen2.Object
 import qualified Gen2.Optimizer as Optimizer
 
-compact :: GhcjsSettings -> [(JStat,[ClosureInfo])] -> ([JStat],JStat)
-compact settings input = renameInternals settings input
+compact :: GhcjsSettings
+        -> RenamerState
+        -> [(JStat,[ClosureInfo])]
+        -> (RenamerState, [JStat],JStat)
+compact settings rs input =
+  renameInternals settings rs input
 
-data RenamerState = RenamerState [Ident] (Map Text Ident)
+data RenamerState = RenamerState [Ident] (HashMap Text Ident)
 
-renameInternals :: GhcjsSettings -> [(JStat,[ClosureInfo])] -> ([JStat], JStat)
-renameInternals settings stats = evalState renamed
-  (RenamerState (map (\(TxtI xs) -> TxtI ("h$$"<>xs)) Optimizer.newLocals) M.empty)
+renamedVars :: [Ident]
+renamedVars = map (\(TxtI xs) -> TxtI ("h$$"<>xs)) Optimizer.newLocals
+
+emptyRenamerState :: RenamerState
+emptyRenamerState = RenamerState renamedVars HM.empty
+
+renameInternals :: GhcjsSettings
+                -> RenamerState
+                -> [(JStat,[ClosureInfo])]
+                -> (RenamerState, [JStat], JStat)
+renameInternals settings rs stats = (rs', stats', meta)
   where
+    ((stats', meta), rs') = runState renamed rs
     renamed = (,) <$> mapM doRename stats <*> metadata (stats >>= snd)
     doRename (stat, ci)
       | gsDebug settings = do
@@ -60,9 +82,9 @@ renameVar :: Ident -> State RenamerState Ident
 renameVar i@(TxtI xs)
   | "h$$" `T.isPrefixOf` xs = do
       (RenamerState (y:ys) m) <- get
-      case M.lookup xs m of
+      case HM.lookup xs m of
         Just r  -> return r
-        Nothing -> put (RenamerState ys (M.insert xs y m)) >> return y
+        Nothing -> put (RenamerState ys (HM.insert xs y m)) >> return y
   | otherwise = return i
 
 renderClosureInfo :: GhcjsSettings -> [ClosureInfo] -> State RenamerState JStat
@@ -71,13 +93,13 @@ renderClosureInfo settings cis =
 
 renameClosureInfo :: [ClosureInfo] -> RenamerState -> [ClosureInfo]
 renameClosureInfo cis (RenamerState _ m) =
-  let m' = M.fromList . map (\(k,TxtI v) -> (k, v)) $ M.toList m
+  let m' = HM.fromList . map (\(k,TxtI v) -> (k, v)) $ HM.toList m
   in  map (g m m') cis
    where
     g m0 m (ClosureInfo v rs n l t s) =
-        (ClosureInfo (fromMaybe v $ M.lookup v m) rs n l t (h m s))
+        (ClosureInfo (fromMaybe v $ HM.lookup v m) rs n l t (h m s))
     h _ CINoStatic = CINoStatic
-    h m0 (CIStaticRefs rs) = CIStaticRefs (map (\sr -> fromMaybe sr $ M.lookup sr m0) rs)
+    h m0 (CIStaticRefs rs) = CIStaticRefs (map (\sr -> fromMaybe sr $ HM.lookup sr m0) rs)
 
 renderInfoBlock :: GhcjsSettings -> [ClosureInfo] -> JStat
 renderInfoBlock settings infos
@@ -147,6 +169,86 @@ encodeInfo m (ClosureInfo var regs name layout typ static)
     encodeLayout (CILayoutFixed s vs)   = [s+1] -- ,length vs] ++ map fromEnum vs
     encodeSrt CINoStatic = [0]
     encodeSrt (CIStaticRefs rs) = length rs : map funIdx rs
+
+
+{-
+  Base files contain a list of functions already linked from
+  elsewhere. They also keep track of linked packages and the
+  data required for link-time optimization
+
+  base format:
+  GHCJSBASE
+  [renamer state]
+  [linkedPackages]
+  [packages]
+  [modules]
+  [symbols]
+ -}
+
+data Base = Base { baseRenamerState :: RenamerState
+                 , basePkgs         :: [Text]
+                 , baseUnits        :: Set (Package, Text, Int)
+                 }
+
+emptyBase :: Base
+emptyBase = Base emptyRenamerState [] S.empty
+
+renderBase :: RenamerState                           -- ^ renamer state
+           -> [Text]                                 -- ^ package linked
+           -> Set (Package, Text, Int)               -- ^ linkable units contained in base
+           -> BL.ByteString                          -- ^ rendered result
+renderBase rs packages funs = DB.runPut $ do
+  DB.putByteString "GHCJSBASE"
+  putRs rs
+  putList DB.put packages
+  putList putPkg pkgs
+  putList DB.put mods
+  putList putFun (S.toList funs)
+  where
+    pi :: Int -> DB.Put
+    pi = DB.putWord32le . fromIntegral
+    uniq :: Ord a => [a] -> [a]
+    uniq  = S.toList . S.fromList
+    pkgs  = uniq (map (\(x,_,_) -> x) $ S.toList funs)
+    pkgsM = M.fromList (zip pkgs [(0::Int)..])
+    mods  = uniq (map (\(_,x,_) -> x) $ S.toList funs)
+    modsM = M.fromList (zip mods [(0::Int)..])
+    putList f xs = pi (length xs) >> mapM_ f xs
+    putRs (RenamerState (ns:_) hm) = do
+      pi (HM.size hm)
+      putRs' renamedVars (HM.fromList . map (\(x,y) -> (y,x)) . HM.toList $ hm)
+    putRs' (n:ns) hm
+      | Just v <- HM.lookup n hm = DB.put v >> putRs' ns hm
+      | otherwise                = return ()
+    putPkg (Package n v) = DB.put n >> DB.put v
+    -- fixme group things first
+    putFun (p,m,s) = pi (pkgsM M.! p) >> pi (modsM M.! m) >> DB.put s
+
+loadBase :: Maybe FilePath -> IO Base
+loadBase Nothing = return emptyBase
+loadBase (Just file) = DB.runGet getBase <$> BL.readFile file
+  where
+    gi :: DB.Get Int
+    gi = fromIntegral <$> DB.getWord32le
+    getList f = DB.getWord32le >>= \n -> replicateM (fromIntegral n) f
+    getFun ps ms = {- Fun -} (,,) <$> ((ps!) <$> gi) <*> ((ms!) <$> gi) <*> DB.get
+    la xs = listArray (0, length xs - 1) xs
+    getPkg = Package <$> DB.get <*> DB.get
+    getRs = do
+      n  <- gi
+      let (used, unused) = splitAt n renamedVars
+      renamed <- replicateM n DB.get
+      return (RenamerState unused $ HM.fromList (zip renamed used))
+    getBase = do
+      hdr <- DB.getByteString 9
+      when (hdr /= "GHCJSBASE") (error "loadBase: invalid base file")
+      rs <- getRs
+      linkedPackages <- getList DB.get
+      pkgs <- la <$> getList getPkg
+      mods <- la <$> getList DB.get
+      funs <- getList (getFun pkgs mods)
+      return (Base rs linkedPackages $ S.fromList funs)
+
 
 ----------------------------
 

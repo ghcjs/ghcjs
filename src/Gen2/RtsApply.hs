@@ -41,7 +41,7 @@ rtsApply = mconcat $  map (uncurry stackApply) applySpec
 -- specialized apply for these
 -- make sure that once you are in spec, you stay there
 applySpec :: [(Int,Int)] -- regs,arity
-applySpec = [ (regs,arity)  | arity <- [1..8], regs <- [max 0 (arity-1)..(arity*2)]]
+applySpec = [ (regs,arity)  | arity <- [1..5], regs <- [max 0 (arity-1)..(arity*2)]]
 
 specApply :: Bool -> Int -> Int -> Maybe JExpr
 specApply fast n r

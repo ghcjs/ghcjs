@@ -143,6 +143,9 @@ getGhcjsSettings args
          , "--log-commandline="
          , "--with-ghc="
          , "--debug"
+         , "--only-out"
+         , "--generate-base="
+         , "--use-base="
          ]
     envSettings = GhcjsSettings <$> getEnvOpt "GHCJS_NATIVE_EXECUTABLES"
                                 <*> getEnvOpt "GHCJS_NO_NATIVE"
@@ -151,6 +154,8 @@ getGhcjsSettings args
                                 <*> getEnvMay "GHCJS_WITH_GHC"
                                 <*> getEnvOpt "GHCJS_DEBUG"
                                 <*> pure False
+                                <*> pure Nothing
+                                <*> pure Nothing
 
 optParser' :: ParserInfo GhcjsSettings
 optParser' = info (helper <*> optParser) fullDesc
@@ -164,6 +169,8 @@ optParser = GhcjsSettings
             <*> optStr ( long "with-ghc" )
             <*> switch ( long "debug" )
             <*> switch ( long "only-out" )
+            <*> optStr ( long "generate-base" )
+            <*> optStr ( long "use-base" )
 
 optStr :: Mod OptionFields (Maybe String) -> Parser (Maybe String)
 optStr m = nullOption $ value Nothing <> reader (Right . str)  <> m

@@ -309,7 +309,7 @@ getSymbolTable bs = SymbolTableR (listArray (0,n-1) xs) (listArray (0,n-1) (map 
       (l',) <$> replicateM l' DB.get
 
 putSymbolTable :: SymbolTable -> ByteString
-putSymbolTable (SymbolTable _ hm) 
+putSymbolTable (SymbolTable _ hm)
 --  | trace "putting symbol table" False = undefined
   | otherwise = DB.runPut $ do
   DB.putWord32le (fromIntegral $ length xs)
@@ -621,3 +621,4 @@ instance Objectable Bool where
                       1 -> return False
                       2 -> return True
                       n -> error ("Objectable get Bool: invalid tag: " ++ show n)
+
