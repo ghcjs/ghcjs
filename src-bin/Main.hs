@@ -144,6 +144,8 @@ getGhcjsSettings args
          , "--with-ghc="
          , "--debug"
          , "--only-out"
+         , "--no-rts"
+         , "--no-stats"
          , "--generate-base="
          , "--use-base="
          ]
@@ -153,6 +155,8 @@ getGhcjsSettings args
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
                                 <*> getEnvMay "GHCJS_WITH_GHC"
                                 <*> getEnvOpt "GHCJS_DEBUG"
+                                <*> pure False
+                                <*> pure False
                                 <*> pure False
                                 <*> pure Nothing
                                 <*> pure Nothing
@@ -169,6 +173,8 @@ optParser = GhcjsSettings
             <*> optStr ( long "with-ghc" )
             <*> switch ( long "debug" )
             <*> switch ( long "only-out" )
+            <*> switch ( long "no-rts" )
+            <*> switch ( long "no-stats" )
             <*> optStr ( long "generate-base" )
             <*> optStr ( long "use-base" )
 

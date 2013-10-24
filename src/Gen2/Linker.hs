@@ -28,7 +28,7 @@ import           Data.List                ( partition, isSuffixOf, isPrefixOf, n
                                           , intercalate, group, sort, groupBy)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
-import           Data.Maybe               (fromMaybe, listToMaybe, isJust)
+import           Data.Maybe               (fromMaybe, listToMaybe, isJust, isNothing)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
@@ -110,15 +110,16 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun = do
       pkgsT = map (T.pack . packageIdString) pkgs'
   BL.writeFile (out </> "out" <.> jsExt) outJs
   when (not $ gsOnlyOut settings) $ do
-    TL.writeFile (out </> "out.stats") (linkerStats metaSize stats)
+    when (not $ gsNoStats settings) $ do
+      let statsFile = if genBase then "out.base.stats" else "out.stats"
+      TL.writeFile (out </> statsFile) (linkerStats metaSize stats)
     getShims jsFiles pkgs' (out </> "lib" <.> jsExt, out </> "lib1" <.> jsExt)
-    if genBase
-      then generateBase out base allDeps pkgsT renamerState
-      else do
-        TL.writeFile (out </> "rts.js") (rtsText' debug)
-        when (not 
-        writeHtml out
-        combineFiles out
+    when (not $ gsNoRts settings) $ TL.writeFile (out </> "rts.js") (rtsText' debug)
+  if genBase
+    then generateBase out base allDeps pkgsT renamerState
+    else when (not (gsOnlyOut settings) && not (gsNoRts settings) && isNothing (gsUseBase settings)) $ do
+           writeHtml out
+           combineFiles out
   return []
   where
     pkgPaths :: Map Text [FilePath]
@@ -223,9 +224,8 @@ getShims extraFiles deps (fileBefore, fileAfter) = do
   T.writeFile fileBefore before
   writeFile (fileBefore <.> "files") (unlines beforeFiles)
   t' <- mapM T.readFile extraFiles
-  T.writeFile fileAfter (T.unlines $ after : t')
+  T.writeFile fileAfter (if null t' then after else T.unlines $ after : t')
   writeFile (fileAfter <.> "files") (unlines $ afterFiles ++ extraFiles)
-    where
 
 convertPkg :: PackageId -> (Text, Version)
 convertPkg p =
