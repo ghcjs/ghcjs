@@ -229,6 +229,7 @@ installRts = do
   mkdir_p inc
   sub $ cd (Paths.libdir </> "include") >> cp_r "." inc
   sub $ cd (Paths.libdir </> "rts-1.0") >> cp_r "." rtsLib
+  sub $ cd ("data" </> "include")       >> cp_r "." inc
   cp (Paths.libdir </> "settings")          (lib </> "settings")
   cp (Paths.libdir </> "platformConstants") (lib </> "platformConstants")
   cp (Paths.libdir </> "settings")          (base </> "settings")
@@ -238,7 +239,7 @@ installRts = do
   cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
 
 cabalFlags :: Bool -- ^ pass -j argument to GHC instead of cabal?
-           -> BootSettings 
+           -> BootSettings
            -> [Text]
 cabalFlags parGhc s = v ++ j ++ d
   where

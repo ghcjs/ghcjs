@@ -30,6 +30,7 @@ import HsBinds
 import HsDecls
 import DsForeign
 import DsMonad
+import Encoding
 import TcRnTypes
 import TcForeign
 import TcType
@@ -168,7 +169,7 @@ unboxJsArg arg
   = return (arg, \body -> body)
 
   -- Recursive newtypes
-  | Just(_rep_ty, co) <- splitNewTypeRepCo_maybe arg_ty
+  | Just (co, _rep_ty) <- topNormaliseNewType_maybe arg_ty
   = unboxJsArg (mkCast arg co)
 
   -- Booleans, do not convert to 0/1, only force them
@@ -373,7 +374,7 @@ mkWildCase e boolTy
                                     (DataAlt falseDataCon,[],Var falseDataConId)] -}
 
   -- Recursive newtypes
-  | Just (rep_ty, co) <- splitNewTypeRepCo_maybe result_ty
+  | Just (co, rep_ty) <- topNormaliseNewType_maybe result_ty
   = do (maybe_ty, wrapper) <- jsResultWrapper rep_ty
        return (maybe_ty, \e -> mkCast (wrapper e) (mkSymCo co))
 
@@ -426,13 +427,132 @@ maybeJsNarrow dflags tycon
 
 {-
   desugar foreign declarations for native code: replace
-  all foreign import JavaScript by foreign import CCall
-  with the function name generated from a hash of the
-  JavaScript contents
+  all foreign import JavaScript by a CCall
+  to the JavaScript handler.
+
+  The JavaScript handler can be installed by calling
+  `setJavaScriptHandler` (ghcjs.h) from C. The
+  default handler prints an error message and terminates the
+  program.
 -}
 ghcjsNativeDsForeigns :: [LForeignDecl Id]
                       -> DsM (ForeignStubs, OrdList (Id, CoreExpr))
-ghcjsNativeDsForeigns fos = dsForeigns' fos
+ghcjsNativeDsForeigns fos = do
+  dflags <- getDynFlags
+  (stubs, ret) <- dsForeigns' (map (convertImport dflags) fos)
+  case catMaybes $ map (importStub dflags) fos of
+    [] -> return (stubs, ret)
+    xs -> return (stubs `appendStubC'` vcat xs, ret)
+    where
+      appendStubC' NoStubs s = ForeignStubs empty (inclGhcjs $$ s)
+      appendStubC' (ForeignStubs h c) s =
+        ForeignStubs h (inclGhcjs $$ c $$ s)
+      inclGhcjs = text "#include \"ghcjs.h\""
+
+      convertImport :: DynFlags -> LForeignDecl Id -> LForeignDecl Id
+      convertImport dflags (L l (ForeignImport n t c (CImport JavaScriptCallConv safety mheader spec))) =
+        (L l (ForeignImport n t c (CImport CCallConv PlaySafe mheader (convertSpec dflags n))))
+      convertImport _ x = x
+
+      convertSpec :: DynFlags -> Located Id -> CImportSpec
+      convertSpec dflags i = CFunction (StaticTarget (stubName dflags (unLoc i)) Nothing True)
+
+      stubName :: DynFlags -> Id -> FastString
+      stubName dflags i = mkFastString $
+        "__ghcjs_stub_" ++ zEncodeString (showSDocOneLine dflags (ppr $ idName i))
+
+      importStub :: DynFlags -> LForeignDecl Id -> Maybe SDoc
+      importStub dflags (L l (ForeignImport n t c (CImport JavaScriptCallConv safety mheader spec))) =
+        Just (mkImportStub dflags (unLoc n) c safety spec)
+      importStub _ _ = Nothing
+
+      mkImportStub :: DynFlags -> Id -> Coercion -> Safety -> CImportSpec -> SDoc
+      mkImportStub dflags i c s spec =
+        resTy <+> ftext (stubName dflags i) <> stubArgs <+> braces body
+          where
+           js :: SDoc
+           js = case spec of
+                  CLabel cls                       -> escapeQuoted (unpackFS cls)
+                  CFunction (StaticTarget cls _ _) -> escapeQuoted (unpackFS cls)
+                  _ -> error "ghcjsNativeDsForeigns: unexpected import spec"
+           safety | s == PlayRisky         = int 0
+                  | s == PlaySafe          = int 1
+                  | s == PlayInterruptible = int 2
+           escapeQuoted xs = doubleQuotes $ text (concatMap escapeChar xs)
+             where
+               -- fixme proper escaping and handling of non-ascii characters
+               escapeChar '\\' = "\\\\"
+               escapeChar '\n' = "\\n"
+               escapeChar '\t' = "\\t"
+               escapeChar '"'  = "\\\""
+               escapeChar x    = x:[]
+
+           t = idType i
+           (args, res) = tcSplitFunTys . snd . tcSplitForAllTys $ t
+           argNames    = map ((text "arg" <>) . int) [1..]
+           (argTys, argsSig) = unzip $ map (tySig False) args
+           (resTy,  resSig) = tySig True res
+           body | resSig == 'v' = vcat [text "int res;", call]
+                | otherwise     = vcat [resTy <+> text "res;", call, text "return res;"]
+           call = text "getJavaScriptHandler()" <> parens (pprWithCommas id handlerArgs) <> semi
+           handlerArgs = [js, safety, escapeQuoted (resSig : argsSig), text "(void*)&res"]
+                           ++ take (length args) argNames
+           stubArgs = parens $ pprWithCommas id (zipWith (<+>) argTys argNames)
+
+           tySig :: Bool -> Type -> (SDoc, Char)
+           tySig isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe t =
+                                 tySig isResult result
+                            | Just (_, t') <- splitForAllTy_maybe t = tySig isResult t'
+                            | Just (tc, _) <- splitTyConApp_maybe t =
+                                 let (d,c) = tcSig isResult tc
+                                 in (text d, c)
+                            | otherwise = error $ "ghcjsNativeDsForeigns: unexpected type: "
+                                                     ++ showSDoc dflags (ppr t)
+           tcSig :: Bool -> TyCon -> (String, Char)
+           tcSig isResult tc
+             | isUnLiftedTyCon tc                                  = prim (tyConPrimRep tc)
+             | Just r <- lookup (getUnique tc) boxed               = r
+             | isResult && getUnique tc == unitTyConKey            = ("void", 'v')
+             | isJSRefTyCon dflags tc = ("StgPtr", 'r')
+             | otherwise = error $ "ghcjsNativeDsForeigns: tcSig unexpected TyCon: "
+                                       ++ showSDoc dflags (ppr tc)
+              where
+                 -- fixme is there alread a list of these somewhere else?
+                 prim VoidRep  = error "ghcjsNativeDsForeigns: VoidRep"
+                 prim PtrRep   = hsPtr
+                 prim IntRep   = hsInt
+                 prim WordRep  = hsWord
+                 prim Int64Rep = hsInt64
+                 prim Word64Rep = hsWord64
+                 prim AddrRep   = hsPtr
+                 prim FloatRep  = hsFloat
+                 prim DoubleRep = hsDouble
+                 prim (VecRep{}) = error "ghcjsNativeDsForeigns: VecRep"
+                 boxed = [ (intTyConKey,        hsInt               )
+                         , (int8TyConKey,       ("StgInt8",      'b'))
+                         , (int16TyConKey,      ("StgInt16",     's'))
+                         , (int32TyConKey,      ("StgInt32",     'l'))
+                         , (int64TyConKey,      hsInt64             )
+                         , (wordTyConKey,       hsWord              )
+                         , (word8TyConKey,      ("StgWord8",     'B'))
+                         , (word16TyConKey,     ("StgWord16",    'S'))
+                         , (word32TyConKey,     ("StgWord32",    'L'))
+                         , (word64TyConKey,     hsWord64            )
+                         , (floatTyConKey,      hsFloat             )
+                         , (doubleTyConKey,     hsDouble            )
+                         , (ptrTyConKey,        hsPtr               )
+                         , (funPtrTyConKey,     hsPtr               )
+                         , (charTyConKey,       ("StgChar",      'c'))
+                         , (stablePtrTyConKey,  hsPtr               )
+                         , (boolTyConKey,       hsInt               )
+                         ]
+                 hsInt    = ("StgInt",    'i')
+                 hsInt64  = ("StgInt64",  'm')
+                 hsWord   = ("StgWord",   'I')
+                 hsWord64 = ("StgWord64", 'M')
+                 hsPtr    = ("StgPtr",    'p')
+                 hsFloat  = ("StgFloat",  'f')
+                 hsDouble = ("StgDouble", 'd')
 
 ghcjsTcForeignImports :: [LForeignDecl Name]
                       -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
@@ -440,12 +560,6 @@ ghcjsTcForeignImports decls
   = do { (ids, decls, gres) <- mapAndUnzip3M ghcjsTcFImport $
                                filter isForeignImport decls
        ; return (ids, decls, unionManyBags gres) }
-
-{-
-isForeignImport :: LForeignDecl name -> Bool
-isForeignImport (L _ (ForeignImport _ _ _ _)) = True
-isForeignImport _                             = False
--}
 
 foreignDeclCtxt :: ForeignDecl Name -> SDoc
 foreignDeclCtxt fo
@@ -498,9 +612,19 @@ isGhcjsFFIImportResultTy dflags ty = isFFIImportResultTy dflags ty
                                   || isGhcjsFFITy dflags ty
 
 isGhcjsFFITy :: DynFlags -> Type -> Bool
-isGhcjsFFITy dflags ty = checkRepTyCon f ty
-  where
-    f tc = any (\(p,m,n) -> p `isPrefixOf` pkg && m == mod && n == name) ffiTys
+isGhcjsFFITy = checkNamedTy jsFfiTys
+
+isJSRefTy :: DynFlags -> Type -> Bool
+isJSRefTy = checkNamedTy [jsRefTy]
+
+isJSRefTyCon :: DynFlags -> TyCon -> Bool
+isJSRefTyCon = checkNamedTyCon [jsRefTy]
+
+checkNamedTy :: [(String, String, String)] -> DynFlags -> Type -> Bool
+checkNamedTy tys dflags ty = checkRepTyCon (checkNamedTyCon tys dflags) ty
+
+checkNamedTyCon :: [(String, String, String)] -> DynFlags -> TyCon -> Bool
+checkNamedTyCon tys dflags tc = any (\(p,m,n) -> p `isPrefixOf` pkg && m == mod && n == name) tys
       where
         -- comparing strings is probably not too fast, perhaps search
         -- for the types first and use some cache
@@ -510,8 +634,12 @@ isGhcjsFFITy dflags ty = checkRepTyCon f ty
                        Just m  -> ( packageIdString (modulePackageId m)
                                   , moduleNameString (moduleName m))
         name = occNameString (nameOccName n)
-    ffiTys :: [(String, String, String)]
-    ffiTys = [ ("ghcjs-prim", "GHCJS.Prim", "JSRef") ]
+
+jsFfiTys :: [(String, String, String)]
+jsFfiTys = [jsRefTy]
+
+jsRefTy :: (String, String, String)
+jsRefTy = ("ghcjs-prim", "GHCJS.Prim", "JSRef")
 
 -- normaliseFfiType gets run before checkRepTyCon, so we don't
 -- need to worry about looking through newtypes or type functions
@@ -525,23 +653,7 @@ checkRepTyCon check_tc ty
 
 ghcjsNativeTcForeignImports :: [LForeignDecl Name]
                             -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
-ghcjsNativeTcForeignImports decls = do
-  (ids, decls', b) <- ghcjsTcForeignImports decls
-  return (ids, map f decls', b)
-    where
-      f (L l (ForeignImport n t c (CImport JavaScriptCallConv safety mheader spec))) =
-        (L l (ForeignImport n t c (CImport CCallConv safety mheader (convertSpec spec))))
-      f x = x
-      convertSpec (CLabel fs) = CLabel (hashFs "jsCall_" fs)
-      convertSpec (CFunction (StaticTarget lbl mpkg isFun)) =
-        CFunction (StaticTarget (hashFs "jsCall_" lbl) mpkg isFun)
-      convertSpec x = x
-
-hashFs :: String -> FastString -> FastString
-hashFs prefix fs = mkFastString . (prefix++) . T.unpack . TE.decodeUtf8
-                 . B16.encode . SHA1.hash . TE.encodeUtf8
-                 . T.pack . unpackFS $ fs
-
+ghcjsNativeTcForeignImports = ghcjsTcForeignImports
 
 ghcjsTcForeignExports :: [LForeignDecl Name]
                       -> TcM (LHsBinds TcId, [LForeignDecl TcId], Bag GlobalRdrElt)

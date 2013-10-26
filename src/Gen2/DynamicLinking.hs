@@ -84,14 +84,11 @@ ghcjsLinkJsBinary settings jsFiles dflags objs dep_pkgs =
   void $ variantLink gen2Variant dflags settings exe [] deps objs jsFiles isRoot
     where
       isRoot _ = True
-      deps     = map (\pkg -> (pkg, packageLibPaths pkg)) dep_pkgs'
+      deps     = map (\pkg -> (pkg, packageLibPaths pkg)) dep_pkgs
       exe      = Utils.exeFileName dflags
       pidMap   = pkgIdMap (pkgState dflags)
       packageLibPaths :: PackageId -> [FilePath]
       packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
-      -- make sure we link ghcjs-prim even when it's not a dependency
-      dep_pkgs' | any isGhcjsPrimPackage dep_pkgs = dep_pkgs
-                | otherwise                       = ghcjsPrimPackage dflags : dep_pkgs
 
 isGhcjsPrimPackage :: PackageId -> Bool
 isGhcjsPrimPackage pkgId = "ghcjs-prim-" `isPrefixOf` packageIdString pkgId
@@ -159,7 +156,12 @@ link' settings extraJs buildJs dflags batch_attempt_linking hpt
                 LinkStaticLib -> linkStaticLibCheck
                 LinkDynLib    -> linkDynLibCheck
                 other         -> panicBadLink other
-        link dflags obj_files pkg_deps
+
+        -- make sure we link ghcjs-prim even when it's not a dependency
+        let pkg_deps' | any isGhcjsPrimPackage pkg_deps = pkg_deps
+                      | otherwise                       = ghcjsPrimPackage dflags : pkg_deps
+
+        link dflags obj_files pkg_deps'
 
         debugTraceMsg dflags 3 (text "link: done")
 

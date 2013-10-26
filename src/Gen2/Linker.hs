@@ -81,7 +81,10 @@ link :: DynFlags
      -> [FilePath]                -- ^ extra js files to include
      -> (Fun -> Bool)             -- ^ functions from the objects to use as roots (include all their deps)
      -> IO [String]               -- ^ arguments for the closure compiler to minify our result
-link dflags settings out include pkgs objFiles jsFiles isRootFun = do
+
+link dflags settings out include pkgs objFiles jsFiles isRootFun
+  | gsNativeExecutables settings = return []
+  | otherwise = do
   objDeps <- mapM readDepsFile objFiles
   let genBase = isJust (gsGenBase settings)
       jsExt | genBase   = "base.js"
