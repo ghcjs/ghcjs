@@ -173,7 +173,7 @@ test-suite test
     type:             exitcode-stdio-1.0
     Default-Language: Haskell2010
     hs-source-dirs:   test
-    ghc-options: -threaded
+    ghc-options: -threaded -O
     main-is:          TestRunner.hs
     build-depends:    base                 >= 4 && < 5,
                       process,

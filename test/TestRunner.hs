@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, OverloadedStrings, TupleSections, ScopedTypeVariables #-}
+{-# LANGUAGE CPP, OverloadedStrings, TupleSections, ScopedTypeVariables, ExtendedDefaultRules #-}
 
 module Main where
 
@@ -46,6 +46,8 @@ import           GHC.IO.Exception(IOErrorType(..), IOException(..))
 import qualified Control.Exception as C
 import           Text.Read (readMaybe)
 
+default (Text)
+
 main = do
   checkBooted
   log <- newIORef []
@@ -73,22 +75,27 @@ main' log = do
   args <- getArgs
   let (args', bench) = partition (/="--benchmark") args
   checkRequiredPackages
+  (baseSymbs, baseJs) <- prepareBaseBundle
   onlyOpt <- getEnvOpt "GHCJS_TEST_ONLYOPT"
   onlyUnopt <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
-  if not (null bench)
-    then (\bs -> defaultMainWithArgs bs args') =<< benchmarks log
-    else do
-      if onlyOpt && onlyUnopt
-        then putStrLn "warning: nothing to do, optimized and unoptimized disabled"
-        else defaultMain =<< tests onlyOpt onlyUnopt log
+  shellyNoDir . silently . withTmpDir $ \symbsDir -> do
+    let symbsFile = symbsDir </> "base.symbs"
+    liftIO $ do
+      B.writeFile (encodeString symbsFile) baseSymbs
+      if not (null bench)
+        then (\bs -> defaultMainWithArgs bs args') =<< benchmarks log symbsFile baseJs
+        else do
+          if onlyOpt && onlyUnopt
+            then putStrLn "warning: nothing to do, optimized and unoptimized disabled"
+            else defaultMain =<< tests onlyOpt onlyUnopt log symbsFile baseJs
 
-benchmarks log = do
-  nofib <- allTestsIn (benchmark log) "test/nofib"
+benchmarks log baseSymbs baseJs = do
+  nofib <- allTestsIn (benchmark log baseSymbs baseJs) "test/nofib"
   return [ testGroup "Benchmarks from nofib" nofib
          ]
 
-tests onlyOpt onlyUnopt log = do
-  let test = TestOpts onlyOpt onlyUnopt log
+tests onlyOpt onlyUnopt log baseSymbs baseJs = do
+  let test = TestOpts onlyOpt onlyUnopt log baseSymbs baseJs
   fay     <- allTestsIn test "test/fay"
   ghc     <- allTestsIn test "test/ghc"
   arith   <- allTestsIn test "test/arith"
@@ -130,6 +137,8 @@ requiredPackages = [ "ghc-prim"
 data TestOpts = TestOpts { disableUnopt :: Bool
                          , disableOpt   :: Bool
                          , failedTests  :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
+                         , baseSymbs    :: FilePath
+                         , baseJs       :: B.ByteString
                          }
 benchmark = TestOpts True False
 
@@ -177,7 +186,7 @@ testCaseLog opts name assertion = testCase name assertion'
    - that start with a lowercase letter
 -}
 -- allTestsIn :: FilePath -> IO [Test]
-allTestsIn testOpts path = shelly $
+allTestsIn testOpts path = shellyNoDir $
   map (stdioTest testOpts) <$> findWhen (return . isTestFile) path
   where
     testFirstChar c = isLower c || isDigit c
@@ -323,37 +332,47 @@ runGhcjsResult opts file = do
         output <- outputPath
         extra <- extraJsFiles file
         cd <- getWorkingDirectory
-        let outputG2 = addExtension output "jsexe"
-            outputRun = cd </> outputG2 </> ("all.js"::FilePath)
+        -- compile test
+        let outputExe = addExtension output "jsexe"
+            outputRun = cd </> outputExe </> ("all.js"::FilePath)
             input  = encodeString file
             desc = ", optimization: " ++ show optimize
             inc = includeOpt file
-            compileOpts = if optimize
-                            then [inc, "-o", encodeString output, "-O2"] ++ [input] ++ extra
-                            else [inc, "-o", encodeString output] ++ [input] ++ extra
+            opt = if optimize then ["-O2"] else []
+            compileOpts = [ inc
+                          , "--no-rts", "--no-stats", "-o"
+                          , "--use-base=" ++ encodeString (baseSymbs opts)
+                          , encodeString output] ++ opt ++ [input] ++ extra
             args = tsArguments settings
         e <- liftIO $ runProcess cd "ghcjs" compileOpts ""
         case e of
           Nothing    -> assertFailure "cannot find ghcjs"
           Just (r,_) -> assertEqual "compile error" ExitSuccess (stdioExit r)
+        -- copy data files for test
         forM_ (tsCopyFiles settings) $ \cfile ->
           let cfile' = fromText (T.pack cfile)
-          in  copyFile (directory file </> cfile') (cd </> outputG2 </> cfile')
+          in  copyFile (directory file </> cfile') (cd </> outputExe </> cfile')
+        -- combine files with base bundle from incremental link
+        [out, lib, lib1] <- mapM (B.readFile . (\x -> encodeString (cd </> outputExe </> x))) ["out.js", "lib.js", "lib1.js"]
+        let runMain = "\nh$main(h$mainZCMainzimain);\n"
+        B.writeFile (encodeString outputRun) (baseJs opts <> lib <> lib1 <> out <> runMain)
+        -- run with node.js
         nodeResult <-
           case tsDisableNode settings of
-            False -> fmap (,"node" ++ desc) <$> runProcess (cd </> outputG2) "node" (encodeString outputRun:args) ""
+            False -> fmap (,"node" ++ desc) <$> runProcess (cd </> outputExe) "node" (encodeString outputRun:args) ""
             True  -> return Nothing
+        -- run with SpiderMonkey
         smResult <-
           case tsDisableSpiderMonkey settings of
-            False -> fmap (,"SpiderMonkey" ++ desc) <$> runProcess (cd </> outputG2) "js" (encodeString outputRun:args) ""
+            False -> fmap (,"SpiderMonkey" ++ desc) <$> runProcess (cd </> outputExe) "js" (encodeString outputRun:args) ""
             True  -> return Nothing
-        liftIO $ removeTree outputG2
+        liftIO $ removeTree outputExe
         return $ catMaybes [nodeResult, smResult]
 
 
 outputPath :: IO FilePath
 outputPath = do
-  t <- show . round . (*1000) . utcTimeToPOSIXSeconds <$> getCurrentTime
+  t <- (show :: Integer -> String) . round . (*1000) . utcTimeToPOSIXSeconds <$> getCurrentTime
   rnd <- show <$> randomRIO (1000000::Int,9999999)
   return . decodeString $ "ghcjs_test_" ++ t ++ "_" ++ rnd
 
@@ -450,12 +469,23 @@ readExitCode = fmap convert . readMaybe . T.unpack
     convert n = ExitFailure n
 
 checkRequiredPackages :: IO ()
-checkRequiredPackages = shelly . silently $ do
+checkRequiredPackages = shellyNoDir . silently $ do
   installedPackages <- T.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
   forM_ requiredPackages $ \pkg -> do
     when (not $ any ((pkg <> "-") `T.isPrefixOf`) installedPackages) $ do
       echo ("warning: package `" <> pkg <> "' is required by the test suite but is not installed")
 --      liftIO exitFailure
+
+prepareBaseBundle :: IO (B.ByteString, B.ByteString)
+prepareBaseBundle = shellyNoDir . silently . sub . withTmpDir $ \tmp -> do
+  cp "test/TestLinkBase.hs" tmp
+  cp "test/TestLinkMain.hs" tmp
+  cd tmp
+  run_ "ghcjs" ["--generate-base=TestLinkBase", "-o", "base", "TestLinkMain.hs"]
+  cd "base.jsexe"
+  [symbs, js, lib, lib1, rts] <- mapM readBinary
+    ["out.base.symbs", "out.base.js", "lib.base.js", "lib1.base.js", "rts.js"]
+  return (symbs, lib <> rts <> lib1 <> js)
 
 getEnvMay :: String -> IO (Maybe String)
 getEnvMay xs = fmap Just (getEnv xs)
