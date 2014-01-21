@@ -179,7 +179,7 @@ optParser = GhcjsSettings
             <*> optStr ( long "use-base" )
 
 optStr :: Mod OptionFields (Maybe String) -> Parser (Maybe String)
-optStr m = nullOption $ value Nothing <> reader (Right . str)  <> m
+optStr m = nullOption $ value Nothing <> reader (pure . str)  <> m
 
 main :: IO ()
 main =
