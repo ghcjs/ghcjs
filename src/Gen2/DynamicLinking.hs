@@ -470,7 +470,7 @@ ghcjsCompileCoreExpr hsc_env srcspan ds_expr
            {- Lint if necessary -}
          ; lintInteractiveExpr "hscCompileExpr" hsc_env prepd_expr 
            {- Convert to BCOs -}
-         ; bcos <- coreExprToBCOs dflags iNTERACTIVE prepd_expr
+         ; bcos <- coreExprToBCOs dflags (icInteractiveModule (hsc_IC hsc_env)) prepd_expr
            {- link it -}
          ; hval <- linkExpr hsc_env srcspan bcos
          ; return hval }

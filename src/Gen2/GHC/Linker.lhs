@@ -527,7 +527,7 @@ getLinkDeps hsc_env hpt pls replace_osuf span mods
  = do {
         -- 1.  Find the dependent home-pkg-modules/packages from each iface
         -- (omitting iINTERACTIVE, which is already linked)
-        (mods_s, pkgs_s) <- follow_deps (filter ((/=) iNTERACTIVE) mods)
+        (mods_s, pkgs_s) <- follow_deps (filter ((/=) (icInteractiveModule (hsc_IC hsc_env))) mods)
                                         emptyUniqSet emptyUniqSet;
 
         let {
