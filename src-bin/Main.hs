@@ -217,6 +217,10 @@ main =
                $ updateWays $ addWay' (WayCustom "js")
                $ setGhcjsSuffixes oneshot dflags2
           dflags3 <- getSessionDynFlags
+          -- this prevents some segfaults, probably GHC bug
+          liftIO $ evaluate dflags3
+          liftIO $ evaluate (log_action dflags3)
+          -------------------------------------------------
           fixNameCache
           if oneshot || null hs_srcs
             then sourceErrorHandler $ do
