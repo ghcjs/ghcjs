@@ -122,7 +122,7 @@ buildingCabalSetup [hs_src] dflags
   where
     isSetupOutput = maybe False (("/setup/setup" `isSuffixOf`) . dropExtension)
     isSetupDir    = maybe False ("/setup" `isSuffixOf`)
-    isSetupSource = (`elem` ["Setup.hs", "Setup.lhs"]) . takeFileName
+    isSetupSource = (`elem` ["setup.hs", "Setup.hs", "Setup.lhs"]) . takeFileName
 buildingCabalSetup _ _ = False
 
 
