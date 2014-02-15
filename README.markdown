@@ -1,9 +1,8 @@
 Haskell to JavaScript compiler
 ==============================
 
-GHCJS is a Haskell to JavaScript compiler using the GHC API. Our first official release is planned
-to coincide with the release of GHC 7.8.1, which is expected around ICFP 2013. We are working to get
-patches to support GHCJS into GHC and Cabal.
+GHCJS is a Haskell to JavaScript compiler that uses the GHC API. Our first official release is planned
+to coincide with the release of GHC 7.8.1. 
 
 GHCJS supports many modern Haskell features, including:
 
@@ -11,7 +10,7 @@ GHCJS supports many modern Haskell features, including:
  * Lightweight preemptive threading with blackholes, MVar, STM, asynchronous exceptions
  * Weak references, CAF deallocation, StableName, StablePtr
  * Unboxed arrays, emulated pointers
- * Integer support through JSBN
+ * Integer support through [JSBN](http://www-cs-students.stanford.edu/~tjw/jsbn/), 32 and 64 bit signed and unsigned arithmetic (`Word64`, `Int32` etc.)
  * Cabal support, GHCJS has its own package database
 
 And some JavaScript-specific features:
@@ -22,27 +21,38 @@ And some JavaScript-specific features:
 Installation
 ============
 
-If you are from the future, you have GHC 7.8 or higher installed, and Cabal 1.18, run the following:
+First install GHC 7.8 (or release candidate) and check with `ghc --version` that it's the
+compiler in your `PATH`.
 
-    $ cabal install ghcjs
-    $ ghcjs-boot --auto
+Next, run the following script to install an updated `Cabal` and `cabal-install` with GHCJS
+support. Note that this will overwrite the `cabal` executable in your cabal executable
+installation path (typically `~/.cabal/bin`), you might want to backup your current version.
 
-Done!
+```bash
+#!/bin/sh
+git clone https://github.com/ghcjs/cabal.git
+cd cabal
+git checkout ghcjs
+cabal install ./Cabal ./cabal-install
+```
 
-If you're not so lucky, the easiest way to install GHCJS is with the vagrant script from the `ghcjs-build` repository:
+Make sure that you're now running the new `cabal-install`, `GHCJS` support must be listed under the
+compiler flags:
 
-    $ git clone https://github.com/ghcjs/ghcjs-build.git
-    $ cd ghcjs-build
-    $ git checkout -b prebuilt origin/prebuilt
-    $ vagrant up
+    $ cabal install --help
+    ...
+                                    build files (default dist)
+     -g --ghc                           compile with GHC
+        --ghcjs                         compile with GHCJS
+        --nhc98                         compile with NHC
+    ...
 
-Or to build everything completely from source (takes a few hours):
+Now install `GHCJS` itself:
 
-    $ git clone https://github.com/ghcjs/ghcjs-build.git
-    $ cd ghcjs-build
-    $ vagrant up
+    $ git clone https://github.com/ghcjs/ghcjs.git
+    $ cabal install ./ghcjs
+    $ ghcjs-boot --init
 
-Log into the vagrant vm with `vagrant ssh`.
 
 Usage
 =====
@@ -57,9 +67,103 @@ for example:
 
 Use `cabal install --ghcjs packageName` to install a package
 
+Most packages from hackage should work out of the box. The main exception is packages with foreign (non-Haskell) dependencies.
+For these packages a JavaScript implementation of the dependencies must be provided. If a package you want to use does
+not work, please create a ticket.
+
 Use `ghcjs-pkg` to manipulate the GHCJS package database
 
+The package database and runtime files from the [shims](https://github.com/ghcjs/shims.git) repository are kept in the
+GHCJS application data directory, typically `~/.ghcjs/`. Remove this directory to reset your GHCJS installation, you
+need to run `ghcjs-boot --init` again.
+
 See [GHCJS introduction](http://weblog.luite.com/wordpress/?p=14) for more examples.
+
+Hacking GHCJS
+=============
+
+If you want to hack on GHCJS, please join our friendly community on IRC at `#ghcjs` on freenode (You're also
+welcome if you only use the compiler or just want to chat about it!). The channel can be quiet from time
+to time, but with a little patience you should be able to find people to get you started or point you in
+the right direction.
+
+The repositories you will be interested in are:
+
+ * [https://github.com/ghcjs/ghcjs](https://github.com/ghcjs/ghcjs)
+
+      The compiler itself, code generator, linker, test suite
+
+      examples:
+
+      * Executables ( `src-bin` )
+      * Main code generator ( `src/Gen2/Generator.hs` )
+      * Optimizer ( `src/Gen2/Optimizer.hs` )
+      * Linker ( `src/Gen2/Linker.hs` )
+      * Generated runtime code (`h$ap_x_y` etc): ( `src/Gen2/RtsApply.hs` )
+
+ * [https://github.com/ghcjs/shims](https://github.com/ghcjs/shims)
+
+      Implementation of much of the runtime system and JavaScript dependencies. Code from this repository is linked into
+      the `lib.js` and `lib1.js` files when generating a `.jsexe`. Installed in `~/.ghcjs/version/shims` by `ghcjs-boot`. 
+
+      examples:
+
+      * thread scheduler, MVar implementation ( `src/thread.js` )
+      * STM implementation (`src/stm.js`)
+      * IO system ( `src/io.js` ) (buffered IO for `putStrLn` etc)
+      * Heap scanner for weak references and finalizers ( `src/gc.js` )
+      * package-specific dependencies (`pkg`), dependencies listed in `packagename.yaml` (temporary measure until Cabal supports JavaScript dependencies directly)
+      * third party libraries (`lib`)
+
+ * [https://github.com/ghcjs/ghcjs-base](https://github.com/ghcjs/ghcjs-base)
+
+      GHCJS base library, basic marshalling between JavaScript and Haskell data
+
+If you've changed something that affects the code generated by GHCJS, you'll need to rebuild the base packages (reboot the compiler). Often,
+a full reboot is not required. You can run a quick boot to install only the essential packages (e.g. `base`, `integer-gmp`, `array`, but not `ghcjs-base`).
+Adjust the `-j4` flag (number of concurrent jobs) for your system:
+
+    $ ghcjs-boot --quick -j4
+
+After a change, please run the test suite to
+check that it does not break anything. Install [jsshell](http://ftp.mozilla.org/pub/mozilla.org/firefox/nightly/latest-trunk/)
+and [node.js](http://nodejs.org/download/) first to make sure that the tests run correctly (`js` and `node` executables should
+be in your `PATH`)).
+
+When the compiler has been booted, run `cabal test`, or run the test program directly for more options:
+
+    $ ./dist/build/test/test --help
+
+For example to run a specific test or tests that match a pattern:
+
+    $ ./dist/build/test/test -t pattern
+
+New test cases, in particular if you add new features, are always welcome. The testrunner automatically picks up new tests
+(`.hs` files that start with a lowercase letter) in the existing categories.
+
+Debugging GHCJS programs
+------------------------
+
+TODO add better instructions here, make `--debug` more effective
+
+  * link your program with `--debug`: `ghcjs --debug -o test test.hs`, this adds debugging information to the generated code
+  * adjust debugging settings in ( `src/Gen2/RtsSettings.hs` ) and reboot the compiler
+     (should not be necessary unless working on specific features, FIXME many of these options aren't used anymore)
+  * adjust the main loop in shims ( `src/thread.js` ) to enable call and stack tracing (warning, huge output)
+  * see the utility programs in `utils` in the ghcjs repository for tools for inspecting object files, quickly bisecting
+     bugs in the optimizer etc.
+
+Profiling GHCJS programs
+------------------------
+
+You can use the JavaScript profiler to get a basic idea where the majority of time in your program is spent. Non-exported
+names (like stack frame functions) start with `h$$`, scroll up in the code to find an exported name to which they belong.
+
+Unfortunately due to Haskell's lazy evaluation and GHCJS's tail-call optimization, the information here is far less
+useful than GHC profiles for native code. Profiling support is planned, but implementation has not been started yet.
+Profiling will support cost centres like in native GHC. In particular, we intend to add memory profiling support for
+interactive (reactive) systems, keeping track of allocations and retention per event. If you're interested in helping
+out or discussing features, please contact us in `#ghcjs` on freenode.
 
 JSC and webkit
 ==============
