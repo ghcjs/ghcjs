@@ -7,7 +7,6 @@ import           Compiler.JMacro.Types
 
 import           Gen2.Debug
 import           Gen2.RtsApply
-import           Gen2.RtsPrim
 import           Gen2.RtsSettings
 import           Gen2.RtsTypes
 import           Gen2.Utils
