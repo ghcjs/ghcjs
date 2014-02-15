@@ -7,7 +7,7 @@ module Gen2.RtsSettings where
 
 import           Data.Monoid
 import           Gen2.Utils
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 import           Data.Text (Text)
 
 -- debugging settings (fixme, make these depend on cabal flags?)

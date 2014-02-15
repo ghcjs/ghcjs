@@ -55,7 +55,7 @@ import qualified Data.Set as S
 import           Data.Set (Set)
 import qualified Data.Text as T
 import           Data.Text (Text)
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 import           Data.Typeable
 import           Data.Data
 

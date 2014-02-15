@@ -18,7 +18,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 
 import           Language.Haskell.TH.Quote
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 
 import           DynFlags
 import           SrcLoc

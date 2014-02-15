@@ -7,7 +7,7 @@
 
 module Gen2.RtsTypes where
 
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 
 import           Control.Applicative
 import           Control.Lens

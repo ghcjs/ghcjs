@@ -26,7 +26,7 @@ import Data.List (partition)
 import qualified Data.List as L
 import Gen2.RtsTypes
 import Gen2.StgAst
-import Language.Javascript.JMacro
+import Compiler.JMacro
 import Encoding
 import qualified Data.Text as T
 import Debug.Trace

@@ -10,7 +10,7 @@ import           Data.Char (isAlpha, isDigit)
 import qualified Data.Map                     as M
 import qualified Data.Text.Lazy               as TL
 import qualified Data.Text                    as T
-import           Language.Javascript.JMacro   (Ident, JExpr(..), JStat(..),
+import           Compiler.JMacro              (Ident, JExpr(..), JStat(..),
                                                JVal(..), jsToDocR, RenderJs(..), defaultRenderJs)
 import           Text.PrettyPrint.Leijen.Text (Doc, align, char, comma, empty,
                                                fillSep, hcat, nest, parens,

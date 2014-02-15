@@ -43,7 +43,7 @@ import qualified Data.HashSet as HS
 import qualified Data.Text as T
 import           Data.Word
 
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 
 import           Gen2.Rts
 import           Gen2.RtsTypes

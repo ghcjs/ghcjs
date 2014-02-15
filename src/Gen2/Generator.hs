@@ -60,7 +60,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import           Data.Text (Text)
 
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 import qualified Text.Parsec as P
 
 import           Compiler.Settings

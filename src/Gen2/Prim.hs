@@ -30,8 +30,8 @@ module Gen2.Prim where
 import           Gen2.RtsTypes
 import           Gen2.StgAst
 import           Gen2.Utils
-import           Language.Javascript.JMacro
-import           Language.Javascript.JMacro.Types
+import           Compiler.JMacro
+import           Compiler.JMacro.Types
 import qualified Data.Text as T
 
 import           Data.Monoid

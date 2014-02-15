@@ -8,8 +8,8 @@
 
 module Gen2.RtsApply where
 
-import           Language.Javascript.JMacro
-import           Language.Javascript.JMacro.Types
+import           Compiler.JMacro
+import           Compiler.JMacro.Types
 
 import           Gen2.RtsAlloc
 import           Gen2.RtsSettings

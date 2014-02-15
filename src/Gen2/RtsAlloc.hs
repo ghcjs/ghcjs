@@ -7,7 +7,7 @@ import Control.Lens
 import Data.Array
 import Data.Data.Lens
 import Data.Monoid
-import Language.Javascript.JMacro
+import Compiler.JMacro
 
 import qualified Data.Map as M
 import qualified Data.Text as T

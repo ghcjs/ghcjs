@@ -2,11 +2,10 @@
 
 module Gen2.Rts where
 
-import           Language.Javascript.JMacro
-import           Language.Javascript.JMacro.Types
+import           Compiler.JMacro
+import           Compiler.JMacro.Types
 
 import           Gen2.Debug
-import           Gen2.GC
 import           Gen2.RtsApply
 import           Gen2.RtsPrim
 import           Gen2.RtsSettings
@@ -818,7 +817,6 @@ fun h$logStack {
 `rtsApply`;
 // rtsPrim
 `closureTypes`;
-`garbageCollector`;
 
 fun h$runio_e {
   `preamble`;

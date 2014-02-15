@@ -10,7 +10,7 @@ import qualified Data.Text as T
 
 import           Control.Applicative ((<$>))
 
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 
 import           Gen2.Utils
 import           Gen2.StgAst ()

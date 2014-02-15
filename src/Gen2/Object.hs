@@ -80,7 +80,7 @@ import           Data.Text.Binary ()
 import qualified Data.Text.Lazy as TL
 import           Data.Word
 
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 import           System.IO (openBinaryFile, hClose, hSeek, SeekMode(..), IOMode(..) )
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 

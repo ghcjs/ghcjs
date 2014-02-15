@@ -20,7 +20,7 @@ import           Data.Generics.Schemes
 import           Data.List                  (isSuffixOf, partition)
 import           Data.Maybe                 (catMaybes)
 import           Data.Monoid
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 
 floatTop :: JStat -> JStat
 floatTop ast = mconcat (collectTop ast) <> removeTop ast

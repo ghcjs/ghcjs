@@ -43,7 +43,7 @@ import qualified Data.Text.Lazy.IO        as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
 import qualified Data.Vector              as V
 
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 import           Language.Haskell.TH
 import           System.FilePath          (dropExtension, splitPath, (<.>), (</>))
 import           System.Directory         (createDirectoryIfMissing, doesFileExist)

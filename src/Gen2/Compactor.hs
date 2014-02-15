@@ -37,7 +37,7 @@ import qualified Data.Set as S
 import           Data.Text (Text)
 import qualified Data.Text as T
 
-import           Language.Javascript.JMacro
+import           Compiler.JMacro
 
 import           Compiler.Settings
 

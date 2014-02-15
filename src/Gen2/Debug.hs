@@ -7,7 +7,7 @@
 
 module Gen2.Debug where
 
-import Language.Javascript.JMacro
+import Compiler.JMacro
 import Data.Generics.Aliases
 import Data.Generics.Schemes
 import Data.Monoid
