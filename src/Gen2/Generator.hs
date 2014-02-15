@@ -412,7 +412,7 @@ genApp _ _ i [StgLitArg (MachStr bs), x]
 genApp force mstackTop i a
     | isPrimitiveType (idType i) || isStrictType (idType i)
             = r1 <> return [j| return `Stack`[`Sp`]; |]
-    | idArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do
+    | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do
           ii <- enterId
           if rtsInlineEnter
              then return [j| var t = `ii`.f;
@@ -427,7 +427,7 @@ genApp force mstackTop i a
                              }
                            |]
              else return [j| return h$e(`ii`); |]
-    | idArity i == 0 && n == 0 && not (might_be_a_function (idType i))
+    | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i))
           = do
              ii <- enterId
              if rtsInlineEnter
@@ -443,11 +443,11 @@ genApp force mstackTop i a
                                 }
                               |]
                 else return [j| return h$e(`ii`); |]
-    | idArity i == n && not (isLocalId i) && n /= 0 = do
+    | idRepArity i == n && not (isLocalId i) && n /= 0 = do
         as' <- concatMapM genArg a
         jumpToII i as' =<< r1
-    | idArity i <  n && idArity i > 0 =
-         let (reg,over) = splitAt (idArity i) a
+    | idRepArity i < n && idRepArity i > 0 =
+         let (reg,over) = splitAt (idRepArity i) a
          in  do
            reg' <- concatMapM genArg reg
            pushCont over <> (jumpToII i reg' =<< r1)
