@@ -135,15 +135,19 @@ main = do
 
                dflags0 <- GHC.getSessionDynFlags
 
-               dflags <- if isJust mbMinusB
-                           then return dflags0
-                           else liftIO (Ghcjs.addPkgConf dflags0)
+               dflags1 <- if isJust mbMinusB
+                            then return dflags0
+                            else liftIO (Ghcjs.addPkgConf dflags0)
+
+               dataDir <- liftIO Ghcjs.ghcjsDataDir
+               let settings0 = (settings dflags1)
+                     { sGhcUsagePath  = dataDir ++ "/doc/ghcjs-usage.txt"
+                     , sGhciUsagePath = dataDir ++ "/doc/ghci-usage.txt"
+                     }
+                   dflags = dflags1 { settings = settings0 }
+
                GHC.setSessionDynFlags dflags
-{-
-               let dflags = if native
-                              then installNativeHooks settings dflags1
-               setSessionDynFlags
--}
+
                case postStartupMode of
                 Left preLoadMode -> do
                     liftIO $ do

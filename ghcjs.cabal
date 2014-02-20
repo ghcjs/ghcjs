@@ -13,6 +13,8 @@ data-dir:       .
 data-files:     include/*.h
                 include/prim/*.hs-incl
                 include/prim/*.txt
+                doc/ghcjs-usage.txt
+                doc/ghci-usage.txt
 
 source-repository head
   type:     git
