@@ -26,6 +26,23 @@ import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
 
 import           Encoding
 
+garbageCollector :: JStat
+garbageCollector =
+  [j| fun h$resetRegisters {
+        `mconcat $ map resetRegister [minBound..maxBound]`;
+      }
+
+      fun h$resetResultVars {
+        `mconcat $ map resetResultVar [minBound..maxBound]`;
+      }
+    |]
+
+resetRegister :: StgReg -> JStat
+resetRegister r = [j| `r` = null; |]
+
+resetResultVar :: StgRet -> JStat
+resetResultVar r = [j| `r` = null; |]
+
 {-
           use h$c1, h$c2, h$c3, ... h$c24 instead of making objects manually
   so layouts and fields can be changed more easily
@@ -260,6 +277,7 @@ var !h$currentThread = null;
 // use these things instead of building objects manually
 `closureConstructors debug`;
 
+`garbageCollector`;
 `stackManip`;
 
 fun h$bh {
