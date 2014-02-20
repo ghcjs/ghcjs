@@ -89,7 +89,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
   let genBase = isJust (gsGenBase settings)
       jsExt | genBase   = "base.js"
             | otherwise = "js"
-      debug = gsDebug settings
+      debug = buildingDebug dflags
       rootTest | Just baseMod <- gsGenBase settings =
                    \(Fun p m s) -> m == T.pack baseMod
                | otherwise = isRootFun
@@ -108,7 +108,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
                 (Compactor.baseUnits base)
                 (roots `S.union` rtsDeps (map fst pkgs))
   createDirectoryIfMissing False out
-  let (outJs, metaSize, renamerState, stats) = renderLinker settings (Compactor.baseRenamerState base) code
+  let (outJs, metaSize, renamerState, stats) = renderLinker settings dflags (Compactor.baseRenamerState base) code
       pkgs' = filter (\p -> T.pack (packageIdString p) `notElem` Compactor.basePkgs base) (map fst pkgs)
       pkgsT = map (T.pack . packageIdString) pkgs'
   BL.writeFile (out </> "out" <.> jsExt) outJs
@@ -175,11 +175,12 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
                          True  -> return p
 
 renderLinker :: GhcjsSettings
+             -> DynFlags
              -> Compactor.RenamerState
              -> [(Package, Module, JStat, [ClosureInfo])] -- ^ linked code per module
              -> (BL.ByteString, Int64, Compactor.RenamerState, LinkerStats)
-renderLinker settings renamerState code =
-  let (renamerState', compacted, meta) = Compactor.compact settings renamerState (map (\(_,_,s,ci) -> (s,ci)) code)
+renderLinker settings dflags renamerState code =
+  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map (\(_,_,s,ci) -> (s,ci)) code)
       pe = TLE.encodeUtf8 . (<>"\n") . displayT . renderPretty 0.8 150 . pretty
       rendered  = parMap rdeepseq pe compacted
       renderedMeta = pe meta

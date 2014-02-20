@@ -92,7 +92,7 @@ generate settings df s m =
   in  flip evalState (initState df m uf) $ do
         (st, g) <- pass df m s'
         let (p, d) = unzip g
-            (st', dbg) = dumpAst st settings s'
+            (st', dbg) = dumpAst st settings df s'
         deps <- genMetaData d
         return . BL.toStrict $
           Object.object' st' deps (p ++ dbg) -- p first, so numbering of linkable units lines up
@@ -105,10 +105,11 @@ generate settings df s m =
  -}
 dumpAst :: Object.SymbolTable
         -> GhcjsSettings
+        -> DynFlags
         -> StgPgm
         -> (Object.SymbolTable, [([Text], BL.ByteString)])
-dumpAst st settings s
-  | gsDebug settings = (st', [(["h$debug", "h$dumpAst"], bs)])
+dumpAst st settings dflags s
+  | buildingDebug dflags = (st', [(["h$debug", "h$dumpAst"], bs)])
   | otherwise        = (st, [])
       where
         (st', bs) = Object.serializeStat st [] [j| h$dumpAst = `x` |]
@@ -410,7 +411,7 @@ genApp _ _ i [StgLitArg (MachStr bs), x]
                    return `Stack`[`Sp`];
                  |]
 genApp force mstackTop i a
-    | isPrimitiveType (idType i) || isStrictType (idType i)
+    | not (isUnboxedTupleType (idType i)) && (isPrimitiveType (idType i) || isStrictType (idType i))
             = r1 <> return [j| return `Stack`[`Sp`]; |]
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do
           ii <- enterId

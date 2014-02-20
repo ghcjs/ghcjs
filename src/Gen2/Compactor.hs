@@ -46,12 +46,15 @@ import           Gen2.ClosureInfo
 import           Gen2.Object
 import qualified Gen2.Optimizer as Optimizer
 
+import           DynFlags
+
 compact :: GhcjsSettings
+        -> DynFlags
         -> RenamerState
         -> [(JStat,[ClosureInfo])]
         -> (RenamerState, [JStat],JStat)
-compact settings rs input =
-  renameInternals settings rs input
+compact settings dflags rs input =
+  renameInternals settings dflags rs input
 
 data RenamerState = RenamerState [Ident] (HashMap Text Ident)
 
@@ -62,21 +65,22 @@ emptyRenamerState :: RenamerState
 emptyRenamerState = RenamerState renamedVars HM.empty
 
 renameInternals :: GhcjsSettings
+                -> DynFlags
                 -> RenamerState
                 -> [(JStat,[ClosureInfo])]
                 -> (RenamerState, [JStat], JStat)
-renameInternals settings rs stats = (rs', stats', meta)
+renameInternals settings dflags rs stats = (rs', stats', meta)
   where
     ((stats', meta), rs') = runState renamed rs
     renamed = (,) <$> mapM doRename stats <*> metadata (stats >>= snd)
     doRename (stat, ci)
-      | gsDebug settings = do
-         rci <- renderClosureInfo settings ci
+      | buildingDebug dflags = do
+         rci <- renderClosureInfo settings dflags ci
          return (stat <> rci)
       | otherwise = identsS renameVar stat
     metadata cis
-      | gsDebug settings = return mempty -- encoded for each block separately
-      | otherwise        = renderClosureInfo settings cis
+      | buildingDebug dflags = return mempty -- encoded for each block separately
+      | otherwise        = renderClosureInfo settings dflags cis
 
 renameVar :: Ident -> State RenamerState Ident
 renameVar i@(TxtI xs)
@@ -87,9 +91,12 @@ renameVar i@(TxtI xs)
         Nothing -> put (RenamerState ys (HM.insert xs y m)) >> return y
   | otherwise = return i
 
-renderClosureInfo :: GhcjsSettings -> [ClosureInfo] -> State RenamerState JStat
-renderClosureInfo settings cis =
-   fmap (renderInfoBlock settings . renameClosureInfo cis) get
+renderClosureInfo :: GhcjsSettings
+                  -> DynFlags
+                  -> [ClosureInfo]
+                  -> State RenamerState JStat
+renderClosureInfo settings dflags cis =
+   fmap (renderInfoBlock settings dflags . renameClosureInfo cis) get
 
 renameClosureInfo :: [ClosureInfo] -> RenamerState -> [ClosureInfo]
 renameClosureInfo cis (RenamerState _ m) =
@@ -101,9 +108,9 @@ renameClosureInfo cis (RenamerState _ m) =
     h _ CINoStatic = CINoStatic
     h m0 (CIStaticRefs rs) = CIStaticRefs (map (\sr -> fromMaybe sr $ HM.lookup sr m0) rs)
 
-renderInfoBlock :: GhcjsSettings -> [ClosureInfo] -> JStat
-renderInfoBlock settings infos
-  | gsDebug settings = mconcat (map (closureInfoStat True) infos)
+renderInfoBlock :: GhcjsSettings -> DynFlags -> [ClosureInfo] -> JStat
+renderInfoBlock settings dflags infos
+  | buildingDebug dflags = mconcat (map (closureInfoStat True) infos)
   | otherwise =
       [j| h$initStatic.push(\ {
             var !h$functions = `funArr`;

@@ -60,6 +60,8 @@ Library
                      Compiler.GhcjsHooks,
                      Compiler.GhcjsPlatform,
                      Compiler.Info,
+                     Compiler.Program,
+                     Compiler.GhcjsProgram,
                      Compiler.Settings,
                      Compiler.Utils,
                      Compiler.Variants,
@@ -85,7 +87,6 @@ Library
                    bytestring     >= 0.10     && < 0.11,
                    attoparsec     >= 0.11     && < 0.12,
                    aeson          >= 0.7      && < 0.8,
---                   jmacro         >= 0.7      && < 0.8,
                    text           >= 0.11     && < 1.2,
                    wl-pprint-text >= 1.1      && < 1.2,
                    lens           >= 4.0      && < 4.1,
@@ -108,6 +109,7 @@ Library
                    parallel       >= 3.2      && < 3.3,
                    hashable,
                    unordered-containers,
+                   optparse-applicative       >= 0.7 && < 0.8,
                    -- for JMacro
                    regex-posix                >= 0.90 && < 0.100,
                    safe                       >= 0.3  && < 0.4,
@@ -118,25 +120,15 @@ Library
     buildable: True
     hs-source-dirs: src
     include-dirs: include
-    GHC-Options:    -O -fno-warn-orphans -auto-all
+    GHC-Options:    -O2 -fno-warn-orphans -auto-all
 
 Executable ghcjs
     Main-Is:        Main.hs
     Default-Language: Haskell2010
     hs-source-dirs: src-bin
     Build-Depends:  base                >= 4    &&  < 5,
-                    containers,
-                    ghcjs,
-                    ghc,
-                    text                >= 0.11 && < 1.2,
-                    ghc-paths,
-                    process,
-                    directory,
-                    filepath,
-                    bytestring          >= 0.10  && < 0.11,
-                    Cabal,
-                    optparse-applicative >= 0.7 && < 0.8
-    GHC-Options:    -O -fno-warn-orphans -rtsopts -with-rtsopts=-K256m -with-rtsopts=-N -auto-all -threaded
+                    ghcjs
+    GHC-Options:    -O -rtsopts -with-rtsopts=-K256m -with-rtsopts=-N -auto-all -threaded
 
 Executable ghcjs-pkg
     if flag(compiler-only)

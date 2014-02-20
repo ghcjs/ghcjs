@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Compiler.Info where
 
 import           Data.Version     as Version
@@ -17,13 +17,10 @@ import           System.FilePath  ((</>))
 
 import           Config           (cProjectVersion)
 import           DynFlags         (compilerInfo)
-#ifndef GHCJS_INTEGRATED
 import           GHC
 import qualified GHC.Paths
 import           Paths_ghcjs
-#endif
 
-#ifndef GHCJS_INTEGRATED
 getCompilerInfo = do
       glbDb <- getGlobalPackageDB
       df <- runGhc (Just GHC.Paths.libdir) getSessionDynFlags
@@ -34,7 +31,6 @@ getCompilerInfo = do
            , ("Project version", getCompilerVersion)
            , ("LibDir", libDir)
            ] ++ compilerInfo df
-#endif
 
 getGlobalPackageBase = do
   appdir <- getAppUserDataDirectory "ghcjs"
@@ -53,7 +49,6 @@ getGlobalPackageInst = fmap (</> "lib") getGlobalPackageBase
 -- Just the GHC version
 getGhcCompilerVersion = cProjectVersion
 
-#ifndef GHCJS_INTEGRATED
 -- GHCJS-GHC
 getFullCompilerVersion = Version.showVersion version ++ "-" ++ getGhcCompilerVersion
 
@@ -64,15 +59,4 @@ getCompilerSubdir = "ghcjs-" ++ getCompilerVersion
 
 ghcjsDataDir :: IO FilePath
 ghcjsDataDir = getDataDir
-#else
 
-getCompilerVersion = cProjectVersion ++ "-0"
-
-#endif
-
-getEnvMay :: String -> IO (Maybe String)
-getEnvMay xs = fmap Just (getEnv xs)
-               `Ex.catch` \(_::Ex.SomeException) -> return Nothing
-
-getEnvOpt :: MonadIO m => String -> m Bool
-getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)
