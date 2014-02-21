@@ -176,7 +176,8 @@ initSourceTree currentDir = do
   extraPackages <- ls "extra"
   forM_ extraPackages $ \p -> do
                            isDir <- test_d p
-                           when isDir (patchPackage "extra" (toString p))
+                           rp <- relativeTo "extra" p
+                           when isDir (patchPackage "extra" (toString rp))
   preparePrimops
   buildGenPrim
   buildGmpConstants
