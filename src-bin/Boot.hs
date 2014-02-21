@@ -167,7 +167,11 @@ initSourceTree currentDir = do
            git ["clone", "http://github.com/ghcjs/ghcjs-boot"]
            cd "ghcjs-boot"
            git ["submodule", "update", "--init", "--recursive"]
-  forM_ bootPackages  (patchPackage "boot")
+  forM_ bootPackages (patchPackage "boot")
+  extraPackages <- ls "extra"
+  forM_ extraPackages $ \p -> do
+                           isDir <- test_d p
+                           when isDir (patchPackage "extra" (toString p))
   preparePrimops
   buildGenPrim
   buildGmpConstants
@@ -278,10 +282,8 @@ installExtraPackages s = sub $ do
       readExtra file =
         filter (not . ignored) . map T.strip . T.lines <$> readfile file
       installExtra c pkgs = do
-        forM_ pkgs $ \pkg -> when ("./" `T.isPrefixOf` pkg) $ do
-          let pkg' = T.unpack (T.drop 2 pkg)
-          when (initTree s) $ sub (cd ".." >> patchPackage "extra" pkg')
-          preparePackage pkg'
+        forM_ pkgs $ \pkg -> when ("./" `T.isPrefixOf` pkg) $
+          preparePackage $ T.unpack (T.drop 2 pkg)
         when (not $ null pkgs)
           (c $ ["install", "--ghcjs"] ++ cabalFlags False s ++ pkgs)
 
