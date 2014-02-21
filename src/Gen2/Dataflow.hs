@@ -19,7 +19,6 @@ module Gen2.Dataflow ( Graph(..), nodes, arcsIn, arcsOut, entry, nodeid, labels,
                      , SimpleStat(..)
                      , Val(..)
                      , Id, IdSet
-                     , BinOp(..), UnOp(..), fromJBOp, toJBOp, fromJUOp, toJUOp
                      , isEqOp, isBoolOp
                      , NodeId
                      , Arc(..), arcFrom, arcTo, arcType
@@ -99,8 +98,8 @@ data Expr =
         ValE  Val
       | SelE  Expr Id
       | IdxE  Expr Expr
-      | BOpE  BinOp Expr Expr
-      | UOpE  UnOp Expr
+      | BOpE  JOp Expr Expr
+      | UOpE  JUOp Expr
       | CondE Expr Expr Expr
       | ApplE Expr [Expr]
   deriving (Show, Eq, Ord, Data, Typeable)
@@ -109,16 +108,15 @@ eBool :: Bool -> Expr
 eBool = ValE . BoolV
 
 fromJExpr :: JExpr -> IdS Expr
-fromJExpr (ValExpr v)          = ValE  <$> fromJVal v
-fromJExpr (IdxExpr e1 e2)      = IdxE  <$> fromJExpr e1 <*> fromJExpr e2
-fromJExpr (InfixExpr op e1 e2) = BOpE  <$> pure (fromJBOp op) <*> fromJExpr e1 <*> fromJExpr e2
-fromJExpr (PPostExpr b o e)    = UOpE  <$> pure (fromJUOp b o) <*> fromJExpr e
-fromJExpr (IfExpr e1 e2 e3)    = CondE <$> fromJExpr e1 <*> fromJExpr e2 <*> fromJExpr e3
-fromJExpr (ApplExpr e1 es)     = ApplE <$> fromJExpr e1 <*> mapM fromJExpr es
-fromJExpr (SelExpr e i)        = SelE  <$> fromJExpr e <*> fromJIdent i
-fromJExpr (UnsatExpr{})        = error "fromJExpr: unsaturated expression"
-fromJExpr (AntiExpr{})         = error "fromJExpr: antiquoted expression"
-fromJExpr (TypeExpr{})         = error "fromJExpr: type expression"
+fromJExpr (ValExpr v)         = ValE  <$> fromJVal v
+fromJExpr (IdxExpr e1 e2)     = IdxE  <$> fromJExpr e1 <*> fromJExpr e2
+fromJExpr (InfixExpr o e1 e2) = BOpE  <$> pure o <*> fromJExpr e1 <*> fromJExpr e2
+fromJExpr (UOpExpr o e)       = UOpE  <$> pure o <*> fromJExpr e
+fromJExpr (IfExpr e1 e2 e3)   = CondE <$> fromJExpr e1 <*> fromJExpr e2 <*> fromJExpr e3
+fromJExpr (ApplExpr e1 es)    = ApplE <$> fromJExpr e1 <*> mapM fromJExpr es
+fromJExpr (SelExpr e i)       = SelE  <$> fromJExpr e <*> fromJIdent i
+fromJExpr (UnsatExpr{})       = error "fromJExpr: unsaturated expression"
+fromJExpr (AntiExpr{})        = error "fromJExpr: antiquoted expression"
 
 toJExpr' :: IntMap Ident -> AExpr a -> JExpr
 toJExpr' m (AExpr _ e) = exprToJExpr m e
@@ -130,13 +128,12 @@ exprToJExpr m (SelE e i) =
     Just i' -> SelExpr (exprToJExpr m e) i'
     Nothing -> error ("toJExpr: unknown identifier: " ++ show i)
 exprToJExpr m (IdxE e1 e2) = IdxExpr (exprToJExpr m e1) (exprToJExpr m e2)
-exprToJExpr m (BOpE op e1 e2) = InfixExpr (toJBOp op) (exprToJExpr m e1) (exprToJExpr m e2)
-exprToJExpr m (UOpE op e) =
-  let (pos, op') = toJUOp op
-  in PPostExpr pos op' (exprToJExpr m e)
+exprToJExpr m (BOpE op e1 e2) = InfixExpr op (exprToJExpr m e1) (exprToJExpr m e2)
+exprToJExpr m (UOpE op e) = UOpExpr op (exprToJExpr m e)
 exprToJExpr m (CondE e1 e2 e3) = IfExpr (exprToJExpr m e1) (exprToJExpr m e2) (exprToJExpr m e3)
 exprToJExpr m (ApplE e es) = ApplExpr (exprToJExpr m e) (map (exprToJExpr m) es)
 
+{-
 data UnOp =
         NotOp           -- !
       | BNotOp          -- ~
@@ -260,9 +257,10 @@ toJBOp LAndOp        = "&&"
 toJBOp LOrOp         = "||"
 toJBOp InstanceofOp  = "instanceof"
 toJBOp InOp          = "in"
+-}
 
 -- does this operator always give a bool result
-isBoolOp :: BinOp -> Bool
+isBoolOp :: JOp -> Bool
 isBoolOp EqOp         = True
 isBoolOp StrictEqOp   = True
 isBoolOp NeqOp        = True
@@ -276,7 +274,7 @@ isBoolOp InOp         = True
 isBoolOp _            = False
  
 -- is this an equality operator
-isEqOp :: BinOp -> Bool
+isEqOp :: JOp -> Bool
 isEqOp EqOp        = True
 isEqOp NeqOp       = True
 isEqOp StrictEqOp  = True
@@ -571,7 +569,7 @@ cfg toAExpr stat = execState buildGraph emptyGraph
       identsR .= m'
       return r'
     go :: JStat -> NodeId -> NodeId -> NodeId -> State (Graph a) NodeId
-    go (DeclStat i _) lb lc n = do
+    go (DeclStat i) lb lc n = do
       i' <- ident i
       newSimpleNode (DeclS i') n
     go (ReturnStat e) lb lc n = do
@@ -611,8 +609,8 @@ cfg toAExpr stat = execState buildGraph emptyGraph
       e' <- expr (ApplExpr e es)
       es' <- mapM expr es
       newSimpleNode (ExprS e') n
-    go (PPostStat b op e)                lb lc n = do
-       e' <- expr (PPostExpr b op e)
+    go (UOpStat op e)                    lb lc n = do
+       e' <- expr (UOpExpr op e)
        newSimpleNode (ExprS e') n
     go (AssignStat e1 e2)                lb lc n = do
        e1' <- expr e1
@@ -620,7 +618,6 @@ cfg toAExpr stat = execState buildGraph emptyGraph
        newSimpleNode (AssignS e1' e2') n
     go (UnsatBlock{})                    lb lc n = error "cfg: unsaturated block"
     go (AntiStat t)                      lb lc n = error ("cfg: antistat: " ++ T.unpack t)
-    go (ForeignStat t _)                 lb lc n = error ("cfg: foreignstat" ++ show t)
     go (LabelStat lbl s1)                lb lc n = do
       lid <- newNodeId
       newLabel lbl lid
@@ -661,10 +658,9 @@ unCfg g = go' (g ^. entry)
     go (LabelNode lbl s)     = LabelStat lbl (go' s)
 
 fromSimpleStat :: IntMap Ident -> SimpleStat a -> JStat
-fromSimpleStat m (DeclS i)       = DeclStat (toJIdent m i) Nothing
+fromSimpleStat m (DeclS i)       = DeclStat (toJIdent m i)
 fromSimpleStat m (ExprS (AExpr _ (ApplE e es))) = ApplStat (exprToJExpr m e) (map (exprToJExpr m) es)
-fromSimpleStat m (ExprS (AExpr _ (UOpE op e))) = let (pos, op') = toJUOp op
-                                                in PPostStat pos op' (exprToJExpr m e)
+fromSimpleStat m (ExprS (AExpr _ (UOpE op e))) = UOpStat op (exprToJExpr m e)
 fromSimpleStat _ (ExprS (AExpr _ e)) = error ("fromSimpleStat: ExprS, not a valid expression statement: " ++ show e)
 fromSimpleStat m (AssignS e1 e2) = AssignStat (toJExpr' m e1) (toJExpr' m e2)
 

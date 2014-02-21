@@ -14,7 +14,8 @@ Simple DSL for lightweight (untyped) programmatic generation of Javascript.
 
 module Compiler.JMacro.Base (
   -- * ADT
-  JStat(..), JExpr(..), JVal(..), Ident(..), IdentSupply(..), JsLabel,
+  JStat(..), JExpr(..), JVal(..), JOp(..), JUOp(..),
+  Ident(..), IdentSupply(..), JsLabel,
   -- * Generic traversal (via compos)
   JMacro(..), JMGadt(..), Compos(..),
   composOp, composOpM, composOpM_, composOpFold,
@@ -34,7 +35,7 @@ module Compiler.JMacro.Base (
   -- * Hash combinators
   jhEmpty, jhSingle, jhAdd, jhFromList,
   -- * Utility
-  jsSaturate, jtFromList, SaneDouble(..)
+  jsSaturate, SaneDouble(..)
   ) where
 import Prelude hiding (tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
 import Control.Applicative hiding (empty)
@@ -61,8 +62,6 @@ import qualified Data.HashMap.Strict as HM
 import Text.PrettyPrint.Leijen.Text hiding ((<$>))
 
 import qualified Text.PrettyPrint.Leijen.Text as PP
-
-import Compiler.JMacro.Types
 
 -- wl-pprint-text compatibility with pretty
 infixl 5 $$, $+$
@@ -110,12 +109,10 @@ instance Show a => Show (IdentSupply a) where
     show x = "(" ++ show (sat_ x) ++ ")"
 
 
--- Yield statement?
--- destructuring/pattern matching functions -- pattern matching in lambdas.
 -- array comprehensions/generators?
 
 -- | Statements
-data JStat = DeclStat   Ident (Maybe JLocalType)
+data JStat = DeclStat   Ident
            | ReturnStat JExpr
            | IfStat     JExpr JStat JStat
            | WhileStat  Bool JExpr JStat -- bool is "do"
@@ -124,11 +121,10 @@ data JStat = DeclStat   Ident (Maybe JLocalType)
            | TryStat    JStat Ident JStat JStat
            | BlockStat  [JStat]
            | ApplStat   JExpr [JExpr]
-           | PPostStat  Bool String JExpr
+           | UOpStat JUOp JExpr
            | AssignStat JExpr JExpr
            | UnsatBlock (IdentSupply JStat)
            | AntiStat   Text
-           | ForeignStat Ident JLocalType
            | LabelStat JsLabel JStat
            | BreakStat (Maybe JsLabel)
            | ContinueStat (Maybe JsLabel)
@@ -150,13 +146,12 @@ instance Monoid JStat where
 data JExpr = ValExpr    JVal
            | SelExpr    JExpr Ident
            | IdxExpr    JExpr JExpr
-           | InfixExpr  String JExpr JExpr
-           | PPostExpr  Bool String JExpr
+           | InfixExpr  JOp JExpr JExpr
+           | UOpExpr JUOp JExpr
            | IfExpr     JExpr JExpr JExpr
            | ApplExpr   JExpr [JExpr]
            | UnsatExpr  (IdentSupply JExpr)
            | AntiExpr   Text
-           | TypeExpr   Bool JExpr JLocalType
              deriving (Eq, Ord, Show, Data, Typeable)
 
 -- | Values
@@ -170,6 +165,101 @@ data JVal = JVar     Ident
           | JFunc    [Ident] JStat
           | UnsatVal (IdentSupply JVal)
             deriving (Eq, Ord, Show, Data, Typeable)
+
+data JOp =
+        EqOp            -- ==
+      | StrictEqOp      -- ===
+      | NeqOp           -- !=
+      | StrictNeqOp     -- !==
+      | GtOp            -- >
+      | GeOp            -- >=
+      | LtOp            -- <
+      | LeOp            -- <=
+      | AddOp           -- +
+      | SubOp           -- -
+      | MulOp           -- *
+      | DivOp           -- /
+      | ModOp           -- %
+      | LeftShiftOp     -- <<
+      | RightShiftOp    -- >>
+      | ZRightShiftOp   -- >>>
+      | BAndOp          -- &
+      | BOrOp           -- |
+      | BXorOp          -- ^
+      | LAndOp          -- &&
+      | LOrOp           -- ||
+      | InstanceofOp    -- instanceof
+      | InOp            -- in
+  deriving (Show, Eq, Ord, Enum, Data, Typeable)
+
+opText :: JOp -> TL.Text
+opText EqOp          = "=="
+opText StrictEqOp    = "==="
+opText NeqOp         = "!="
+opText StrictNeqOp   = "!=="
+opText GtOp          = ">"
+opText GeOp          = ">="
+opText LtOp          = "<"
+opText LeOp          = "<="
+opText AddOp         = "+"
+opText SubOp         = "-"
+opText MulOp         = "*"
+opText DivOp         = "/"
+opText ModOp         = "%"
+opText LeftShiftOp   = "<<"
+opText RightShiftOp  = ">>"
+opText ZRightShiftOp = ">>>"
+opText BAndOp        = "&"
+opText BOrOp         = "|"
+opText BXorOp        = "^"
+opText LAndOp        = "&&"
+opText LOrOp         = "||"
+opText InstanceofOp  = "instanceof"
+opText InOp          = "in"
+
+data JUOp =
+        NotOp           -- !
+      | BNotOp          -- ~
+      | NegOp           -- -
+      | PlusOp          -- +x
+      | NewOp           -- new x
+      | TypeofOp        -- typeof x
+      | DeleteOp        -- delete x
+      | YieldOp         -- yield x
+      | VoidOp          -- void x
+      | PreInc          -- ++x
+      | PostInc         -- x++
+      | PreDec          -- --x
+      | PostDec         -- x--
+  deriving (Show, Eq, Ord, Enum, Data, Typeable)
+
+isPre :: JUOp -> Bool
+isPre PostInc = False
+isPre PostDec = False
+isPre _       = True
+
+isAlphaOp :: JUOp -> Bool
+isAlphaOp NewOp    = True
+isAlphaOp TypeofOp = True
+isAlphaOp DeleteOp = True
+isAlphaOp YieldOp  = True
+isAlphaOp VoidOp   = True
+isAlphaOp _        = False
+
+uOpText :: JUOp -> TL.Text
+uOpText NotOp    = "!"
+uOpText BNotOp   = "~"
+uOpText NegOp    = "-"
+uOpText PlusOp   = "+"
+uOpText NewOp    = "new"
+uOpText TypeofOp = "typeof"
+uOpText DeleteOp = "delete"
+uOpText YieldOp  = "yield"
+uOpText VoidOp   = "void"
+uOpText PreInc   = "++"
+uOpText PostInc  = "++"
+uOpText PreDec   = "--"
+uOpText PostDec  = "--"
 
 newtype SaneDouble = SaneDouble Double deriving (Data, Typeable, Fractional, Num)
 
@@ -188,19 +278,12 @@ instance Show SaneDouble where
 newtype Ident = TxtI Text
  deriving (Show, Data, Typeable, Hashable, Eq, Ord)
 
-{-
-data IdentA = IdentA Ident
-            | AntiI  Text
-  deriving (Show, Data, Typeable, Eq, Ord)
--}
-
 expr2stat :: JExpr -> JStat
 expr2stat (ApplExpr x y) = (ApplStat x y)
 expr2stat (IfExpr x y z) = IfStat x (expr2stat y) (expr2stat z)
-expr2stat (PPostExpr b s x) = PPostStat b s x
+expr2stat (UOpExpr o x) = UOpStat o x
 expr2stat (AntiExpr x) = AntiStat x
 expr2stat _ = nullStat
-
 
 {--------------------------------------------------------------------
   Compos
@@ -209,6 +292,7 @@ expr2stat _ = nullStat
 -- the JMacro ADT.
 
 -- | Utility class to coerce the ADT into a regular structure.
+
 class JMacro a where
     jtoGADT :: a -> JMGadt a
     jfromGADT :: JMGadt a -> a
@@ -240,7 +324,6 @@ data JMGadt a where
     JMGExpr :: JExpr -> JMGadt JExpr
     JMGVal  :: JVal  -> JMGadt JVal
 
-
 composOp :: Compos t => (forall a. t a -> t a) -> t b -> t b
 composOp f = runIdentity . composOpM (Identity . f)
 composOpM :: (Compos t, Monad m) => (forall a. t a -> m (t a)) -> t b -> m (t b)
@@ -263,7 +346,7 @@ jmcompos ret app f' v =
     case v of
      JMGId _ -> ret v
      JMGStat v' -> ret JMGStat `app` case v' of
-           DeclStat i t -> ret DeclStat `app` f i `app` ret t
+           DeclStat i -> ret DeclStat `app` f i
            ReturnStat i -> ret ReturnStat `app` f i
            IfStat e s s' -> ret IfStat `app` f e `app` f s `app` f s'
            WhileStat b e s -> ret (WhileStat b) `app` f e `app` f s
@@ -273,11 +356,10 @@ jmcompos ret app f' v =
            BlockStat xs -> ret BlockStat `app` mapM' f xs
            ApplStat  e xs -> ret ApplStat `app` f e `app` mapM' f xs
            TryStat s i s1 s2 -> ret TryStat `app` f s `app` f i `app` f s1 `app` f s2
-           PPostStat b o e -> ret (PPostStat b o) `app` f e
+           UOpStat o e -> ret (UOpStat o) `app` f e
            AssignStat e e' -> ret AssignStat `app` f e `app` f e'
            UnsatBlock _ -> ret v'
            AntiStat _ -> ret v'
-           ForeignStat i t -> ret ForeignStat `app` f i `app` ret t
            ContinueStat l -> ret (ContinueStat l)
            BreakStat l -> ret (BreakStat l)
            LabelStat l s -> ret (LabelStat l) `app` f s
@@ -286,12 +368,11 @@ jmcompos ret app f' v =
            SelExpr e e' -> ret SelExpr `app` f e `app` f e'
            IdxExpr e e' -> ret IdxExpr `app` f e `app` f e'
            InfixExpr o e e' -> ret (InfixExpr o) `app` f e `app` f e'
-           PPostExpr b o e -> ret (PPostExpr b o) `app` f e
+           UOpExpr o e -> ret (UOpExpr o) `app` f e
            IfExpr e e' e'' -> ret IfExpr `app` f e `app` f e' `app` f e''
            ApplExpr e xs -> ret ApplExpr `app` f e `app` mapM' f xs
-           AntiExpr _ -> ret v'
-           TypeExpr b e t -> ret (TypeExpr b) `app` f e `app` ret t
            UnsatExpr _ -> ret v'
+           AntiExpr _ -> ret v'
      JMGVal v' -> ret JMGVal `app` case v' of
            JVar i -> ret JVar `app` f i
            JList xs -> ret JList `app` mapM' f xs
@@ -419,14 +500,14 @@ scopify x = evalState (jfromGADT <$> go (jtoGADT x)) (newIdentSupply Nothing)
                    (JMGStat (BlockStat ss)) -> JMGStat . BlockStat <$>
                                              blocks ss
                        where blocks [] = return []
-                             blocks (DeclStat (TxtI i) t : xs)
-                               | "!!" `T.isPrefixOf` i = (DeclStat (TxtI (T.drop 2 i)) t:) <$> blocks xs
-                               | "!" `T.isPrefixOf` i  = (DeclStat (TxtI $ T.tail i) t:) <$> blocks xs
+                             blocks (DeclStat (TxtI i) : xs)
+                               | "!!" `T.isPrefixOf` i = (DeclStat (TxtI (T.drop 2 i)):) <$> blocks xs
+                               | "!" `T.isPrefixOf` i  = (DeclStat (TxtI $ T.tail i):) <$> blocks xs
                                | otherwise = do
                                   (newI:st) <- get
                                   put st
                                   rest <- blocks xs
-                                  return $ [DeclStat newI t `mappend` jsReplace_ [(TxtI i, newI)] (BlockStat rest)]
+                                  return $ [DeclStat newI `mappend` jsReplace_ [(TxtI i, newI)] (BlockStat rest)]
                              blocks (x':xs) = (jfromGADT <$> go (jtoGADT x')) <:> blocks xs
                              (<:>) = liftM2 (:)
                    (JMGStat (TryStat s (TxtI i) s1 s2)) -> do
@@ -460,12 +541,11 @@ renderJs' r = jsToDocR r . jsSaturate Nothing
 data RenderJs = RenderJs { renderJsS :: RenderJs -> JStat -> Doc
                          , renderJsE :: RenderJs -> JExpr -> Doc
                          , renderJsV :: RenderJs -> JVal  -> Doc
-                         , renderJsT :: RenderJs -> JType -> Doc
                          , renderJsI :: RenderJs -> Ident -> Doc
                          }
 
 defaultRenderJs :: RenderJs
-defaultRenderJs = RenderJs defRenderJsS defRenderJsE defRenderJsV defRenderJsT defRenderJsI
+defaultRenderJs = RenderJs defRenderJsS defRenderJsE defRenderJsV defRenderJsI
 
 jsToDoc :: JsToDoc a => a -> Doc
 jsToDoc = jsToDocR defaultRenderJs
@@ -487,23 +567,17 @@ class JsToDoc a where jsToDocR :: RenderJs -> a -> Doc
 instance JsToDoc JStat where jsToDocR r = renderJsS r r
 instance JsToDoc JExpr where jsToDocR r = renderJsE r r
 instance JsToDoc JVal  where jsToDocR r = renderJsV r r
-instance JsToDoc JType where jsToDocR r = renderJsT r r
 instance JsToDoc Ident where jsToDocR r = renderJsI r r
 instance JsToDoc [JExpr] where
     jsToDocR r = vcat . map ((<> semi) . jsToDocR r)
 instance JsToDoc [JStat] where
     jsToDocR r = vcat . map ((<> semi) . jsToDocR r)
-instance JsToDoc JLocalType where
-    jsToDocR r (cs,t) = maybe (text "") (<+> text "=> ") (ppConstraintList r cs) <> jsToDocR r t
 
 defRenderJsS :: RenderJs -> JStat -> Doc
 defRenderJsS r (IfStat cond x y) = text "if" <> parens (jsToDocR r cond) $$ braceNest' (jsToDocR r x) $$ mbElse
         where mbElse | y == BlockStat []  = PP.empty
                      | otherwise = text "else" $$ braceNest' (jsToDocR r y)
-defRenderJsS r (DeclStat x t) = text "var" <+> jsToDocR r x <> rest
-        where rest = case t of
-                       Nothing -> text ""
-                       Just tp -> text " /* ::" <+> jsToDocR r tp <+> text "*/"
+defRenderJsS r (DeclStat x) = text "var" <+> jsToDocR r x
 defRenderJsS r (WhileStat False p b)  = text "while" <> parens (jsToDocR r p) $$ braceNest' (jsToDocR r b)
 defRenderJsS r (WhileStat True  p b)  = (text "do" $$ braceNest' (jsToDocR r b)) $+$ text "while" <+> parens (jsToDocR r p)
 defRenderJsS r (UnsatBlock e) = jsToDocR r $ sat_ e
@@ -532,12 +606,11 @@ defRenderJsS r (TryStat s i s1 s2) = text "try" $$ braceNest' (jsToDocR r s) $$ 
               mbFinally | s2 == BlockStat [] = PP.empty
                         | otherwise = text "finally" $$ braceNest' (jsToDocR r s2)
 defRenderJsS r (AssignStat i x) = jsToDocR r i <+> char '=' <+> jsToDocR r x
-defRenderJsS r (PPostStat isPre op x)
-        | isPre && all isAlpha op = text (TL.pack op) <+> optParens r x
-        | isPre = text (TL.pack op) <> optParens r x
-        | otherwise = optParens r x <> text (TL.pack op)
-defRenderJsS r (AntiStat s) = text . TL.fromChunks $ ["`(", s, ")`"]
-defRenderJsS r (ForeignStat i t) = text "// foreign" <+> jsToDocR r i <+> text "::" <+> jsToDocR r t
+defRenderJsS r (UOpStat op x)
+        | isPre op && isAlphaOp op = text (uOpText op) <+> optParens r x
+        | isPre op = text (uOpText op) <> optParens r x
+        | otherwise = optParens r x <> text (uOpText op)
+defRenderJsS r (AntiStat s) = error "defRenderJsS: AntiStat"
 defRenderJss r (BlockStat xs) = jsToDocR r (flattenBlocks xs)
 
 flattenBlocks :: [JStat] -> [JStat]
@@ -547,7 +620,7 @@ flattenBlocks [] = []
 
 optParens :: RenderJs -> JExpr -> Doc
 optParens r x = case x of
-                (PPostExpr _ _ _) -> parens (jsToDocR r x)
+                (UOpExpr _ _) -> parens (jsToDocR r x)
                 _ -> jsToDocR r x
 
 defRenderJsE :: RenderJs -> JExpr -> Doc
@@ -555,14 +628,14 @@ defRenderJsE r (ValExpr x) = jsToDocR r x
 defRenderJsE r (SelExpr x y) = cat [jsToDocR r x <> char '.', jsToDocR r y]
 defRenderJsE r (IdxExpr x y) = jsToDocR r x <> brackets (jsToDocR r y)
 defRenderJsE r (IfExpr x y z) = parens (jsToDocR r x <+> char '?' <+> jsToDocR r y <+> char ':' <+> jsToDocR r z)
-defRenderJsE r (InfixExpr op x y) = parens $ hsep [jsToDocR r x, text (TL.pack op), jsToDocR r y]
-defRenderJsE r (PPostExpr isPre op x)
-        | isPre && all isAlpha op = text (TL.pack op) <+> optParens r x
-        | isPre = text (TL.pack op) <> optParens r x
-        | otherwise = optParens r x <> text (TL.pack op)
+defRenderJsE r (InfixExpr op x y) = parens $ hsep [jsToDocR r x, text (opText op), jsToDocR r y]
+defRenderJsE r (UOpExpr op x)
+        | isPre op && isAlphaOp op = text (uOpText op) <+> optParens r x
+        | isPre op = text (uOpText op) <> optParens r x
+        | otherwise = optParens r x <> text (uOpText op)
 defRenderJsE r (ApplExpr je xs) = jsToDocR r je <> (parens . fillSep . punctuate comma $ map (jsToDocR r) xs)
-defRenderJsE r (AntiExpr s) = text . TL.fromChunks $ ["`(", s, ")`"]
-defRenderJsE r (TypeExpr b e t)  = parens $ jsToDocR r e <+> text (if b then "/* ::!" else "/* ::") <+> jsToDocR r t <+> text "*/"
+defRenderJsE r (AntiExpr s) = error "defRenderJsE: AntiExpr" -- text . TL.fromChunks $ ["`(", s, ")`"]
+
 defRenderJsE r (UnsatExpr e) = jsToDocR r $ sat_ e
 
 defRenderJsV :: RenderJs -> JVal -> Doc
@@ -584,45 +657,6 @@ defRenderJsV r (UnsatVal f) = jsToDocR r $ sat_ f
 
 defRenderJsI :: RenderJs -> Ident -> Doc
 defRenderJsI r (TxtI t) = text (TL.fromStrict t)
-
-defRenderJsT :: RenderJs -> JType -> Doc
-defRenderJsT r JTNum = text "Num"
-defRenderJsT r JTString = text "String"
-defRenderJsT r JTBool = text "Bool"
-defRenderJsT r JTStat = text "()"
-defRenderJsT r JTImpossible = text "_|_" -- "⊥"
-defRenderJsT r (JTForall vars t) = text "forall" <+> fillSep  (punctuate comma (map ppRef vars)) <> text "." <+> jsToDocR r t
-defRenderJsT r (JTFunc args ret) = fillSep . punctuate (text " ->") . map (ppType r) $ args' ++ [ret]
-        where args'
-               | null args = [JTStat]
-               | otherwise = args
-defRenderJsT r (JTList t) = brackets $ jsToDocR r t
-defRenderJsT r (JTMap t) = text "Map" <+> ppType r t
-defRenderJsT r (JTRecord t mp) = braces (fillSep . punctuate comma . map (\(x,y) -> text (TL.pack x) <+> text "::" <+> jsToDocR r y) $ M.toList mp) <+> text "[" <> jsToDocR r t <> text "]"
-defRenderJsT r (JTFree ref) = ppRef ref
-defRenderJsT r (JTRigid ref _) = text "[" <> ppRef ref <> text "]"
-{-
-        maybe (text "") (text " / " <>)
-                  (ppConstraintList . map (\x -> (ref,x)) $ S.toList cs) <>
-        text "]"
--}
-
-ppConstraintList :: Show a => RenderJs -> [((Maybe String, a), Constraint)] -> Maybe Doc
-ppConstraintList r cs
-    | null cs = Nothing
-    | otherwise = Just . parens . fillSep . punctuate comma $ map go cs
-    where
-      go (vr,Sub   t') = ppRef vr     <+> text "<:" <+> jsToDocR r t'
-      go (vr,Super t') = jsToDocR r t' <+> text "<:" <+> ppRef vr
-
-ppRef :: Show a => (Maybe String, a) -> Doc
-ppRef (Just n,_) = text . TL.pack $ n
-ppRef (_,i) = text . TL.pack $ "t_"++show i
-
-ppType :: RenderJs -> JType -> Doc
-ppType r x@(JTFunc _ _) = parens $ jsToDocR r x
-ppType r x@(JTMap _) = parens $ jsToDocR r x
-ppType r x = jsToDocR r x
 
 {--------------------------------------------------------------------
   ToJExpr Class
@@ -696,11 +730,11 @@ instance (ToJExpr a, ToJExpr b, ToJExpr c, ToJExpr d, ToJExpr e, ToJExpr f) => T
 
 instance Num JExpr where
     fromInteger = ValExpr . JInt . fromIntegral
-    x + y = InfixExpr "+" x y
-    x - y = InfixExpr "-" x y
-    x * y = InfixExpr "*" x y
+    x + y = InfixExpr AddOp x y
+    x - y = InfixExpr SubOp x y
+    x * y = InfixExpr MulOp x y
     abs x = ApplExpr (jsv "Math.abs") [x]
-    signum x = IfExpr (InfixExpr ">" x 0) 1 (IfExpr (InfixExpr "==" x 0) 0 (-1))
+    signum x = IfExpr (InfixExpr GtOp x 0) 1 (IfExpr (InfixExpr EqOp x 0) 0 (-1))
 
 {--------------------------------------------------------------------
   Block Sugar
@@ -741,7 +775,7 @@ jVar :: ToSat a => a -> JStat
 jVar f = UnsatBlock . IS $ do
            (block, is) <- runIdentSupply $ toSat_ f []
            let addDecls (BlockStat ss) =
-                  BlockStat $ map (\x -> DeclStat x Nothing) is ++ ss
+                  BlockStat $ map (\x -> DeclStat x) is ++ ss
                addDecls x = x
            return $ addDecls block
 
@@ -750,11 +784,11 @@ jVar f = UnsatBlock . IS $ do
 -- of the enclosed expression. The result is a block statement.
 -- Usage:
 -- @jVar $ \ x y -> {JExpr involving x and y}@
-jVarTy :: ToSat a => a -> Maybe JLocalType -> JStat
-jVarTy f t = UnsatBlock . IS $ do
+jVarTy :: ToSat a => a -> {- Maybe JLocalType -> -} JStat
+jVarTy f {- t -} = UnsatBlock . IS $ do
            (block, is) <- runIdentSupply $ toSat_ f []
            let addDecls (BlockStat ss) =
-                  BlockStat $ map (\x -> DeclStat x t) is ++ ss
+                  BlockStat $ map (\x -> DeclStat x {- t -}) is ++ ss
                addDecls x = x
            return $ addDecls block
 
@@ -766,14 +800,14 @@ jForIn :: ToSat a => JExpr -> (JExpr -> a)  -> JStat
 jForIn e f = UnsatBlock . IS $ do
                (block, is) <- runIdentSupply $ toSat_ f []
                let i = headNote "jForIn" is
-               return $ DeclStat i Nothing `mappend` ForInStat False i e block
+               return $ DeclStat i `mappend` ForInStat False i e block
 
 -- | As with "jForIn" but creating a \"for each in\" statement.
 jForEachIn :: ToSat a => JExpr -> (JExpr -> a) -> JStat
 jForEachIn e f = UnsatBlock . IS $ do
                (block, is) <- runIdentSupply $ toSat_ f []
                let i = headNote "jForEachIn" is
-               return $ DeclStat i Nothing `mappend` ForInStat True i e block
+               return $ DeclStat i `mappend` ForInStat True i e block
 
 jTryCatchFinally :: (ToSat a) => JStat -> a -> JStat -> JStat
 jTryCatchFinally s f s2 = UnsatBlock . IS $ do
@@ -801,9 +835,6 @@ jhAdd  k v m = M.insert k (toJExpr v) m
 
 jhFromList :: [(Text, JExpr)] -> JVal
 jhFromList = JHash . M.fromList
-
-jtFromList :: JType -> [(String, JType)] -> JType
-jtFromList t y = JTRecord t $ M.fromList y
 
 nullStat :: JStat
 nullStat = BlockStat []

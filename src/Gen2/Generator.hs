@@ -1318,9 +1318,9 @@ delimitBlock m i s = do
     end   block = T.unpack Linker.endMarker ++ block ++ ">"
 -}
 
--- ew
+-- this hack doesn't work anymore
 comment :: String -> JStat
-comment xs = PPostStat True ("// " ++ xs) (iex $ TxtI "")
+comment xs =  mempty -- True ("// " ++ xs) (iex $ TxtI "")
 
 
 typeComment :: Id -> C

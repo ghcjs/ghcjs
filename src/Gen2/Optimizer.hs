@@ -88,7 +88,7 @@ statExprs f (IfStat e s1 s2) = IfStat <$> f e <*> pure s1 <*> pure s2
 statExprs f (ForInStat b i e s) = ForInStat b i <$> f e <*> pure s
 statExprs f (SwitchStat e es s) = SwitchStat <$> f e <*> (traverse . _1) f es <*> pure s
 statExprs f (ApplStat e1 es) = ApplStat <$> f e1 <*> traverse f es
-statExprs f (PPostStat b o e) = PPostStat b o <$> f e
+statExprs f (UOpStat o e) = UOpStat o <$> f e
 statExprs f (AssignStat e1 e2) = AssignStat <$> f e1 <*> f e2
 statExprs _ s = pure s
 
@@ -106,10 +106,9 @@ subExprs :: Traversal' JExpr JExpr
 subExprs f (SelExpr e i) = SelExpr <$> f e <*> pure i
 subExprs f (IdxExpr e1 e2) = IdxExpr <$> f e1 <*> f e2
 subExprs f (InfixExpr o e1 e2) = InfixExpr o <$> f e1 <*> f e2
-subExprs f (PPostExpr b xs e) = PPostExpr b xs <$> f e
+subExprs f (UOpExpr xs e) = UOpExpr xs <$> f e
 subExprs f (IfExpr e1 e2 e3) = IfExpr <$> f e1 <*> f e2 <*> f e3
 subExprs f (ApplExpr e es) = ApplExpr <$> f e <*> traverse f es
-subExprs f (TypeExpr b e t) = TypeExpr b <$> f e <*> pure t
 subExprs f e = f e
 
 -- traverse all 'leaf' statements in this function
@@ -131,7 +130,7 @@ thisFunction f s = f s
 localVars :: JStat -> [Ident]
 localVars = universeOf subStats >=> getLocals
   where
-    getLocals (DeclStat i _) = [i]
+    getLocals (DeclStat i) = [i]
     getLocals (ForInStat _ i _ _) = [i] -- remove ident?
     getLocals (TryStat _ i _ _) = []  -- is this correct?
     getLocals _ = []
@@ -144,7 +143,7 @@ nestedFuns = template . localFunctionVals . _JFunc
 nonExprLocalIdents :: Traversal' JStat Ident
 nonExprLocalIdents f (IfStat e s1 s2) = IfStat e <$> nonExprLocalIdents f s1
                                                  <*> nonExprLocalIdents f s2
-nonExprLocalIdents f (DeclStat i e)   = DeclStat <$> f i <*> pure e
+nonExprLocalIdents f (DeclStat i)   = DeclStat <$> f i
 nonExprLocalIdents f (WhileStat b e s) = WhileStat b e <$> nonExprLocalIdents f s
 nonExprLocalIdents f (ForInStat b i e s) = ForInStat b <$> f i
                                                        <*> pure e
@@ -210,7 +209,7 @@ removeDeadVars' s = transformOf subStats (removeDead dead) s
     locals  = S.fromList (localVars s)
 
 removeDead :: S.Set Ident -> JStat -> JStat
-removeDead dead (DeclStat i _)
+removeDead dead (DeclStat i)
    | i `S.member` dead = mempty
 removeDead _ s = s
 
@@ -652,7 +651,7 @@ foldExpr c = transformOf template f
     f e = e
 
 -- v3 `op` (c ? v1 : v2)
-constIfEq :: BinOp -> Expr -> Integer -> Integer -> Integer -> Expr
+constIfEq :: JOp -> Expr -> Integer -> Integer -> Integer -> Expr
 constIfEq op c v1 v2 v3
   | not (neqOp || eqOp) = error ("constIfEq: not an equality operator: " ++ show op)
   | v1 == v2  = ValE (BoolV $ eqOp == (v1 == v3))
@@ -664,14 +663,14 @@ constIfEq op c v1 v2 v3
     eqOp = op == EqOp || op == StrictEqOp
 
 -- only use if rel always produces a bool result
-boolRelEq :: BinOp -> BinOp -> Expr -> Expr -> Bool -> Expr
+boolRelEq :: JOp -> JOp -> Expr -> Expr -> Bool -> Expr
 boolRelEq eq rel x y b | eq == EqOp  || eq == StrictEqOp  =
   if b     then BOpE rel x y else UOpE NotOp (BOpE rel x y)
 boolRelEq eq rel x y b | eq == NeqOp || eq == StrictNeqOp =
   if not b then BOpE rel x y else UOpE NotOp (BOpE rel x y)
 boolRelEq op _   _ _ _ = error ("boolRelEq: not an equality operator: " ++ show op)
 
-negateEqOp :: BinOp -> BinOp
+negateEqOp :: JOp -> JOp
 negateEqOp EqOp        = NeqOp
 negateEqOp NeqOp       = EqOp
 negateEqOp StrictEqOp  = StrictNeqOp
@@ -778,7 +777,7 @@ exprCond' :: AExpr a -> Maybe Bool
 exprCond' = exprCond . fromA
 
 -- constant folding and other bottom up rewrites
-intInfixOp :: BinOp -> Integer -> Integer -> Expr
+intInfixOp :: JOp -> Integer -> Integer -> Expr
 intInfixOp AddOp         i1 i2 = ValE (IntV (i1+i2))
 intInfixOp SubOp         i1 i2 = ValE (IntV (i1-i2))
 intInfixOp MulOp         i1 i2 = ValE (IntV (i1*i2))
@@ -803,7 +802,7 @@ intInfixOp EqOp          i1 i2 = eBool (i1 == i2)
 intInfixOp NeqOp         i1 i2 = eBool (i1 /= i2)
 intInfixOp op            i1 i2 = BOpE op (ValE (IntV i1)) (ValE (IntV i2))
 
-doubleInfixOp :: BinOp -> SaneDouble -> SaneDouble -> Expr
+doubleInfixOp :: JOp -> SaneDouble -> SaneDouble -> Expr
 doubleInfixOp AddOp (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1+d2))
 doubleInfixOp SubOp (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1-d2))
 doubleInfixOp MulOp (SaneDouble d1) (SaneDouble d2) = ValE (DoubleV $ SaneDouble (d1*d2))

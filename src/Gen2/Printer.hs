@@ -10,7 +10,7 @@ import           Data.Char (isAlpha, isDigit)
 import qualified Data.Map                     as M
 import qualified Data.Text.Lazy               as TL
 import qualified Data.Text                    as T
-import           Compiler.JMacro              (Ident, JExpr(..), JStat(..),
+import           Compiler.JMacro              (Ident, JExpr(..), JStat(..), JOp(..), JUOp(..),
                                                JVal(..), jsToDocR, RenderJs(..), defaultRenderJs)
 import           Text.PrettyPrint.Leijen.Text (Doc, align, char, comma, empty,
                                                fillSep, hcat, nest, parens,
@@ -58,7 +58,7 @@ prettyBlock r xs = vcat $ map addSemi (prettyBlock' r xs)
 -- recognize common patterns in a block and convert them to more idiomatic/concise javascript
 prettyBlock' :: RenderJs -> [JStat] -> [Doc]
 -- resugar for loops with/without var declaration
-prettyBlock' r ( (DeclStat i _)
+prettyBlock' r ( (DeclStat i)
               : (AssignStat (ValExpr (JVar i')) v0)
               : (WhileStat False p (BlockStat bs))
               : xs
@@ -77,7 +77,7 @@ prettyBlock' r ( (AssignStat (ValExpr (JVar i)) v0)
           flat = flattenBlocks bs
 
 -- global function (does not preserve semantics but works for GHCJS)
-prettyBlock' r ( (DeclStat i _)
+prettyBlock' r ( (DeclStat i)
                : (AssignStat (ValExpr (JVar i')) (ValExpr (JFunc is b)))
                : xs
                )
@@ -86,26 +86,26 @@ prettyBlock' r ( (DeclStat i _)
                    $$ braceNest' (jsToDocR r b)
                   ) : prettyBlock' r xs
 -- declare/assign
-prettyBlock' r ( (DeclStat i _)
+prettyBlock' r ( (DeclStat i)
                : (AssignStat (ValExpr (JVar i')) v)
                : xs
                )
       | i == i' = (text "var" <+> jsToDocR r i <+> char '=' <+> jsToDocR r v) : prettyBlock' r xs
 
 -- modify/assign operators (fixme this should be more general, but beware of side effects like PPostExpr)
-prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr "+" (ValExpr (JVar i')) (ValExpr (JInt 1))))
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr AddOp (ValExpr (JVar i')) (ValExpr (JInt 1))))
                : xs
                )
       | i == i' = ("++" <> jsToDocR r i) : prettyBlock' r xs
-prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr "-" (ValExpr (JVar i')) (ValExpr (JInt 1))))
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr SubOp (ValExpr (JVar i')) (ValExpr (JInt 1))))
                : xs
                )
       | i == i' = ("--" <> jsToDocR r i) : prettyBlock' r xs
-prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr "+" (ValExpr (JVar i')) e))
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr AddOp (ValExpr (JVar i')) e))
                : xs
                )
       | i == i' = (jsToDocR r i <+> text "+=" <+> jsToDocR r e) : prettyBlock' r xs
-prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr "-" (ValExpr (JVar i')) e))
+prettyBlock' r ( (AssignStat (ValExpr (JVar i)) (InfixExpr SubOp (ValExpr (JVar i')) e))
                : xs
                )
       | i == i' = (jsToDocR r i <+> text "-=" <+> jsToDocR r e) : prettyBlock' r xs
@@ -128,7 +128,7 @@ mkFor r decl i v0 p s1 sb = text "for" <> forCond <+> braceNest'' (jsToDocR r $ 
 
 -- check if a statement is suitable to be converted to something in the for(;;x) position
 isForUpdStat :: JStat -> Bool
-isForUpdStat (PPostStat {})  = True
+isForUpdStat (UOpStat {})  = True
 isForUpdStat (AssignStat {}) = True
 isForUpdStat (ApplStat {})   = True
 isForUpdStat _               = False

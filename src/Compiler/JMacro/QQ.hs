@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleInstances, UndecidableInstances, OverlappingInstances, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, GADTs, OverloadedStrings, PatternGuards #-}
-
+{-# LANGUAGE ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 {- |
 Module      :  Language.Javascript.JMacro
@@ -30,6 +30,9 @@ import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH (mkName, appE)
 import Language.Haskell.TH.Quote
 
+import qualified Text.Parsec as TP
+import qualified Data.Functor.Identity as DFI
+
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Expr
 import Text.ParserCombinators.Parsec.Error
@@ -39,7 +42,6 @@ import Text.ParserCombinators.Parsec.Language (javaStyle)
 import Text.Regex.Posix.String
 
 import Compiler.JMacro.Base
-import Compiler.JMacro.Types
 import Compiler.JMacro.ParseTH
 
 import System.IO.Unsafe
@@ -121,28 +123,26 @@ jm2th v = dataToExpQ (const Nothing
                       `extQ` handleVal
                       `extQ` handleStr
                       `extQ` handleText
-                      `extQ` handleTyp
                      ) v
 
     where handleStat :: JStat -> Maybe TH.ExpQ
           handleStat (BlockStat ss) = Just $ [|BlockStat|] `appE` TH.listE (blocks ss)
               where blocks :: [JStat] -> [TH.ExpQ]
                     blocks [] = []
-                    blocks (DeclStat (TxtI i) t:xs) = case T.unpack i of
-                     ('!':'!':_) -> jm2th (DeclStat (TxtI (T.drop 2 i)) t) : blocks xs
+                    blocks (DeclStat (TxtI i):xs) = case T.unpack i of
+                     ('!':'!':_) -> jm2th (DeclStat (TxtI (T.drop 2 i))) : blocks xs
                      ('!':i') ->
                         [appE (TH.lamE [TH.varP . mkName . fixIdent $ i'] $
                                  [|BlockStat|] `appE`
                                    (TH.listE . (ds:) . blocks $ xs))
                                        [|TxtI (T.pack i') |]]
-                          where ds = [|DeclStat (TxtI (T.pack i'))|] `appE` (jm2th t)
+                          where ds = [|DeclStat (TxtI (T.pack i'))|]
 
                      i' ->
                         [ ([|jVarTy|]
                            `appE` (TH.lamE [TH.varP . mkName . fixIdent $ i'] $
                                      [|BlockStat|] `TH.appE`
                                        (TH.listE $ blocks $ map (antiIdent i') xs)))
-                           `appE` jm2th t
                         ]
 
                     blocks (x:xs) = jm2th x : blocks xs
@@ -197,14 +197,6 @@ jm2th v = dataToExpQ (const Nothing
           handleText :: T.Text -> Maybe TH.ExpQ
           handleText x = let x' = T.unpack x in Just [|T.pack x'|]
 
-          handleTyp :: JType -> Maybe TH.ExpQ
-          handleTyp (JTRecord t mp) = Just $ [|jtFromList|]
-                                                `appE` jm2th t
-                                                `appE` jm2th (M.toList mp)
-
-          handleTyp _ = Nothing
-
-
 {--------------------------------------------------------------------
   Parsing
 --------------------------------------------------------------------}
@@ -247,7 +239,7 @@ semi      = P.semi lexer
 identifier= P.identifier lexer
 reserved  = P.reserved lexer
 reservedOpNames :: [String]
-reservedOpNames = ["|>","<|","+=","-=","*=","/=","%=","<<=", ">>=", ">>>=", "&=", "^=", "|=", "--","*","/","+","-",".","%","?","=","==","!=","<",">","&&","||","&", "^", "|", "++","===","!==", ">=","<=","!", "~", "<<", ">>", ">>>", "->","::","::!",":|","@", "new", "typeof", "void", "delete", "instanceof", "in", "yield", "?", ":", "{|", "|}"]
+reservedOpNames = ["+=","-=","*=","/=","%=","<<=", ">>=", ">>>=", "&=", "^=", "|=", "--","*","/","+","-",".","%","?","=","==","!=","<",">","&&","||","&", "^", "|", "++","===","!==", ">=","<=","!", "~", "<<", ">>", ">>>", "new", "typeof", "void", "delete", "instanceof", "in", "yield", "?", ":"]
 reservedOp name
   | name `notElem` reservedOpNames = error ("reservedOp: not a reserved operator: " ++ name)
   | all isAlpha name = lexeme $ try $
@@ -283,24 +275,13 @@ parseJME s = runParser jmacroParserE () "" s
             eof
             return ans
 
-getType :: JMParser (Bool, JLocalType)
-getType = do
-  isForce <- (reservedOp "::!" >> return True) <|> (reservedOp "::" >> return False)
-  t <- runTypeParser
-  return (isForce, t)
-
-addForcedType :: Maybe (Bool, JLocalType) -> JExpr -> JExpr
-addForcedType (Just (True,t)) e = TypeExpr True e t
-addForcedType _ e = e
-
 -- function !foo or function foo or var !x or var x, with optional type
-varidentdecl :: JMParser (Ident, Maybe (Bool, JLocalType))
+varidentdecl :: JMParser Ident
 varidentdecl = do
   i <- identifierWithBang
   when ("jmId_" `isPrefixOf` i || "!jmId_" `isPrefixOf` i) $ fail "Illegal use of reserved jmId_ prefix in variable name."
   when (i=="this" || i=="!this") $ fail "Illegal attempt to name variable 'this'."
-  t <- optionMaybe getType
-  return (TxtI (T.pack i), t)
+  return (TxtI $ T.pack i)
 
 -- any other identifier decl
 identdecl :: JMParser Ident
@@ -327,29 +308,17 @@ data PatternTree = PTAs Ident PatternTree
                  | PTVar Ident
                    deriving Show
 patternTree :: JMParser PatternTree
-patternTree = toCons <$> (parens patternTree <|> ptList <|> ptObj <|> varOrAs) `sepBy1` reservedOp ":|"
-    where
-      toCons [] = PTVar (TxtI "_")
-      toCons [x] = x
-      toCons (x:xs) = PTCons x (toCons xs)
-      ptList  = lexeme $ PTList <$> brackets' (commaSep patternTree)
-      ptObj   = lexeme $ PTObj  <$> oxfordBraces (commaSep $ liftM2 (,) myIdent (colon >> patternTree))
-      varOrAs = do
-        i <- fst <$> varidentdecl
-        isAs <- option False (reservedOp "@" >> return True)
-        if isAs
-          then PTAs i <$> patternTree
-          else return $ PTVar i
+patternTree = PTVar <$> varidentdecl
 
 --either we have a function from any ident to the constituent parts
 --OR the top level is named, and hence we have the top ident, plus decls for the constituent parts
 patternBinding :: JMParser (Either (Ident -> [JStat]) (Ident, [JStat]))
 patternBinding = do
   ptree <- patternTree
-  let go path (PTAs asIdent pt) = [DeclStat asIdent Nothing, AssignStat (ValExpr (JVar (cleanIdent asIdent))) path] ++ go path pt
+  let go path (PTAs asIdent pt) = [DeclStat asIdent, AssignStat (ValExpr (JVar (cleanIdent asIdent))) path] ++ go path pt
       go path (PTVar i)
           | i == (TxtI "_") = []
-          | otherwise = [DeclStat i Nothing, AssignStat (ValExpr (JVar (cleanIdent i))) (path)]
+          | otherwise = [DeclStat i, AssignStat (ValExpr (JVar (cleanIdent i))) (path)]
       go path (PTList pts) = concatMap (uncurry go) $ zip (map addIntToPath [0..]) pts
            where addIntToPath i = IdxExpr path (ValExpr $ JInt i)
       go path (PTObj xs)   = concatMap (uncurry go) $ map (first fixPath) xs
@@ -371,7 +340,7 @@ destructuringDecl = do
        reservedOp "="
        e <- expr
        return $  AssignStat (ValExpr (JVar (cleanIdent i))) e : patDecls
-    return $ DeclStat i Nothing : fromMaybe [] optAssignStat
+    return $ DeclStat i : fromMaybe [] optAssignStat
   where matchVar = TxtI "jmId_match_var"
 
 statblock :: JMParser [JStat]
@@ -392,7 +361,6 @@ statement :: JMParser [JStat]
 statement = declStat
             <|> funDecl
             <|> functionDecl
-            <|> foreignStat
             <|> returnStat
             <|> labelStat
             <|> ifStat
@@ -419,29 +387,22 @@ statement = declStat
       functionDecl = do
         reserved "function"
 
-        (i,mbTyp) <- varidentdecl
+        i <- varidentdecl
         (as,patDecls) <- fmap (\x -> (x,[])) (try $ parens (commaSep identdecl)) <|> patternBlocks
         b' <- try (ReturnStat <$> braces expr) <|> (l2s <$> statement)
         let b = BlockStat patDecls `mappend` b'
-        return $ [DeclStat i (fmap snd mbTyp),
-                  AssignStat (ValExpr $ JVar (cleanIdent i)) (addForcedType mbTyp $ ValExpr $ JFunc as b)]
+        return $ [DeclStat i,
+                  AssignStat (ValExpr $ JVar (cleanIdent i)) (ValExpr $ JFunc as b)]
 
       funDecl = do
         reserved "fun"
         n <- identdecl
-        mbTyp <- optionMaybe getType
         (as, patDecls) <- patternBlocks
         b' <- try (ReturnStat <$> braces expr) <|> (l2s <$> statement) <|> (symbol "->" >> ReturnStat <$> expr)
         let b = BlockStat patDecls `mappend` b'
-        return $ [DeclStat (addBang n) (fmap snd mbTyp),
-                  AssignStat (ValExpr $ JVar n) (addForcedType mbTyp $ ValExpr $ JFunc as b)]
+        return $ [DeclStat (addBang n),
+                  AssignStat (ValExpr $ JVar n) (ValExpr $ JFunc as b)]
             where addBang (TxtI x) = TxtI (T.pack "!!" `mappend` x)
-
-      foreignStat = do
-          reserved "foreign"
-          i <- try $ identdecl <* reservedOp "::"
-          t <- runTypeParser
-          return [ForeignStat i t]
 
       returnStat =
         reserved "return" >> (:[]) . ReturnStat <$> option (ValExpr $ JVar $ TxtI "undefined") expr
@@ -508,7 +469,7 @@ statement = declStat
         e <- expr
         char ')' >> whiteSpace
         s <- l2s <$> statement
-        return $ (if dec then (DeclStat i Nothing:) else id) [ForInStat isEach i e s]
+        return $ (if dec then (DeclStat i:) else id) [ForInStat isEach i e s]
 
       simpleForStat = do
         (before,after,p) <- parens threeStat
@@ -523,20 +484,20 @@ statement = declStat
                     where b' = BlockStat $ bs ++ after
 
       assignOpStat = do
-          let rop x = reservedOp x >> return x
-          (e1,op) <- try $ liftM2 (,) dotExpr (fmap (take 1) $
-                                                   rop "="
-                                               <|> rop "+="
-                                               <|> rop "-="
-                                               <|> rop "*="
-                                               <|> rop "/="
-                                               <|> rop "%="
-                                               <|> rop "<<="
-                                               <|> rop ">>="
-                                               <|> rop ">>>="
-                                               <|> rop "&="
-                                               <|> rop "^="
-                                               <|> rop "|="
+          let rop x x' = reservedOp x >> return x'
+          (e1, op) <- try $ liftM2 (,) dotExpr (
+                                                   rop "=" Nothing
+                                               <|> rop "+=" (Just AddOp)
+                                               <|> rop "-=" (Just SubOp)
+                                               <|> rop "*=" (Just MulOp)
+                                               <|> rop "/=" (Just DivOp)
+                                               <|> rop "%=" (Just ModOp)
+                                               <|> rop "<<=" (Just LeftShiftOp)
+                                               <|> rop ">>=" (Just RightShiftOp)
+                                               <|> rop ">>>=" (Just ZRightShiftOp)
+                                               <|> rop "&=" (Just BAndOp)
+                                               <|> rop "^=" (Just BXorOp)
+                                               <|> rop "|=" (Just BOrOp)
                                               )
           let gofail  = fail ("Invalid assignment.")
               badList = ["this", "true", "false", "undefined", "null"]
@@ -546,8 +507,7 @@ statement = declStat
             ValExpr {}              -> gofail
             _                       -> return ()
           e2 <- expr
-          return [AssignStat e1 (if op == "=" then e2 else InfixExpr op e1 e2)]
-
+          return [AssignStat e1 $ maybe e2 (\o -> InfixExpr o e1 e2) op]
 
       applStat = expr2stat' =<< expr
 
@@ -601,15 +561,8 @@ compileRegex s = unsafePerformIO $ compile co eo s
           eo = execBlank
 
 expr :: JMParser JExpr
-expr = do
-  e <- exprWithIf
-  addType e
+expr = exprWithIf
   where
-    addType e = do
-         optTyp <- optionMaybe getType
-         case optTyp of
-           (Just (b,t)) -> return $ TypeExpr b e t
-           Nothing -> return e
     exprWithIf = do
          e <- rawExpr
          addIf e <|> return e
@@ -621,33 +574,26 @@ expr = do
           let ans = (IfExpr e t el)
           addIf ans <|> return ans
     rawExpr = buildExpressionParser table dotExpr <?> "expression"
-    table = [[pop "++", pop "--", poop "++", poop "--"],  -- fixme, yield
-             [pop "~", pop "!", negop, pop "+", pop "typeof", pop "void", pop "delete"],
-             [iop "*", iop "/", iop "%"],
-             [iop "+", iop "-"],
-             [iop "<<", iop ">>>", iop ">>"],
-             [consOp],
-             [iop "<=", iop "<", iop ">=", iop ">", iop "in", iop "instanceof"],
-             [iop "===", iop "!==", iop "==", iop "!="],
-             [iop "&"],
-             [iop "^"],
-             [iop "|"],
-             [iop "&&"],
-             [iop "||"],
-             [applOp, applOpRev]
+    table = [[pop "++" PreInc, pop "--" PreDec, poop "++" PostInc, poop "--" PostDec],  -- fixme, yield
+             [pop "~" BNotOp, pop "!" NotOp, negop, pop "+" PlusOp, pop "typeof" TypeofOp, pop "void" VoidOp, pop "delete" DeleteOp],
+             [iop "*" MulOp, iop "/" DivOp, iop "%" ModOp],
+             [iop "+" AddOp, iop "-" SubOp],
+             [iop "<<" LeftShiftOp, iop ">>>" ZRightShiftOp, iop ">>" RightShiftOp],
+             [iop "<=" LeOp, iop "<" LtOp, iop ">=" GeOp, iop ">" GtOp, iop "in" InOp, iop "instanceof" InstanceofOp],
+             [iop "===" StrictEqOp, iop "!==" StrictNeqOp, iop "==" EqOp, iop "!=" NeqOp],
+             [iop "&" BAndOp],
+             [iop "^" BXorOp],
+             [iop "|" BOrOp],
+             [iop "&&" LAndOp],
+             [iop "||" LOrOp]
             ]
-    pop  s  = Prefix (reservedOp s >> return (PPostExpr True s))
-    poop s  = Postfix (reservedOp s >> return (PPostExpr False s))
-    iop  s  = Infix (reservedOp s >> return (InfixExpr s)) AssocLeft
-    applOp  = Infix (reservedOp "<|" >> return (\x y -> ApplExpr x [y])) AssocRight
-    applOpRev = Infix (reservedOp "|>" >> return (\x y -> ApplExpr y [x])) AssocLeft
-    consOp  = Infix (reservedOp ":|" >> return consAct) AssocRight
-    consAct x y = ApplExpr (ValExpr (JFunc [TxtI "x",TxtI "y"] (BlockStat [BlockStat [DeclStat (TxtI "tmp") Nothing, AssignStat tmpVar (ApplExpr (SelExpr (ValExpr (JVar (TxtI "x"))) (TxtI "slice")) [ValExpr (JInt 0)]),ApplStat (SelExpr tmpVar (TxtI "unshift")) [ValExpr (JVar (TxtI "y"))],ReturnStat tmpVar]]))) [x,y]
-        where tmpVar = ValExpr (JVar (TxtI "tmp"))
+    pop  s s' = Prefix (reservedOp s >> return (UOpExpr s'))
+    poop s s' = Postfix (reservedOp s >> return (UOpExpr s'))
+    iop  s s' = Infix (reservedOp s >> return (InfixExpr s')) AssocLeft
     negop   = Prefix (reservedOp "-" >> return negexp)
     negexp (ValExpr (JDouble n)) = ValExpr (JDouble (-n))
     negexp (ValExpr (JInt    n)) = ValExpr (JInt    (-n))
-    negexp x                     = PPostExpr True "-" x
+    negexp x                     = UOpExpr NegOp x
 
 dotExpr :: JMParser JExpr
 dotExpr = do
@@ -670,7 +616,7 @@ dotExprOne = addNxt =<< valExpr <|> antiExpr <|> antiExprSimple <|> parens' expr
 
     numIdent = TxtI . T.pack <$> many1 digit
 
-    newExpr = PPostExpr True "new" <$> (reservedOp "new" >> dotExpr)
+    newExpr = UOpExpr NewOp <$> (reservedOp "new" >> dotExpr)
 
     antiExpr  = AntiExpr <$> do
          x <- (try (symbol "`(") >> anyChar `manyTill` try (string ")`"))
@@ -708,11 +654,10 @@ folBy :: JMParser a -> Char -> JMParser a
 folBy a b = a <* (lookAhead (char b) >>= const (return ()))
 
 -- Parsers without Lexeme
-braces', brackets', parens', oxfordBraces :: JMParser a -> JMParser a
+braces', brackets', parens' {- , oxfordBraces -} :: JMParser a -> JMParser a
 brackets' = around' '[' ']'
 braces' = around' '{' '}'
 parens' = around' '(' ')'
-oxfordBraces x = lexeme (reservedOp "{|") >> (lexeme x <* reservedOp "|}")
 
 around' :: Char -> Char -> JMParser a -> JMParser a
 around' a b x = lexeme (char a) >> (lexeme x <* char b)

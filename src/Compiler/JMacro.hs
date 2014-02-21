@@ -72,11 +72,15 @@ An experimental typechecker is available in the "Language.Javascript.JMacro.Type
 module Compiler.JMacro (
   module Compiler.JMacro.QQ,
   module Compiler.JMacro.Base,
---  module Compiler.JMacro.Prelude,
-  module Compiler.JMacro.Types
+  module Compiler.JMacro.Lens,
+  j, je
  ) where
 
 import Compiler.JMacro.Base hiding (expr2stat)
 import Compiler.JMacro.QQ
--- import Compiler.JMacro.Prelude
-import Compiler.JMacro.Types (JType(..))
+import Compiler.JMacro.Lens
+
+-- shorter names for jmacro
+j  = jmacro
+je = jmacroE
+

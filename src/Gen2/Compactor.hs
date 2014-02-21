@@ -261,7 +261,7 @@ loadBase (Just file) = DB.runGet getBase <$> BL.readFile file
 
 {-# INLINE identsS #-}
 identsS :: Traversal' JStat Ident
-identsS f (DeclStat i mt)      = DeclStat       <$> f i <*> pure mt
+identsS f (DeclStat i)         = DeclStat       <$> f i
 identsS f (ReturnStat e)       = ReturnStat     <$> identsE f e
 identsS f (IfStat e s1 s2)     = IfStat         <$> identsE f e <*> identsS f s1 <*> identsS f s2
 identsS f (WhileStat b e s)    = WhileStat b    <$> identsE f e <*> identsS f s
@@ -269,29 +269,27 @@ identsS f (ForInStat b i e s)  = ForInStat b    <$> f i <*> identsE f e <*> iden
 identsS f (SwitchStat e xs s)  = SwitchStat     <$> identsE f e <*> (traverse . traverseCase) f xs <*> identsS f s
   where traverseCase g (e,s) = (,) <$> identsE g e <*> identsS g s
 identsS f (TryStat s1 i s2 s3) = TryStat        <$> identsS f s1 <*> f i <*> identsS f s2 <*> identsS f s3
-identsS f (BlockStat xs)       = BlockStat      <$> (traverse . identsS) f xs
-identsS f (ApplStat e es)      = ApplStat       <$> identsE f e <*> (traverse . identsE) f es
-identsS f (PPostStat b op e)   = PPostStat b op <$> identsE f e
-identsS f (AssignStat e1 e2)   = AssignStat     <$> identsE f e1 <*> identsE f e2
+identsS f (BlockStat xs)       = BlockStat   <$> (traverse . identsS) f xs
+identsS f (ApplStat e es)      = ApplStat    <$> identsE f e <*> (traverse . identsE) f es
+identsS f (UOpStat op e)       = UOpStat op  <$> identsE f e
+identsS f (AssignStat e1 e2)   = AssignStat  <$> identsE f e1 <*> identsE f e2
 identsS f (UnsatBlock{})       = error "identsS: UnsatBlock"
 identsS f (AntiStat{})         = error "identsS: AntiStat"
-identsS f (ForeignStat{})      = error "identsS: ForeignStat"
-identsS f (LabelStat l s)      = LabelStat l    <$> identsS f s
+identsS f (LabelStat l s)      = LabelStat l <$> identsS f s
 identsS f b@(BreakStat{})      = pure b
 identsS f c@(ContinueStat{})   = pure c
 
 {-# INLINE identsE #-}
 identsE :: Traversal' JExpr Ident
-identsE f (ValExpr v)         = ValExpr       <$> identsV f v
-identsE f (SelExpr e i)       = SelExpr       <$> identsE f e <*> pure i -- do not rename properties
-identsE f (IdxExpr e1 e2)     = IdxExpr       <$> identsE f e1 <*> identsE f e2
-identsE f (InfixExpr s e1 e2) = InfixExpr s   <$> identsE f e1 <*> identsE f e2
-identsE f (PPostExpr b s e)   = PPostExpr b s <$> identsE f e
-identsE f (IfExpr e1 e2 e3)   = IfExpr        <$> identsE f e1 <*> identsE f e2 <*> identsE f e3
-identsE f (ApplExpr e es)     = ApplExpr      <$> identsE f e <*> (traverse . identsE) f es
+identsE f (ValExpr v)         = ValExpr     <$> identsV f v
+identsE f (SelExpr e i)       = SelExpr     <$> identsE f e <*> pure i -- do not rename properties
+identsE f (IdxExpr e1 e2)     = IdxExpr     <$> identsE f e1 <*> identsE f e2
+identsE f (InfixExpr s e1 e2) = InfixExpr s <$> identsE f e1 <*> identsE f e2
+identsE f (UOpExpr o e)       = UOpExpr o   <$> identsE f e
+identsE f (IfExpr e1 e2 e3)   = IfExpr      <$> identsE f e1 <*> identsE f e2 <*> identsE f e3
+identsE f (ApplExpr e es)     = ApplExpr    <$> identsE f e <*> (traverse . identsE) f es
 identsE f (UnsatExpr{})       = error "identsE: UnsatExpr"
 identsE f (AntiExpr{})        = error "identsE: AntiExpr"
-identsE f (TypeExpr{})        = error "identsE: TypeExpr"
 
 {-# INLINE identsV #-}
 identsV :: Traversal' JVal Ident

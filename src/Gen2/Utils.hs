@@ -26,19 +26,6 @@ import           Outputable (defaultUserStyle, text)
 import           ErrUtils (Severity(..))
 import           FastString
 
-makeLenses ''JStat
-makePrisms ''JStat
-makeLenses ''JExpr
-makePrisms ''JExpr
-makeLenses ''JVal
-makePrisms ''JVal
-makeLenses ''Ident
-makePrisms ''Ident
-
--- shorter names for jmacro
-j  = jmacro
-je = jmacroE
-
 insertAt :: Int -> a -> [a] -> [a]
 insertAt 0 y xs             = y:xs
 insertAt n y (x:xs) | n > 0 = x : insertAt (n-1) y xs
@@ -46,7 +33,7 @@ insertAt _ _ _ = error "insertAt"
 
 -- hack for missing unary negation in jmacro
 jneg :: JExpr -> JExpr
-jneg e = PPostExpr True "-" e
+jneg = UOpExpr NegOp
 
 jnull :: JExpr
 jnull = ValExpr (JVar $ TxtI "null")
@@ -63,14 +50,14 @@ jint n = ValExpr (JInt n)
 jzero = jint 0
 
 decl :: Ident -> JStat
-decl i = DeclStat i Nothing
+decl i = DeclStat i
 
 -- until supported in jmacro
 decl' :: Ident -> JExpr -> JStat
 decl' i e = decl i `mappend` AssignStat (ValExpr (JVar i)) e
 
 decls :: Text -> JStat
-decls s = DeclStat (TxtI s) Nothing
+decls s = DeclStat (TxtI s)
 
 -- generate an identifier, use it in both statements
 identBoth :: (Ident -> JStat) -> (Ident -> JStat) -> JStat

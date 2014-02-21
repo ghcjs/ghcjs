@@ -3,7 +3,6 @@
 module Gen2.Rts where
 
 import           Compiler.JMacro
-import           Compiler.JMacro.Types
 
 import           Gen2.Debug
 import           Gen2.RtsApply

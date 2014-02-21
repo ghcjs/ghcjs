@@ -9,7 +9,6 @@
 module Gen2.RtsApply where
 
 import           Compiler.JMacro
-import           Compiler.JMacro.Types
 
 import           Gen2.RtsAlloc
 import           Gen2.RtsSettings
@@ -610,3 +609,14 @@ pap r = [j| `decl func`;
     moveCase m = (toJExpr m, [j| `numReg (m+r+1)` = `numReg (m+1)`; |])
     loadOwnArgs d = mconcat $ map (\r -> [j| `numReg (r+1)` = `dField d (r+2)`; |]) [1..r]
     dField d n = SelExpr d (TxtI . T.pack $ ('d':show (n-1)))
+
+{-
+-- entry function for a pap
+papGeneric :: JStat
+papGeneric =
+  [j| h$papGeneric() {
+        
+      }
+    |]
+
+-}

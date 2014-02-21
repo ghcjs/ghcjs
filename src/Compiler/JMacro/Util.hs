@@ -25,19 +25,19 @@ x $  y = ApplExpr (toJExpr x) (toJExprList y)
 x $$  y = ApplStat (toJExpr x) (toJExprList y)
 
 (==), (!=), (<), (&&) :: JExpr -> JExpr -> JExpr
-x == y = InfixExpr "==" x y
-x != y = InfixExpr "!=" x y
+x == y = InfixExpr EqOp x y
+x != y = InfixExpr NeqOp x y
 
 infix 4 <
-x < y = InfixExpr "<" x y
+x < y = InfixExpr LtOp x y
 infixr 3 &&
-x && y = InfixExpr "&&" x y
+x && y = InfixExpr LAndOp x y
 
 null :: JExpr
-null  = jsv "null"
+null  = jsv "null" -- fixme
 
 new :: ToJExpr a => a -> JExpr
-new x = PPostExpr True "new" (toJExpr x)
+new x = UOpExpr NewOp (toJExpr x)
 
 if' :: (ToJExpr a, ToStat b) => a -> b -> JStat
 if' x y       = IfStat (toJExpr x) (toStat y) (BlockStat [])

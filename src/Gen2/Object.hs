@@ -339,8 +339,9 @@ putHeader (Header sl dl il) = DB.runPut $ do
 showObject :: [ObjUnit] -> TL.Text
 showObject xs = mconcat (zipWith showSymbol xs [0..])
   where
+    showSymbol :: ObjUnit -> Int -> TL.Text
     showSymbol (ObjUnit symbs cis stat) n
-      | "h$debug" `elem` symbs = 
+      | "h$debug" `elem` symbs =
            "/*\n" <> (TL.fromStrict $ T.unlines ( stat ^.. template . _JStr )) <> "\n*/\n"
       | otherwise = TL.unlines
         [ "// begin: [" <> TL.intercalate "," (map TL.fromStrict symbs) <> "] (" <> TL.pack (show n) <> ")"
@@ -444,7 +445,7 @@ instance Objectable Text where
     return (strText st ! fromIntegral n)
 
 instance Objectable JStat where
-  put (DeclStat i _)       = tag 1  >> put i
+  put (DeclStat i)         = tag 1  >> put i
   put (ReturnStat e)       = tag 2  >> put e
   put (IfStat e s1 s2)     = tag 3  >> put e  >> put s1 >> put s2
   put (WhileStat b e s)    = tag 4  >> put b  >> put e  >> put s
@@ -453,16 +454,15 @@ instance Objectable JStat where
   put (TryStat s1 i s2 s3) = tag 7  >> put s1 >> put i  >> put s2 >> put s3
   put (BlockStat xs)       = tag 8  >> put xs
   put (ApplStat e es)      = tag 9  >> put e  >> put es
-  put (PPostStat b s e)    = tag 10 >> put b  >> put s  >> put e
+  put (UOpStat o e)        = tag 10 >> put o  >> put e
   put (AssignStat e1 e2)   = tag 11 >> put e1 >> put e2
   put (UnsatBlock {})      = error "put JStat: UnsatBlock"
   put (AntiStat xs)        = tag 12 >> put xs
-  put (ForeignStat i _)    = tag 13 >> put i
-  put (LabelStat l s)      = tag 14 >> put l  >> put s
-  put (BreakStat ml)       = tag 15 >> put ml
-  put (ContinueStat ml)    = tag 16 >> put ml
+  put (LabelStat l s)      = tag 13 >> put l  >> put s
+  put (BreakStat ml)       = tag 14 >> put ml
+  put (ContinueStat ml)    = tag 15 >> put ml
   get = getTag >>= \case
-                      1  -> DeclStat     <$> get <*> pure Nothing
+                      1  -> DeclStat     <$> get
                       2  -> ReturnStat   <$> get
                       3  -> IfStat       <$> get <*> get <*> get
                       4  -> WhileStat    <$> get <*> get <*> get
@@ -471,36 +471,33 @@ instance Objectable JStat where
                       7  -> TryStat      <$> get <*> get <*> get <*> get
                       8  -> BlockStat    <$> get
                       9  -> ApplStat     <$> get <*> get
-                      10 -> PPostStat    <$> get <*> get <*> get
+                      10 -> UOpStat      <$> get <*> get
                       11 -> AssignStat   <$> get <*> get
                       12 -> AntiStat     <$> get
-                      13 -> ForeignStat  <$> get <*> pure ([], JTImpossible)
-                      14 -> LabelStat    <$> get <*> get
-                      15 -> BreakStat    <$> get
-                      16 -> ContinueStat <$> get
+                      13 -> LabelStat    <$> get <*> get
+                      14 -> BreakStat    <$> get
+                      15 -> ContinueStat <$> get
                       n -> error ("Objectable get JStat: invalid tag: " ++ show n)
 
 instance Objectable JExpr where
   put (ValExpr v)          = tag 1 >> put v
   put (SelExpr e i)        = tag 2 >> put e  >> put i
   put (IdxExpr e1 e2)      = tag 3 >> put e1 >> put e2
-  put (InfixExpr xs e1 e2) = tag 4 >> put xs >> put e1 >> put e2
-  put (PPostExpr b xs e)   = tag 5 >> put b  >> put xs >> put e
+  put (InfixExpr o e1 e2)  = tag 4 >> put o  >> put e1 >> put e2
+  put (UOpExpr o e)        = tag 5 >> put o  >> put e
   put (IfExpr e1 e2 e3)    = tag 6 >> put e1 >> put e2 >> put e3
   put (ApplExpr e es)      = tag 7 >> put e  >> put es
   put (UnsatExpr {})       = error "put JExpr: UnsatExpr"
   put (AntiExpr xs)        = tag 8 >> put xs
-  put (TypeExpr b e _)     = tag 9 >> put b  >> put e -- don't serialize the type
   get = getTag >>= \case
                       1 -> ValExpr   <$> get
                       2 -> SelExpr   <$> get <*> get
                       3 -> IdxExpr   <$> get <*> get
                       4 -> InfixExpr <$> get <*> get <*> get
-                      5 -> PPostExpr <$> get <*> get <*> get
+                      5 -> UOpExpr   <$> get <*> get
                       6 -> IfExpr    <$> get <*> get <*> get
                       7 -> ApplExpr  <$> get <*> get
                       8 -> AntiExpr  <$> get
-                      9 -> TypeExpr  <$> get <*> get <*> pure ([], JTImpossible)
                       n -> error ("Objectable get JExpr: invalid tag: " ++ show n)
 
 instance Objectable JVal where
@@ -554,6 +551,14 @@ instance Objectable ClosureInfo where
   get = ClosureInfo <$> get <*> get <*> get <*> get <*> get <*> get
 
 instance Objectable VarType where
+  put = putEnum
+  get = getEnum
+
+instance Objectable JOp where
+  put = putEnum
+  get = getEnum
+
+instance Objectable JUOp where
   put = putEnum
   get = getEnum
 
