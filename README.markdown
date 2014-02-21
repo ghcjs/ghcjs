@@ -51,6 +51,16 @@ Now install `GHCJS` itself:
 
     $ git clone https://github.com/ghcjs/ghcjs.git
     $ cabal install ./ghcjs
+
+Check that you have the correct version of `GHCJS` in your PATH:
+
+    $ ghcjs --version
+    The Glorious Glasgow Haskell Compilation System for JavaScript, version 0.1.0 (GHC 7.8.1)
+    $ ghcjs-boot --version
+    The Glorious Glasgow Haskell Compilation System for JavaScript, version 0.1.0 (GHC 7.8.1)
+
+Build the base libraries for `GHCJS`:
+
     $ ghcjs-boot --init
 
 

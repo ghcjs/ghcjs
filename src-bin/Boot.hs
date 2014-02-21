@@ -1,6 +1,7 @@
 {-# LANGUAGE ExtendedDefaultRules, OverloadedStrings #-}
 module Main where
 
+import Compiler.GhcjsProgram (printVersion)
 import Compiler.Info
 import Prelude hiding (FilePath)
 import Shelly
@@ -20,6 +21,7 @@ default (Text)
 
 main = do
     settings <- execParser optParser'
+    when (showVersion settings) (printVersion >> exitSuccess)
     r <- (shellyNoDir $ actions settings `catchany_sh` (return . Just))
     maybe exitSuccess Ex.throwIO r
   where
@@ -57,6 +59,7 @@ main = do
       return Nothing
 
 data BootSettings = BootSettings { initTree  :: Bool      -- ^ initialize the source tree
+                                 , showVersion :: Bool    -- ^ show the version and exit
                                  , preBuilt  :: Bool      -- ^ download prebuilt archive if available
                                  , quick     :: Bool      -- ^ skip Cabal and ghcjs-base
                                  , jobs      :: Int       -- ^ number of parallel jobs
@@ -84,6 +87,8 @@ optParser :: Parser BootSettings
 optParser = BootSettings
             <$> switch ( long "init"      <> short 'i' <>
                   help "initialize the boot tree for first time build (or update an existing one)" )
+            <*> switch ( long "version" <>
+                  help "show the ghcjs-boot version")
             <*> switch ( long "preBuilt"  <> short 'p' <>
                   help "download prebuilt libraries for compiler (might not be available)" )
             <*> switch ( long "quick"     <> short 'q' <>
