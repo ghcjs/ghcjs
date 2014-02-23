@@ -298,7 +298,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        DoPrintObj obj         -> liftIO (Ghcjs.printObj obj) >> return True
 
   liftIO $ dumpFinalStats dflags6
-  return skipJs
+  return (skipJs || buildingSetup)
 
 ghciUI :: [(FilePath, Maybe Phase)] -> Maybe [String] -> Ghc ()
 #ifndef GHCI
