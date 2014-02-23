@@ -287,8 +287,8 @@ installBootPackages s = sub $ do
     (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
     where
       configureOpts = map ("--configure-option=" <>) $ catMaybes
-            [ fmap ("--with-iconv-includes"  <>) (iconvInclude s)
-            , fmap ("--with-iconv-libraries" <>) (iconvLib s)
+            [ fmap ("--with-iconv-includes="  <>) (iconvInclude s)
+            , fmap ("--with-iconv-libraries=" <>) (iconvLib s)
             , fmap ("--with-gmp-includes="   <>) (gmpInclude s)
             , fmap ("--with-gmp-libraries="  <>) (gmpLib s)
             , if gmpFramework s then Just "--with-gmp-framework-preferred" else Nothing
