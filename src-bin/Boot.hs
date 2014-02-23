@@ -29,7 +29,7 @@ main = do
     actions s = verbosely . tracing False $ do
       e <- test_f ("data" </> "primops.txt.pp")
       if initTree s
-        then initSourceTree e
+        then initSourceTree e (gmpInclude s)
         else when (not e) $ do
           cdBase
           e' <- test_d ("ghcjs-boot")
@@ -65,6 +65,12 @@ data BootSettings = BootSettings { initTree  :: Bool      -- ^ initialize the so
                                  , jobs      :: Int       -- ^ number of parallel jobs
                                  , debug     :: Bool      -- ^ build debug version of the libraries
                                  , verbose   :: Bool
+                                 , iconvInclude :: Maybe Text -- ^ directory containing iconv.h
+                                 , iconvLib     :: Maybe Text -- ^ directory containing iconv library
+                                 , gmpInclude   :: Maybe Text -- ^ directory containing gmp.h
+                                 , gmpLib       :: Maybe Text -- ^ directory containing gmp library
+                                 , gmpFramework :: Bool       -- ^ with-gmp-framework-preferred
+                                 , gmpInTree    :: Bool       -- ^ force using the in-tree GMP
                                  } deriving (Ord, Eq)
 
 optParser' :: ParserInfo BootSettings
@@ -99,6 +105,18 @@ optParser = BootSettings
                   help "build debug libraries with extra checks" )
             <*> switch ( long "verbose"   <> short 'v' <>
                   help "verbose output" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-iconv-includes" <> metavar "DIR" <>
+                  help "directory containing iconv.h" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-iconv-libraries" <> metavar "DIR" <>
+                  help "directory containing iconv library" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-gmp-includes" <> metavar "DIR" <>
+                  help "directory containing gmp.h" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-gmp-libraries" <> metavar "DIR" <>
+                  help "directory containing gmp library" )
+            <*> switch ( long "with-gmp-framework-preferred" <>
+                  help "on OSX, prefer the GMP framework to the gmp lib" )
+            <*> switch ( long "with-intree-gmp" <>
+                  help "force using the in-tree GMP" )
 
 initPackageDB :: Sh ()
 initPackageDB = do
@@ -142,8 +160,8 @@ ghcjsPackages = [ "ghcjs-base"
 -- | reduced set of packages for quick boot
 ghcjsQuickPackages = [ ]
 
-initSourceTree :: Bool -> Sh ()
-initSourceTree currentDir = do
+initSourceTree :: Bool -> Maybe Text -> Sh ()
+initSourceTree currentDir gmpIncludeDir = do
   if currentDir
     then do
       p <- pwd
@@ -180,7 +198,7 @@ initSourceTree currentDir = do
                            when isDir (patchPackage "extra" (toString rp))
   preparePrimops
   buildGenPrim
-  buildGmpConstants
+  buildGmpConstants gmpIncludeDir
 
 -- | preprocess primops.txt.pp, one version for the JS platform
 --   one for native
@@ -206,10 +224,10 @@ buildGenPrim = sub $ do
     happy ["Parser.y"]
     ghc   ["-o", "genprimopcode", "-O", "Main.hs", "+RTS", "-K128M"]
 
-buildGmpConstants :: Sh ()
-buildGmpConstants = sub $ do
+buildGmpConstants :: Maybe Text -> Sh ()
+buildGmpConstants gmpIncludeDir = sub $ do
   cd ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants")
-  ghc ["-no-hs-main", "-o", "mkGmpDerivedConstants", "mkGmpDerivedConstants.c"]
+  ghc $ maybe [] (\d -> ["-I" <> d]) gmpIncludeDir ++ ["-no-hs-main", "-o", "mkGmpDerivedConstants", "mkGmpDerivedConstants.c"]
   p <- pwd
   constants <- run (p </> "mkGmpDerivedConstants") []
   writefile "GmpDerivedConstants.h" constants
@@ -266,8 +284,16 @@ installBootPackages s = sub $ do
   cd "boot"
   forM_ bootPackages preparePackage
   when (not $ null bootPackages)
-    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
-
+    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
+    where
+      configureOpts = map ("--configure-option=" <>) $ catMaybes
+            [ fmap ("--with-iconv-includes"  <>) (iconvInclude s)
+            , fmap ("--with-iconv-libraries" <>) (iconvLib s)
+            , fmap ("--with-gmp-includes="   <>) (gmpInclude s)
+            , fmap ("--with-gmp-libraries="  <>) (gmpLib s)
+            , if gmpFramework s then Just "--with-gmp-framework-preferred" else Nothing
+            , if gmpInTree s then Just "--with-intree-gmp" else Nothing
+            ]
 -- | extra packages are not hardcoded but live in two files:
 --     extra/extra0  -- installed before Cabal (list Cabal dependencies here)
 --     extra/extra1  -- installed after Cabal
