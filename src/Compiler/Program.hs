@@ -292,7 +292,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        DoInteractive          -> ghciUI srcs Nothing >> return True
        DoEval exprs           -> (ghciUI srcs $ Just $ reverse exprs) >> return True
        DoAbiHash              -> abiHash srcs >> return True
-       DoGenerateLib          -> Ghcjs.generateLib >> return True
+       DoGenerateLib          -> Ghcjs.generateLib ghcjsSettings >> return True
        DoPrintRts             -> liftIO Ghcjs.printRts >> return True
        DoInstallExecutable from to -> liftIO (Ghcjs.installExecutable from to) >> return True
        DoPrintObj obj         -> liftIO (Ghcjs.printObj obj) >> return True

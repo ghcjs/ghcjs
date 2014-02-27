@@ -116,7 +116,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
     when (not $ gsNoStats settings) $ do
       let statsFile = if genBase then "out.base.stats" else "out.stats"
       TL.writeFile (out </> statsFile) (linkerStats metaSize stats)
-    getShims jsFiles pkgs' (out </> "lib" <.> jsExt, out </> "lib1" <.> jsExt)
+    getShims dflags settings jsFiles pkgs' (out </> "lib" <.> jsExt, out </> "lib1" <.> jsExt)
     when (not $ gsNoRts settings) $ TL.writeFile (out </> "rts.js") (rtsText' debug)
   if genBase
     then generateBase out base allDeps pkgsT renamerState
@@ -220,11 +220,11 @@ splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
 
 -- fixme the wired-in package id's we get from GHC we have no version
-getShims :: [FilePath] -> [PackageId] -> (FilePath, FilePath) -> IO ()
-getShims extraFiles deps (fileBefore, fileAfter) = do
+getShims :: DynFlags -> GhcjsSettings -> [FilePath] -> [PackageId] -> (FilePath, FilePath) -> IO ()
+getShims dflags settings extraFiles deps (fileBefore, fileAfter) = do
   base <- (</> "shims") <$> getGlobalPackageBase
   ((before, beforeFiles), (after, afterFiles))
-     <- collectShims base (map convertPkg deps)
+     <- collectShims dflags settings base (map convertPkg deps)
   T.writeFile fileBefore before
   writeFile (fileBefore <.> "files") (unlines beforeFiles)
   t' <- mapM T.readFile extraFiles

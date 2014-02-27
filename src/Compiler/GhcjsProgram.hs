@@ -234,35 +234,24 @@ printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
 
   fixme: make this variant-aware?
  -}
--- generateLib :: [String] -> Maybe String -> IO ()
 
-generateLib :: Ghc ()
-generateLib = do
--- generateLib args mbMinusB = do
-{-
-  (argsS, _) <- parseStaticFlags (map noLoc args)
-  runGhcSession mbMinusB $
-    do sdflags0 <- getSessionDynFlags
-       let sdflags1 = sdflags0 { verbosity = 1 }
-       (dflags0, _, _) <- parseDynamicFlags sdflags1 argsS -- fixme $ ignoreUnsupported argsS -}
-       
---       liftIO $ do
---         dflags1 <- if isJust mbMinusB then return dflags0 else addPkgConf dflags0
-      dflags1 <- getSessionDynFlags
-      liftIO $ do
-         (dflags2, _) <- initPackages dflags1
-         let pkgs =  map sourcePackageId . eltsUFM . pkgIdMap . pkgState $ dflags2
-         base <- (</> "shims") <$> getGlobalPackageBase
-         let convertPkg p = let PackageName n = pkgName p
-                                v = map fromIntegral (versionBranch $ pkgVersion p)
-                            in (T.pack n, v)
-             pkgs' = M.toList $ M.fromListWith max (map convertPkg pkgs)
-         ((before, _), (after, _)) <- Gen2.collectShims base pkgs'
-         T.writeFile "lib.js" before
-         T.writeFile "lib1.js" after
-         putStrLn "generated lib.js and lib1.js for:"
-         mapM_ (\(p,v) -> putStrLn $ "    " ++ T.unpack p ++
-           if null v then "" else ("-" ++ L.intercalate "." (map show v))) pkgs'
+generateLib :: GhcjsSettings -> Ghc ()
+generateLib settings = do
+  dflags1 <- getSessionDynFlags
+  liftIO $ do
+    (dflags2, _) <- initPackages dflags1
+    let pkgs =  map sourcePackageId . eltsUFM . pkgIdMap . pkgState $ dflags2
+    base <- (</> "shims") <$> getGlobalPackageBase
+    let convertPkg p = let PackageName n = pkgName p
+                           v = map fromIntegral (versionBranch $ pkgVersion p)
+                       in (T.pack n, v)
+        pkgs' = M.toList $ M.fromListWith max (map convertPkg pkgs)
+    ((before, _), (after, _)) <- Gen2.collectShims dflags2 settings base pkgs'
+    T.writeFile "lib.js" before
+    T.writeFile "lib1.js" after
+    putStrLn "generated lib.js and lib1.js for:"
+    mapM_ (\(p,v) -> putStrLn $ "    " ++ T.unpack p ++
+      if null v then "" else ("-" ++ L.intercalate "." (map show v))) pkgs'
 
 -- | Sets up GHCJS package databases, requires a call to initPackages
 addPkgConf :: DynFlags -> IO DynFlags

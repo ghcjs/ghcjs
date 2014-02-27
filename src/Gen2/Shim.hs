@@ -48,6 +48,12 @@ import System.Directory (doesFileExist, canonicalizePath)
 import qualified Data.List as L
 import Data.Monoid
 
+import Compiler.Settings
+import DynFlags
+import Packages (getPackageIncludePath)
+import Config (cProjectVersionInt)
+import qualified SysTools
+
 type Pkg     = Text
 type Version = [Integer]
 
@@ -81,10 +87,12 @@ instance FromJSON VersionRange where
   parseJSON (String t) = maybe mempty pure (parseVersionRange t)
   parseJSON _          = mempty
 
-collectShims :: FilePath                                    -- ^ the base path
+collectShims :: DynFlags
+             -> GhcjsSettings
+             -> FilePath                                    -- ^ the base path
              -> [(Text, Version)]                           -- ^ packages being linked
              -> IO ((Text, [FilePath]), (Text, [FilePath])) -- ^ collected shims, to be included (before, after) rts
-collectShims base pkgs = do
+collectShims dflags settings base pkgs = do
   files <- mapM (collectShim base) pkgs
   let files' = map (base </>) (concat files)
       (beforeRts, afterRts) = splitFiles files'
@@ -95,17 +103,40 @@ collectShims base pkgs = do
       splitFiles files = (before, map init after)
         where
           (after, before) = L.partition ("@" `L.isSuffixOf`) files
-      combineShims files = ((,files).T.unlines) <$> mapM tryReadFile (uniq files)
+      combineShims files = ((,files).T.unlines) <$> mapM (tryReadShimFile dflags settings) (uniq files)
       uniq xs = let go (x:xs) s
                       | x `S.notMember` s = x : go xs (S.insert x s)
                       | otherwise         = go xs s
                     go [] _ = []
                 in go xs mempty
 
-tryReadFile :: FilePath -> IO Text
-tryReadFile file = T.readFile file `catch` \(_::SomeException) -> do
-                     putStrLn ("warning: could not read file: " <> file)
-                     return mempty
+tryReadShimFile :: DynFlags -> GhcjsSettings -> FilePath -> IO Text
+tryReadShimFile dflags settings file = do
+  exists <- doesFileExist file
+  if not exists
+    then putStrLn ("warning: " <> file <> " does not exist") >> return mempty
+    else do
+      let hscpp_opts = picPOpts dflags
+      outfile <- SysTools.newTempName dflags "jspp"
+      let cmdline_include_paths = includePaths dflags
+      pkg_include_dirs <- getPackageIncludePath dflags []
+      let include_paths = foldr (\ x xs -> "-I" : x : xs) []
+                            (cmdline_include_paths ++ pkg_include_dirs)
+      let verbFlags = getVerbFlags dflags
+      let hsSourceCppOpts = [ "-D__GLASGOW_HASKELL__="++cProjectVersionInt ]
+      SysTools.runCpp dflags (
+                       map SysTools.Option verbFlags
+                    ++ map SysTools.Option include_paths
+                    ++ map SysTools.Option hscpp_opts
+                    ++ [ SysTools.Option    "-P" ] -- suppress line number info
+                    -- see compiler/main/DriverPipeline.hs for hacks here
+                    ++ [ SysTools.Option     "-x"
+                       , SysTools.Option     "assembler-with-cpp"
+                       , SysTools.Option     file
+                       , SysTools.Option     "-o"
+                       , SysTools.FileOption "" outfile
+                       ])
+      T.readFile outfile
 
 collectShim :: FilePath -> (Pkg, Version) -> IO [FilePath]
 collectShim base (pkgName, pkgVer) = do
@@ -113,7 +144,7 @@ collectShim base (pkgName, pkgVer) = do
   let configFile = base </> T.unpack pkgName <.> "yaml"
   e <- doesFileExist configFile
   if e then do
-         cfg <- B.readFile  configFile
+         cfg <- B.readFile configFile
          case Yaml.decodeEither cfg of
            Left err -> do
              putStrLn ("invalid shim config: " ++ configFile ++ "\n   " ++ err)
