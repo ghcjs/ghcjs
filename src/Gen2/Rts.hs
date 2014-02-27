@@ -64,7 +64,7 @@ closureConstructors debug =
                              if(arguments[i] === null || arguments[i] === undefined) {
                                var msg = "warning: undefined or null in argument: " 
                                       + i + " allocating closure: " + arguments[0].n;
-                               log(msg);
+                               h$log(msg);
                                if(console && console.trace) { console.trace(msg); }
                              }
                            }
@@ -192,7 +192,7 @@ declRets :: JStat
 declRets = mconcat $ map (decl . TxtI . T.pack . ("h$"++) . map toLower . show) (enumFrom Ret1)
 
 trace :: ToJExpr a => a -> JStat
-trace e = [j| log(`e`);  |]
+trace e = [j| h$log(`e`);  |]
 
 closureTypes :: JStat
 closureTypes = mconcat (map mkClosureType (enumFromTo minBound maxBound)) <> closureTypeName
@@ -239,7 +239,7 @@ rts' debug = [j|
 var h$glbl;
 fun h$getGlbl { h$glbl = this; }
 h$getGlbl();
-fun log {
+fun h$log {
   if(h$glbl) {
     if(h$glbl.console && h$glbl.console.log) {
       h$glbl.console.log.apply(h$glbl.console,arguments);
@@ -427,13 +427,13 @@ fun h$select2_ret {
 // throw an exception: unwind the thread's stack until you find a handler
 fun h$throw e async {
   `preamble`;
-  //log("throwing exception: " + async);
+  //h$log("throwing exception: " + async);
   //h$dumpStackTop(`Stack`,0,`Sp`);
   var origSp = `Sp`;
   var lastBh = null; // position of last blackhole frame
   var f;
   while(`Sp` > 0) {
-    //log("unwinding frame: " + `Sp`);
+    //h$log("unwinding frame: " + `Sp`);
     f = `Stack`[`Sp`];
     if(f === null || f === undefined) {
       throw("h$throw: invalid object while unwinding stack");
@@ -485,7 +485,7 @@ fun h$throw e async {
     }
     `Sp` = `Sp` - size;
   }
-  //log("unwound stack to: " + `Sp`);
+  //h$log("unwound stack to: " + `Sp`);
   //h$dumpStackTop(`Stack`,0,origSp);
   if(`Sp` > 0) {
     var maskStatus = `Stack`[`Sp` - 2];
@@ -551,7 +551,7 @@ fun h$reduce {
 
 var h$gccheckcnt = 0;
 fun h$gc_check next {
-//  log("gc_check: todo");
+//  h$log("gc_check: todo");
   if(++h$gccheckcnt > 1000) {
     for(var i=`Sp`+1;i<`Stack`.length;i++) {
       `Stack`[i] = null;
@@ -654,7 +654,7 @@ fun h$printcl i {
         r += "unknown field: " + cl.i[i];
     }
   }
-  log(r);
+  h$log(r);
 }
 /*
 fun h$static_con0 f {
@@ -736,7 +736,7 @@ fun h$logCall c {
   } else {
     f = h$collectProps c;
   }
-  log(h$threadString(h$currentThread) + "  trampoline calling: " + f + "    " + JSON.stringify([h$printReg `R1`, h$printReg `R2`, h$printReg `R3`, h$printReg `R4`, h$printReg `R5`]));
+  h$log(h$threadString(h$currentThread) + "  trampoline calling: " + f + "    " + JSON.stringify([h$printReg `R1`, h$printReg `R2`, h$printReg `R3`, h$printReg `R4`, h$printReg `R5`]));
   h$checkStack();
 }
 
@@ -766,7 +766,7 @@ fun h$checkStack {
         }
       }
       if(size < 1) throw("invalid stack frame size at: stack[" + idx + "], frame: " +`Stack`[idx].n);
-//        log("checking frame: " + `Stack`[idx].n + " size " + size);
+//        h$log("checking frame: " + `Stack`[idx].n + " size " + size);
       if(f !== h$returnf && f !== h$restoreThread) {
         for(var i=0;i<size-offset;i++) {
           if(typeof `Stack`[idx-offset-i] === 'function') {
@@ -812,7 +812,7 @@ fun h$printReg r {
 // print top stack frame
 fun h$logStack {
   if(typeof `Stack`[`Sp`] === 'undefined') {
-    log("warning: invalid stack frame");
+    h$log("warning: invalid stack frame");
     return;
   }
   var size = 0;
@@ -858,7 +858,7 @@ var h$start = new Date();
 fun h$dumpRes cl {
    h$printcl cl;
    var end = new Date();
-   log("elapsed time: " + (end.getTime()-h$start.getTime()) + "ms");
+   h$log("elapsed time: " + (end.getTime()-h$start.getTime()) + "ms");
 }
 
 // fixme move somewhere else
@@ -877,32 +877,32 @@ fun h$dumpStackTop stack start sp {
         for(var i=start;i<=sp;i++) {
            var s = stack[i];
            if(s && s.n) {
-             log("stack[" + i + "] = " + s.n);
+             h$log("stack[" + i + "] = " + s.n);
            } else {
              if(s === null) {
-               log("stack[" + i + "] = null WARNING DANGER");
+               h$log("stack[" + i + "] = null WARNING DANGER");
              } else if(typeof s === 'object' && s !== null && s.hasOwnProperty("f") && s.hasOwnProperty("d1") && s.hasOwnProperty("d2")) {
-               if(s.d1 === undefined) { log("WARNING: stack[" + i + "] d1 undefined"); }
-               if(s.d2 === undefined) { log("WARNING: stack[" + i + "] d2 undefined"); }
+               if(s.d1 === undefined) { h$log("WARNING: stack[" + i + "] d1 undefined"); }
+               if(s.d2 === undefined) { h$log("WARNING: stack[" + i + "] d2 undefined"); }
                if(s.f.t === `Blackhole` && s.d1 && s.d1.x1 && s.d1.x1.n) {
-                 log("stack[" + i + "] = blackhole -> " + s.d1.x1.n);
+                 h$log("stack[" + i + "] = blackhole -> " + s.d1.x1.n);
                } else {
-                 log("stack[" + i + "] = -> " + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
+                 h$log("stack[" + i + "] = -> " + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
                }
              } else if(h$isInstanceOf(s,h$MVar)) {
                var val = s.val ===
                  null ? " empty"
                       : " value -> " + (typeof s.val === 'object' ? s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")" : s.val);
-               log("stack[" + i + "] = MVar " + val);
+               h$log("stack[" + i + "] = MVar " + val);
              } else if(h$isInstanceOf(s,h$MutVar)) {
-               log("stack[" + i + "] = IORef -> " + (typeof s.val === 'object' ? (s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")") : s.val));
+               h$log("stack[" + i + "] = IORef -> " + (typeof s.val === 'object' ? (s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")") : s.val));
              } else if(typeof s === 'object') {
-               log("stack[" + i + "] = " + h$collectProps(s).substring(0,50));
+               h$log("stack[" + i + "] = " + h$collectProps(s).substring(0,50));
              } else if(typeof s === 'function') {
                var re = new RegExp("([^\\n]+)\\n(.|\\n)*");
-               log("stack[" + i + "] = " + (""+s).substring(0,50).replace(re,"$1"));
+               h$log("stack[" + i + "] = " + (""+s).substring(0,50).replace(re,"$1"));
              } else {
-               log("stack[" + i + "] = " + (""+s).substring(0,50));
+               h$log("stack[" + i + "] = " + (""+s).substring(0,50));
              }
           }
         }
@@ -914,41 +914,41 @@ fun h$dumpStackTop stack start sp {
 fun h$checkObj obj {
   if(typeof obj === 'boolean' || typeof obj === 'number') { return; }
   if(!obj.hasOwnProperty("f") || obj.f === null || obj.f === undefined || obj.f.a === undefined || typeof obj.f !== 'function') {
-    log("h$checkObj: WARNING, something wrong with f:");
-    log((""+obj).substring(0,200));
-    log(h$collectProps(obj));
-    log(typeof obj.f);
+    h$log("h$checkObj: WARNING, something wrong with f:");
+    h$log((""+obj).substring(0,200));
+    h$log(h$collectProps(obj));
+    h$log(typeof obj.f);
   }
   if(!obj.hasOwnProperty("d1") || obj.d1 === undefined) {
-    log("h$checkObj: WARNING, something wrong with d1:");
-    log((""+obj).substring(0,200));
+    h$log("h$checkObj: WARNING, something wrong with d1:");
+    h$log((""+obj).substring(0,200));
   } else if(!obj.hasOwnProperty("d2") || obj.d2 === undefined) {
-    log("h$checkObj: WARNING, something wrong with d2:");
-    log((""+obj).substring(0,200));
+    h$log("h$checkObj: WARNING, something wrong with d2:");
+    h$log((""+obj).substring(0,200));
   } else if(obj.d2 !== null && typeof obj.d2 === 'object' && obj.f.gtag !== 2) {
     var d = obj.d2;
     for(var p in d) {
       if(d.hasOwnProperty(p)) {
         if(p.substring(0,1) != "d") {
-          log("h$checkObj: WARNING, unexpected field name: " + p);
-          log((""+obj).substring(0,200));
+          h$log("h$checkObj: WARNING, unexpected field name: " + p);
+          h$log((""+obj).substring(0,200));
         }
         if(d[p] === undefined) {
-          log("h$checkObj: WARNING, undefined field detected: " + p);
-          log((""+obj).substring(0,200));
+          h$log("h$checkObj: WARNING, undefined field detected: " + p);
+          h$log((""+obj).substring(0,200));
         }
 //        if(d[p] === null) {
-//          log("h$checkObj: WARNING, null field detected: " + p);
-//          log((""+obj).substring(0,200));
+//          h$log("h$checkObj: WARNING, null field detected: " + p);
+//          h$log((""+obj).substring(0,200));
 //        }
       }
     }
     switch(obj.f.gtag) {
-      case 6: if(d.d5 === undefined) { log("h$checkObj: WARNING, undefined field detected: d5"); }
-      case 5: if(d.d4 === undefined) { log("h$checkObj: WARNING, undefined field detected: d4"); }
-      case 4: if(d.d3 === undefined) { log("h$checkObj: WARNING, undefined field detected: d3"); }
-      case 3: if(d.d2 === undefined) { log("h$checkObj: WARNING, undefined field detected: d2"); }
-              if(d.d1 === undefined) { log("h$checkObj: WARNING, undefined field detected: d1"); }
+      case 6: if(d.d5 === undefined) { h$log("h$checkObj: WARNING, undefined field detected: d5"); }
+      case 5: if(d.d4 === undefined) { h$log("h$checkObj: WARNING, undefined field detected: d4"); }
+      case 4: if(d.d3 === undefined) { h$log("h$checkObj: WARNING, undefined field detected: d3"); }
+      case 3: if(d.d2 === undefined) { h$log("h$checkObj: WARNING, undefined field detected: d2"); }
+              if(d.d1 === undefined) { h$log("h$checkObj: WARNING, undefined field detected: d1"); }
       default: d = obj.d2; // dummy
     }
   }
@@ -972,7 +972,7 @@ fun h$traceForeign f as {
       bs.push(""+ai);
     }
   }
-  log("ffi: " + f + "(" + bs.join(",") + ")");
+  h$log("ffi: " + f + "(" + bs.join(",") + ")");
 }
 
 // the scheduler pushes this frame when suspending a thread that
@@ -980,7 +980,7 @@ fun h$traceForeign f as {
 fun h$restoreThread {
   var f         = `Stack`[`Sp`-2];
   var frameSize = `Stack`[`Sp`-1];
-//  log("restoreThread " + h$currentThread.tid + " sp: " + h$sp + " frame size: " + frameSize);
+//  h$log("restoreThread " + h$currentThread.tid + " sp: " + h$sp + " frame size: " + frameSize);
   var nregs = frameSize - 3;
   for(var i=1;i<=nregs;i++) {
     h$setReg(i, `Stack`[`Sp`-2-i]);
@@ -993,7 +993,7 @@ fun h$restoreThread {
 // return a closure in the stack frame to the next thing on the stack
 fun h$return {
   `R1` = `Stack`[`Sp`-1];
-//  log("h$return, returning: " + `R1`.f.n);
+//  h$log("h$return, returning: " + `R1`.f.n);
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
@@ -1002,7 +1002,7 @@ fun h$return {
 // return a function in the stack frame for the next call
 fun h$returnf {
   var r = `Stack`[`Sp`-1];
-//  log("h$returnf, returning: " + r.n);
+//  h$log("h$returnf, returning: " + r.n);
   `adjSpN 2`;
   return r;
 }
@@ -1037,7 +1037,7 @@ fun h$suspendCurrentThread next {
   } else {
     nregs = 1;  // Thunk, Con, Blackhole only have R1
   }
-  // log("suspending: " + `Sp` + " nregs: " + nregs);
+  // h$log("suspending: " + `Sp` + " nregs: " + nregs);
   `Sp` = `Sp`+nregs+3;
   for(var i=1;i<=nregs;i++) {
     `Stack`[`Sp`-2-i] = h$getReg(i);
@@ -1050,17 +1050,17 @@ fun h$suspendCurrentThread next {
 
 // debug thing, insert on stack to dump current result
 fun h$dumpRes {
-  log("#######: result: " + `Stack`[`Sp`-1]);
-  log(`R1`);
-  log(h$collectProps(`R1`));
-  if(`R1`.f && `R1`.f.n) { log("name: " + `R1`.f.n); }
-  if(`R1`.hasOwnProperty('d1')) { log("d1: " + `R1`.d1); }
-  if(`R1`.hasOwnProperty('d2')) { log("d2: " + `R1`.d2); }
+  h$log("#######: result: " + `Stack`[`Sp`-1]);
+  h$log(`R1`);
+  h$log(h$collectProps(`R1`));
+  if(`R1`.f && `R1`.f.n) { h$log("name: " + `R1`.f.n); }
+  if(`R1`.hasOwnProperty('d1')) { h$log("d1: " + `R1`.d1); }
+  if(`R1`.hasOwnProperty('d2')) { h$log("d2: " + `R1`.d2); }
   if(`R1`.f) {
     var re = new RegExp("([^\\n]+)\\n(.|\\n)*");
-    log("function: " + (""+`R1`.f).substring(0,50).replace(re,"$1"));
+    h$log("function: " + (""+`R1`.f).substring(0,50).replace(re,"$1"));
   }
-  log("######");
+  h$log("######");
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
@@ -1099,7 +1099,7 @@ fun h$unmaskFrame {
 `ClosureInfo "h$unmaskFrame" [] "unmask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 fun h$maskFrame {
-  //log("h$maskFrame: " + h$threadString(h$currentThread));
+  //h$log("h$maskFrame: " + h$threadString(h$currentThread));
   h$currentThread.mask = 2;
   `adjSpN 1`;
   return `Stack`[`Sp`];
@@ -1107,7 +1107,7 @@ fun h$maskFrame {
 `ClosureInfo "h$maskFrame" [] "mask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
 fun h$maskUnintFrame {
-  //log("h$maskUnintFrame: " + h$threadString(h$currentThread));
+  //h$log("h$maskUnintFrame: " + h$threadString(h$currentThread));
   h$currentThread.mask = 1;
   `adjSpN 1`;
   return `Stack`[`Sp`];
