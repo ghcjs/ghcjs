@@ -111,12 +111,15 @@ collectShims dflags settings base pkgs = do
                 in go xs mempty
 
 tryReadShimFile :: DynFlags -> GhcjsSettings -> FilePath -> IO Text
-tryReadShimFile dflags settings file = do
+tryReadShimFile dflags ghcjsSettings file = do
   exists <- doesFileExist file
   if not exists
     then putStrLn ("warning: " <> file <> " does not exist") >> return mempty
     else do
       let hscpp_opts = picPOpts dflags
+      let s = settings dflags
+          s1 = s { sPgm_P = (fst (sPgm_P s), filter ((/=) (Option "-traditional")) (snd $ sPgm_P s)) }
+      let dflags1 = dflags { settings = s1 }
       outfile <- SysTools.newTempName dflags "jspp"
       let cmdline_include_paths = includePaths dflags
       pkg_include_dirs <- getPackageIncludePath dflags []
@@ -124,7 +127,7 @@ tryReadShimFile dflags settings file = do
                             (cmdline_include_paths ++ pkg_include_dirs)
       let verbFlags = getVerbFlags dflags
       let hsSourceCppOpts = [ "-D__GLASGOW_HASKELL__="++cProjectVersionInt ]
-      SysTools.runCpp dflags (
+      SysTools.runCpp dflags1 (
                        map SysTools.Option verbFlags
                     ++ map SysTools.Option include_paths
                     ++ map SysTools.Option hscpp_opts
