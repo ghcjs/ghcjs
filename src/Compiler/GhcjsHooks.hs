@@ -21,6 +21,8 @@ import           Platform
 import qualified SysTools
 import           SimplStg             (stg2stg)
 import           UniqFM               (eltsUFM)
+import           HeaderInfo
+import           HscTypes
 
 import           Control.Applicative
 import           Control.Concurrent.MVar
@@ -35,7 +37,6 @@ import           System.FilePath
 import           Compiler.Info
 import           Compiler.Settings
 import           Compiler.Variants
-import           Compiler.Utils
 import qualified Compiler.Utils       as Utils
 
 import qualified Gen2.PrimIface       as Gen2
@@ -84,6 +85,41 @@ runGhcjsPhase :: GhcjsSettings
               -> GhcjsEnv
               -> PhasePlus -> FilePath -> DynFlags
               -> CompPipeline (PhasePlus, FilePath)
+
+runGhcjsPhase settings env (RealPhase (Cpp sf)) input_fn dflags0
+  = do
+       src_opts <- liftIO $ getOptionsFromFile dflags0 input_fn
+       (dflags1, unhandled_flags, warns)
+           <- liftIO $ parseDynamicFilePragma dflags0 src_opts
+       setDynFlags dflags1
+       liftIO $ checkProcessArgsResult dflags1 unhandled_flags
+
+       if not (xopt Opt_Cpp dflags1) then do
+           -- we have to be careful to emit warnings only once.
+           unless (gopt Opt_Pp dflags1) $
+               liftIO $ handleFlagWarnings dflags1 warns
+
+           -- no need to preprocess CPP, just pass input file along
+           -- to the next phase of the pipeline.
+           return (RealPhase (HsPp sf), input_fn)
+        else do
+            output_fn <- phaseOutputFilename (HsPp sf)
+            liftIO $ Utils.doCpp dflags1 True{-raw-}
+                           input_fn output_fn
+            -- re-read the pragmas now that we've preprocessed the file
+            -- See #2464,#3457
+            src_opts <- liftIO $ getOptionsFromFile dflags0 output_fn
+            (dflags2, unhandled_flags, warns)
+                <- liftIO $ parseDynamicFilePragma dflags0 src_opts
+            liftIO $ checkProcessArgsResult dflags2 unhandled_flags
+            unless (gopt Opt_Pp dflags2) $
+                liftIO $ handleFlagWarnings dflags2 warns
+            -- the HsPp pass below will emit warnings
+
+            setDynFlags dflags2
+
+            return (RealPhase (HsPp sf), output_fn)
+
 runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
 
         location <- getLocation src_flavour mod_name
@@ -180,11 +216,11 @@ ghcjsCompileModule settings jsEnv env core mod =
 
 doFakeNative :: DynFlags -> FilePath -> IO ()
 doFakeNative df base = do
-  b <- getEnvOpt "GHCJS_FAKE_NATIVE"
+  b <- Utils.getEnvOpt "GHCJS_FAKE_NATIVE"
   when b $ do
     mapM_ backupExt ["hi", "o", "dyn_hi", "dyn_o"]
     mapM_ touchExt  ["hi", "o", "dyn_hi", "dyn_o"]
   where
-    backupExt ext = copyNoOverwrite (base ++ ".backup_" ++ ext) (base ++ "." ++ ext)
-    touchExt  ext = touchFile df (base ++ "." ++ ext)
+    backupExt ext = Utils.copyNoOverwrite (base ++ ".backup_" ++ ext) (base ++ "." ++ ext)
+    touchExt  ext = Utils.touchFile df (base ++ "." ++ ext)
 

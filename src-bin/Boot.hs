@@ -1,4 +1,4 @@
-{-# LANGUAGE ExtendedDefaultRules, OverloadedStrings #-}
+{-# LANGUAGE CPP, ExtendedDefaultRules, OverloadedStrings, ScopedTypeVariables #-}
 module Main where
 
 import Compiler.GhcjsProgram (printVersion)
@@ -15,21 +15,31 @@ import Control.Applicative
 import Control.Monad
 import Options.Applicative
 import qualified Control.Exception as Ex
-import System.Exit (exitSuccess)
+import System.Exit (exitSuccess, exitFailure)
+
+import qualified Data.ByteString.Lazy as BL
+import Network.HTTP (simpleHTTP, getRequest)
+import Network.HTTP.Base (Response(..), Request(..), RequestMethod(..), mkRequest)
+import Network.Stream (Result, ConnError(..))
+import Network.URI (parseURI)
+import qualified Codec.Compression.GZip as GZip
+import qualified Codec.Compression.BZip as BZip
+import qualified Codec.Archive.Tar as Tar
 
 default (Text)
 
 main = do
-    settings <- execParser optParser'
+    settings <- adjustDefaultSettings <$> execParser optParser'
     when (showVersion settings) (printVersion >> exitSuccess)
     r <- (shellyNoDir $ actions settings `catchany_sh` (return . Just))
     maybe exitSuccess Ex.throwIO r
   where
     actions :: BootSettings -> Sh (Maybe Ex.SomeException)
     actions s = verbosely . tracing False $ do
+      checkBuildTools s
       e <- test_f ("data" </> "primops.txt.pp")
       if initTree s
-        then initSourceTree e (gmpInclude s)
+        then initSourceTree e s
         else when (not e) $ do
           cdBase
           e' <- test_d ("ghcjs-boot")
@@ -45,7 +55,7 @@ main = do
       pjs <- test_f ("data" </> "primops-js.txt")
       when (not pjs) (errorExit $ "Cannot find `data/primops-js.txt': the source tree appears to have\n" <>
                                   "not been initialized. Run `ghcjs-boot --init' first." )
-      installRts
+      installRts s
       installFakes
       installBootPackages s
       installGhcjsPrim s
@@ -72,6 +82,76 @@ data BootSettings = BootSettings { initTree  :: Bool      -- ^ initialize the so
                                  , gmpFramework :: Bool       -- ^ with-gmp-framework-preferred
                                  , gmpInTree    :: Bool       -- ^ force using the in-tree GMP
                                  } deriving (Ord, Eq)
+
+adjustDefaultSettings :: BootSettings -> BootSettings
+#ifdef WINDOWS
+adjustDefaultSettings s
+  | isNothing (gmpInclude s) && isNothing (gmpLib s) = s { gmpInTree = True }
+  | otherwise                                        = s
+#else
+adjustDefaultSettings = id
+#endif
+
+checkBuildTools :: BootSettings -> Sh ()
+#ifdef WINDOWS
+buildToolsURI :: String
+buildToolsURI = "http://ghcjs.github.io/ghcjs-buildtools-windows.tar.bz2"
+
+buildToolsFile :: FilePath
+buildToolsFile = "ghcjs-buildtools-windows.tar.bz2"
+
+checkBuildTools s = do
+  cdBase
+  p <- pwd
+  let bt = p </> "buildtools"
+  toolsExist <- test_d "buildtools"
+  when (not toolsExist) $ do
+    if not (initTree s)
+	  then do
+        echo "buildtools required for ghcjs-boot not installed"
+        echo "`ghcjs-boot --init` will automatically install them"
+        liftIO exitFailure
+      else do
+        toolsArchiveExists <- test_f buildToolsFile
+        when (not toolsArchiveExists) $ do
+          echo "fetching buildtools"
+          res <- liftIO $ simpleHTTP (getBsRequest buildToolsURI)
+          case res of
+            Left err -> do
+              echo $ "could not download " <> T.pack buildToolsURI
+              echo $ "error: " <> T.pack (show err)
+              echo $ "you can manually get the file and place it in: " <> toTextIgnore p
+              liftIO exitFailure
+            Right response -> writeBinary buildToolsFile (rspBody response)
+        unpackTarBz2 "." buildToolsFile
+  path1 <- get_env "Path"
+  path2 <- get_env "PATH"
+  let path = maybe "" (";"<>) (path1 <> path2)
+      newPath = ((toTextIgnore $ bt </> "bin") <> path)
+  echo ("orig path: " <> path)
+  setenv "Path" newPath
+  setenv "PATH" newPath
+  setenv "MINGW_HOME" (toTextIgnore bt)
+  setenv "PERL5LIB" (msysPath $ bt </> "share" </> "autoconf")
+  mkdir_p (bt </> "etc")
+  writefile (bt </> "etc" </> "fstab")
+    (escapePath bt <> " /mingw\n")
+
+-- convert C:\x\y to /c/x/y
+msysPath :: FilePath -> Text
+msysPath p = let p' = toTextIgnore p
+                 backToForward '\\' = '/'
+                 backToForward x    = x
+             in "/" <> T.map backToForward (T.filter (/=':') p')
+
+escapePath :: FilePath -> Text
+escapePath p = let p' = toTextIgnore p
+                   escape ' ' = "\\ "
+                   escape c   = T.singleton c
+               in  T.concatMap escape p'
+#else
+checkBuildTools _ = return ()
+#endif
 
 optParser' :: ParserInfo BootSettings
 optParser' = info (helper <*> optParser) ( fullDesc <>
@@ -142,6 +222,10 @@ bootPackages = [ "ghc-prim"
                , "template-haskell"
                , "array"
                , "pretty"
+               , "time"
+#ifdef WINDOWS
+               , "Win32"
+#endif
                ]
 
 -- | We need to pretend that these are installed while building bootPackages
@@ -160,9 +244,9 @@ ghcjsPackages = [ "ghcjs-base"
 -- | reduced set of packages for quick boot
 ghcjsQuickPackages = [ ]
 
-initSourceTree :: Bool -> Maybe Text -> Sh ()
-initSourceTree currentDir gmpIncludeDir = do
-  if currentDir
+initSourceTree :: Bool -> BootSettings -> Sh ()
+initSourceTree localTree settings = do
+  if localTree
     then do
       p <- pwd
       echo $ "preparing local boot tree ( " <> toTextIgnore p <> " )"
@@ -198,7 +282,7 @@ initSourceTree currentDir gmpIncludeDir = do
                            when isDir (patchPackage "extra" (toString rp))
   preparePrimops
   buildGenPrim
-  buildGmpConstants gmpIncludeDir
+  cleanGmp
 
 -- | preprocess primops.txt.pp, one version for the JS platform
 --   one for native
@@ -224,10 +308,58 @@ buildGenPrim = sub $ do
     happy ["Parser.y"]
     ghc   ["-o", "genprimopcode", "-O", "Main.hs", "+RTS", "-K128M"]
 
+cleanGmp :: Sh ()
+cleanGmp = sub $ do
+  cd ("boot" </> "integer-gmp")
+  rm_rf ("gmp" </> "intree")
+  rm_f ("mkGmpDerivedConstants" </> exe "mkGmpDerivedConstants")
+  rm_f "GmpDerivedConstants.h"
+
+prepareGmp :: BootSettings -> Sh ()
+prepareGmp settings = sub $ do
+  cd ("boot" </> "integer-gmp")
+  intreeInstalled <- test_f ("gmp" </> "intree" </> "include" </> "gmp.h")
+  when (gmpInTree settings && not intreeInstalled) $ do
+      sub $ do
+        cd "gmp"
+        lsFilter "." isGmpSubDir rm_rf
+        echo "unpacking in-tree GMP"
+        lsFilter "tarball" (return . isTarball) (unpackTarBz2 ".")
+        d <- pwd
+        ad <- absPath d
+        lsFilter "." isGmpSubDir $ \dir -> do
+          -- patch has already been applied
+          cd dir
+          echo ("building GMP in dir: " <> toTextIgnore dir)
+          configure ["--prefix=" <> fixPrefix (toTextIgnore (ad </> "intree"))]
+          make []
+          make ["install"]
+  constantsGenerated <- test_f "GmpGeneratedConstants.h"
+  when (not constantsGenerated) $ do
+    if gmpInTree settings
+	  then do
+        ad <- absPath =<< pwd
+        buildGmpConstants (gmpInclude settings `mplus`
+	      Just (toTextIgnore (ad </> "gmp" </> "intree" </> "include")))
+      else
+        buildGmpConstants (gmpInclude settings)
+    where
+      lsFilter :: FilePath -> (FilePath -> Sh Bool) -> (FilePath -> Sh ()) -> Sh ()
+      lsFilter dir p a = ls dir >>= mapM_ (\x -> p x >>= flip when (a x))
+      isTarball file = ".tar.bz2" `T.isSuffixOf` toTextIgnore file
+      isGmpSubDir dir = (("gmp-" `T.isPrefixOf`) . toTextIgnore) <$> relativeTo "." dir
+#ifdef WINDOWS
+      fixPrefix = T.map (\c -> if c == '\\' then '/' else c)
+#else
+      fixPrefix = id
+#endif
+
 buildGmpConstants :: Maybe Text -> Sh ()
-buildGmpConstants gmpIncludeDir = sub $ do
-  cd ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants")
-  ghc $ maybe [] (\d -> ["-I" <> d]) gmpIncludeDir ++ ["-no-hs-main", "-o", "mkGmpDerivedConstants", "mkGmpDerivedConstants.c"]
+buildGmpConstants includeDir = sub $ do
+  echo "generating GMP derived constants"
+  cd "mkGmpDerivedConstants"
+  ghc $ maybe [] (\d -> ["-I" <> d]) includeDir ++
+    ["-fforce-recomp", "-no-hs-main", "-o", "mkGmpDerivedConstants", "mkGmpDerivedConstants.c"]
   p <- pwd
   constants <- run (p </> "mkGmpDerivedConstants") []
   writefile "GmpDerivedConstants.h" constants
@@ -242,8 +374,8 @@ patchPackage base pkg = sub $ do
     cd (base </> fromString pkg)
     ignoreExcep $ patch ["-p1", "-N"]
 
-installRts :: Sh ()
-installRts = do
+installRts :: BootSettings -> Sh ()
+installRts settings = do
   echo "installing RTS"
   dest <- liftIO getGlobalPackageDB
   base <- liftIO getGlobalPackageBase
@@ -263,15 +395,37 @@ installRts = do
   cp (Paths.libdir </> "platformConstants") (lib </> "platformConstants")
   cp (Paths.libdir </> "settings")          (base </> "settings")
   cp (Paths.libdir </> "platformConstants") (base </> "platformConstants")
-  cp (Paths.libdir </> "unlit")             (base </> "unlit")
+  cp (Paths.libdir </> exe "unlit")         (base </> exe "unlit")
   -- required for integer-gmp
+  prepareGmp settings
   cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
+#ifdef WINDOWS
+  cp (Paths.libdir </> exe "touchy") (base </> exe "touchy")
+  mingwInstalled <- test_d (base </> ".." </> "mingw")
+  when (not mingwInstalled) $ do
+    echo "copying MingW installation"
+    cp_r (Paths.libdir </> ".." </> "mingw") (base </> "..")
+#endif
+  echo "RTS prepared"
+
+exe :: FilePath -> FilePath
+#ifdef WINDOWS
+exe p = p <.> "exe"
+#else
+exe p = p
+#endif
 
 cabalFlags :: Bool -- ^ pass -j argument to GHC instead of cabal?
            -> BootSettings
            -> [Text]
-cabalFlags parGhc s = v ++ j ++ d
+cabalFlags parGhc s = v ++ j ++ d ++ str
   where
+#ifdef WINDOWS
+    -- workaround for Cabal bug?
+    str = ["--disable-executable-stripping", "--disable-library-stripping"]
+#else
+    str = []
+#endif
     v = if verbose s then ["-v"] else []
     j = if jobs s /= 1 then [if parGhc then jGhc else jCabal] else []
     d = if debug s then ["--ghcjs-options=--debug"] else []
@@ -282,18 +436,24 @@ installBootPackages :: BootSettings -> Sh ()
 installBootPackages s = sub $ do
   echo "installing boot packages"
   cd "boot"
+  p <- pwd
   forM_ bootPackages preparePackage
   when (not $ null bootPackages)
-    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
+    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
     where
-      configureOpts = map ("--configure-option=" <>) $ catMaybes
+      configureOpts p = map ("--configure-option=" <>) $ catMaybes
             [ fmap ("--with-iconv-includes="  <>) (iconvInclude s)
             , fmap ("--with-iconv-libraries=" <>) (iconvLib s)
-            , fmap ("--with-gmp-includes="   <>) (gmpInclude s)
-            , fmap ("--with-gmp-libraries="  <>) (gmpLib s)
+            , fmap ("--with-gmp-includes="   <>) (gmpInclude s <> inTreePath p "include")
+            , fmap ("--with-gmp-libraries="  <>) (gmpLib s <> inTreePath p "lib")
             , if gmpFramework s then Just "--with-gmp-framework-preferred" else Nothing
             , if gmpInTree s then Just "--with-intree-gmp" else Nothing
             ]
+      inTreePath p sub | gmpInTree s = Just (toTextIgnore (p' </> sub))
+                       | otherwise   = Nothing
+            where
+              p' = p </> "integer-gmp" </> "gmp" </> "intree"
+
 -- | extra packages are not hardcoded but live in two files:
 --     extra/extra0  -- installed before Cabal (list Cabal dependencies here)
 --     extra/extra1  -- installed after Cabal
@@ -343,9 +503,11 @@ preparePackage pkg = sub $ do
   cd (fromString pkg)
   conf   <- test_f "configure"
   confac <- test_f "configure.ac"
-  when (confac && not conf) (run_ "autoreconf" [])
+  when (confac && not conf) $ do
+    echo ("generating configure script for " <> T.pack pkg)
+    autoreconf []
   rm_rf "dist"
-  cabal ["clean"]
+--  cabal ["clean"]
 
 fixRtsConf :: Text -> Text -> Text -> Text
 fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
@@ -414,17 +576,49 @@ checkShims = sub $ do
               echo "The shims repository is missing, fetching"
               git ["clone", "https://github.com/ghcjs/shims.git"]
 
-cpp          = run  "cpp"
-gcc          = run_ "gcc"
+getBsRequest :: String -> Request BL.ByteString
+getBsRequest urlString =
+  case parseURI urlString of
+    Nothing -> error ("getBsRequest: Not a valid URL - " ++ urlString)
+    Just u  -> mkRequest GET u
+
+writeBinary :: FilePath -> BL.ByteString -> Sh ()
+writeBinary file bs = do
+  file' <- absPath file
+  liftIO $ BL.writeFile (toString file') bs
+
+unpackTarGz :: FilePath -> FilePath -> Sh ()
+unpackTarGz dest tarFile =
+  unpackCompressedTar dest tarFile GZip.decompress
+
+unpackTarBz2 :: FilePath -> FilePath -> Sh ()
+unpackTarBz2 dest tarFile =
+  unpackCompressedTar dest tarFile BZip.decompress
+
+unpackCompressedTar :: FilePath -> FilePath -> (BL.ByteString -> BL.ByteString) -> Sh ()
+unpackCompressedTar dest tarFile decompress = do
+  dest' <- absPath dest
+  bs    <- BL.fromStrict <$> readBinary tarFile
+  liftIO (Tar.unpack (toString dest') . Tar.read . decompress $ bs)
+
 git          = run_ "git"
 alex         = run_ "alex"
 happy        = run_ "happy"
 ghc          = run_ "ghc"
-path         = run_ "patch"
 ghcjs_pkg    = run_ "ghcjs-pkg"
 cabalBoot xs = sub (setenv "GHCJS_BOOTING" "1" >> run_ "cabal" xs)
 cabal        = run_ "cabal"
 patch        = run_ "patch"
+make         = run_ "make"
+cpp          = run  "cpp"
+#ifdef WINDOWS
+bash = run_ "bash"
+configure xs = bash ("configure":xs)
+autoreconf xs = bash ("/mingw/bin/autoreconf-2.68":xs)
+#else
+configure = run_ "./configure"
+autoreconf = run_ "autoreconf"
+#endif
 
 ignoreExcep a = a `catchany_sh` (\e -> echo $ "ignored exception: " <> T.pack (show e))
 

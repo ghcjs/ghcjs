@@ -130,7 +130,7 @@ Executable ghcjs
     hs-source-dirs: src-bin
     Build-Depends:  base                >= 4    &&  < 5,
                     ghcjs
-    GHC-Options:    -O -rtsopts -with-rtsopts=-K256m -with-rtsopts=-N -auto-all -threaded
+    GHC-Options:    -O2 -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded
 
 Executable ghcjs-pkg
     if flag(compiler-only)
@@ -156,6 +156,8 @@ Executable ghcjs-pkg
 Executable ghcjs-boot
     if flag(compiler-only)
       Buildable:      False
+    if os(Windows)
+      cpp-options: -DWINDOWS
     Main-Is:          Boot.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
@@ -171,7 +173,11 @@ Executable ghcjs-boot
                       system-filepath      >= 0.4  && < 0.5,
                       shelly               >= 1.4  && < 1.5,
                       system-fileio        >= 0.3  && < 0.4,
-                      optparse-applicative >= 0.7  && < 0.8
+                      optparse-applicative >= 0.7  && < 0.8,
+                      tar                  >= 0.4  && < 0.5,
+                      zlib                 >= 0.5.4 && < 0.6,
+                      bzlib                >= 0.5   && < 0.6,
+                      HTTP                 >= 4000.2 && < 5000
 
 test-suite test
     type:             exitcode-stdio-1.0

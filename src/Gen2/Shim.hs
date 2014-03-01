@@ -49,6 +49,7 @@ import qualified Data.List as L
 import Data.Monoid
 
 import Compiler.Settings
+import qualified Compiler.Utils as Utils
 import DynFlags
 import Packages (getPackageIncludePath)
 import Config (cProjectVersionInt)
@@ -116,29 +117,13 @@ tryReadShimFile dflags ghcjsSettings file = do
   if not exists
     then putStrLn ("warning: " <> file <> " does not exist") >> return mempty
     else do
-      let hscpp_opts = picPOpts dflags
       let s = settings dflags
-          s1 = s { sPgm_P = (fst (sPgm_P s), filter ((/=) (Option "-traditional")) (snd $ sPgm_P s)) }
-      let dflags1 = dflags { settings = s1 }
+          -- suppress line numbers and enable extended syntax
+          cppOpts opts = (Option "-P") : filter (/=(Option "-traditional")) opts
+          s1 = s { sPgm_P = (fst (sPgm_P s), cppOpts (snd $ sPgm_P s)) }
+          dflags1 = dflags { settings = s1 }
       outfile <- SysTools.newTempName dflags "jspp"
-      let cmdline_include_paths = includePaths dflags
-      pkg_include_dirs <- getPackageIncludePath dflags []
-      let include_paths = foldr (\ x xs -> "-I" : x : xs) []
-                            (cmdline_include_paths ++ pkg_include_dirs)
-      let verbFlags = getVerbFlags dflags
-      let hsSourceCppOpts = [ "-D__GLASGOW_HASKELL__="++cProjectVersionInt ]
-      SysTools.runCpp dflags1 (
-                       map SysTools.Option verbFlags
-                    ++ map SysTools.Option include_paths
-                    ++ map SysTools.Option hscpp_opts
-                    ++ [ SysTools.Option    "-P" ] -- suppress line number info
-                    -- see compiler/main/DriverPipeline.hs for hacks here
-                    ++ [ SysTools.Option     "-x"
-                       , SysTools.Option     "assembler-with-cpp"
-                       , SysTools.Option     file
-                       , SysTools.Option     "-o"
-                       , SysTools.FileOption "" outfile
-                       ])
+      Utils.doCpp dflags1 False file outfile
       T.readFile outfile
 
 collectShim :: FilePath -> (Pkg, Version) -> IO [FilePath]
