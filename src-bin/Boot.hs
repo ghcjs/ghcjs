@@ -225,6 +225,8 @@ bootPackages = [ "ghc-prim"
                , "time"
 #ifdef WINDOWS
                , "Win32"
+#else
+               , "unix"
 #endif
                ]
 
