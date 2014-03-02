@@ -9,6 +9,7 @@ module Compiler.Utils
       touchFile
     , copyNoOverwrite
     , findFile
+    , jsexeExtension
     , exeFileName
     , mkGhcjsSuf
     , mkGhcjsOutput
@@ -71,13 +72,16 @@ findFile mk_file_path (dir : dirs)
        if b then return (Just file_path)
             else findFile mk_file_path dirs
 
+jsexeExtension :: FilePath
+jsexeExtension = "jsexe"
+
 exeFileName :: DynFlags -> FilePath
 exeFileName dflags
   | Just s <- outputFile dflags =
       -- unmunge the extension
       let s' = dropPrefix "js_" (drop 1 $ takeExtension s)
       in if null s'
-           then dropExtension s <.> "jsexe"
+           then dropExtension s <.> jsexeExtension
            else dropExtension s <.> s'
   | otherwise =
       if platformOS (targetPlatform dflags) == OSMinGW32

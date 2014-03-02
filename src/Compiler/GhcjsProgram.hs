@@ -23,7 +23,12 @@ import           Panic (handleGhcException)
 
 import           Exception
 
+import           Distribution.System (buildOS, OS(..))
+import           Distribution.Verbosity (deafening, intToVerbosity)
 import           Distribution.Package (PackageName(..), PackageIdentifier(..))
+import           Distribution.Simple.BuildPaths (exeExtension)
+import           Distribution.Simple.Utils (installExecutableFile, installDirectoryContents)
+import           Distribution.Simple.Program (runProgramInvocation, simpleProgramInvocation)
 
 import           Control.Applicative
 import           Control.Monad
@@ -48,7 +53,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 
 import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory,
-                                   doesFileExist, copyFile)
+                                   doesFileExist, doesDirectoryExist, copyFile)
 import           System.Environment (getArgs, getEnv, getEnvironment)
 import           System.Exit
 import           System.FilePath
@@ -108,6 +113,7 @@ getGhcjsSettings args
     as = [ "--native-executables"
          , "--no-native"
          , "--no-js-executables"
+         , "--strip-program="
          , "--log-commandline="
          , "--with-ghc="
 --         , "--debug"
@@ -120,6 +126,7 @@ getGhcjsSettings args
     envSettings = GhcjsSettings <$> getEnvOpt "GHCJS_NATIVE_EXECUTABLES"
                                 <*> getEnvOpt "GHCJS_NO_NATIVE"
                                 <*> pure False
+                                <*> pure Nothing
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
                                 <*> getEnvMay "GHCJS_WITH_GHC"
 --                                <*> getEnvOpt "GHCJS_DEBUG"
@@ -137,6 +144,7 @@ optParser = GhcjsSettings
             <$> switch ( long "native-executables" )
             <*> switch ( long "no-native" )
             <*> switch ( long "no-js-executables" )
+            <*> optStr ( long "strip-program" )
             <*> optStr ( long "log-commandline" )
             <*> optStr ( long "with-ghc" )
 --            <*> switch ( long "debug" )
@@ -204,15 +212,27 @@ bootstrapFallback = do
     ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
     getArgs >>= rawSystem ghc >>= exitWith -- run without GHCJS package args
 
-installExecutable :: String -> String -> IO () -- [String] -> IO ()
--- installExecutable ["--install-executable", "-from", from, "-to", to] =
-installExecutable from to =
-                      putStrLn "installing executables not yet implemented"
-{-
-installExecutable _ = do
-  putStrLn "usage: ghcjs --install-executable -from <from> -to <to>"
-  exitFailure
--}
+installExecutable :: DynFlags -> GhcjsSettings -> [String] -> IO ()
+installExecutable dflags settings srcs = do
+    case (srcs, outputFile dflags) of
+        ([from], Just to) -> do
+          let v = fromMaybe deafening . intToVerbosity $ verbosity dflags
+          nativeExists <- doesFileExist $ from <.> exeExtension
+          when nativeExists $ do
+            installExecutableFile v (from <.> exeExtension) (to <.> exeExtension)
+            let stripFlags = if buildOS == OSX then ["-x"] else []
+            case gsStripProgram settings of
+                Just strip -> runProgramInvocation v . simpleProgramInvocation strip $
+                                stripFlags ++ [to <.> exeExtension]
+                Nothing -> return ()
+          jsExists <- doesDirectoryExist $ from <.> jsexeExtension
+          when jsExists $ installDirectoryContents v (from <.> jsexeExtension) (to <.> jsexeExtension)
+          unless (nativeExists || jsExists) $ do
+            hPutStrLn stderr $ "No executable found to install at " ++ from
+            exitFailure
+        _ -> do
+            hPutStrLn stderr "Usage: ghcjs --install-executable <from> -o <to>"
+            exitFailure
 
 -- we might generate .hi files for a different bitness than native GHC,
 -- make sure we can show then

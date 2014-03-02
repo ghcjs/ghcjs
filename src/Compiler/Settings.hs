@@ -14,6 +14,7 @@ import DynFlags
 data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
                                    , gsNoNative          :: Bool
                                    , gsNoJSExecutables   :: Bool
+                                   , gsStripProgram      :: Maybe FilePath
                                    , gsLogCommandLine    :: Maybe FilePath
                                    , gsGhc               :: Maybe FilePath
                                    , gsOnlyOut           :: Bool
@@ -24,12 +25,13 @@ data GhcjsSettings = GhcjsSettings { gsNativeExecutables :: Bool
                                    } deriving (Eq, Show)
 
 instance Monoid GhcjsSettings where
-  mempty = GhcjsSettings False False False Nothing Nothing False False False Nothing Nothing
-  mappend (GhcjsSettings ne1 nn1 nj1 lc1 gh1 oo1 nr1 ns1 gb1 ub1)
-          (GhcjsSettings ne2 nn2 nj2 lc2 gh2 oo2 nr2 ns2 gb2 ub2) =
+  mempty = GhcjsSettings False False False Nothing Nothing Nothing False False False Nothing Nothing
+  mappend (GhcjsSettings ne1 nn1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1)
+          (GhcjsSettings ne2 nn2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2) =
           GhcjsSettings (ne1  || ne2)
                         (nn1  || nn2)
                         (nj1  || nj2)
+                        (sp1  `mplus` sp2)
                         (lc1  `mplus` lc2)
                         (gh1  `mplus` gh2)
                         (oo1  || oo2)

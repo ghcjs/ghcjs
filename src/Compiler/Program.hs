@@ -239,12 +239,13 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
 
   -- add GHCJS configuration
     buildingSetup = Ghcjs.buildingCabalSetup (map fst srcs) dflags4
-    dflags4a = if not native || Ghcjs.gsNativeExecutables ghcjsSettings
-                             || ghcLink dflags4 /= LinkBinary || buildingSetup
-                 then dflags4
-                 else dflags4 { ghcLink    = NoLink
-                              , outputFile = Nothing
-                              }
+    dflags4a = case (postLoadMode, ghcLink dflags4) of
+                    (DoMake, LinkBinary) | native
+                             && not (Ghcjs.gsNativeExecutables ghcjsSettings)
+                             && not buildingSetup -> dflags4 { ghcLink    = NoLink
+                                                             , outputFile = Nothing
+                                                             }
+                    _ -> dflags4
 
   dflags4b <- if native
                 then return (Ghcjs.installNativeHooks ghcjsSettings dflags4a)
@@ -294,7 +295,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        DoAbiHash              -> abiHash srcs >> return True
        DoGenerateLib          -> Ghcjs.generateLib ghcjsSettings >> return True
        DoPrintRts             -> liftIO Ghcjs.printRts >> return True
-       DoInstallExecutable from to -> liftIO (Ghcjs.installExecutable from to) >> return True
+       DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings $ map fst srcs) >> return True
        DoPrintObj obj         -> liftIO (Ghcjs.printObj obj) >> return True
 
   liftIO $ dumpFinalStats dflags6
@@ -516,15 +517,15 @@ data PostLoadMode
 -- GHCJS modes
   | DoGenerateLib                         -- ghcjs --generate-lib
   | DoPrintRts                            -- ghcjs --print-rts
-  | DoInstallExecutable FilePath FilePath -- ghcjs --install-executable from to
+  | DoInstallExecutable                   -- ghcjs --install-executable ? -o ?
   | DoPrintObj FilePath                   -- ghcjs --print-obj file
 
 doGenerateLib, doPrintRts :: Mode
 doGenerateLib = mkPostLoadMode DoGenerateLib
 doPrintRts = mkPostLoadMode DoPrintRts
 
-doInstallExecutable :: FilePath -> FilePath -> Mode
-doInstallExecutable from to = mkPostLoadMode (DoInstallExecutable from to)
+doInstallExecutable :: Mode
+doInstallExecutable = mkPostLoadMode DoInstallExecutable
 
 doPrintObj :: FilePath -> Mode
 doPrintObj file = mkPostLoadMode (DoPrintObj file)
@@ -671,7 +672,7 @@ mode_flags =
 
       ------- GHCJS modes ------------------------------------------------
   , Flag "-generate-lib"           (PassFlag (setMode doGenerateLib))
-  , Flag "-install-executable"     (HasArg (\f -> setMode (doInstallExecutable f f) "--install-executable")) -- fixme wrong destination location, should use -from, -to flags
+  , Flag "-install-executable"     (PassFlag (setMode doInstallExecutable))
   , Flag "-print-obj"              (HasArg (\f -> setMode (doPrintObj f) "--print-obj"))
   , Flag "-numeric-ghc-version"    (PassFlag (setMode (showNumGhcVersionMode)))
   , Flag "-numeric-ghcjs-version"  (PassFlag (setMode (showNumVersionMode)))
@@ -928,4 +929,4 @@ unknownFlagsErr fs = throwGhcException $ UsageError $ concatMap oneError fs
         "unrecognised flag: " ++ f ++ "\n" ++
         (case fuzzyMatch f (nub allFlags) of
             [] -> ""
-            suggs -> "did you mean one of:\n" ++ unlines (map ("  " ++) suggs)) 
+            suggs -> "did you mean one of:\n" ++ unlines (map ("  " ++) suggs))
