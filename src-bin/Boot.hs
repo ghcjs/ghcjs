@@ -248,8 +248,8 @@ initPackageDB = do
   rm_rf . fromString =<< liftIO getUserPackageDB
   mkdir_p (fromString base)
   mkdir_p (fromString inst)
-  ghcjs_pkg ["init", T.pack base <> "/package.conf.d"] `catchany_sh` const (return ())
-  ghcjs_pkg ["init", T.pack inst <> "/package.conf.d"] `catchany_sh` const (return ())
+  ghcjs_pkg' ["init", T.pack base <> "/package.conf.d"] `catchany_sh` const (return ())
+  ghcjs_pkg' ["init", T.pack inst <> "/package.conf.d"] `catchany_sh` const (return ())
 
 -- | these need to be installed in the boot setting:
 --   fake Cabal package registered, GHCJS_BOOTING environment variable set
@@ -425,7 +425,7 @@ installRts settings = do
   rtsConf <- readfile (Paths.libdir </> "package.conf.d" </> "builtin_rts.conf")
   writefile (dest </> "builtin_rts.conf") $
                  fixRtsConf (toTextIgnore inc) (toTextIgnore rtsLib) rtsConf
-  ghcjs_pkg ["recache", "--global"]
+  ghcjs_pkg' ["recache", "--global"]
   mkdir_p lib
   mkdir_p inc
   sub $ cd (Paths.libdir </> "include") >> cp_r "." inc
@@ -474,14 +474,15 @@ installBootPackages s = sub $ do
   cd "boot"
   p <- pwd
   forM_ bootPackages preparePackage
-  when (not $ null bootPackages)
+  when (not $ null bootPackages) $ do
     (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
+    when (gmpInTree s) installInTreeGmp
     where
       configureOpts p = map ("--configure-option=" <>) $ catMaybes
             [ fmap ("--with-iconv-includes="  <>) (iconvInclude s)
             , fmap ("--with-iconv-libraries=" <>) (iconvLib s)
             , fmap ("--with-gmp-includes="   <>) (gmpInclude s <> inTreePath p "include")
-            , fmap ("--with-gmp-libraries="  <>) (gmpLib s <> inTreePath p "lib")
+            , fmap ("--with-gmp-libraries="  <>) (gmpLib s {- <> inTreePath p "lib" -})
             , if gmpFramework s then Just "--with-gmp-framework-preferred" else Nothing
             , if gmpInTree s then Just "--with-intree-gmp" else Nothing
             ]
@@ -489,6 +490,19 @@ installBootPackages s = sub $ do
                        | otherwise   = Nothing
             where
               p' = p </> "integer-gmp" </> "gmp" </> "intree"
+
+      -- urk, this is probably not how it's supposed to be done
+      installInTreeGmp = do
+        p <- absPath =<< pwd
+        let gmpLib = p </> "integer-gmp" </> "gmp" </> "intree" </> "lib" </> "libgmp.a"
+        libPath <- ghcjs_pkg ["field", "integer-gmp", "library-dirs", "--simple-output"]
+        libPath' <- canonic (fromText $ T.strip libPath)
+        cp gmpLib libPath'
+        descr <- T.lines <$> ghcjs_pkg ["describe", "integer-gmp"]
+        let updateLine line | "extra-libraries:" `T.isPrefixOf` line = line <> " gmp"
+                            | otherwise                              = line
+        setStdin (T.unlines $ map updateLine descr)
+        ghcjs_pkg' ["update", "-", "--user"]
 
 -- | extra packages are not hardcoded but live in two files:
 --     extra/extra0  -- installed before Cabal (list Cabal dependencies here)
@@ -559,8 +573,8 @@ installFakes :: Sh ()
 installFakes = silently $ do
   base <- T.pack <$> liftIO getGlobalPackageBase
   db   <- T.pack <$> liftIO getGlobalPackageDB
-  installed <- T.words <$> run "ghc-pkg" ["list", "--simple-output"]
-  dumped <- T.lines <$> run "ghc-pkg" ["dump"]
+  installed <- T.words <$> ghc_pkg ["list", "--simple-output"]
+  dumped <- T.lines <$> ghc_pkg ["dump"]
   let fakes = map T.pack fakePackages
   forM_ fakes $ \pkg ->
     case reverse (filter ((pkg<>"-") `T.isPrefixOf`) installed) of
@@ -572,7 +586,7 @@ installFakes = silently $ do
           Just pkgId -> do
             let conf = fakeConf base base pkg version pkgId
             writefile (db </> (pkgId <.> "conf")) conf
-  ghcjs_pkg ["recache", "--global"]
+  ghcjs_pkg' ["recache", "--global"]
 
 findPkgId:: [Text] -> Text -> Text -> Maybe Text
 findPkgId dump pkg version =
@@ -598,9 +612,9 @@ fakeConf incl lib name version pkgId = T.unlines
 removeFakes :: Sh ()
 removeFakes = do
   let fakes = map (T.pack . (++"-")) fakePackages
-  pkgs <- T.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
+  pkgs <- T.words <$> ghcjs_pkg ["list", "--simple-output"]
   forM_ pkgs $ \p -> when (any (`T.isPrefixOf` p) fakes)
-    (echo ("unregistering " <> p) >> ghcjs_pkg ["unregister", p])
+    (echo ("unregistering " <> p) >> ghcjs_pkg' ["unregister", p])
 
 checkShims :: Sh ()
 checkShims = sub $ do
@@ -641,11 +655,13 @@ git          = run_ "git"
 alex         = run_ "alex"
 happy        = run_ "happy"
 ghc          = run_ "ghc"
-ghcjs_pkg    = run_ "ghcjs-pkg"
+ghc_pkg      = run  "ghc-pkg"
+ghcjs_pkg    = run  "ghcjs-pkg"
+ghcjs_pkg'   = run_  "ghcjs-pkg"
 cabalBoot xs = sub (setenv "GHCJS_BOOTING" "1" >> run_ "cabal" xs)
 cabal        = run_ "cabal"
 patch        = run_ "patch"
-cpp       xs = run "cpp" xs
+cpp       xs = run  "cpp" xs
 
 #ifdef WINDOWS
 bash cmd xs = run_ "bash" ["-c", T.unwords (map escapeArg (cmd:xs))]
@@ -683,4 +699,3 @@ fromString = fromText . T.pack
 
 toString :: FilePath -> String
 toString = T.unpack . toTextIgnore
-
