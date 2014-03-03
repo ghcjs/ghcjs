@@ -96,16 +96,16 @@ adjustDefaultSettings = id
 -- small 'boot' archive with tools (wget, xz and tar)
 -- for getting the big archive more quickly
 buildToolsBootURI :: String
-buildToolsBootURI = "http://ghcjs.github.io/ghcjs-buildtools-boot-windows-" ++ getCompilerVersion ++ ".tar.gz"
+buildToolsBootURI = "http://hdiff.luite.com/ghcjs/ghcjs-buildtools-boot-windows-" ++ getCompilerVersion ++ ".tar.gz"
 
 buildToolsURI :: String
-buildToolsURI = "http://ghcjs.github.io/ghcjs-buildtools-windows-" ++ getCompilerVersion ++ ".tar.xz"
+buildToolsURI = "http://hdiff.luite.com/ghcjs/ghcjs-buildtools-windows-" ++ getCompilerVersion ++ ".tar.xz"
 
 buildToolsBootFile :: FilePath
-buildToolsBootFile = "ghcjs-buildtools-boot-windows-" <> fromString getCompilerVersion <.> "tar" <.> "gz"
+buildToolsBootFile = fromString ("ghcjs-buildtools-boot-windows-" ++ getCompilerVersion) <.> "tar" <.> "gz"
 
 buildToolsFile :: FilePath
-buildToolsFile = "ghcjs-buildtools-windows-" <> fromString getCompilerVersion <.> "tar" <.> "xz"
+buildToolsFile = fromString ("ghcjs-buildtools-windows-" ++getCompilerVersion) <.> "tar" <.> "xz"
 
 checkBuildTools :: BootSettings -> Sh ()
 checkBuildTools s = do
@@ -137,10 +137,10 @@ checkBuildTools s = do
               toolsBootArchiveExists <- test_f buildToolsBootFile
               unless toolsBootArchiveExists $ do
                 echo "fetching extra buildtools"
-                res <- liftIO $ simpleHTTP (getBsRequest buildToolsURI)
+                res <- liftIO $ simpleHTTP (getBsRequest buildToolsBootURI)
                 case res of
                   Left err -> do
-                    echo $ "could not download " <> T.pack buildToolsURI
+                    echo $ "could not download " <> T.pack buildToolsBootURI
                     echo $ "error: " <> T.pack (show err)
                     echo $ "you can manually get the file and place it in: " <> toTextIgnore p
                     liftIO exitFailure
