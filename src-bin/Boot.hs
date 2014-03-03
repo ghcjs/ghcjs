@@ -42,7 +42,7 @@ main = do
         then initSourceTree e s
         else when (not e) $ do
           cdBase
-          e' <- test_d ("ghcjs-boot")
+          e' <- test_d "ghcjs-boot"
           if e' then cd "ghcjs-boot"
                 else do
                   p <- pwd
@@ -92,50 +92,87 @@ adjustDefaultSettings s
 adjustDefaultSettings = id
 #endif
 
-checkBuildTools :: BootSettings -> Sh ()
 #ifdef WINDOWS
+-- small 'boot' archive with tools (wget, xz and tar)
+-- for getting the big archive more quickly
+buildToolsBootURI :: String
+buildToolsBootURI = "http://ghcjs.github.io/ghcjs-buildtools-boot-windows-" ++ getCompilerVersion ++ ".tar.gz"
+
 buildToolsURI :: String
-buildToolsURI = "http://ghcjs.github.io/ghcjs-buildtools-windows.tar.bz2"
+buildToolsURI = "http://ghcjs.github.io/ghcjs-buildtools-windows-" ++ getCompilerVersion ++ ".tar.xz"
+
+buildToolsBootFile :: FilePath
+buildToolsBootFile = "ghcjs-buildtools-boot-windows-" <> fromString getCompilerVersion <.> "tar" <.> "gz"
 
 buildToolsFile :: FilePath
-buildToolsFile = "ghcjs-buildtools-windows.tar.bz2"
+buildToolsFile = "ghcjs-buildtools-windows-" <> fromString getCompilerVersion <.> "tar" <.> "xz"
 
+checkBuildTools :: BootSettings -> Sh ()
 checkBuildTools s = do
-  cdBase
-  p <- pwd
-  let bt = p </> "buildtools"
-  toolsExist <- test_d "buildtools"
-  when (not toolsExist) $ do
-    if not (initTree s)
-	  then do
-        echo "buildtools required for ghcjs-boot not installed"
-        echo "`ghcjs-boot --init` will automatically install them"
-        liftIO exitFailure
-      else do
-        toolsArchiveExists <- test_f buildToolsFile
-        when (not toolsArchiveExists) $ do
-          echo "fetching buildtools"
-          res <- liftIO $ simpleHTTP (getBsRequest buildToolsURI)
-          case res of
-            Left err -> do
-              echo $ "could not download " <> T.pack buildToolsURI
-              echo $ "error: " <> T.pack (show err)
-              echo $ "you can manually get the file and place it in: " <> toTextIgnore p
-              liftIO exitFailure
-            Right response -> writeBinary buildToolsFile (rspBody response)
-        unpackTarBz2 "." buildToolsFile
+  mw <- sub $ do
+    cdBase
+    base <- absPath =<< pwd
+    mw <- canonicalize (base </> ".." </> "mingw")
+    mingwInstalled <- test_d mw
+    when (not mingwInstalled) $ do
+      echo "copying MingW installation"
+      cp_r (Paths.libdir </> ".." </> "mingw") (base </> "..")
+    return mw
+  bt <- sub $ do
+    cdBase
+    p <- absPath =<< pwd
+    let bt = p </> "buildtools"
+    toolsExist <- test_d "buildtools"
+    when (not toolsExist) $ do
+      if not (initTree s)
+        then do
+          echo "buildtools required for ghcjs-boot not installed"
+          echo "`ghcjs-boot --init` will automatically install them"
+          liftIO exitFailure
+        else do
+          toolsArchiveExists <- test_f buildToolsFile
+          toolsBootDirExists <- test_d "buildtools-boot"
+          when (not toolsArchiveExists || not toolsBootDirExists) $ do
+            unless toolsBootDirExists $ do
+              toolsBootArchiveExists <- test_f buildToolsBootFile
+              unless toolsBootArchiveExists $ do
+                echo "fetching extra buildtools"
+                res <- liftIO $ simpleHTTP (getBsRequest buildToolsURI)
+                case res of
+                  Left err -> do
+                    echo $ "could not download " <> T.pack buildToolsURI
+                    echo $ "error: " <> T.pack (show err)
+                    echo $ "you can manually get the file and place it in: " <> toTextIgnore p
+                    liftIO exitFailure
+                  Right response -> writeBinary buildToolsBootFile (rspBody response)
+              unpackTarGz "." buildToolsBootFile
+              prependPath [p </> "buildtools-boot" </> "bin"]
+            wget [T.pack buildToolsURI]
+          prependPath [p </> "buildtools-boot" </> "bin"]
+          echo "extracting buildtools"
+          tar ["-xJvf", toTextIgnore buildToolsFile]
+    return bt
+  prependPath [ mw </> "bin"
+              , bt </> "bin"
+              , bt </> "msys" </> "1.0" </> "bin"
+              , bt </> "git" </> "bin"
+              ]
+  setenv "MINGW_HOME" (toTextIgnore mw)
+  setenv "PERL5LIB" (msysPath $ bt </> "share" </> "autoconf")
+  mkdir_p (bt </> "etc")
+  writefile (bt </> "msys" </> "1.0" </> "etc" </> "fstab") $ T.unlines
+    [ escapePath bt <> " /mingw"
+    , escapePath (bt </> "msys" </> "1.0" </> "bin") <> " /bin"
+    ]
+
+prependPath :: [FilePath] -> Sh ()
+prependPath xs = do
   path1 <- get_env "Path"
   path2 <- get_env "PATH"
   let path = maybe "" (";"<>) (path1 <> path2)
-      newPath = ((toTextIgnore $ bt </> "bin") <> path)
-  echo ("orig path: " <> path)
+      newPath = T.intercalate ";" (map toTextIgnore xs) <> path
   setenv "Path" newPath
   setenv "PATH" newPath
-  setenv "MINGW_HOME" (toTextIgnore bt)
-  setenv "PERL5LIB" (msysPath $ bt </> "share" </> "autoconf")
-  mkdir_p (bt </> "etc")
-  writefile (bt </> "etc" </> "fstab")
-    (escapePath bt <> " /mingw\n")
 
 -- convert C:\x\y to /c/x/y
 msysPath :: FilePath -> Text
@@ -150,7 +187,11 @@ escapePath p = let p' = toTextIgnore p
                    escape c   = T.singleton c
                in  T.concatMap escape p'
 #else
+checkBuildTools :: BootSettings -> Sh ()
 checkBuildTools _ = return ()
+
+msysPath :: FilePath -> Text
+msysPath = toTextIgnore
 #endif
 
 optParser' :: ParserInfo BootSettings
@@ -223,6 +264,7 @@ bootPackages = [ "ghc-prim"
                , "array"
                , "pretty"
                , "time"
+               , "process"
 #ifdef WINDOWS
                , "Win32"
 #else
@@ -332,8 +374,9 @@ prepareGmp settings = sub $ do
         lsFilter "." isGmpSubDir $ \dir -> do
           -- patch has already been applied
           cd dir
-          echo ("building GMP in dir: " <> toTextIgnore dir)
-          configure ["--prefix=" <> fixPrefix (toTextIgnore (ad </> "intree"))]
+          adir <- absPath dir
+          echo ("building GMP in dir: " <> toTextIgnore adir)
+          configure ["--prefix=" <> msysPath (ad </> "intree")]
           make []
           make ["install"]
   constantsGenerated <- test_f "GmpGeneratedConstants.h"
@@ -350,11 +393,6 @@ prepareGmp settings = sub $ do
       lsFilter dir p a = ls dir >>= mapM_ (\x -> p x >>= flip when (a x))
       isTarball file = ".tar.bz2" `T.isSuffixOf` toTextIgnore file
       isGmpSubDir dir = (("gmp-" `T.isPrefixOf`) . toTextIgnore) <$> relativeTo "." dir
-#ifdef WINDOWS
-      fixPrefix = T.map (\c -> if c == '\\' then '/' else c)
-#else
-      fixPrefix = id
-#endif
 
 buildGmpConstants :: Maybe Text -> Sh ()
 buildGmpConstants includeDir = sub $ do
@@ -403,10 +441,6 @@ installRts settings = do
   cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
 #ifdef WINDOWS
   cp (Paths.libdir </> exe "touchy") (base </> exe "touchy")
-  mingwInstalled <- test_d (base </> ".." </> "mingw")
-  when (not mingwInstalled) $ do
-    echo "copying MingW installation"
-    cp_r (Paths.libdir </> ".." </> "mingw") (base </> "..")
 #endif
   echo "RTS prepared"
 
@@ -611,15 +645,26 @@ ghcjs_pkg    = run_ "ghcjs-pkg"
 cabalBoot xs = sub (setenv "GHCJS_BOOTING" "1" >> run_ "cabal" xs)
 cabal        = run_ "cabal"
 patch        = run_ "patch"
-make         = run_ "make"
-cpp          = run  "cpp"
+cpp       xs = run "cpp" xs
+
 #ifdef WINDOWS
-bash = run_ "bash"
-configure xs = bash ("configure":xs)
-autoreconf xs = bash ("/mingw/bin/autoreconf-2.68":xs)
+bash cmd xs = run' "bash" ["-c", T.unwords (map escapeArg (cmd:xs))]
+  where
+    -- might not escape everything, be careful
+    escapeArg = T.concatMap escapeChar
+    escapeChar ' '  = "\\ "
+    escapeChar '\\' = "\\\\"
+    escapeChar x    = T.singleton x
+
+configure  = bash "./configure"
+autoreconf = bash "autoreconf"
+make       = bash "make"
+wget       = run_ "wget"
+tar        = run_ "tar"
 #else
-configure = run_ "./configure"
+configure  = run_ "./configure"
 autoreconf = run_ "autoreconf"
+make       = run_ "make"
 #endif
 
 ignoreExcep a = a `catchany_sh` (\e -> echo $ "ignored exception: " <> T.pack (show e))
