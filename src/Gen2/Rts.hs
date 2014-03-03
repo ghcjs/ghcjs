@@ -233,41 +233,14 @@ rts debug = jsSaturate (Just "h$RTS") (rts' debug)
 rts' :: Bool -> JStat
 rts' debug = [j|
 
-// make logging work in browser, node, v8 and spidermonkey, browser also logs to
-// <div id="output"> if jquery is detected
+var !h$currentThread = null;      // thread state object for current thread
+var !h$stack         = null;      // stack for the current thread
+var !h$sp            = 0;         // stack pointer for the current thread
 
-var h$glbl;
-fun h$getGlbl { h$glbl = this; }
-h$getGlbl();
-fun h$log {
-  if(h$glbl) {
-    if(h$glbl.console && h$glbl.console.log) {
-      h$glbl.console.log.apply(h$glbl.console,arguments);
-    } else {
-      h$glbl.print.apply(this,arguments);
-    }
-  } else {
-    print.apply(this, arguments);
-  }
-  // if we have jquery, add to <div id='output'> element
-  if(typeof($) !== 'undefined') {
-    var x = '';
-    for(var i=0;i<arguments.length;i++) { x = x + arguments[i]; }
-    var xd = $("<div></div>");
-    xd.text(x);
-    $('#output').append(xd);
-  }
-}
-
-var !h$stack = null; // [];                // thread-local
 var !h$initStatic = [];           // we need delayed initialization for static objects, push functions here
                                   // to be initialized just before haskell runs
-
-var !h$sp  = 0;                   // stack pointer
-
 var !h$staticThunks    = {};      // funcName -> heapidx map for srefs
 var !h$staticThunksArr = [];      // indices of updatable thunks in static heap
-var !h$currentThread = null;
 
 // stg registers
 `declRegs`;
