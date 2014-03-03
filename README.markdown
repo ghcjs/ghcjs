@@ -21,7 +21,15 @@ And some JavaScript-specific features:
 Installation
 ============
 
-First install GHC 7.8 (or release candidate) and check with `ghc --version` that it's the
+### Note:
+
+    The GHCJS command line options are still in flux. Make sure that you have the
+    latest Cabal patch installed when you update GHCJS. You need both an updated
+    `cabal-install` executable and `Cabal` library. Rerun `ghcjs-boot --init` to get the
+    latest updates for the libraries. If you get `Not in scope: data constructor ‘GHCJS’`,
+    you need to update your `Cabal` library.
+
+First install GHC 7.8 release candidate 2 or later and check with `ghc --version` that it's the
 compiler in your `PATH`.
 
 Next, run the following script to install an updated `Cabal` and `cabal-install` with GHCJS
@@ -68,7 +76,7 @@ Usage
 =====
 
 `ghcjs` can be invoked with the same command line arguments as `ghc`. The generated programs can be run directly from
-the shell with Node.js and jsshell.
+the shell with [Node.js](http://nodejs.org/) and [SpiderMonkey jsshell](http://download.cdn.mozilla.net/pub/firefox/nightly/latest-mozilla-central/).
 for example:
 
     $ ghcjs -o helloWorld helloWorld.hs
@@ -154,12 +162,16 @@ New test cases, in particular if you add new features, are always welcome. The t
 Debugging GHCJS programs
 ------------------------
 
-TODO add better instructions here, make `--debug` more effective
+TODO add better instructions here
 
-  * link your program with `--debug`: `ghcjs --debug -o test test.hs`, this adds debugging information to the generated code
-  * adjust debugging settings in ( `src/Gen2/RtsSettings.hs` ) and reboot the compiler
-     (should not be necessary unless working on specific features, FIXME many of these options aren't used anymore)
-  * adjust the main loop in shims ( `src/thread.js` ) to enable call and stack tracing (warning, huge output)
+  * link your program with `-debug`: `ghcjs -debug -o test test.hs`, this adds debugging information to the generated code
+  * get more informaton from the runtime system by enabling various tracing and logging options. See the code in the shims repository for more info. Examples:
+      * `-DGHCJS_TRACE_SCHEDULER`: messages from the thread scheduler
+      * `-DGHCJS_TRACE_CALLS`: print all function calls from the main loop. warning: lots of output. Requires `-debug` for name information
+      * `-DGHCJS_TRACE_STACK`: print top of stack for every call in the main loop. warning: even more output
+      * `-DGHCJS_TRACE_WEAK`: output related to weak references
+      * `-DGHCJS_TRACE_STM`: output for software transactional memory
+      * `-DGHCJS_TRACE_GC`: output garbage collector (heap scanner) related messages
   * see the utility programs in `utils` in the ghcjs repository for tools for inspecting object files, quickly bisecting
      bugs in the optimizer etc.
 
