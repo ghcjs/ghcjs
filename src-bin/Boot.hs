@@ -648,7 +648,7 @@ patch        = run_ "patch"
 cpp       xs = run "cpp" xs
 
 #ifdef WINDOWS
-bash cmd xs = run' "bash" ["-c", T.unwords (map escapeArg (cmd:xs))]
+bash cmd xs = run_ "bash" ["-c", T.unwords (map escapeArg (cmd:xs))]
   where
     -- might not escape everything, be careful
     escapeArg = T.concatMap escapeChar
@@ -683,3 +683,4 @@ fromString = fromText . T.pack
 
 toString :: FilePath -> String
 toString = T.unpack . toTextIgnore
+

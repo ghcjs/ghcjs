@@ -94,9 +94,10 @@ buildingCabalSetup [hs_src] dflags
     isSetupDir    (hiDir      dflags)     &&
     isSetupSource hs_src
   where
-    isSetupOutput = maybe False (("/setup/setup" `isSuffixOf`) . dropExtension)
-    isSetupDir    = maybe False ("/setup" `isSuffixOf`)
-    isSetupSource = (`elem` ["setup.hs", "Setup.hs", "Setup.lhs"]) . takeFileName
+    forwardSlashes = map (\x -> if x == '\\' then '/' else x)
+    isSetupOutput  = maybe False (("/setup/setup" `isSuffixOf`) . forwardSlashes . dropExtension)
+    isSetupDir     = maybe False (("/setup" `isSuffixOf`) . forwardSlashes)
+    isSetupSource  = (`elem` ["setup.hs", "Setup.hs", "Setup.lhs"]) . takeFileName
 buildingCabalSetup _ _ = False
 
 getGhcjsSettings :: [Located String] -> IO ([Located String], GhcjsSettings)
@@ -172,14 +173,9 @@ printDeps :: [String] -> IO ()
 printDeps ["--print-deps", file] = Object.readDepsFile file >>= TL.putStrLn . Object.showDeps
 printDeps _                    = putStrLn "usage: ghcjs --print-deps objfile" >> exitFailure
 
--- printObj :: [String] -> IO ()
 printObj :: FilePath -> IO ()
 printObj file = Object.readObjectFile file >>= TL.putStrLn . Object.showObject
 
-{-
-printObj ["--print-obj", file] = Object.readObjectFile file >>= TL.putStrLn . Object.showObject
-printObj _                     = putStrLn "usage: ghcjs --print-obj objfile" >> exitFailure
--}
 -- replace primops in the name cache so that we get our correctly typed primops
 fixNameCache :: GhcMonad m => m ()
 fixNameCache = do
