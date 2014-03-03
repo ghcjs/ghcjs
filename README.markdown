@@ -30,9 +30,23 @@ Installation
     you need to update your `Cabal` library.
 
 First install GHC 7.8 release candidate 2 or later and check with `ghc --version` that it's the
-compiler in your `PATH`.
+compiler in your `PATH`. Next, make sure that you have all the prerequisites for your platform:
 
-Next, run the following script to install an updated `Cabal` and `cabal-install` with GHCJS
+#### Linux / OS X
+
+ * a recent version of `alex` and `happy` need to be in your `PATH`
+ * `git`, `make`, `cpp`, `autoremake`, `patch` need to be in your `PATH`
+ * by default, `ghcjs-boot` will try to use the system GMP library, see
+   `ghcjs-boot --help` for more info.
+
+#### Windows
+
+ * virus scanners often interfere with configure scripts (permission denied errors),
+   disable on-access scanning before running `ghcjs-boot`.
+ * no extra programs need to be installed, `ghcjs-boot` will download an archive (around 100MB)
+   with the required programs.
+
+Run the following script to install an updated `Cabal` and `cabal-install` with GHCJS
 support. Note that this will overwrite the `cabal` executable in your cabal executable
 installation path (typically `~/.cabal/bin`), you might want to backup your current version.
 
