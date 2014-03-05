@@ -248,7 +248,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
                     _ -> dflags4
 
   dflags4b <- if native
-                then return (Ghcjs.installNativeHooks ghcjsSettings dflags4a)
+                then return (Ghcjs.setNativePlatform ghcjsSettings dflags4a)
                 else do
                    base  <- liftIO Ghcjs.ghcjsDataDir
                    jsEnv <- liftIO Ghcjs.newGhcjsEnv

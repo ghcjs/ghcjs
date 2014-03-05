@@ -55,6 +55,12 @@ getFullCompilerVersion = Version.showVersion version ++ "-" ++ getGhcCompilerVer
 -- Just the GHCJS version
 getCompilerVersion = Version.showVersion version -- ++ "." ++ cProjectVersion
 
+-- version in GHC format
+getShortCompilerVersion =
+  case Version.versionBranch version of
+    [x]     -> show (100 * x)
+    (x:y:_) -> show (100 * x + min 99 y)
+
 getCompilerSubdir = "ghcjs-" ++ getCompilerVersion
 
 ghcjsDataDir :: IO FilePath
