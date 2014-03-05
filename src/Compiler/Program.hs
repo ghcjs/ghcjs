@@ -90,7 +90,7 @@ main :: IO ()
 main = do
    hSetBuffering stdout LineBuffering
    hSetBuffering stderr LineBuffering
-   GHC.defaultErrorHandler defaultFatalMessager defaultFlushOut $ do
+   Ghcjs.ghcjsErrorHandler defaultFatalMessager defaultFlushOut $ do
     -- 1. extract the -B flag from the args
     argv0 <- getArgs
 

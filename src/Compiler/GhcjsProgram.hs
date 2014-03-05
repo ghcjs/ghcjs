@@ -297,9 +297,10 @@ setGhcjsSuffixes oneshot df = df
 
 -- | make sure we don't show panic messages with the "report GHC bug" text, since
 --   those are probably our fault.
-errorHandler :: (ExceptionMonad m, MonadIO m)
+ghcjsErrorHandler :: (ExceptionMonad m, MonadIO m)
                     => FatalMessager -> FlushOut -> m a -> m a
-errorHandler fm (FlushOut flushOut) inner =
+ghcjsErrorHandler fm (FlushOut flushOut) inner =
+  -- top-level exception handler: any unrecognised exception is a compiler bug.
   ghandle (\exception -> liftIO $ do
            flushOut
            case fromException exception of
@@ -307,14 +308,18 @@ errorHandler fm (FlushOut flushOut) inner =
                 Just (ioe :: IOException) ->
                   fatalErrorMsg'' fm (show ioe)
                 _ -> case fromException exception of
-                     Just UserInterrupt -> exitWith (ExitFailure 1)
+                     Just UserInterrupt ->
+                         -- Important to let this one propagate out so our
+                         -- calling process knows we were interrupted by ^C
+                         liftIO $ throwIO UserInterrupt
                      Just StackOverflow ->
                          fatalErrorMsg'' fm "stack overflow: use +RTS -K<size> to increase it"
                      _ -> case fromException exception of
                           Just (ex :: ExitCode) -> liftIO $ throwIO ex
                           _ -> case fromException exception of
+                               -- don't panic!
                                Just (Panic str) -> fatalErrorMsg'' fm str
-                               _ -> fatalErrorMsg'' fm (show exception)
+                               _                -> fatalErrorMsg'' fm (show exception)
            exitWith (ExitFailure 1)
          ) $
 
@@ -334,15 +339,6 @@ sourceErrorHandler :: GhcMonad m => m a -> m a
 sourceErrorHandler m = handleSourceError (\e -> do
   GHC.printException e
   liftIO $ exitWith (ExitFailure 1)) m
-
-fatalMessager :: String -> IO ()
-fatalMessager str = do
-  hPutStrLn stderr str
-  dumpArgs <- getEnvOpt "GHCJS_ERROR_ARGUMENTS"
-  when dumpArgs $ do
-    args <- getArgs
-    hPutStrLn stderr (str ++ "\n--- arguments: \n" ++ unwords args ++ "\n---\n")
-  exitWith (ExitFailure 1)
 
 runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
                    -- like GHC's -B argument

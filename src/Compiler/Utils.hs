@@ -23,12 +23,18 @@ module Compiler.Utils
     , getEnvOpt
       -- * Preprocessing for JS
     , doCpp
+      -- * Error messages
+    , simpleSrcErr
     ) where
 
 import DynFlags
 import DriverPhases
 import GHC
 import Platform
+import HscTypes
+import Bag
+import Outputable
+import ErrUtils      (mkPlainErrMsg)
 import qualified SysTools
 import SrcLoc
 import Util          (looksLikeModuleName)
@@ -183,3 +189,9 @@ hsSourceCppOpts :: [String]
 -- Default CPP defines in Haskell source
 hsSourceCppOpts =
         [ "-D__GLASGOW_HASKELL__="++cProjectVersionInt ]
+
+simpleSrcErr :: DynFlags -> SrcSpan -> String -> SourceError
+simpleSrcErr df span msg = mkSrcErr (unitBag errMsg)
+  where
+    errMsg = mkPlainErrMsg df span (text msg)
+

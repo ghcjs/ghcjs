@@ -10,6 +10,7 @@ module Gen2.RtsTypes where
 import           Compiler.JMacro
 
 import           Control.Applicative
+import qualified Control.Exception as Ex
 import           Control.Lens
 import           Control.Monad.State.Strict
 
@@ -41,7 +42,10 @@ import           Unique
 import           UniqFM
 import           VarSet
 import           UniqSet
+import           SrcLoc
 import           TysWiredIn
+
+import           Compiler.Utils
 
 import           Gen2.ClosureInfo
 import qualified Gen2.Object as Object
@@ -219,27 +223,14 @@ encodeUnique = reverse . go  -- reversed is more compressible
 
     chars = listArray (0,61) (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
 
-{-
--- | where can we find all Ids
-data GenScope = GenScope
-  { _stableScope :: Map Id IdScope  -- | how to access an id 
-  , _localScope  :: Set Id          -- | set of ids that have a local var binding
-  } -- deriving (Eq, Monoid)
--}
--- emptyScope :: GenScope
--- emptyScope = GenScope mempty mempty
+throwSimpleSrcErr :: DynFlags -> SrcSpan -> String -> G a
+throwSimpleSrcErr df span msg = return $! Ex.throw (simpleSrcErr df span msg)
 
 initState :: DynFlags -> Module -> UniqFM StgExpr -> GenState
 initState df m unfloat = GenState m Nothing [] [] 1 df [] emptyIdCache unfloat emptyVarSet
 
 runGen :: DynFlags -> Module -> UniqFM StgExpr -> G a -> a
 runGen df m unfloat = flip evalState (initState df m unfloat)
-
-{-
--- | run an action in the initial state, useful for making one-off 
-runInit :: Module -> G a -> a
-runInit
--}
 
 instance Monoid C where
   mappend = liftM2 (<>)
@@ -252,15 +243,6 @@ data IdScope = Register !StgReg
              | StackFrame !Int    -- | current stack frame, offset
              | NoEscape Id !Int   -- | no-escape stack frame allocated by id
                                          -- fixme: why not a direct stack-offset?
-
--- makeLenses ''GenScope
-
--- currentModule :: G String
---currentModule = moduleNameString . moduleName <$> use gsModule
-
--- currentModulePkg :: G String
--- currentModulePkg = showPpr' =<< use gsModule
-
 
 -- arguments that the trampoline calls our funcs with
 funArgs :: [Ident]
