@@ -1,3 +1,10 @@
+Google Summer of Code
+---------------------
+
+Haskell.org is participating in [Google Summer of Code](https://www.google-melange.com/gsoc/homepage/google/gsoc2014) again this year. If you're looking for a fun project to work on over the summer and want to learn something about Haskell compilation, a GHCJS-related project might just be the ticket for you. We've compiled a list of ideas to get you started:
+
+[GHCJS Google Summer of Code project ideas](https://github.com/ghcjs/ghcjs/wiki/GHCJS-Google-Summer-of-Code-project-ideas)
+
 Haskell to JavaScript compiler
 ==============================
 
