@@ -2,7 +2,16 @@
              OverloadedStrings #-}
 
 {-
-  generate various apply functions for the rts
+  generate various apply functions for the RTS, for speeding up
+  function application in the most common cases. The code is generated
+  because it contains lots of repeating patterns, and to make it more
+  flexible when changing the RTS (for example how arguments are passed)
+
+  The code in here can be a bit hard to read due to all the generated
+  low-level access things. Reading rts.js for a compiled program can be
+  easier (the file is always the same unless you change low-level RTS
+  options)
+
   - fixme: add selector thunks and let the gc follow them
 -}
 
@@ -28,19 +37,20 @@ t = id
 rtsApply :: JStat
 rtsApply = mconcat $  map (uncurry stackApply) applySpec
                    ++ map (uncurry fastApply) applySpec
-                   ++ map pap paps
+                   ++ map pap specPap
                    ++ [ mkApplyArr
                       , genericStackApply
                       , genericFastApply
                       , zeroApply
---                      , compatApply
                       , updates
+                      , papGen
+                      , moveRegs2
                       ]
 
 -- specialized apply for these
 -- make sure that once you are in spec, you stay there
 applySpec :: [(Int,Int)] -- regs,arity
-applySpec = [ (regs,arity)  | arity <- [1..5], regs <- [max 0 (arity-1)..(arity*2)]]
+applySpec = [ (regs,arity)  | arity <- [1..4], regs <- [max 0 (arity-1)..(arity*2)]]
 
 specApply :: Bool -> Int -> Int -> Maybe JExpr
 specApply fast n r
@@ -52,21 +62,26 @@ specApply fast n r
    where
       fastSuff | fast      = "_fast"
                | otherwise = ""
-
-paps :: [Int]
-paps = [0..64]
-
+{-
+  Build arrays to quickly lookup apply functions, getting the fast variant when possible
+   - h$apply[r << 8 | n] = function application for r regs, n args
+   - h$paps[r]           = partial application for r registers (number of args is in the object)
+ -}
 mkApplyArr =
   [j| var !h$apply = [];
       var !h$paps = [];
       h$initStatic.push(function() {
-        for(var i=0;i<65536;i++) {
+        var i;
+        for(i=0;i<65536;i++) {
           h$apply[i] = h$ap_gen;
+        }
+        for(i=0;i<128;i++) {
+          h$paps[i] = h$pap_gen;
         }
         h$apply[0] = h$ap_0_0;
         h$apply[1] = h$ap_1_0;
         `map assignSpec applySpec`;
-        `map assignPap paps`;
+        `map assignPap specPap`;
       });
     |]
   where
@@ -360,34 +375,10 @@ stackApply r n = [j| `decl func`;
             switchAlts = map (\x -> ([je|`x`|], [j|`numReg (x+1)` = `Stack`[`Sp`-`x`]; |])) [r,r-1..1]
 
 {-
-vApply :: JStat
-vApply = [j| fun h$ap_v_fast {
-               `traceRts "h$ap_v_fast"`;
-               `preamble`;
-               var h = `R1`.f;
-               switch(h.t) {
-                 case `Fun`:
-                   if(h.a === 1) {
-                     return h;
-                   } else {
-                     throw "h$ap_v_fast: PAP";
-                   }
-                 default:
-                   `push [iex $ StrI "h$ap_v"]`; // fixme not necessary
-                   return h$ap_v;
-               }
-             }
-         |]
--}
-{-
-  stg_ap_n_fast is entered if a function of unknown arity
-  is called, arguments are already in registers
+  stg_ap_r_n_fast is entered if a function of unknown arity
+  is called, n arguments are already in r registers
 -}
 fastApply :: Int -> Int -> JStat
--- fastApply 0 0 _ = let func = StrI "h$ap_0_fast" in decl func <> [j| `JVar func` = `JFunc [] (preamble <> enter)` |]
--- fastApply 0 1 _ = let func = StrI "h$ap_v_fast" in decl func <>
---    [j| `JVar func` = `JFunc [] (preamble <> enterv)` |]
--- [j| fun stg_ap_v_fast !o { `enter`; } |]
 fastApply r n =
   [j| `decl func`;
       `JVar func` = `JFunc myFunArgs (preamble <> body)`;
@@ -404,19 +395,10 @@ fastApply r n =
 
       mkAp :: Int -> Int -> [JExpr]
       mkAp n' r' = [ jsv . T.pack $ "h$ap_" ++ show n' ++ "_" ++ show r' ]
-{-
-      makePap :: Ident -> JStat
-      makePap pap = mkPap pap (toJExpr R1) (map toJExpr $ take n $ enumFrom R2)
-      -}
+
       regsTo :: Int -> [JExpr]
       regsTo m = map (toJExpr . numReg) (reverse [m..r+1])
-{-
-      oversat :: JExpr -> Int -> (JExpr, JStat)
-      oversat c m =
-          (toJExpr m, [j| `push $ map toJExpr (reverse $ enumFromTo (numReg (m+2)) (numReg (n+1))) ++ mkAp (n-m)`
-                           return `c`;
-                        |])
--}
+
       body = [j| var c = `R1`.f;
                  `traceRts $ (funName <> ": sp ") |+ Sp`;
                  switch(c.t) {
@@ -475,7 +457,6 @@ fastApply r n =
 
 zeroApply :: JStat
 zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
-
                 fun h$ap_0_0 { `preamble`; `adjSpN 1`; `enter (toJExpr R1)`; }
                 `ClosureInfo "h$ap_0_0" [PtrV] "h$ap_0_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
 
@@ -562,21 +543,45 @@ updates =
 mkFunc :: Ident -> JStat -> JStat
 mkFunc func body = [j| `decl func`; `JVar func` = `JFunc funArgs body`; |]
 
+{-
+  Partial applications. There are two different kinds of partial application:
+    pap_r: contains r registers, layout:
+     - d1      = function
+     - d2.d1   = number of arguments
+     - d2.d2.. = args (r)
+    pap_gen: generic pap, layout:
+     - d1      = function
+     - d2.d1   = number of arguments
+     - d2.d2   = number of registers for arguments
+     - d2.d3.. = args (d2.d2)
+-}
 -- arity is the remaining arity after our supplied arguments are applied
 mkPap :: Ident   -- ^ id of the pap object
       -> JExpr   -- ^ the function that's called (can be a second pap)
       -> JExpr   -- ^ number of arguments in pap
       -> [JExpr] -- ^ values for the supplied arguments
       -> JStat
-mkPap tgt fun n values =
-    traceRts ("making pap with: " ++ show (length values) ++ " items") <>
-    allocDynamic True tgt (iex entry) (fun:n:map toJExpr values')
+mkPap tgt fun n values
+  | length values > numSpecPap =
+      traceRts ("making generic pap with: " ++ show (length values) ++ " items") <>
+      allocDynamic True tgt (iex . TxtI . T.pack $ "h$pap_gen")
+                            (fun:n:toJExpr (length values):map toJExpr values)
+  | otherwise =
+      traceRts ("making pap with: " ++ show (length values) ++ " items") <>
+      allocDynamic True tgt (iex entry) (fun:n:map toJExpr values')
         where
           values' | null values = [jnull]
                   | otherwise   = values
           entry = TxtI . T.pack $ "h$pap_" ++ show (length values)
 
--- entry function for a pap with n stored registers
+-- specialized (faster) pap generated for [0..numSpecPap]
+-- others use h$pap_gen
+specPap :: [Int]
+specPap = [0..numSpecPap]
+
+numSpecPap :: Int
+numSpecPap = 6
+
 pap :: Int -> JStat
 pap r = [j| `decl func`;
             `iex func` = `JFunc [] (preamble <> body)`;
@@ -587,7 +592,7 @@ pap r = [j| `decl func`;
 
     func     = TxtI funcName
 
-    body = [j| var c = `R1`.d1;
+    body = [j| var c = `R1`.d1; // the closure
                var d = `R1`.d2;
                var f = c.f;
                `assertRts (isFun' f ||| isPap' f) (funcName <> ": expected function or pap")`;
@@ -610,13 +615,49 @@ pap r = [j| `decl func`;
     loadOwnArgs d = mconcat $ map (\r -> [j| `numReg (r+1)` = `dField d (r+2)`; |]) [1..r]
     dField d n = SelExpr d (TxtI . T.pack $ ('d':show (n-1)))
 
-{-
--- entry function for a pap
-papGeneric :: JStat
-papGeneric =
-  [j| h$papGeneric() {
-        
-      }
-    |]
+-- generic pap
+papGen :: JStat
+papGen = [j| fun h$pap_gen {
+               var c = `R1`.d1;
+               var d = `R1`.d2;
+               var r = d.d1;
+               var f = c.f;
+               `assertRts (isFun' f ||| isPap' f) $ t "h$pap_gen: expected function or pap"`;
+               var extra;
+               if(`isFun f`) {
+                 extra = (f.a>>8) - r;
+               } else {
+                 extra = (extra>>8) - r;
+               }
+               `traceRts $ (t "h$pap_gen: generic pap extra args moving: " |+ extra)`;
+               h$moveRegs2(extra, r);
+               `loadOwnArgs d r`;
+             }
+           |]
+  where
+    loadOwnArgs d r =
+      let prop n = d |. ("d" <> T.pack (show $ n+1))
+          loadOwnArg n = (toJExpr n, [j| `numReg (n+1)` = `prop n`; |])
+      in  SwitchStat r (map loadOwnArg [127,126..1]) mempty
 
--}
+-- general utilities
+-- move the first n registers, starting at R2, m places up (do not use with negative m)
+moveRegs2 :: JStat
+moveRegs2 = [j| fun h$moveRegs2 n m {
+                 `moveSwitch n m`;
+               }
+             |]
+  where
+    moveSwitch n m = SwitchStat [je| (n << 8 | m) |] switchCases (defaultCase n m)
+    -- fast cases
+    switchCases = [switchCase n m | n <- [1..5], m <- [1..4]] -- tune the parameteters for performance and size
+    switchCase :: Int -> Int -> (JExpr, JStat)
+    switchCase n m = (toJExpr $ (n `shiftL` 8) .|. m, mconcat (map (\n -> moveRegFast n m) [n+1,n..2]) <> [j| break; |])
+    moveRegFast n m = [j| `numReg n` = `numReg (n+m)`; |]
+    -- fallback
+    defaultCase n m = [j| for(var i=n;i>0;i--) {
+                            h$setReg(i+1, h$getReg(i+1+m));
+                          }
+                        |]
+    moveReg n m = [j| h$setReg(`n`, h$getReg(`n+m`)); |]
+
