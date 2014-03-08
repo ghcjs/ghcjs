@@ -709,7 +709,7 @@ fun h$logCall c {
   } else {
     f = h$collectProps c;
   }
-  h$log(h$threadString(h$currentThread) + "  trampoline calling: " + f + "    " + JSON.stringify([h$printReg `R1`, h$printReg `R2`, h$printReg `R3`, h$printReg `R4`, h$printReg `R5`]));
+  h$log(h$threadString(h$currentThread) + ":" + `Sp` + "  calling: " + f + "    " + JSON.stringify([h$printReg `R1`, h$printReg `R2`, h$printReg `R3`, h$printReg `R4`, h$printReg `R5`]));
   h$checkStack();
 }
 
