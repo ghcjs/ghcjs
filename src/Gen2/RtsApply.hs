@@ -632,6 +632,8 @@ papGen = [j| fun h$pap_gen {
                `traceRts $ (t "h$pap_gen: generic pap extra args moving: " |+ extra)`;
                h$moveRegs2(extra, r);
                `loadOwnArgs d r`;
+               `R1` = c;
+               return f;
              }
            |]
   where
