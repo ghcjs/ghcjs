@@ -97,7 +97,6 @@ main = do
     -- fall back to native GHC if we're booting (we can't build Setup.hs with GHCJS yet)
     booting <- Ghcjs.getEnvOpt "GHCJS_BOOTING"
     when (booting && any ("Cabal-" `isPrefixOf`) argv0) Ghcjs.bootstrapFallback
-    when (not booting) Ghcjs.checkIsBooted
 
     let (minusB_args, argv1) = partition ("-B" `isPrefixOf`) argv0
         mbMinusB | null minusB_args = Nothing
@@ -129,6 +128,7 @@ main = do
                    ShowNumGhcVersion       -> putStrLn cProjectVersion
                    ShowOptions             -> showOptions
          Right postStartupMode -> do
+          when (not booting) Ghcjs.checkIsBooted
             -- start our GHC session
 
           let runPostStartup native = Ghcjs.runGhcSession mbMinusB $ do
