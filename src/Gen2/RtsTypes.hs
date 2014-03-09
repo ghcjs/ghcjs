@@ -236,14 +236,6 @@ instance Monoid C where
   mappend = liftM2 (<>)
   mempty  = return mempty
 
--- | where can we find a single Id
-data IdScope = Register !StgReg
-             | HeapPtr Id !Int    -- | it's in the heap object for Id, offset Int
---              | StackOffset !Int
-             | StackFrame !Int    -- | current stack frame, offset
-             | NoEscape Id !Int   -- | no-escape stack frame allocated by id
-                                         -- fixme: why not a direct stack-offset?
-
 -- arguments that the trampoline calls our funcs with
 funArgs :: [Ident]
 funArgs = [] -- [StrI "o"] -- [StrI "_heap", StrI "_stack"] -- [] -- [StrI "r", StrI "heap", StrI "stack"]
@@ -352,9 +344,6 @@ loadSkip n xs = mconcat items
       offset 0 = [je| `Sp` |]
       offset n = [je| `Sp` - `n` |]
 
--- debugPop e@(ValExpr (JVar (StrI i))) offset = [j| log("popped: " + `i`  + " -> " + `e`) |]
--- debugPop _ _ = mempty
-
 -- declare and pop
 popSkipI :: Int -> [(Ident,StackSlot)] -> C
 popSkipI 0 [] = mempty
@@ -420,16 +409,15 @@ funArity' :: JExpr -> JExpr
 funArity' f = [je| `f`.a |]
 
 -- expects heap pointer to entry (fixme document this better or make typesafe)
--- arity & 0xff = real number of arguments
--- arity >> 8   = number of trailing void
 papArity :: JExpr -> JExpr -> JStat
 papArity tgt p = [j| `tgt` = 0;
                      var cur = `p`;
                      var args = 0;
                      var regs = 0;
                      do {
-                       regs += cur.f.a;
-                       args += cur.d2.d1;
+                       var a = cur.d2.d1;
+                       regs += a >> 8;
+                       args += a & 0xff;
                        `traceRts $ "pap: " |+ regs |+ " " |+ args`;
                        cur = cur.d1;
                      } while(cur.f.t === `Pap`);

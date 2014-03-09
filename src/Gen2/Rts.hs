@@ -260,13 +260,13 @@ fun h$bh {
 }
 
 fun h$blackhole { throw "<<loop>>"; return 0; }
-`ClosureInfo "h$blackhole" [] "blackhole" (CILayoutPtrs 2 []) CIBlackhole CINoStatic`;
+`ClosureInfo "h$blackhole" (CIRegs 0 []) "blackhole" (CILayoutUnknown 2) CIBlackhole noStatic`;
 
 fun h$done o {
   h$finishThread(h$currentThread);
   return h$reschedule;
 }
-`ClosureInfo "h$done" [PtrV] "done" (CILayoutPtrs 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$done" (CIRegs 0 [PtrV]) "done" (CILayoutUnknown 0) CIStackFrame noStatic`;
 
 fun h$doneMain {
   if(typeof process !== 'undefined' && process.exit) {
@@ -277,24 +277,24 @@ fun h$doneMain {
   h$finishThread(h$currentThread);
   return h$reschedule;
 }
-`ClosureInfo "h$doneMain" [PtrV] "doneMain" (CILayoutPtrs 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$doneMain" (CIRegs 0 [PtrV]) "doneMain" (CILayoutUnknown 0) CIStackFrame noStatic`;
 
 // many primops return bool, and we can cheaply convert javascript bool to 0,1 with |0
 // so this is where we store our Bool constructors, hackily
 // note: |0 hack removed because it's slow in v8, fixed positions still useful: x?1:0
 fun h$false_e { return `Stack`[`Sp`]; }
-`ClosureInfo "h$false_e" [] "GHC.Types.False" (CILayoutFixed 0 []) (CICon 1) CINoStatic`;
+`ClosureInfo "h$false_e" (CIRegs 0 [PtrV]) "GHC.Types.False" (CILayoutFixed 0 []) (CICon 1) noStatic`;
 
 fun h$true_e { return `Stack`[`Sp`]; }
-`ClosureInfo "h$true_e" [] "GHC.Types.True" (CILayoutFixed 0 []) (CICon 2) CINoStatic`;
+`ClosureInfo "h$true_e" (CIRegs 0 [PtrV]) "GHC.Types.True" (CILayoutFixed 0 []) (CICon 2) noStatic`;
 
 // generic data constructor with 1 non-heapobj field
 fun h$data1_e { return `Stack`[`Sp`]; }
-`ClosureInfo "h$data1_e" [] "data1" (CILayoutFixed 1 [ObjV]) (CICon 1) CINoStatic`;
+`ClosureInfo "h$data1_e" (CIRegs 0 [PtrV]) "data1" (CILayoutFixed 1 [ObjV]) (CICon 1) noStatic`;
 
 // generic data constructor with 2 non-heapobj fields
 fun h$data2_e { return `Stack`[`Sp`]; }
-`ClosureInfo "h$data2_e" [] "data2" (CILayoutFixed 2 [ObjV,ObjV]) (CICon 1) CINoStatic`;
+`ClosureInfo "h$data2_e" (CIRegs 0 [PtrV]) "data2" (CILayoutFixed 2 [ObjV,ObjV]) (CICon 1) noStatic`;
 
 
 fun h$con_e { return `Stack`[`Sp`]; };
@@ -312,7 +312,7 @@ fun h$catch a handler {
 fun h$noop_e {
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$noop_e" [] "no-op IO ()" (CILayoutFixed 0 []) (CIFun 1 0) CINoStatic`;
+`ClosureInfo "h$noop_e" (CIRegs 0 []) "no-op IO ()" (CILayoutFixed 0 []) (CIFun 1 0) noStatic`;
 var !h$noop = h$c0(h$noop_e);
 
 fun h$catch_e {
@@ -320,7 +320,7 @@ fun h$catch_e {
   `adjSpN 3`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$catch_e" [] "exception handler" (CILayoutFixed 2 [PtrV,IntV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$catch_e" (CIRegs 0 [PtrV]) "exception handler" (CILayoutFixed 2 [PtrV,IntV]) CIStackFrame noStatic`;
 
 
 // function application to one argument
@@ -330,7 +330,7 @@ fun h$ap1_e {
   `R2` = c.d2;
   return h$ap_1_1_fast();
 }
-`ClosureInfo "h$ap1_e" [] "apply1" (CILayoutFixed 2 [PtrV, PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$ap1_e" (CIRegs 0 [PtrV]) "apply1" (CILayoutFixed 2 [PtrV, PtrV]) CIThunk noStatic`;
 
 // function application to two arguments
 fun h$ap2_e {
@@ -340,7 +340,7 @@ fun h$ap2_e {
   `R3` = c.d2.d2;
   return h$ap_2_2_fast();
 }
-`ClosureInfo "h$ap2_e" [] "apply2" (CILayoutFixed 3 [PtrV, PtrV, PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$ap2_e" (CIRegs 0 [PtrV]) "apply2" (CILayoutFixed 3 [PtrV, PtrV, PtrV]) CIThunk noStatic`;
 
 // function application to three arguments
 fun h$ap3_e {
@@ -351,7 +351,7 @@ fun h$ap3_e {
   `R4` = c.d2.d3;
   return h$ap_3_3_fast();
 }
-`ClosureInfo "h$ap3_e" [] "apply3" (CILayoutFixed 4 [PtrV, PtrV, PtrV, PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$ap3_e" (CIRegs 0 [PtrV]) "apply3" (CILayoutFixed 4 [PtrV, PtrV, PtrV, PtrV]) CIThunk noStatic`;
 
 // select first field
 fun h$select1_e {
@@ -366,14 +366,14 @@ fun h$select1_e {
   `R1` = t;
   return h$ap_0_0_fast();
 }
-`ClosureInfo "h$select1_e" [] "select1" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$select1_e" (CIRegs 0 [PtrV]) "select1" (CILayoutFixed 1 [PtrV]) CIThunk noStatic`;
 
 fun h$select1_ret {
   `R1` = `R1`.d1;
   `adjSpN 1`;
   return h$ap_0_0_fast();
 }
-`ClosureInfo "h$select1_ret" [] "select1ret" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$select1_ret" (CIRegs 0 [PtrV]) "select1ret" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 // select second field of a two-field constructor
 fun h$select2_e {
@@ -388,14 +388,14 @@ fun h$select2_e {
   `R1` = t;
   return h$ap_0_0_fast();
 }
-`ClosureInfo "h$select2_e" [] "select2" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$select2_e" (CIRegs 0 [PtrV]) "select2" (CILayoutFixed 1 [PtrV]) CIThunk noStatic`;
 
 fun h$select2_ret {
   `R1` = `R1`.d2;
   `adjSpN 1`;
   return h$ap_0_0_fast();
 }
-`ClosureInfo "h$select2_ret" [] "select2ret" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$select2_ret" (CIRegs 0 [PtrV]) "select2ret" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 // throw an exception: unwind the thread's stack until you find a handler
 fun h$throw e async {
@@ -491,13 +491,13 @@ fun h$throw e async {
 fun h$raise_e {
   return h$throw(`R1`.d1, false);
 }
-`ClosureInfo "h$raise_e" [PtrV] "h$raise_e" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$raise_e" (CIRegs 0 [PtrV]) "h$raise_e" (CILayoutFixed 0 []) CIThunk noStatic`;
 
 // a thunk that just raises an asynchronous exception
 fun h$raiseAsync_e {
   return h$throw(`R1`.d1, true);
 }
-`ClosureInfo "h$raiseAsync_e" [PtrV] "h$raiseAsync_e" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$raiseAsync_e" (CIRegs 0 [PtrV]) "h$raiseAsync_e" (CILayoutFixed 0 []) CIThunk noStatic`;
 
 // a stack frame that raises an exception, this is pushed by
 // the scheduler when raising an async exception
@@ -506,7 +506,7 @@ fun h$raiseAsync_frame {
   `adjSpN 2`;
   return h$throw(ex,true);
 }
-`ClosureInfo "h$raiseAsync_frame" [] "h$raiseAsync_frame" (CILayoutFixed 1 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$raiseAsync_frame" (CIRegs 0 []) "h$raiseAsync_frame" (CILayoutFixed 1 []) CIStackFrame noStatic`;
 
 // reduce result if it's a thunk, follow if it's an ind
 // add this to the stack if you want the outermost result
@@ -520,7 +520,7 @@ fun h$reduce {
     return `Stack`[`Sp`];
   }
 }
-`ClosureInfo "h$reduce" [PtrV] "h$reduce" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$reduce" (CIRegs 0 [PtrV]) "h$reduce" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 var h$gccheckcnt = 0;
 fun h$gc_check next {
@@ -534,29 +534,23 @@ fun h$gc_check next {
   return 0;
 }
 
-fun h$o o typ0 a gcinfo regs srefs {
-  h$setObjInfo(o,typ0,"",[],a,gcinfo,regs,srefs);
+fun h$o o typ0 a size regs srefs {
+  h$setObjInfo(o,typ0,"",[],a,size,regs,srefs);
 }
 
 // set heap/stack object information
-fun h$setObjInfo o typ name fields a gcinfo regs srefs {
+fun h$setObjInfo o typ name fields a size regs srefs {
   o.t    = typ;
   o.i    = fields;
   o.n    = name;
   o.a    = a;
-  o.gai  = regs;        // active registers with ptrs
+  o.r    = regs;        // active registers
   o.s    = null;
   o.m    = 0;           // placeholder for uniqe idents
   if(srefs !== null) {
     h$initStatic.push(\x { o.s = srefs(); });
   }
-  if(`isArray gcinfo`) { // info doesn't fit in int tag
-    o.gtag = gcinfo.length; // fixme this is wrong for multi-elem0;
-    o.gi   = gcinfo;
-  } else {
-    o.gtag = gcinfo;
-    o.gi   = [];
-  }
+  o.size = size;
 }
 
 // allocate function on heap
@@ -573,6 +567,7 @@ fun h$static_thunk f {
 }
 
 // print a closure
+// fixme, property access here might be closure compiler incompatible
 fun h$printcl i {
   var cl = i.f;
   var d  = i.d1;
@@ -623,39 +618,17 @@ fun h$printcl i {
         r += "(" + d["d"+idx].length + "," + d["d"+(idx+1)] + " :: ptr)";
         idx+=2;
         break;
+      case `RtsObjV`:
+        r += "(" + d["d"+idx].toString() + " :: RTS object)";
+        idx++;
+        break;
       default:
         r += "unknown field: " + cl.i[i];
     }
   }
   h$log(r);
 }
-/*
-fun h$static_con0 f {
-  if(hpS+1 >= hpDyn) run_gc();
-  var h = hpS;
-  heap[hpS++] = f;
-  return h;
-}
 
-fun h$static_con f xs {
-  if(hpS+1+xs.length >= hpDyn) run_gc();
-  var h = hpS;
-  var n = xs.length;
-  heap[h] = f;
-  for(var i=0;i<n;i++) {
-    heap[hpS+i+1] = xs[i];
-  }
-  hpS += n+1;
-  return h;
-}
-
-fun h$alloc_static n {
-  if(hpS+n >= hpDyn) run_gc();
-  var h = hpS;
-  hpS += n;
-  return h;
-}
-*/
 fun h$init_closure c xs {
   c.m = 0;
   switch(xs.length) {
@@ -813,7 +786,7 @@ fun h$runio_e {
   `Stack`[++`Sp`] = h$ap_1_0;
   return h$ap_1_0;
 }
-`ClosureInfo "h$runio_e" [PtrV] "runio" (CILayoutFixed 1 [PtrV]) CIThunk CINoStatic`;
+`ClosureInfo "h$runio_e" (CIRegs 0 [PtrV]) "runio" (CILayoutFixed 1 [PtrV]) CIThunk noStatic`;
 
 fun h$runio c {
   return h$c1(h$runio_e, c);
@@ -824,7 +797,7 @@ fun h$flushStdout_e {
   `R2` = h$baseZCGHCziIOziHandleziFDzistdout;
   return h$ap_1_1_fast();
 }
-`ClosureInfo "h$flushStdout_e" [] "flushStdout" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$flushStdout_e" (CIRegs 0 []) "flushStdout" (CILayoutFixed 0 []) CIThunk noStatic`;
 var !h$flushStdout = h$static_thunk(h$flushStdout_e);
 
 var h$start = new Date();
@@ -961,7 +934,7 @@ fun h$restoreThread {
   `Sp` = `Sp` - frameSize;
   return f;
 }
-`ClosureInfo "h$restoreThread" [] "restoreThread" CILayoutVariable (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$restoreThread" (CIRegs 0 []) "restoreThread" CILayoutVariable CIStackFrame noStatic`;
 
 // return a closure in the stack frame to the next thing on the stack
 fun h$return {
@@ -970,7 +943,7 @@ fun h$return {
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$return" [] "return" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$return" (CIRegs 0 []) "return" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
 
 // return a function in the stack frame for the next call
 fun h$returnf {
@@ -979,7 +952,8 @@ fun h$returnf {
   `adjSpN 2`;
   return r;
 }
-`ClosureInfo "h$returnf" [] "returnf" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`;
+// fixme, check that this is only used when R1 is active
+`ClosureInfo "h$returnf" (CIRegs 0 [PtrV]) "returnf" (CILayoutFixed 1 [ObjV]) CIStackFrame noStatic`;
 
 // return this function when the scheduler needs to come into action
 // (yield, delay etc), returning thread needs to push all relevant
@@ -987,7 +961,8 @@ fun h$returnf {
 fun h$reschedule {
   return h$reschedule;
 }
-`ClosureInfo "h$reschedule" [] "reschedule" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+// fixme check registers
+`ClosureInfo "h$reschedule" (CIRegs 0 []) "reschedule" (CILayoutFixed 0 []) CIThunk noStatic`;
 
 // carefully suspend the current thread, looking at the
 // function that would be called next
@@ -999,20 +974,27 @@ fun h$suspendCurrentThread next {
     return;
   }
    var nregs;
+   var skipregs = 0;
+   var t = next.t;
   // pap arity
-  if(next.t === `Pap`) {
+  if(t === `Pap`) {
     var pa;
     `papArity pa (toJExpr R1)`;
     nregs = (pa >> 8) + 1;
-  } else if(next.t === `Fun`) {
-    // for normal functions, the number active registers is in the .a proprty
-    nregs = (next.a >> 8) + 1;
+  } else if(t === `Fun` || t === `StackFrame`) {
+    // for normal functions, the number active registers is in the .r proprty
+    nregs    = next.r >> 8;
+    skipregs = next.r & 0xff;
   } else {
     nregs = 1;  // Thunk, Con, Blackhole only have R1
   }
   // h$log("suspending: " + `Sp` + " nregs: " + nregs);
   `Sp` = `Sp`+nregs+3;
-  for(var i=1;i<=nregs;i++) {
+  var i;
+  for(i=1;i<=skipregs;i++) {
+    `Stack`[`Sp`-2-i] = null;
+  }
+  for(i=skipregs+1;i<=nregs+skipregs;i++) {
     `Stack`[`Sp`-2-i] = h$getReg(i);
   }
   `Stack`[`Sp`-2] = next;
@@ -1021,9 +1003,9 @@ fun h$suspendCurrentThread next {
   h$currentThread.sp = `Sp`;
 }
 
-// debug thing, insert on stack to dump current result
+// debug thing, insert on stack to dump current result, should be boxed
 fun h$dumpRes {
-  h$log("#######: result: " + `Stack`[`Sp`-1]);
+  h$log("h$dumpRes result: " + `Stack`[`Sp`-1]);
   h$log(`R1`);
   h$log(h$collectProps(`R1`));
   if(`R1`.f && `R1`.f.n) { h$log("name: " + `R1`.f.n); }
@@ -1033,11 +1015,10 @@ fun h$dumpRes {
     var re = new RegExp("([^\\n]+)\\n(.|\\n)*");
     h$log("function: " + (""+`R1`.f).substring(0,50).replace(re,"$1"));
   }
-  h$log("######");
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$dumpRes" [] "dumpRes" (CILayoutFixed 1 [ObjV]) CIThunk CINoStatic`;
+`ClosureInfo "h$dumpRes" (CIRegs 0 [PtrV]) "dumpRes" (CILayoutFixed 1 [ObjV]) CIThunk noStatic`;
 
 // resume an interrupted computation, the stack
 // we need to push is in d1, restore frame should
@@ -1055,7 +1036,7 @@ fun h$resume_e {
   `R1` = null;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$resume_e" [] "resume" (CILayoutFixed 0 []) CIThunk CINoStatic`;
+`ClosureInfo "h$resume_e" (CIRegs 0 [PtrV]) "resume" (CILayoutFixed 0 []) CIThunk noStatic`;
 
 fun h$unmaskFrame {
   //log("h$unmaskFrame: " + h$threadString(h$currentThread));
@@ -1069,7 +1050,7 @@ fun h$unmaskFrame {
     return `Stack`[`Sp`];
   }
 }
-`ClosureInfo "h$unmaskFrame" [] "unmask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$unmaskFrame" (CIRegs 0 [PtrV]) "unmask" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 fun h$maskFrame {
   //h$log("h$maskFrame: " + h$threadString(h$currentThread));
@@ -1077,7 +1058,7 @@ fun h$maskFrame {
   `adjSpN 1`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$maskFrame" [] "mask" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$maskFrame" (CIRegs 0 [PtrV]) "mask" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 fun h$maskUnintFrame {
   //h$log("h$maskUnintFrame: " + h$threadString(h$currentThread));
@@ -1085,7 +1066,7 @@ fun h$maskUnintFrame {
   `adjSpN 1`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$maskUnintFrame" [] "maskUnint" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$maskUnintFrame" (CIRegs 0 [PtrV]) "maskUnint" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 // async ffi results are returned in R1 = { f: ... d1: [array of values], d2: null }
 fun h$unboxFFIResult {
@@ -1096,7 +1077,7 @@ fun h$unboxFFIResult {
   `adjSpN 1`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$unboxFFIResult" [PtrV] "unboxFFI" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$unboxFFIResult" (CIRegs 0 [PtrV]) "unboxFFI" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 // for non-strict things that are represented as an unboxed value:
 // 1. enumerations
@@ -1105,14 +1086,14 @@ fun h$unbox_e {
   `R1` = `R1`.d1;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$unbox_e" [DoubleV] "unboxed value" (CILayoutFixed 1 [DoubleV]) CIThunk CINoStatic`;
+`ClosureInfo "h$unbox_e" (CIRegs 0 [PtrV]) "unboxed value" (CILayoutFixed 1 [DoubleV]) CIThunk noStatic`;
 
 fun h$retryInterrupted {
   var a = `Stack`[`Sp`-1];
   `adjSpN 2`;
   return a[0].apply(this, a.slice(1));
 }
-`ClosureInfo "h$retryInterrupted" [ObjV] "retry interrupted operation" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$retryInterrupted" (CIRegs 0 [ObjV]) "retry interrupted operation" (CILayoutFixed 1 [ObjV]) CIStackFrame noStatic`;
 
 // STM support
 
@@ -1126,13 +1107,13 @@ fun h$atomically_e {
     return h$stmStartTransaction(`Stack`[`Sp`-2]);
   }
 }
-`ClosureInfo "h$atomically_e" [PtrV] "atomic operation" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$atomically_e" (CIRegs 0 [PtrV]) "atomic operation" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
 
 fun h$checkInvariants_e {
   `adjSpN 1`;
   return h$stmCheckInvariants();
 }
-`ClosureInfo "h$checkInvariants_e" [] "check transaction invariants" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$checkInvariants_e" (CIRegs 0 [PtrV]) "check transaction invariants" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 fun h$stmCheckInvariantStart_e {
   var t   = `Stack`[`Sp`-2];
@@ -1146,7 +1127,7 @@ fun h$stmCheckInvariantStart_e {
   `R1` = inv.action;
   return h$ap_1_0_fast();
 }
-`ClosureInfo "h$stmCheckInvariantStart_e" [] "start checking invariant" (CILayoutFixed 2 [ObjV, ObjV]) (CIFun 0 0) CINoStatic`
+`ClosureInfo "h$stmCheckInvariantStart_e" (CIRegs 0 []) "start checking invariant" (CILayoutFixed 2 [ObjV, RtsObjV]) CIStackFrame noStatic`
 
 fun h$stmCheckInvariantResult_e {
   var inv = `Stack`[`Sp`-1];
@@ -1156,9 +1137,10 @@ fun h$stmCheckInvariantResult_e {
   h$stmAbortTransaction();
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$stmCheckInvariantResult_e" [] "finish checking invariant" (CILayoutFixed 1 [ObjV]) (CIFun 0 0) CINoStatic`
+`ClosureInfo "h$stmCheckInvariantResult_e" (CIRegs 0 [PtrV]) "finish checking invariant" (CILayoutFixed 1 [ObjV]) CIStackFrame noStatic`
 
 // update invariant TVar dependencies and rethrow exception
+// handler must be pushed above h$stmCheckInvariantResult_e frame
 fun h$stmInvariantViolatedHandler_e {
   if(`Stack`[`Sp`] !== h$stmCheckInvariantResult_e) {
     throw "h$stmInvariantViolatedHandler_e: unexpected value on stack";
@@ -1169,7 +1151,7 @@ fun h$stmInvariantViolatedHandler_e {
   h$stmAbortTransaction();
   return h$throw(`R2`, false);
 }
-`ClosureInfo "h$stmInvariantViolatedHandler_e" [PtrV] "finish checking invariant" (CILayoutFixed 0 []) (CIFun 2 1) CINoStatic`;
+`ClosureInfo "h$stmInvariantViolatedHandler_e" (CIRegs 0 [PtrV]) "finish checking invariant" (CILayoutFixed 0 []) (CIFun 2 1) noStatic`;
 
 var !h$stmInvariantViolatedHandler = h$c(h$stmInvariantViolatedHandler_e);
 
@@ -1178,13 +1160,13 @@ fun h$stmCatchRetry_e {
   h$stmCommitTransaction();
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$stmCatchRetry_e" [] "catch retry" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$stmCatchRetry_e" (CIRegs 0 [PtrV]) "catch retry" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
 
 fun h$catchStm_e {
   `adjSpN 4`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$catchStm_e" [] "STM catch" (CILayoutFixed 3 [ObjV,PtrV,ObjV]) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$catchStm_e" (CIRegs 0 [PtrV]) "STM catch" (CILayoutFixed 3 [ObjV,PtrV,ObjV]) CIStackFrame noStatic`;
 
 fun h$stmResumeRetry_e {
   if(`Stack`[`Sp`-2] !== h$atomically_e) {  // must be pushed just above atomically
@@ -1196,7 +1178,7 @@ fun h$stmResumeRetry_e {
   h$stmRemoveBlockedThread(blocked, h$currentThread);
   return h$stmStartTransaction(`Stack`[`Sp`-2]);
 }
-`ClosureInfo "h$stmResumeRetry_e" [] "resume retry" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+`ClosureInfo "h$stmResumeRetry_e" (CIRegs 0 [PtrV]) "resume retry" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 |]
 

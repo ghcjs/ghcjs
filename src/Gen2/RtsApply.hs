@@ -115,7 +115,7 @@ genericStackApply =
             throw "h$ap_gen: unexpected closure type";
         }
       }
-      `ClosureInfo "h$ap_gen" [PtrV] "h$ap_gen" CILayoutVariable (CIFun 1 1) CINoStatic`;
+      `ClosureInfo "h$ap_gen" (CIRegs 0 [PtrV]) "h$ap_gen" CILayoutVariable CIStackFrame noStatic`;
     |]
   where
     funCase c arity = withIdent $ \pap ->
@@ -278,15 +278,14 @@ stackApply :: Int -> -- ^ number of registers in stack frame
               JStat
 stackApply r n = [j| `decl func`;
                      `JVar func` = `JFunc funArgs (preamble <> body)`;
-                     `ClosureInfo funcName [PtrV] funcName layout (CIFun 0 0) CINoStatic`;
+                     `ClosureInfo funcName (CIRegs 0 [PtrV]) funcName layout CIStackFrame noStatic`;
                    |]
   where
-    layout    = CILayoutPtrs r []
+    layout    = CILayoutUnknown r
 
     frameSize = r+1
 
     funcName = T.pack ("h$ap_" ++ show n ++ "_" ++ show r)
---    funcNameT = T.pack funcName
 
     popFrame = adjSpN frameSize
 
@@ -458,7 +457,7 @@ fastApply r n =
 zeroApply :: JStat
 zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
                 fun h$ap_0_0 { `preamble`; `adjSpN 1`; `enter (toJExpr R1)`; }
-                `ClosureInfo "h$ap_0_0" [PtrV] "h$ap_0_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo "h$ap_0_0" (CIRegs 0 [PtrV]) "h$ap_0_0" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
                 fun h$ap_1_0 x {
                   `preamble`;
@@ -474,7 +473,7 @@ zeroApply = [j| fun h$ap_0_0_fast { `preamble`; `enter (toJExpr R1)`; }
                     return c;
                   }
                 }
-                `ClosureInfo "h$ap_1_0" [PtrV] "h$ap_1_0" (CILayoutFixed 0 []) (CIFun 0 0) CINoStatic`;
+                `ClosureInfo "h$ap_1_0" (CIRegs 0 [PtrV]) "h$ap_1_0" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
                 fun h$e c { `preamble`; `R1` = c; `enter c`; }
 
@@ -537,7 +536,7 @@ updates =
         `traceRts $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
         return `Stack`[`Sp`];
       };
-      `ClosureInfo "h$upd_frame" [PtrV] "h$upd_frame" (CILayoutFixed 1 [PtrV]) (CIFun 0 0) CINoStatic`;
+      `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]
 
 mkFunc :: Ident -> JStat -> JStat
@@ -545,15 +544,13 @@ mkFunc func body = [j| `decl func`; `JVar func` = `JFunc funArgs body`; |]
 
 {-
   Partial applications. There are two different kinds of partial application:
-    pap_r: contains r registers, layout:
+    pap_r contains r registers, pap_gen can contain any number
+
+    layout:
      - d1      = function
-     - d2.d1   = number of arguments
+     - d2.d1 & 0xff = number of args
+       d2.d1 >> 8   = number of registers (r for h$pap_r)
      - d2.d2.. = args (r)
-    pap_gen: generic pap, layout:
-     - d1      = function
-     - d2.d1   = number of arguments
-     - d2.d2   = number of registers for arguments
-     - d2.d3.. = args (d2.d2)
 -}
 -- arity is the remaining arity after our supplied arguments are applied
 mkPap :: Ident   -- ^ id of the pap object
@@ -561,18 +558,14 @@ mkPap :: Ident   -- ^ id of the pap object
       -> JExpr   -- ^ number of arguments in pap
       -> [JExpr] -- ^ values for the supplied arguments
       -> JStat
-mkPap tgt fun n values
-  | length values > numSpecPap =
-      traceRts ("making generic pap with: " ++ show (length values) ++ " items") <>
-      allocDynamic True tgt (iex . TxtI . T.pack $ "h$pap_gen")
-                            (fun:n:toJExpr (length values):map toJExpr values)
-  | otherwise =
+mkPap tgt fun n values =
       traceRts ("making pap with: " ++ show (length values) ++ " items") <>
-      allocDynamic True tgt (iex entry) (fun:n:map toJExpr values')
-        where
-          values' | null values = [jnull]
-                  | otherwise   = values
-          entry = TxtI . T.pack $ "h$pap_" ++ show (length values)
+      allocDynamic True tgt (iex entry) (fun:[je| `length values`+`n`|]:map toJExpr values')
+  where
+    values' | null values = [jnull]
+            | otherwise   = values
+    entry | length values > numSpecPap = TxtI "h$pap_gen"
+          | otherwise                  = TxtI . T.pack $ "h$pap_" ++ show (length values)
 
 -- specialized (faster) pap generated for [0..numSpecPap]
 -- others use h$pap_gen
@@ -585,7 +578,7 @@ numSpecPap = 6
 pap :: Int -> JStat
 pap r = [j| `decl func`;
             `iex func` = `JFunc [] (preamble <> body)`;
-            `ClosureInfo funcName [] funcName CILayoutVariable (CIPap r) CINoStatic`;
+            `ClosureInfo funcName CIRegsUnknown funcName (CILayoutUnknown (r+2)) CIPap noStatic`;
           |]
   where
     funcName = T.pack ("h$pap_" ++ show r)
@@ -635,8 +628,10 @@ papGen = [j| fun h$pap_gen {
                `R1` = c;
                return f;
              }
+             `ClosureInfo funcName CIRegsUnknown funcName CILayoutVariable CIPap noStatic`;
            |]
   where
+    funcName = "h$pap_gen"
     loadOwnArgs d r =
       let prop n = d |. ("d" <> T.pack (show $ n+1))
           loadOwnArg n = (toJExpr n, [j| `numReg (n+1)` = `prop n`; |])

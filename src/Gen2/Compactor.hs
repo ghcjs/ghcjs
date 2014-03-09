@@ -21,6 +21,7 @@ import           Data.Array
 import qualified Data.Binary as DB
 import qualified Data.Binary.Get as DB
 import qualified Data.Binary.Put as DB
+import           Data.Bits
 import qualified Data.ByteString.Lazy as BL
 import           Data.Char (chr)
 import           Data.Data.Lens
@@ -91,6 +92,7 @@ renameVar i@(TxtI xs)
         Nothing -> put (RenamerState ys (HM.insert xs y m)) >> return y
   | otherwise = return i
 
+
 renderClosureInfo :: GhcjsSettings
                   -> DynFlags
                   -> [ClosureInfo]
@@ -105,7 +107,6 @@ renameClosureInfo cis (RenamerState _ m) =
    where
     g m0 m (ClosureInfo v rs n l t s) =
         (ClosureInfo (fromMaybe v $ HM.lookup v m) rs n l t (h m s))
-    h _ CINoStatic = CINoStatic
     h m0 (CIStaticRefs rs) = CIStaticRefs (map (\sr -> fromMaybe sr $ HM.lookup sr m0) rs)
 
 renderInfoBlock :: GhcjsSettings -> DynFlags -> [ClosureInfo] -> JStat
@@ -119,7 +120,7 @@ renderInfoBlock settings dflags infos
           });
         |]
   where
-    infos' = sortBy (compare `on` ciVar) infos
+    infos' = sortBy (compare `on` ciVar) infos -- (filter (not . implicitLayout) infos)
     infoTables :: String
     infoTables = encodeStr (concatMap (encodeInfo m) infos')
     funArr :: [Ident]
@@ -132,7 +133,6 @@ renderInfoBlock settings dflags infos
     extras = filter (`S.notMember` s) allSrts
 
     allSrts = let getSrts inf = case ciStatic inf of
-                                  CINoStatic      -> []
                                   CIStaticRefs xs -> xs
               in S.toList $ S.fromList (concatMap getSrts infos)
 {-
@@ -147,7 +147,7 @@ encodeStr :: [Int] -> String
 encodeStr = concatMap encodeChr
   where
     c :: Int -> Char
-    c i | i > 90 || i < 0 = error "encodeStr: c"
+    c i | i > 90 || i < 0 = error ("encodeStr: c " ++ show i)
         | i >= 59   = chr (34+i)
         | i >= 2    = chr (33+i)
         | otherwise = chr (32+i)
@@ -158,24 +158,30 @@ encodeStr = concatMap encodeChr
       | i <= 737189 = let (c2a, c3) = (i - 8190) `divMod` 90
                           (c1, c2)  = c2a `divMod` 90
                       in [chr 125, c c1, c c2, c c3]
-      | otherwise = error "encodeStr"
+      | otherwise = error "encodeStr: overflow"
 
 encodeInfo :: Map Text Int -> ClosureInfo -> [Int]
 encodeInfo m (ClosureInfo var regs name layout typ static)
-  | CIThunk            <- typ = [0] ++ ls
-  | (CIFun arity regs) <- typ = [1, arity, regs] ++ ls
-  | (CICon tag)        <- typ = [2, tag] ++ ls
--- | (CIPap ar)         <- typ = [3, ar] ++ ls
-  | otherwise                 = error "encodeInfo"
+  | CIThunk             <- typ = [0] ++ ls
+  | (CIFun arity regs0) <- typ = [1, arity, encodeRegs regs] ++ ls
+  | (CICon tag)         <- typ = [2, tag] ++ ls
+  | CIStackFrame        <- typ = [3, encodeRegs regs] ++ ls
+-- | (CIPap ar)         <- typ = [4, ar] ++ ls  -- these should only appear during runtime
+  | otherwise                 = error ("encodeInfo, unexpected closure type: " ++ show typ)
   where
     vi       = funIdx var
     funIdx t = fromMaybe (error $ "encodeInfo: funIdx: " ++ T.unpack t) (M.lookup t m)
     ls       = encodeLayout layout ++ encodeSrt static
-    encodeLayout CILayoutVariable      = [0]
-    encodeLayout (CILayoutPtrs s ptrs) = [s+1] -- ,length ptrs] ++ ptrs
-    encodeLayout (CILayoutFixed s vs)   = [s+1] -- ,length vs] ++ map fromEnum vs
-    encodeSrt CINoStatic = [0]
+    encodeLayout CILayoutVariable     = [0]
+    encodeLayout (CILayoutUnknown s)  = [s+1]
+    encodeLayout (CILayoutFixed s vs) = [s+1]
     encodeSrt (CIStaticRefs rs) = length rs : map funIdx rs
+    encodeRegs CIRegsUnknown = 0
+    encodeRegs (CIRegs skip regTypes) = let nregs = sum (map varSize regTypes)
+                                        in  encodeRegsTag skip nregs
+    encodeRegsTag skip nregs
+      | skip < 0 || skip > 1 = error "encodeRegsTag: unexpected skip"
+      | otherwise            = (nregs `shiftL` 1) + skip
 
 
 {-
@@ -238,7 +244,7 @@ loadBase (Just file) = DB.runGet getBase <$> BL.readFile file
     gi :: DB.Get Int
     gi = fromIntegral <$> DB.getWord32le
     getList f = DB.getWord32le >>= \n -> replicateM (fromIntegral n) f
-    getFun ps ms = {- Fun -} (,,) <$> ((ps!) <$> gi) <*> ((ms!) <$> gi) <*> DB.get
+    getFun ps ms = (,,) <$> ((ps!) <$> gi) <*> ((ms!) <$> gi) <*> DB.get
     la xs = listArray (0, length xs - 1) xs
     getPkg = Package <$> DB.get <*> DB.get
     getRs = do

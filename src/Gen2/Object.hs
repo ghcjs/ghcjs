@@ -240,7 +240,6 @@ instance Objectable Deps where
 --   so it's potentially more efficient than readDeps <$> B.readFile file
 readDepsFile :: FilePath -> IO Deps
 readDepsFile file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
---  putStrLn ("reading deps: " ++ file)
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
     Nothing -> error ("readDepsFile: not a valid GHCJS object: " ++ file)
@@ -266,7 +265,6 @@ readObjectFile = readObjectFileKeys (\_ _ -> True)
 
 readObjectFileKeys :: (Int -> [Text] -> Bool) -> FilePath -> IO [ObjUnit]
 readObjectFileKeys p file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
---  putStrLn ("reading object: " ++ file)
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
     Nothing -> error ("readObjectFileKeys: not a valid GHCJS object: " ++ file)
@@ -554,6 +552,13 @@ instance Objectable VarType where
   put = putEnum
   get = getEnum
 
+instance Objectable CIRegs where
+  put CIRegsUnknown       = tag 1
+  put (CIRegs skip types) = tag 2 >> putIW16 skip >> put types
+  get = getTag >>= \case
+                      1 -> pure CIRegsUnknown
+                      2 -> CIRegs <$> getIW16 <*> get
+
 instance Objectable JOp where
   put = putEnum
   get = getEnum
@@ -565,34 +570,34 @@ instance Objectable JUOp where
 -- 16 bit sizes should be enough...
 instance Objectable CILayout where
   put CILayoutVariable           = tag 1
-  put (CILayoutPtrs size ptrs)   = tag 2 >> putIW16 size >> putListOf putIW16 ptrs
+  put (CILayoutUnknown size)     = tag 2 >> putIW16 size
   put (CILayoutFixed size types) = tag 3 >> putIW16 size >> put types
   get = getTag >>= \case
                       1 -> pure CILayoutVariable
-                      2 -> CILayoutPtrs  <$> getIW16 <*> getListOf getIW16
-                      3 -> CILayoutFixed <$> getIW16 <*> get
+                      2 -> CILayoutUnknown <$> getIW16
+                      3 -> CILayoutFixed   <$> getIW16 <*> get
                       n -> error ("Objectable get CILayout: invalid tag: " ++ show n)
 
 instance Objectable CIStatic where
   put (CIStaticRefs refs) = tag 1 >> put refs
-  put CINoStatic          = tag 2
   get = getTag >>= \case
                       1 -> CIStaticRefs <$> get
-                      2 -> pure CINoStatic
                       n -> error ("Objectable get CIStatic: invalid tag: " ++ show n)
 
 instance Objectable CIType where
   put (CIFun arity regs) = tag 1 >> putIW16 arity >> putIW16 regs
   put CIThunk            = tag 2
   put (CICon conTag)     = tag 3 >> putIW16 conTag
-  put (CIPap size)       = tag 4 >> putIW16 size
+  put CIPap              = tag 4
   put CIBlackhole        = tag 5
+  put CIStackFrame       = tag 6
   get = getTag >>= \case
                       1 -> CIFun <$> getIW16 <*> getIW16
                       2 -> pure CIThunk
                       3 -> CICon <$> getIW16
-                      4 -> CIPap <$> getIW16
+                      4 -> pure CIPap
                       5 -> pure CIBlackhole
+                      6 -> pure CIStackFrame
                       n -> error ("Objectable get CIType: invalid tag: " ++ show n)
 
 -- put an Int as a Word16, little endian. useful for many small values

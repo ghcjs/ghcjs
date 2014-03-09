@@ -259,9 +259,8 @@ genToplevelConEntry i (StgRhsClosure _cc _bi [] upd_flag srt args (StgConApp dc 
     | i `elem` dataConImplicitIds dc = genSetConInfo i dc srt
 genToplevelConEntry _ _ = mempty
 
-
 genStaticRefs :: SRT -> G CIStatic
-genStaticRefs NoSRT = return CINoStatic
+genStaticRefs NoSRT = return noStatic
 genStaticRefs (SRTEntries s) = do
   unfloated <- use gsUnfloated
   let xs = filter (\x -> not $ elemUFM x unfloated) (uniqSetToList s)
@@ -299,7 +298,8 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) _ = do
         body0 <- genBody i [] body Updatable i
         tci <- typeComment i
         sr <- genStaticRefs srt
-        emitClosureInfo (ClosureInfo (itxt eid) [] (itxt idi) (CILayoutFixed 0 []) CIThunk sr)
+        -- fixme can we skip the first reg here?
+        emitClosureInfo (ClosureInfo (itxt eid) (CIRegs 0 [PtrV]) (itxt idi) (CILayoutFixed 0 []) CIThunk sr)
         return [j| `tci`;
                    `decl eid`;
                    `eid` = `JFunc funArgs (preamble <> updateThunk <> body0)`;
@@ -315,7 +315,9 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) _ = do
         et <- genEntryType args
         tci <- typeComment i
         sr <- genStaticRefs srt
-        emitClosureInfo (ClosureInfo (itxt eid) (genArgInfo False $ map idType args) (itxt idi) (CILayoutFixed 0 []) et sr)
+        emitClosureInfo (ClosureInfo (itxt eid)
+                           (CIRegs 1 $ concatMap idVt args)
+                           (itxt idi) (CILayoutFixed 0 []) et sr)
         return [j| `tci`;
                    `decl eid`;
                    `eid` = `JFunc funArgs (preamble <> body0)`;
@@ -497,7 +499,7 @@ genEntry top i (StgRhsClosure _cc _bi live Updatable srt [] (StgApp fun args)) =
   ie <- jsEntryIdI i
   et <- genEntryType []
   sr <- genStaticRefs srt
-  emitClosureInfo (ClosureInfo (itxt ie) (genArgInfo True []) (itxt ie <> " ," <> T.pack (show i))
+  emitClosureInfo (ClosureInfo (itxt ie) (CIRegs 0 [PtrV]) (itxt ie <> " ," <> T.pack (show i))
                      (fixedLayout $ map (uTypeVt . idType) live) et sr)
 -- fixme args correct here?
   emitToplevel
@@ -513,7 +515,7 @@ genEntry top i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlo
   ei <- jsEntryIdI i
   et <- genEntryType args
   sr <- genStaticRefs srt
-  emitClosureInfo (ClosureInfo (itxt ei) (genArgInfo True $ map idType args) (itxt ei <> " ," <> T.pack (show i))
+  emitClosureInfo (ClosureInfo (itxt ei) (CIRegs 0 $ PtrV : concatMap idVt args) (itxt ei <> " ," <> T.pack (show i))
                      (fixedLayout $ map (uTypeVt . idType) live) et sr)
   emitToplevel
              [j| `decl ei`;
@@ -524,28 +526,19 @@ genEntryType :: [Id] -> G CIType
 genEntryType []   = return CIThunk
 genEntryType args = do
   args' <- mapM genIdArg args
---  let nvoid = length $ takeWhile null (reverse args')
   return $ CIFun (length args) (length $ concat args')
 
 genSetConInfo :: Id -> DataCon -> SRT -> C
 genSetConInfo i d srt = do
   ei <- jsDcEntryIdI i
   sr <- genStaticRefs srt
-  emitClosureInfo (ClosureInfo (itxt ei) [PtrV] (T.pack $ show d) (fixedLayout $ map uTypeVt fields)
+  emitClosureInfo (ClosureInfo (itxt ei) (CIRegs 0 [PtrV]) (T.pack $ show d) (fixedLayout $ map uTypeVt fields)
                  (CICon $ dataConTag d) sr)
   return [j| `decl ei`;
              `iex ei`     = `mkDataEntry`;
            |]
     where
       fields = dataConRepArgTys d
-
--- info table for the arguments that are heap pointers when this function is to be calledb
--- cl == True means that the current closure in r1 is a heap object
-genArgInfo :: Bool -> [Type] -> [VarType] -- [StgReg]
-genArgInfo cl args = map uTypeVt args
-    where
-      xs = r1 <> map uTypeVt args
-      r1 = if cl then [PtrV] else [IntV]
 
 mkDataEntry :: JExpr
 mkDataEntry = ValExpr $ JFunc funArgs [j| `preamble`; return `Stack`[`Sp`]; |]
@@ -593,13 +586,6 @@ genCase top bnd (StgApp i []) at@(PrimAlt tc) alts l srt
 
 genCase top bnd (StgOpApp (StgPrimOp SeqOp) [StgVarArg a, _] _) at alts l srt =
   genCase top bnd (StgApp a []) at alts l srt
-
--- genCase r bnd (StgApp i []) at alts l = genForce r bnd (jsId i) at alts l
--- genCase bnd (StgApp i xs) (PrimAlt tc) alts l = decl (jsIdI bnd) <> [j| `jsId bnd` = `jsId i`; |] <> 
-{-
-genCase top bnd (StgApp i xs) at@(AlgAlt tc) [alt] l =
-  gen
--}
 
 genCase top bnd (StgLit lit) at@(PrimAlt tc) [(_,[],_,e)] l srt = do
   ibnd <- genIdsI bnd
@@ -658,7 +644,7 @@ genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l srt = do
     args' <- concatMapM genArg args
     ids   <- genIds bnd
     case genPrim t p ids args' of
-      PrimInline s -> declIds bnd <> return s <> genInlinePrimCase top bnd (uTypeVt t) at alts
+      PrimInline s -> declIds bnd <> return s <> genInlinePrimCase top bnd (typeVt t) at alts
       PRPrimCall s -> genRet top bnd at alts l srt <> return s
 
 genCase top bnd x@(StgConApp c as) at [(DataAlt{}, bndrs, _, e)] l srt = do
@@ -670,8 +656,8 @@ genCase top bnd expr at@PolyAlt alts l srt = do
   genRet top bnd at alts l srt <> genExpr top expr
 
 genCase _ _ x at alts _ _ =
-  error $ "unhandled genCase format: " ++ show x ++ "\n"
-             ++ show at ++ "\n" ++ show alts
+  error $ "genCase: unhandled format: " ++ show x ++ "\n"
+            ++ show at ++ "\n" ++ show alts
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
 assignAll xs ys = mconcat (zipWith assignj xs ys)
@@ -680,7 +666,7 @@ assignj :: (ToJExpr a, ToJExpr b) => a -> b -> JStat
 assignj x y = [j| `x` = `y` |]
 
 -- simple inline prim case, no return function needed
-genInlinePrimCase :: Id -> Id -> VarType -> AltType -> [StgAlt] -> C
+genInlinePrimCase :: Id -> Id -> [VarType] -> AltType -> [StgAlt] -> C
 genInlinePrimCase top bnd tc _ [(DEFAULT, bs, used, e)] = genExpr top e
 -- some primops return ADT's, we can assume they're in WHNF
 genInlinePrimCase top bnd tc (AlgAlt dtc) alts@[_,(DataAlt dc,_,_,_)]
@@ -705,7 +691,7 @@ genInlinePrimCase _ _ _ at alt = error ("genInlinePrimCase: unhandled alt: (" ++
 
 
 genRet :: Id -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
-genRet top e at as l srt = withNewIdent f -- $ \ret -> pushRetArgs free (iex ret) <> f ret
+genRet top e at as l srt = withNewIdent f
   where
     f :: Ident -> C
     f r    =  do
@@ -715,22 +701,22 @@ genRet top e at as l srt = withNewIdent f -- $ \ret -> pushRetArgs free (iex ret
       topi <- jsIdI top
       tc <- typeComment e
       sr <- genStaticRefs srt
-      emitClosureInfo (ClosureInfo (itxt r) (genArgInfo isBoxedAlt []) (itxt r)
-                         (fixedLayout $ map (freeType . fst3) free) (CIFun regs regs) sr)
+      emitClosureInfo (ClosureInfo (itxt r) (CIRegs 0 altRegs) (itxt r)
+                         (fixedLayout $ map (freeType . fst3) free) CIStackFrame sr)
       emitToplevel $
-         tc -- is this correct?
-         <> (decl r)
-         <> [j| `r` = `fun'`;
-              |]
+         decl r <> [j| `r` = `fun'`; |]
       return pushRet
     fst3 ~(x,_,_)  = x
 
     -- 2-var values might have been moved around separately, use DoubleV as substitute
+    -- ObjV is 1 var, so this is no problem for implicit metadata
     freeType i | varSize otype == 1 = otype
                | otherwise          = DoubleV
       where otype = uTypeVt (idType i)
 
-    regs   = max 0 (typeSize (idType e) - 1)  -- number of active regs other than R1
+    altRegs = case at of
+      PrimAlt ptc -> tyConVt ptc
+      _           -> [PtrV]
 
     isBoxedAlt = case at of
                    PrimAlt {} -> False
@@ -905,7 +891,7 @@ mkAlgBranch top d alt@(a,bs,use,expr) = isolateSlots $
       b = (jsId d >>= \idd -> loadParams idd bs use) <> genExpr top expr
 
 -- single-var prim
-mkPrimBranch :: Id -> VarType -> StgAlt -> G (Maybe JExpr, JStat)
+mkPrimBranch :: Id -> [VarType] -> StgAlt -> G (Maybe JExpr, JStat)
 mkPrimBranch top vt (DEFAULT, bs, us, e) = isolateSlots $
   (Nothing,) <$> genExpr top e
 mkPrimBranch top vt (cond,    bs, us, e) = isolateSlots $ do
@@ -913,7 +899,7 @@ mkPrimBranch top vt (cond,    bs, us, e) = isolateSlots $ do
 
 -- possibly multi-var prim
 -- fixme load binders?
-mkPrimIfBranch :: Id -> VarType -> StgAlt -> G (Maybe [JExpr], JStat)
+mkPrimIfBranch :: Id -> [VarType] -> StgAlt -> G (Maybe [JExpr], JStat)
 mkPrimIfBranch top vt (DEFAULT, bs, us, e) = isolateSlots $ do
 --  (Nothing,) <$> genExpr top e
   expr <- genExpr top e

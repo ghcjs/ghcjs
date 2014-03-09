@@ -5,6 +5,7 @@ module Gen2.ClosureInfo where
 import           Data.Bits ((.|.), shiftL)
 import           Data.List (foldl')
 import           Data.Maybe (fromMaybe)
+import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
 
@@ -20,38 +21,37 @@ import           StgSyn
 import           DataCon
 import           TyCon
 import           Type
+import           Id
 
 -- closure types
-data CType = Thunk | Fun | Pap | Con | Blackhole
+data CType = Thunk | Fun | Pap | Con | Blackhole | StackFrame
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 --
 ctNum :: CType -> Int
-ctNum Fun       = 1
-ctNum Con       = 2
-ctNum Thunk     = 0 -- 4
-ctNum Pap       = 3 -- 8
--- ctNum Ind       = 4 -- 16
-ctNum Blackhole = 5 -- 32
+ctNum Fun        = 1
+ctNum Con        = 2
+ctNum Thunk      = 0 -- 4
+ctNum Pap        = 3 -- 8
+-- ctNum Ind        = 4 -- 16
+ctNum Blackhole  = 5 -- 32
+ctNum StackFrame = -1
 
 instance ToJExpr CType where
   toJExpr e = toJExpr (ctNum e)
 
 -- function argument and free variable types
-data VarType = PtrV     -- pointer = heap index, one field (gc follows this)
+data VarType = PtrV     -- pointer = reference to heap object (closure object)
              | VoidV    -- no fields
 --             | FloatV   -- one field -- no single precision supported
              | DoubleV  -- one field
              | IntV     -- one field
              | LongV    -- two fields
              | AddrV    -- a pointer not to the heap: two fields, array + index
-             | ObjV     -- some js object, does not contain heap pointers
-             | ArrV     -- array of followable values
-             | MVarV    -- h$MVar object
---             | TVarV
-             | MutVarV -- h$MutVar object
-             | WeakV
-               deriving (Eq, Ord, Show, Enum, Bounded)
+             | RtsObjV  -- some RTS object from GHCJS (for example TVar#, MVar#, MutVar#, Weak#)
+             | ObjV     -- some JS object, user supplied, be careful around these, can be anything
+             | ArrV     -- boxed array
+                deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- can we unbox C x to x, only if x is represented as a Number
 isUnboxableCon :: DataCon -> Bool
@@ -93,20 +93,16 @@ isMultiVar :: VarType -> Bool
 isMultiVar v = varSize v > 1
 
 -- can we pattern match on these values in a case?
-isMatchable :: VarType -> Bool
-isMatchable DoubleV = True
-isMatchable IntV    = True
-isMatchable _       = False
+isMatchable :: [VarType] -> Bool
+isMatchable [DoubleV] = True
+isMatchable [IntV]    = True
+isMatchable _         = False
 
--- can this thing contain references to heap objects?
-isScannable :: VarType -> [Bool]
-isScannable PtrV = [True]
-isScannable ArrV = [True]
-isScannable x = replicate (varSize x) False
+tyConVt :: TyCon -> [VarType]
+tyConVt = typeVt . mkTyConTy
 
--- go through PrimRep, not CgRep to make Int -> IntV instead of LongV
-tyConVt :: TyCon -> VarType
-tyConVt = primRepVt . tyConPrimRep
+idVt :: Id -> [VarType]
+idVt = typeVt . idType
 
 typeVt :: Type -> [VarType]
 typeVt t = case repType t of
@@ -118,6 +114,16 @@ uTypeVt :: UnaryType -> VarType
 uTypeVt ut
   | isPrimitiveType ut = primTypeVt ut
   | otherwise          = primRepVt . typePrimRep $ ut
+  where
+    primRepVt VoidRep   = VoidV
+    primRepVt PtrRep    = PtrV -- fixme does ByteArray# ever map to this?
+    primRepVt IntRep    = IntV
+    primRepVt WordRep   = IntV
+    primRepVt Int64Rep  = LongV
+    primRepVt Word64Rep = LongV
+    primRepVt AddrRep   = AddrV
+    primRepVt FloatRep  = DoubleV
+    primRepVt DoubleRep = DoubleV
 
 primTypeVt :: Type -> VarType
 primTypeVt t = case repType t of
@@ -128,103 +134,126 @@ primTypeVt t = case repType t of
   where
    pr xs = "ghc-prim:GHC.Prim." ++ xs
    go st
-    | st == pr "Addr#" = AddrV
-    | st == pr "Int#"  = IntV
-    | st == pr "Int64#" = LongV
-    | st == pr "Char#" = IntV
-    | st == pr "Word#" = IntV
-    | st == pr "Word64#" = LongV
-    | st == pr "Double#" = DoubleV
-    | st == pr "Float#" = DoubleV
-    | st == pr "Array#" = ArrV
-    | st == pr "MutableArray#" = ArrV
-    | st == pr "ByteArray#" = ObjV
-    | st == pr "MutableByteArray#" = ObjV
-    | st == pr "ArrayArray#" = ArrV
-    | st == pr "MutableArrayArray#" = ArrV
-    | st == pr "MutVar#" = ObjV
-    | st == pr "TVar#" = ObjV
-    | st == pr "MVar#" = ObjV
-    | st == pr "State#" = VoidV
-    | st == pr "RealWorld" = VoidV
-    | st == pr "ThreadId#" = ObjV
-    | st == pr "Weak#" = WeakV
-    | st == pr "StablePtr#" = AddrV
-    | st == pr "StableName#" = ObjV
-    | st == pr "Void#" = VoidV
-    | st == pr "Proxy#" = VoidV
-    | st == pr "MutVar#" = ArrV -- MutVarV
-    | st == pr "BCO#" = ObjV -- fixme what do we need here?
-    | st == pr "~#" = VoidV -- coercion token?
-    | st == pr "~R#" = VoidV -- role
-    | st == pr "Any" = PtrV
-    | st == "Data.Dynamic.Obj" = PtrV -- ?
+    | st == pr "Addr#"               = AddrV
+    | st == pr "Int#"                = IntV
+    | st == pr "Int64#"              = LongV
+    | st == pr "Char#"               = IntV
+    | st == pr "Word#"               = IntV
+    | st == pr "Word64#"             = LongV
+    | st == pr "Double#"             = DoubleV
+    | st == pr "Float#"              = DoubleV
+    | st == pr "Array#"              = ArrV
+    | st == pr "MutableArray#"       = ArrV
+    | st == pr "ByteArray#"          = ObjV -- can contain any JS reference, used for JSRef
+    | st == pr "MutableByteArray#"   = ObjV -- can contain any JS reference, used for JSRef
+    | st == pr "ArrayArray#"         = ArrV
+    | st == pr "MutableArrayArray#"  = ArrV
+    | st == pr "MutVar#"             = RtsObjV
+    | st == pr "TVar#"               = RtsObjV
+    | st == pr "MVar#"               = RtsObjV
+    | st == pr "State#"              = VoidV
+    | st == pr "RealWorld"           = VoidV
+    | st == pr "ThreadId#"           = RtsObjV
+    | st == pr "Weak#"               = RtsObjV
+    | st == pr "StablePtr#"          = AddrV
+    | st == pr "StableName#"         = RtsObjV
+    | st == pr "Void#"               = VoidV
+    | st == pr "Proxy#"              = VoidV
+    | st == pr "MutVar#"             = RtsObjV
+    | st == pr "BCO#"                = RtsObjV -- fixme what do we need here?
+    | st == pr "~#"                  = VoidV -- coercion token?
+    | st == pr "~R#"                 = VoidV -- role
+    | st == pr "Any"                 = PtrV
+    | st == "Data.Dynamic.Obj"       = PtrV -- ?
     | otherwise = error ("primTypeVt: unrecognized primitive type: " ++ st)
 
 argVt :: StgArg -> VarType
 argVt = uTypeVt . stgArgType
 
-primRepVt :: PrimRep -> VarType
-primRepVt VoidRep   = VoidV
-primRepVt PtrRep    = PtrV
-primRepVt IntRep    = IntV
-primRepVt WordRep   = IntV
-primRepVt Int64Rep  = LongV
-primRepVt Word64Rep = LongV
-primRepVt AddrRep   = AddrV
-primRepVt FloatRep  = DoubleV
-primRepVt DoubleRep = DoubleV
-
-
 instance ToJExpr VarType where
   toJExpr = toJExpr . fromEnum
 
-
 data ClosureInfo = ClosureInfo
-     { ciVar    :: Text      -- ^ object being infod
-     , ciRegs   :: [VarType] -- ^ things in registers
-     , ciName   :: Text      -- ^ friendly name for printing
-     , ciLayout :: CILayout  -- ^ heap/stack layout of the object
-     , ciType   :: CIType    -- ^ type of the object, with extra info where required
-     , ciStatic :: CIStatic  -- ^ static references of this object
+     { ciVar     :: Text      -- ^ object being infod
+     , ciRegs    :: CIRegs    -- ^ things in registers when this is the next closure to enter
+     , ciName    :: Text      -- ^ friendly name for printing
+     , ciLayout  :: CILayout  -- ^ heap/stack layout of the object
+     , ciType    :: CIType    -- ^ type of the object, with extra info where required
+     , ciStatic  :: CIStatic  -- ^ static references of this object
      }
+  deriving (Eq, Ord, Show)
 
 data CIType = CIFun { citArity :: Int  -- | function arity
                     , citRegs  :: Int  -- | number of registers for the args
                     }
             | CIThunk
             | CICon { citConstructor :: Int }
-            | CIPap { citSize :: Int } -- fixme is this ok?
+            | CIPap
             | CIBlackhole
+            | CIStackFrame
   --          | CIInd
+  deriving (Eq, Ord, Show)
+
+data CIRegs = CIRegsUnknown
+            | CIRegs { ciRegsSkip  :: Int       -- | unused registers before actual args start
+                     , ciRegsTypes :: [VarType] -- | args
+                     }
+  deriving (Eq, Ord, Show)
 
 data CIStatic = -- CIStaticParent { staticParent :: Ident } -- ^ static refs are stored in parent in fungroup
                 CIStaticRefs   { staticRefs :: [Text] } -- ^ list of refs that need to be kept alive
-              | CINoStatic
+  deriving (Eq, Ord, Show)
+
+noStatic :: CIStatic
+noStatic = CIStaticRefs []
 
 -- | static refs: array = references, single var = follow parent link, null = nothing to report
 instance ToJExpr CIStatic where
-  toJExpr CINoStatic         = [je| null |]
 --  toJExpr (CIStaticParent p) = iex p -- jsId p
   toJExpr (CIStaticRefs [])  = [je| null |]
-  toJExpr (CIStaticRefs rs)  = [je| \ -> `toJExpr rs` |] --- (map istr rs) -- (map idStr rs)
+  toJExpr (CIStaticRefs rs)  = [je| \ -> `toJExpr rs` |]
 
 
-data CILayout = CILayoutVariable -- layout stored in object itself, first position from the start
-              | CILayoutPtrs     -- size and pointer offsets known, no other primitive things (like IORef, MVar, Array) inside
+data CILayout = CILayoutVariable            -- layout stored in object itself, first position from the start
+              | CILayoutUnknown             -- fixed size, but content unknown (for example stack apply frame)
                   { layoutSize :: !Int
-                  , layoutPtrs :: [Int] -- offsets of pointer fields
                   }
-              | CILayoutFixed    -- whole layout known
+              | CILayoutFixed               -- whole layout known
                   { layoutSize :: !Int      -- closure size in array positions, including entry
                   , layout     :: [VarType]
                   }
+  deriving (Eq, Ord, Show)
 
 -- standard fixed layout: payload size
 fixedLayout :: [VarType] -> CILayout
 fixedLayout vts = CILayoutFixed (sum (map varSize vts)) vts
 
--- a gi gai i
+layoutSizeMaybe :: CILayout -> Maybe Int
+layoutSizeMaybe (CILayoutUnknown n) = Just n
+layoutSizeMaybe (CILayoutFixed n _) = Just n
+layoutSizeMaybe _                   = Nothing
+
+{-
+  Some stack frames don't need explicit information, since the
+  frame size can be determined from inspecting the types on the stack
+
+  requirements:
+    - stack frame
+    - fixed size, known layout
+    - one register value
+    - no ObjV (the next function on the stack should be the start of the next frame, not something in this frame)
+    - no static references
+ -}
+implicitLayout :: ClosureInfo -> Bool
+implicitLayout ci
+  | CILayoutFixed _ layout <- ciLayout ci
+  , CIStaticRefs []        <- ciStatic ci
+  , CIStackFrame           <- ciType ci
+  , CIRegs 0 rs            <- ciRegs ci =
+      sum (map varSize rs) == 1 &&
+      null (filter (==ObjV) layout)
+  | otherwise = False
+
 instance ToStat ClosureInfo where
   toStat = closureInfoStat rtsDebug
 
@@ -235,65 +264,40 @@ closureInfoStat debug (ClosureInfo obj rs name layout (CIFun arity nregs) srefs)
     setObjInfoL debug obj rs layout Fun name (mkArityTag arity nregs) srefs
 closureInfoStat debug (ClosureInfo obj rs name layout (CICon con) srefs) =
     setObjInfoL debug obj rs layout Con name con srefs
---  toStat (ClosureInfo obj rs name layout CIInd srefs)         =
---    setObjInfoL obj rs layout Ind name 0 srefs -- fixme do we need to keep track of register arguments of underlying thing?
 closureInfoStat debug (ClosureInfo obj rs name layout CIBlackhole srefs)   =
     setObjInfoL debug obj rs layout Blackhole name 0 srefs
-
-  -- pap have a special gtag for faster gc ident (only need to access gtag field)
-closureInfoStat debug (ClosureInfo obj rs name layout (CIPap size) srefs)  =
-    setObjInfo debug obj Pap name [] size (toJExpr $ -3-size) rs srefs
--- setObjInfo obj rs layout Pap name size srefs
-
+closureInfoStat debug (ClosureInfo obj rs name layout CIPap srefs)  =
+    setObjInfoL debug obj rs layout Pap name 0 srefs
+closureInfoStat debug (ClosureInfo obj rs name layout CIStackFrame srefs) =
+    setObjInfoL debug obj rs layout StackFrame name (fromMaybe (-1) (layoutSizeMaybe layout)) srefs
 
 mkArityTag :: Int -> Int -> Int
-mkArityTag arity trailingVoid = arity .|. (trailingVoid `shiftL` 8)
+mkArityTag arity registers = arity .|. (registers `shiftL` 8)
 
--- tag repurposed as size
 setObjInfoL :: Bool      -- ^ debug: output symbol names
             -> Text      -- ^ the object name
-            -> [VarType] -- ^ things in registers
+            -> CIRegs    -- ^ things in registers
             -> CILayout  -- ^ layout of the object
             -> CType     -- ^ closure type
             -> Text      -- ^ object name, for printing
-            -> Int       -- ^ `a' argument, depends on type (arity, conid, size)
+            -> Int       -- ^ `a' argument, depends on type (arity, conid)
             -> CIStatic  -- ^ static refs
             -> JStat
 setObjInfoL debug obj rs CILayoutVariable t n a =
-  setObjInfo debug obj t n [] a (toJExpr (-1 :: Int)) rs
-setObjInfoL debug obj rs (CILayoutPtrs size ptrs) t n a =
-  setObjInfo debug obj t n xs a tag rs
+  setObjInfo debug obj t n [] a (-1) rs
+setObjInfoL debug obj rs (CILayoutUnknown size) t n a =
+  setObjInfo debug obj t n xs a size rs
     where
-      tag = toJExpr size  -- mkGcTagPtrs t size ptrs
-      xs -- | tag /= 0  = []
-       = map (\i -> fromEnum $ if i `elem` ptrs then PtrV else ObjV) [1..size-1]
+      tag = toJExpr size
+      xs  = toTypeList (replicate size ObjV)
 setObjInfoL debug obj rs (CILayoutFixed size layout) t n a =
-  setObjInfo debug obj t n xs a tag rs
+  setObjInfo debug obj t n xs a size rs
     where
-      tag  = toJExpr size -- mkGcTag t size layout
+      tag  = toJExpr size
       xs   = toTypeList layout
-       {-
-       | tag /= 0 = []
-       | otherwise = toTypeList layout
-       -}
-mkGcTag :: CType -> Int -> [VarType] -> JExpr
-mkGcTag t size vs = mkGcTagPtrs t size (scannableOffsets 0 vs)
-{-
-   | any (\v -> isScannable v && not (v==PtrV)) vs = 0
-  | otherwise = 
--}
 
 toTypeList :: [VarType] -> [Int]
 toTypeList = concatMap (\x -> replicate (varSize x) (fromEnum x))
-
--- the tag thingie, will be 0 if info cannot be read from the tag
-mkGcTagPtrs :: CType -> Int -> [Int] -> JExpr
-mkGcTagPtrs t objSize ptrs = fromMaybe fallback $
-                           toJExpr . (.|. objSize') <$> ptrTag (map (+8) ptrs)
-  where
-    -- if tag bits don't fit in an integer, set tag to 0, gc will use the info list
-    fallback = toJExpr (0::Int) -- (objSize' : ptrs)
-    objSize' = if t == Thunk then max 2 objSize else objSize
 
 setObjInfo :: Bool       -- ^ debug: output all symbol names
            -> Text       -- ^ the thing to modify
@@ -301,25 +305,15 @@ setObjInfo :: Bool       -- ^ debug: output all symbol names
            -> Text       -- ^ object name, for printing
            -> [Int]      -- ^ list of item types in the object, if known (free variables, datacon fields)
            -> Int        -- ^ extra 'a' parameter, for constructor tag or arity
-           -> JExpr      -- ^ tag for the garbage collector
-           -> [VarType]  -- ^ things in registers
+           -> Int        -- ^ object size, -1 (number of vars) for unknown
+           -> CIRegs     -- ^ things in registers [VarType]  -- ^ things in registers
            -> CIStatic   -- ^ static refs
            -> JStat
-setObjInfo debug obj t name fields a gctag argptrs static
-   | debug     = [j| h$setObjInfo(`TxtI obj`, `t`, `name`, `fields`, `a`, `gctag`, `nregs`, `static`);  |]
-   | otherwise = [j| h$o(`TxtI obj`,`t`,`a`,`gctag`,`nregs`,`static`); |]
+setObjInfo debug obj t name fields a size regs static
+   | debug     = [j| h$setObjInfo(`TxtI obj`, `t`, `name`, `fields`, `a`, `size`, `regTag regs`, `static`); |]
+   | otherwise = [j| h$o(`TxtI obj`,`t`,`a`,`size`,`regTag regs`,`static`); |]
   where
-    nregs = sum $ map varSize argptrs
-
-scannableOffsets :: Int -> [VarType] -> [Int]
-scannableOffsets start ts =
-  [o | (o,True) <- zip [start..] (concatMap isScannable ts) ]
-
-ptrTag :: [Int] -> Maybe Int
-ptrTag ptrs
-    | any (>30) ptrs = Nothing -- error "tag bits greater than 30 unsupported"
-    | otherwise      = Just $ foldl' (.|.) 0 (map (1 `shiftL`) $ filter (>=0) ptrs)
-
-shiftedPtrTag :: Int -> [Int] -> Maybe Int
-shiftedPtrTag shift = ptrTag . map (subtract shift)
-
+    regTag CIRegsUnknown            = -1
+    regTag (CIRegs skip types) =
+      let nregs = sum $ map varSize types
+      in  skip + (nregs `shiftL` 8)
