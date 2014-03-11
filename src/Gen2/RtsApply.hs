@@ -560,7 +560,7 @@ mkPap :: Ident   -- ^ id of the pap object
       -> JStat
 mkPap tgt fun n values =
       traceRts ("making pap with: " ++ show (length values) ++ " items") <>
-      allocDynamic True tgt (iex entry) (fun:[je| `length values`+`n`|]:map toJExpr values')
+      allocDynamic True tgt (iex entry) (fun:[je| `length values * 256`+`n`|]:map toJExpr values')
   where
     values' | null values = [jnull]
             | otherwise   = values

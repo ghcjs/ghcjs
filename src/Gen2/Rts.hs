@@ -312,7 +312,7 @@ fun h$catch a handler {
 fun h$noop_e {
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$noop_e" (CIRegs 0 []) "no-op IO ()" (CILayoutFixed 0 []) (CIFun 1 0) noStatic`;
+`ClosureInfo "h$noop_e" (CIRegs 1 [PtrV]) "no-op IO ()" (CILayoutFixed 0 []) (CIFun 1 0) noStatic`;
 var !h$noop = h$c0(h$noop_e);
 
 fun h$catch_e {
@@ -449,7 +449,7 @@ fun h$throw e async {
     if(f === h$ap_gen) { // h$ap_gen is special
       size = ((`Stack`[`Sp` - 1] >> 8) + 2);
     } else {
-      var tag = f.gtag;
+      var tag = f.size;
       if(tag < 0) { // dynamic size
         size = `Stack`[`Sp`-1];
       } else {
@@ -674,24 +674,6 @@ fun h$run_init_static {
   h$initStatic = [];
 }
 
-// print function to be called and first few registers
-fun h$logCall c {
-  var f = c;
-  if(c && c.n) {
-    f = c.n;
-  } else {
-    f = h$collectProps c;
-  }
-  h$log(h$threadString(h$currentThread) + ":" + `Sp` + "  calling: " + f + "    " + JSON.stringify([h$printReg `R1`, h$printReg `R2`, h$printReg `R3`, h$printReg `R4`, h$printReg `R5`]));
-  h$checkStack();
-}
-
-fun h$collectProps o {
-  var props = [];
-  for(var p in o) { props.push(p); }
-  return("{"+props.join(",")+"}");
-}
-
 fun h$checkStack {
   var idx = `Sp`;
   while(idx >= 0) {
@@ -702,7 +684,7 @@ fun h$checkStack {
         size = (`Stack`[idx - 1] >> 8) + 2;
         offset = 2;
       } else {
-        var tag = `Stack`[idx].gtag;
+        var tag = `Stack`[idx].size;
         if(tag <= 0) {
           size = `Stack`[idx-1];
           offset = 2;
@@ -762,7 +744,7 @@ fun h$logStack {
     return;
   }
   var size = 0;
-  var gt = `Stack`[`Sp`].gtag;
+  var gt = `Stack`[`Sp`].size;
   if(gt === -1) {
     size = `Stack`[`Sp` - 1] & 0xff;
   } else {
@@ -871,7 +853,7 @@ fun h$checkObj obj {
   } else if(!obj.hasOwnProperty("d2") || obj.d2 === undefined) {
     h$log("h$checkObj: WARNING, something wrong with d2:");
     h$log((""+obj).substring(0,200));
-  } else if(obj.d2 !== null && typeof obj.d2 === 'object' && obj.f.gtag !== 2) {
+  } else if(obj.d2 !== null && typeof obj.d2 === 'object' && obj.f.size !== 2) {
     var d = obj.d2;
     for(var p in d) {
       if(d.hasOwnProperty(p)) {
@@ -889,7 +871,7 @@ fun h$checkObj obj {
 //        }
       }
     }
-    switch(obj.f.gtag) {
+    switch(obj.f.size) {
       case 6: if(d.d5 === undefined) { h$log("h$checkObj: WARNING, undefined field detected: d5"); }
       case 5: if(d.d4 === undefined) { h$log("h$checkObj: WARNING, undefined field detected: d4"); }
       case 4: if(d.d3 === undefined) { h$log("h$checkObj: WARNING, undefined field detected: d3"); }
@@ -989,7 +971,7 @@ fun h$suspendCurrentThread next {
     nregs = 1;  // Thunk, Con, Blackhole only have R1
   }
   // h$log("suspending: " + `Sp` + " nregs: " + nregs);
-  `Sp` = `Sp`+nregs+3;
+  `Sp` = `Sp`+nregs+skipregs+3;
   var i;
   for(i=1;i<=skipregs;i++) {
     `Stack`[`Sp`-2-i] = null;
@@ -998,7 +980,7 @@ fun h$suspendCurrentThread next {
     `Stack`[`Sp`-2-i] = h$getReg(i);
   }
   `Stack`[`Sp`-2] = next;
-  `Stack`[`Sp`-1] = nregs+3;
+  `Stack`[`Sp`-1] = nregs+skipregs+3;
   `Stack`[`Sp`]   = h$restoreThread;
   h$currentThread.sp = `Sp`;
 }
