@@ -674,6 +674,7 @@ mode_flags =
   , Flag "-generate-lib"           (PassFlag (setMode doGenerateLib))
   , Flag "-install-executable"     (PassFlag (setMode doInstallExecutable))
   , Flag "-print-obj"              (HasArg (\f -> setMode (doPrintObj f) "--print-obj"))
+  , Flag "-print-rts"              (PassFlag (setMode doPrintRts))
   , Flag "-numeric-ghc-version"    (PassFlag (setMode (showNumGhcVersionMode)))
   , Flag "-numeric-ghcjs-version"  (PassFlag (setMode (showNumVersionMode)))
   ]
