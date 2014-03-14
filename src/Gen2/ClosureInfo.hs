@@ -176,8 +176,8 @@ data ClosureInfo = ClosureInfo
      }
   deriving (Eq, Ord, Show)
 
-data CIType = CIFun { citArity :: Int  -- | function arity
-                    , citRegs  :: Int  -- | number of registers for the args
+data CIType = CIFun { citArity :: Int  -- ^ function arity
+                    , citRegs  :: Int  -- ^ number of registers for the args
                     }
             | CIThunk
             | CICon { citConstructor :: Int }
@@ -188,8 +188,8 @@ data CIType = CIFun { citArity :: Int  -- | function arity
   deriving (Eq, Ord, Show)
 
 data CIRegs = CIRegsUnknown
-            | CIRegs { ciRegsSkip  :: Int       -- | unused registers before actual args start
-                     , ciRegsTypes :: [VarType] -- | args
+            | CIRegs { ciRegsSkip  :: Int       -- ^ unused registers before actual args start
+                     , ciRegsTypes :: [VarType] -- ^ args
                      }
   deriving (Eq, Ord, Show)
 
