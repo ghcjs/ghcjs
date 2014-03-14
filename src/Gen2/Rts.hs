@@ -693,16 +693,16 @@ fun h$checkStack {
           offset = 1;
         }
       }
-      if(size < 1) throw("invalid stack frame size at: stack[" + idx + "], frame: " +`Stack`[idx].n);
+//      if(size < 1) throw("invalid stack frame size at: stack[" + idx + "], frame: " +`Stack`[idx].n);
 //        h$log("checking frame: " + `Stack`[idx].n + " size " + size);
-      if(f !== h$returnf && f !== h$restoreThread) {
-        for(var i=0;i<size-offset;i++) {
-          if(typeof `Stack`[idx-offset-i] === 'function') {
-            h$dumpStackTop `Stack` 0 `Sp`;
-            throw("unexpected function in frame at: " + idx + " " + `Stack`[idx].n);
-          }
-        }
-      }
+//      if(f !== h$returnf && f !== h$restoreThread) {
+//        for(var i=0;i<size-offset;i++) {
+//          if(typeof `Stack`[idx-offset-i] === 'function') {
+//            h$dumpStackTop `Stack` 0 `Sp`;
+//            throw("unexpected function in frame at: " + idx + " " + `Stack`[idx].n);
+//          }
+//        }
+//      }
       idx = idx - size;
     } else {
       h$dumpStackTop `Stack` 0 `Sp`;

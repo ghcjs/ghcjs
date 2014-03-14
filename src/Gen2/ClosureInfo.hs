@@ -269,7 +269,7 @@ closureInfoStat debug (ClosureInfo obj rs name layout CIBlackhole srefs)   =
 closureInfoStat debug (ClosureInfo obj rs name layout CIPap srefs)  =
     setObjInfoL debug obj rs layout Pap name 0 srefs
 closureInfoStat debug (ClosureInfo obj rs name layout CIStackFrame srefs) =
-    setObjInfoL debug obj rs layout StackFrame name (fromMaybe (-1) (layoutSizeMaybe layout)) srefs
+    setObjInfoL debug obj rs layout StackFrame name 0 srefs
 
 mkArityTag :: Int -> Int -> Int
 mkArityTag arity registers = arity .|. (registers `shiftL` 8)

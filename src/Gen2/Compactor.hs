@@ -163,6 +163,7 @@ encodeStr = concatMap encodeChr
 encodeInfo :: Map Text Int -> ClosureInfo -> [Int]
 encodeInfo m (ClosureInfo var regs name layout typ static)
   | CIThunk             <- typ = [0] ++ ls
+  | (CIFun arity regs0) <- typ, regs0 /= argSize regs = error ("encodeInfo: inconsistent register metadata for " ++ T.unpack name)
   | (CIFun arity regs0) <- typ = [1, arity, encodeRegs regs] ++ ls
   | (CICon tag)         <- typ = [2, tag] ++ ls
   | CIStackFrame        <- typ = [3, encodeRegs regs] ++ ls
@@ -182,7 +183,8 @@ encodeInfo m (ClosureInfo var regs name layout typ static)
     encodeRegsTag skip nregs
       | skip < 0 || skip > 1 = error "encodeRegsTag: unexpected skip"
       | otherwise            = (nregs `shiftL` 1) + skip
-
+    argSize (CIRegs skip regTypes) = sum (map varSize regTypes) - 1 + skip
+    argSize _ = 0
 
 {-
   Base files contain a list of functions already linked from

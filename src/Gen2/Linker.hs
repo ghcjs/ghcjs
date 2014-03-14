@@ -378,7 +378,18 @@ funPkgTxtNoVer = packageName . funPackage
 -- dependencies for the RTS, these need to be always linked
 rtsDeps :: [PackageId] -> Set Fun
 rtsDeps pkgs =
- let mkDep (p,m,s) = Fun (Package p "") m s
+ let mkDep (p,m,s) = Fun (Package p "") m (mkSymb p m s)
+     mkSymb p m s = "h$" <> zenc (p <> ":" <> m <> "." <> s)
+     -- probably incomplete
+     zenc = let f 'z' = "zz"
+                f '.' = "zi"
+                f ':' = "ZC"
+                f '[' = "ZM"
+                f ']' = "ZN"
+                f '$' = "zd"
+                f '-' = "zm"
+                f c   = T.singleton c
+            in  T.concatMap f
      pkgs'     = map packageIdString pkgs
      pkgErr p  = error ("Package `" ++ p ++ "' is required for linking, but was not found")
      findPkg p | null (filter (p `isPrefixOf`) pkgs') = pkgErr p
@@ -388,20 +399,23 @@ rtsDeps pkgs =
      basePkg        = findPkg "base"
 
  in S.fromList $ map mkDep
-     [ (basePkg,      "GHC.Conc.Sync",          "h$baseZCGHCziConcziSynczireportError")
-     , (basePkg,      "Control.Exception.Base", "h$baseZCControlziExceptionziBasezinonTermination" )
-     , (basePkg,      "GHC.Exception",          "h$baseZCGHCziExceptionziSomeException")
-     , (basePkg,      "GHC.TopHandler",         "h$baseZCGHCziTopHandlerzirunMainIO")
-     , (basePkg,      "GHC.Base",               "h$baseZCGHCziBasezizdfMonadIO")
-     , (ghcPrimPkg,   "GHC.Types",              "h$ghczmprimZCGHCziTypesziZC")
-     , (ghcPrimPkg,   "GHC.Types",              "h$ghczmprimZCGHCziTypesziZMZN")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSRef")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimziJSException")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfTypeableJSException")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfShowJSException")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfExceptionJSException")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfTypeableJSException")
-     , (ghcjsPrimPkg, "GHCJS.Prim",             "h$ghcjszmprimZCGHCJSziPrimzizdfShowJSException")
+     [ (basePkg,      "GHC.Conc.Sync",          "reportError")
+     , (basePkg,      "Control.Exception.Base", "nonTermination" )
+     , (basePkg,      "GHC.Exception",          "SomeException")
+     , (basePkg,      "GHC.TopHandler",         "runMainIO")
+     , (basePkg,      "GHC.Base",               "$fMonadIO")
+     , (ghcPrimPkg,   "GHC.Types",              ":")
+     , (ghcPrimPkg,   "GHC.Types",              "[]")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "JSRef")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "JSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "$fTypeableJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "$fShowJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "$fExceptionJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "$fTypeableJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim",             "$fShowJSException")
+     , (ghcjsPrimPkg, "GHCJS.Prim.Internal",    "wouldBlock")
+     , (ghcjsPrimPkg, "GHCJS.Prim.Internal",    "blockedIndefinitelyOnMVar")
+     , (ghcjsPrimPkg, "GHCJS.Prim.Internal",    "blockedIndefinitelyOnSTM")
      ]
 
 generateBase :: FilePath -> Compactor.Base -> Set LinkableUnit
