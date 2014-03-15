@@ -138,7 +138,6 @@ localIdents = template . localFunctionVals . _JVar
 allIdents :: Traversal' JStat Ident
 allIdents = template . functionVals . _JVar
 
-nestedFuns :: Traversal' JStat ([JExpr], JStat)
 nestedFuns = template . localFunctionVals . _JFunc
 
 -- all idents not in expressions in this function, including in declarations

@@ -49,9 +49,9 @@ setGhcjsPlatform set js_env js_objs basePath df
        , pc_WORDS_BIGENDIAN = False
        }
 
-setNativePlatform :: GhcjsSettings -> DynFlags -> DynFlags
-setNativePlatform gs df
-  = addNativePlatformDefines
+setNativePlatform :: GhcjsSettings -> FilePath -> DynFlags -> DynFlags
+setNativePlatform gs baseDir df
+  = addPlatformDefines baseDir
   $ installNativeHooks gs
   $ df
 
@@ -68,41 +68,7 @@ addPlatformDefines baseDir df = addCpp (("-I" ++ includeDir) : map ("-D"++) defs
                                 df { includePaths = includeDir : includePaths df }
   where
     includeDir = baseDir ++ "/include"
-    -- ^ fixme: shouldn't be necessary if builtin_rts has this in its include-dirs?
-    defs = [ "__GHCJS__=" ++ Info.getShortCompilerVersion
-           , "__GHCAUTOCONF_H__=1"
-           , "__GHCCONFIG_H__=1"
-           , "SIZEOF_CHAR=1"
-           , "ALIGNMENT_CHAR=1"
-           , "SIZEOF_UNSIGNED_CHAR=1"
-           , "ALIGNMENT_UNSIGNED_CHAR=1"
-           , "SIZEOF_SHORT=2"
-           , "ALIGNMENT_SHORT=2"
-           , "SIZEOF_UNSIGNED_SHORT=2"
-           , "ALIGNMENT_UNSIGNED_SHORT=2"
-           , "SIZEOF_INT=4"
-           , "ALIGNMENT_INT=4"
-           , "SIZEOF_UNSIGNED_INT=4"
-           , "ALIGNMENT_UNSIGNED_INT=4"
-           , "SIZEOF_LONG=4"
-           , "ALIGNMENT_LONG=4"
-           , "SIZEOF_UNSIGNED_LONG=4"
-           , "ALIGNMENT_UNSIGNED_LONG=4"
-           , "HAVE_LONG_LONG=1"
-           , "SIZEOF_LONG_LONG=8"
-           , "ALIGNMENT_LONG_LONG=8"
-           , "SIZEOF_UNSIGNED_LONG_LONG=8"
-           , "ALIGNMENT_UNSIGNED_LONG_LONG=8"
-           , "SIZEOF_VOID_P=4"
-           , "ALIGNMENT_VOID_P=4"
-           , "SIZEOF_DOUBLE=8"
-           , "ALIGNMENT_DOUBLE=8"
-           , "SIZEOF_FLOAT=4"
-           , "ALIGNMENT_FLOAT=4"
-           ]
-
-addNativePlatformDefines :: DynFlags -> DynFlags
-addNativePlatformDefines = addCpp [ "-D__GHCJS__=" ++ Info.getShortCompilerVersion ]
+    defs = [ "__GHCJS__=" ++ Info.getShortCompilerVersion ]
 
 addCpp :: [String] -> DynFlags -> DynFlags
 addCpp cpp df = df { settings = settings1 }

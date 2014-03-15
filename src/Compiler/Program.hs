@@ -245,13 +245,13 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
                                                              }
                     _ -> dflags4
 
+  baseDir  <- liftIO Ghcjs.ghcjsDataDir
   dflags4b <- if native
-                then return (Ghcjs.setNativePlatform ghcjsSettings dflags4a)
+                then return (Ghcjs.setNativePlatform ghcjsSettings baseDir dflags4a)
                 else do
-                   base  <- liftIO Ghcjs.ghcjsDataDir
                    jsEnv <- liftIO Ghcjs.newGhcjsEnv
                    return $
-                     Ghcjs.setGhcjsPlatform ghcjsSettings jsEnv js_objs base $
+                     Ghcjs.setGhcjsPlatform ghcjsSettings jsEnv js_objs baseDir $
                      updateWays $ addWay' (WayCustom "js") $
                      Ghcjs.setGhcjsSuffixes {- oneshot -} False dflags4a -- fixme value of oneshot?
 

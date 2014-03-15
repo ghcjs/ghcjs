@@ -16,6 +16,7 @@ import Control.Monad
 import Options.Applicative
 import qualified Control.Exception as Ex
 import System.Exit (exitSuccess, exitFailure)
+import Filesystem.Path hiding ((<.>), (</>), null)
 
 import qualified Data.ByteString.Lazy as BL
 import Network.HTTP (simpleHTTP, getRequest)
@@ -31,7 +32,7 @@ default (Text)
 main = do
     settings <- adjustDefaultSettings <$> execParser optParser'
     when (showVersion settings) (printVersion >> exitSuccess)
-    r <- (shellyNoDir $ actions settings `catchany_sh` (return . Just))
+    r <- (shelly $ actions settings `catchany_sh` (return . Just))
     maybe exitSuccess Ex.throwIO r
   where
     actions :: BootSettings -> Sh (Maybe Ex.SomeException)
@@ -56,6 +57,8 @@ main = do
       when (not pjs) (errorExit $ "Cannot find `data/primops-js.txt': the source tree appears to have\n" <>
                                   "not been initialized. Run `ghcjs-boot --init' first." )
       installRts s
+      base <- liftIO getGlobalPackageBase
+      setenv "CFLAGS" $ "-I" <> toTextIgnore (base </> "lib" </> "include")
       installFakes
       installBootPackages s
       installGhcjsPrim s
@@ -332,15 +335,17 @@ initSourceTree localTree settings = do
 --   one for native
 preparePrimops :: Sh ()
 preparePrimops = sub $ do
+  echo "preparing primops"
   cd "data"
   mkdir_p "native"
   cp (Paths.libdir </> "include" </> "MachDeps.h") "native"
   cp (Paths.libdir </> "include" </> "ghcautoconf.h") "native"
   cp (Paths.libdir </> "include" </> "ghcplatform.h") ("native" </> "ghc_boot_platform.h")
-  primopsJs <- cpp ["-P", "-Ijs", "primops.txt.pp"]
-  writefile "primops-js.txt" primopsJs
-  primopsNative <- cpp ["-P", "-Inative", "primops.txt.pp"]
-  writefile "primops-native.txt" primopsNative
+  silently $ do
+    primopsJs <- cpp ["-P", "-Ijs", "primops.txt.pp"]
+    writefile "primops-js.txt" primopsJs
+    primopsNative <- cpp ["-P", "-Inative", "primops.txt.pp"]
+    writefile "primops-native.txt" primopsNative
 
 -- | build the genprimopcode tool, this requires alex and happy
 buildGenPrim :: Sh ()
@@ -419,18 +424,21 @@ installRts settings = do
   echo "installing RTS"
   dest <- liftIO getGlobalPackageDB
   base <- liftIO getGlobalPackageBase
-  let lib    = base </> "lib"
-      inc    = lib  </> "include"
-      rtsLib = lib  </> "rts-1.0"
+  let lib       = base </> "lib"
+      inc       = lib  </> "include"
+      incNative = lib  </> "include_native"
+      rtsLib    = lib  </> "rts-1.0"
   rtsConf <- readfile (Paths.libdir </> "package.conf.d" </> "builtin_rts.conf")
   writefile (dest </> "builtin_rts.conf") $
                  fixRtsConf (toTextIgnore inc) (toTextIgnore rtsLib) rtsConf
   ghcjs_pkg' ["recache", "--global"]
   mkdir_p lib
   mkdir_p inc
-  sub $ cd (Paths.libdir </> "include") >> cp_r "." inc
+  sub $ cd (Paths.libdir </> "include") >> cp_r "." incNative
   sub $ cd (Paths.libdir </> "rts-1.0") >> cp_r "." rtsLib
-  sub $ cd ("data" </> "include")       >> cp_r "." inc
+  -- fixme this
+  -- sub $ cd ("data" </> "include")       >> cp_r "." inc
+  sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
   cp (Paths.libdir </> "settings")          (lib </> "settings")
   cp (Paths.libdir </> "platformConstants") (lib </> "platformConstants")
   cp (Paths.libdir </> "settings")          (base </> "settings")
@@ -443,6 +451,28 @@ installRts settings = do
   cp (Paths.libdir </> exe "touchy") (base </> exe "touchy")
 #endif
   echo "RTS prepared"
+
+
+installPlatformIncludes :: FilePath -> FilePath -> Sh ()
+installPlatformIncludes inc incNative = do
+  pw <- pwd
+  cp_r "." inc
+  nativeHeaders <- findWhen (return . isHeaderFile) incNative
+  forM_ nativeHeaders $ \h -> do
+    h' <- relativeTo incNative h
+    e <- test_f ("." </> h')
+    when (not e) $ do
+      mkdir_p (directory $ inc </> h')
+      writefile (inc </> h') (wrappedHeader h')
+  where
+    isHeaderFile = (`hasExtension` "h")
+    wrappedHeader file =
+      let pathParts = length (splitDirectories file)
+          included  = iterate (".." </>) ("include_native" </> file) !! pathParts
+      in T.unlines [ "#ifndef ghcjs_HOST_OS"
+                   , "#include \"" <> toTextIgnore included <> "\""
+                   , "#endif"
+                   ]
 
 exe :: FilePath -> FilePath
 #ifdef WINDOWS
@@ -473,7 +503,7 @@ installBootPackages s = sub $ do
   echo "installing boot packages"
   cd "boot"
   p <- pwd
-  forM_ bootPackages preparePackage
+  forM_ bootPackages (preparePackage s)
   when (not $ null bootPackages) $ do
     (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
     when (gmpInTree s) installInTreeGmp
@@ -525,7 +555,7 @@ installExtraPackages s = sub $ do
         filter (not . ignored) . map T.strip . T.lines <$> readfile file
       installExtra c pkgs = do
         forM_ pkgs $ \pkg -> when ("./" `T.isPrefixOf` pkg) $
-          preparePackage $ T.unpack (T.drop 2 pkg)
+          preparePackage s $ T.unpack (T.drop 2 pkg)
         when (not $ null pkgs)
           (c $ ["install", "--ghcjs"] ++ cabalFlags False s ++ pkgs)
 
@@ -534,7 +564,7 @@ installGhcjsPrim s = sub $ do
   echo "installing ghcjs-prim"
   let pkgs = ["ghcjs-prim"]
   cd "ghcjs"
-  forM_ pkgs preparePackage
+  forM_ pkgs (preparePackage s)
   when (not $ null pkgs)
     (cabalBoot $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) pkgs)
 
@@ -544,16 +574,16 @@ installGhcjsPackages s = sub $ do
   let pkgs = if quick s then ghcjsQuickPackages else ghcjsPackages
       c    = if quick s then cabalBoot else cabal
   cd "ghcjs"
-  forM_ pkgs preparePackage
+  forM_ pkgs (preparePackage s)
   when (not $ null pkgs)
     (c $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) pkgs)
 
-preparePackage :: String -> Sh ()
-preparePackage pkg = sub $ do
+preparePackage :: BootSettings -> String -> Sh ()
+preparePackage s pkg = sub $ do
   cd (fromString pkg)
   conf   <- test_f "configure"
   confac <- test_f "configure.ac"
-  when (confac && not conf) $ do
+  when (confac && (not conf || initTree s)) $ do
     echo ("generating configure script for " <> T.pack pkg)
     autoreconf []
   rm_rf "dist"
