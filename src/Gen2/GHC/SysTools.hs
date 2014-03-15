@@ -2,36 +2,20 @@
 
 module Gen2.GHC.SysTools where
 
-import DriverPhases
 import Module
 import Packages
 import Config
-import Outputable
-import ErrUtils
 import Panic
 import Platform
-import Util
 import DynFlags
-import Exception
-
-import Data.IORef
-import Control.Monad
-import System.Exit
-import System.Environment
-import System.FilePath
-import System.IO
-import System.IO.Error as IO
-import System.Directory
-import Data.Char
-import Data.List
-import qualified Data.Map as Map
-import Text.ParserCombinators.ReadP hiding (char)
-import qualified Text.ParserCombinators.ReadP as R
-
 
 import Data.List (isPrefixOf, isInfixOf)
 
+import System.FilePath
+import System.Directory
+
 import qualified SysTools as ST
+
 
 linkDynLib :: DynFlags -> [String] -> [PackageId] -> IO ()
 linkDynLib dflags0 o_files dep_packages

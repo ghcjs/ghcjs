@@ -104,7 +104,10 @@ instance Show (GenStgArg Var) where
   show a@(StgVarArg occ) = "StgVarArg " ++ show occ ++ " :: " ++ show (stgArgType a)
   show (StgLitArg l)   = "StgLitArg " ++ show l
 
+s :: a -> Set a
 s = S.singleton
+
+l :: (a -> Set Id) -> [a] -> Set Id
 l = F.foldMap
 
 -- | collect Ids that this binding refers to

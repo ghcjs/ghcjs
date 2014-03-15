@@ -72,8 +72,7 @@ import           Gen2.RtsTypes
 import           Gen2.StgAst
 import           Gen2.RtsAlloc
 import           Gen2.RtsApply
-import           Gen2.RtsSettings
-import qualified Gen2.Linker as Linker
+import qualified Gen2.Linker    as Linker
 import           Gen2.ClosureInfo
 import qualified Gen2.Optimizer as O
 import qualified Gen2.Object    as Object
@@ -268,6 +267,7 @@ genStaticRefs (SRTEntries s) = do
 genStaticRefs (SRT n e bmp) =
   error "genStaticRefs: unexpected SRT"
 
+getStaticRef :: Id -> G Text
 getStaticRef = fmap (itxt.head) . genIdsI
 
 genToplevelRhs :: Id
@@ -298,11 +298,12 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) _ = do
         body0 <- genBody i [] body Updatable i
         tci <- typeComment i
         sr <- genStaticRefs srt
+        cs <- use gsCgSettings
         -- fixme can we skip the first reg here?
         emitClosureInfo (ClosureInfo (itxt eid) (CIRegs 0 [PtrV]) (itxt idi) (CILayoutFixed 0 []) CIThunk sr)
         return [j| `tci`;
                    `decl eid`;
-                   `eid` = `JFunc funArgs (preamble <> updateThunk <> body0)`;
+                   `eid` = `JFunc funArgs (preamble <> updateThunk cs <> body0)`;
                    `decl id`;
                    `id` = h$static_thunk(`eid`);
                  |]
@@ -341,7 +342,7 @@ loadLiveFun l = do
                             in  decl' v (SelExpr d ident)
 
 dataFields :: Array Int Ident
-dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [1..1024])
+dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..1024])
 
 genBody :: Id -> [Id] -> StgExpr -> UpdateFlag -> Id -> C
 genBody topid args e upd i = loadArgs args <> b0
@@ -417,7 +418,8 @@ genApp force mstackTop i a
             = r1 <> return [j| return `Stack`[`Sp`]; |]
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do
           ii <- enterId
-          if rtsInlineEnter
+          cgs <- use gsCgSettings
+          if csInlineEnter cgs
              then return [j| var t = `ii`.f;
                              var tt = t.t;
                              `R1` = `ii`;
@@ -433,7 +435,8 @@ genApp force mstackTop i a
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i))
           = do
              ii <- enterId
-             if rtsInlineEnter
+             cgs <- use gsCgSettings
+             if csInlineEnter cgs
                 then return [j| var t = `ii`.f;
                                 var tt = t.t;
                                 `R1` = `ii`;
@@ -481,12 +484,13 @@ pushCont as = do
 
 -- regular let binding: allocate heap object
 genBind :: Id -> StgBinding -> C
-genBind top bndr
- | (StgNonRec b r) <- bndr = assign b r >> allocCls [(b,r)]
- | (StgRec bs)     <- bndr = mapM_ (uncurry assign) bs >> allocCls bs
- where
-   assign :: Id -> StgRhs -> G ()
-   assign b r = genEntry top b r
+genBind top bndr =
+  case bndr of
+    (StgNonRec b r) -> assign b r >> allocCls [(b,r)]
+    (StgRec bs)     -> mapM_ (uncurry assign) bs >> allocCls bs
+   where
+     assign :: Id -> StgRhs -> G ()
+     assign b r = genEntry top b r
 
 -- generate the entry function for a local closure
 genEntry :: Id -> Id -> StgRhs -> G ()
@@ -552,14 +556,15 @@ argSize :: [Type] -> Int
 argSize = sum . map (varSize . uTypeVt)
 
 genUpdFrame :: UpdateFlag -> C
-genUpdFrame Updatable = return updateThunk
+genUpdFrame Updatable = updateThunk <$> use gsCgSettings
 genUpdFrame _         = mempty
 
 -- allocate local closures
 allocCls :: [(Id, StgRhs)] -> C
 allocCls xs = do
    (stat, dyn) <- splitEithers <$> mapM toCl xs
-   return ((mconcat stat) <> allocDynAll True dyn)
+   cs <- use gsCgSettings
+   return ((mconcat stat) <> allocDynAll cs True dyn)
   where
     -- left = static, right = dynamic
     toCl :: (Id, StgRhs) -> G (Either JStat (Ident,JExpr,[JExpr]))
@@ -857,17 +862,18 @@ mkSwitch e cases
       (n,d) = partition (isJust.fst) cases
 
 checkIsCon :: JExpr -> JStat
-checkIsCon e = assertRts [je| `e` !== undefined |] ("unexpected undefined, expected datacon or prim"::String)
-
--- mempty -- traceErrorCond [je| `e` === undefined |] "expected data constructor!"
+-- checkIsCon e = assertRts [je| `e` !== undefined |] ("unexpected undefined, expected datacon or prim"::String)
+checkIsCon _ = mempty -- fixme
 
 -- if/else for pattern matching on things that js cannot switch on
 mkIfElse :: [JExpr] -> [(Maybe [JExpr], JStat)] -> JStat
 mkIfElse e s = go (reverse $ sort s)
     where
+      go [] = error "mkIfElse: empty expression list"
       go [(_, s)] = s -- only one 'nothing' allowed
       go ((Just e0, s):xs) =
           [j| if( `mkEq e e0` ) { `s` } else { `go xs` } |]
+      go _ = error "mkIfElse: multiple DEFAULT cases"
 
 mkEq :: [JExpr] -> [JExpr] -> JExpr
 mkEq es1 es2
@@ -919,8 +925,6 @@ caseCond :: AltCon -> G (Maybe JExpr)
 caseCond (DataAlt da) = return $ Just [je| `dataConTag da` |]
 caseCond (LitAlt l)   = Just <$> genSingleLit l
 caseCond DEFAULT      = return Nothing
-
-fourth (_,_,_,x) = x
 
 -- load parameters from constructor
 -- fixme use single tmp var for all branches
@@ -988,7 +992,8 @@ genArg a@(StgVarArg i) = do
        | otherwise = do
            as <- concat <$> mapM genArg args
            e  <- enterDataCon dc
-           return [allocDynamicE e as]
+           cs <- use gsCgSettings
+           return [allocDynamicE cs e as]
      unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
 
 allocateList :: [StgArg] -> StgArg -> G JExpr
@@ -1006,11 +1011,13 @@ allocateList xs a@(StgVarArg i)
     listAlloc [h] (Just t) = do
       as <- concat <$> mapM genArg [h,t]
       c  <- jsDcEntryId (dataConWorkId consDataCon)
-      return $ allocDynamicE c as
+      cs <- use gsCgSettings
+      return $ allocDynamicE cs c as
     listAlloc [h] Nothing = do
       as <- concat <$> mapM genArg [h,StgVarArg (dataConWorkId nilDataCon)]
       c  <- jsDcEntryId (dataConWorkId consDataCon)
-      return $ allocDynamicE c as
+      cs <- use gsCgSettings
+      return $ allocDynamicE cs c as
     listAlloc xs Nothing  = do
       as <- concat . reverse <$> mapM genArg xs
       return [je| h$cl(`as`) |]
@@ -1034,31 +1041,11 @@ genFFIArg (StgLitArg (MachStr str)) =
 genFFIArg (StgLitArg l) = (mempty,) <$> genLit l
 genFFIArg a@(StgVarArg i)
     | isVoid r                  = return (mempty, [])
-    | Just x <- marshalFFIArg a = x
+--    | Just x <- marshalFFIArg a = x
     | isMultiVar r              = (mempty,) <$> mapM (jsIdN i) [1..varSize r]
     | otherwise                 = (\x -> (mempty,[x])) <$> jsId i
    where
      r = uTypeVt . stgArgType $ a
-
-marshalFFIArg :: StgArg -> Maybe (G (JStat, [JExpr]))
-marshalFFIArg a@(StgVarArg i)
--- should we convert ByteString# to the 2-var Addr# rep? lots of code appears to expect that unsafeCoerce works there
-{-  | isJSCStringType (stgArgType a) = Just $ do
-      [d,o] <- genArg a
-      str   <- makeIdent
-      let stat = decl str <> [j| `str` = h$dU16(`d`, `o`); |]
-      return (stat, [toJExpr str]) -}
-  | otherwise = Nothing
-
--- convert FFI return type back to some Haskell
-marshalFFIRet :: [JExpr] -> Type -> Maybe (G (JStat, [JExpr]))
-marshalFFIRet tgt t
-{-  | isJSCStringType t = Just $ do
-      str <- makeIdent
-      let [d,o] = take 2 tgt
-          stat = decl str <> [j| `d` = h$eU16(`str`); `o` = 0; |]
-      return (stat, [toJExpr str]) -}
-  | otherwise = Nothing
 
 -- Ptr JSChar
 isJSCStringType :: Type -> Bool
@@ -1191,7 +1178,8 @@ allocCon to con xs
       return $ decl to <> [j| `to` = `i`; |]
   | otherwise = do
       e <- enterDataCon con
-      return $ allocDynamic True to e xs
+      cs <- use gsCgSettings
+      return $ allocDynamic cs True to e xs
 
 allocUnboxedCon :: DataCon -> [JExpr] -> JExpr
 allocUnboxedCon con []
@@ -1232,7 +1220,8 @@ allocConStatic to con args isRecursive = do
             return [j| `to` = `e`; |]
           else do
             e <- enterDataCon con
-            return (allocDynamic False to e xs)
+            cs <- use gsCgSettings
+            return (allocDynamic cs False to e xs)
 
 -- we track what variables we have already initialized
 argNeedDelayed :: Module -> UniqFM StgExpr -> VarSet -> StgArg -> Bool
@@ -1310,9 +1299,11 @@ comment xs =  mempty -- True ("// " ++ xs) (iex $ TxtI "")
 
 
 typeComment :: Id -> C
-typeComment i
-  | not Gen2.RtsSettings.rtsDebug = return mempty
-  | otherwise = do
+typeComment i = do
+  tc <- csAssertRts <$> use gsCgSettings
+  if not tc
+    then return mempty
+    else do
       si <- sh i
       sit <- sh (idType i)
       return (comment $ si ++ " :: " ++ sit)
@@ -1452,20 +1443,23 @@ parseFFIPattern' callback javascriptCc pat t ret args
     mkApply f
       | Just cb <- callback = do
          (stats, as) <- unzip <$> mapM genFFIArg args
-         return $ traceCall as <> mconcat stats <> ApplStat f' (concat as++[cb])
+         cs <- use gsCgSettings
+         return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as++[cb])
       | (ts@(_:_)) <- tgt = do
          (stats, as) <- unzip <$> mapM genFFIArg args
-         (statR, (t:ts')) <- case marshalFFIRet ts t of
-                                Nothing -> return (mempty, ts)
-                                Just m  -> m
-         return $ traceCall as
+         (statR, (t:ts')) <- return (mempty, ts) {- case marshalFFIRet ts t of
+                                                      Nothing -> return (mempty, ts)
+                                                      Just m  -> m -}
+         cs <- use gsCgSettings
+         return $ traceCall cs as
                 <> mconcat stats
                 <> [j| `t` = `ApplExpr f' (concat as)`; |]
                 <> copyResult ts'
                 <> statR
       | otherwise = do
          (stats, as) <- unzip <$> mapM genFFIArg args
-         return $ traceCall as <> mconcat stats <> ApplStat f' (concat as)
+         cs <- use gsCgSettings
+         return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as)
         where f' = toJExpr (TxtI $ T.pack f)
     copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs
     p e = error ("Parse error in FFI pattern: " ++ pat ++ "\n" ++ e)
@@ -1477,9 +1471,9 @@ parseFFIPattern' callback javascriptCc pat t ret args
           (TxtI i') = i
           err = error (pat ++ ": invalid placeholder, check function type: " ++ show i')
     replaceIdent _ e = e
-    traceCall as
-        | rtsTraceForeign = [j| h$traceForeign(`pat`, `as`); |]
-        | otherwise       = mempty
+    traceCall cs as
+        | csTraceForeign cs = [j| h$traceForeign(`pat`, `as`); |]
+        | otherwise         = mempty
 
 -- parse and saturate ffi splice
 parseFfiJME :: String -> Int -> Either P.ParseError JExpr
@@ -1528,7 +1522,7 @@ argPlaceholders args = do
   (stats, idents0) <- unzip <$> mapM genFFIArg args
   let idents = filter (not . null) idents0
   return $ (mconcat stats, concat
-    (zipWith (\is n -> mkPlaceholder True ("$"++show n) is) idents [1..]))
+    (zipWith (\is n -> mkPlaceholder True ("$"++show n) is) idents [(1::Int)..]))
 
 callbackPlaceholders :: Maybe JExpr -> [(Ident,JExpr)]
 callbackPlaceholders Nothing  = []

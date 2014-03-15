@@ -9,29 +9,20 @@ import StgSyn
 import Id
 import Name
 import Module
-import Unique
 import Literal
 import Digraph
 
-import Gen2.ClosureInfo
-
 import Control.Applicative
 import Control.Lens
+
 import Data.Char
-import Data.Data.Lens
-import Data.Traversable
-import Data.Maybe
 import Data.List (partition)
+import Data.Maybe
+import Data.Traversable
 
-import qualified Data.List as L
-import Gen2.RtsTypes
-import Gen2.StgAst
-import Compiler.JMacro
-import Encoding
-import qualified Data.Text as T
-import Debug.Trace
+import Gen2.ClosureInfo
 
-{-
+{- |
   GHC floats constants to the top level. This is fine in native code, but with JS
   they occupy some global variable name. We can unfloat some unexported things:
 
@@ -40,8 +31,12 @@ import Debug.Trace
   - literals (small literals may also be sunk if they are used more than once)
  -}
 
-sinkPgm :: Module -> [StgBinding] -> (UniqFM StgExpr, [StgBinding])
--- sinkPgm m pgm = -- (emptyUFM, topSortDecls m pgm) -- still some problems
+sinkPgm :: Module                         -- ^ the module, since we treat definitions from the
+                                          --   current module differently
+        -> [StgBinding]                   -- ^ the bindings
+        -> (UniqFM StgExpr, [StgBinding]) -- ^ a map with sunken replacements for nodes, for where
+                                          --   the replacement does not fit in the 'StgBinding' AST
+                                          --   and the new bindings
 sinkPgm m pgm =
   let usedOnce = collectUsedOnce pgm
       as = concatMap alwaysSinkable pgm
@@ -53,7 +48,11 @@ sinkPgm m pgm =
       isSunkBind _                                     = False
   in (sinkables, filter (not . isSunkBind) $ topSortDecls m pgm)
 
--- always sinkable: small literals
+{- |
+  always sinkable, values that may be duplicated in the generated code:
+
+   *  small literals
+-}
 alwaysSinkable :: StgBinding -> [(Id, StgExpr)]
 alwaysSinkable (StgNonRec b rhs)
   | (StgRhsClosure _ccs _bi _ _upd _srt _ e@(StgLit l)) <- rhs,
@@ -68,6 +67,10 @@ isSmallSinkableLit (MachInt i)  = i > -100000 && i < 100000
 isSmallSinkableLit (MachWord i) = i < 100000
 isSmallSinkableLit _            = False
 
+
+{- |
+   once sinkable: may be sunk, but duplication is not ok
+-}
 onceSinkable :: Module -> StgBinding -> [(Id, StgExpr)]
 onceSinkable m (StgNonRec b rhs)
   | Just e <- getSinkable rhs, isLocal b = [(b,e)]
@@ -155,8 +158,9 @@ foldArgsA _ a             = pure a
 isLocal :: Id -> Bool
 isLocal i = isNothing (nameModule_maybe . idName $ i)
 
--- | since we have sequential initialization,
---   topsort the non-recursive constructor bindings
+{- | since we have sequential initialization,
+     topsort the non-recursive constructor bindings
+ -}
 topSortDecls :: Module -> [StgBinding] -> [StgBinding]
 topSortDecls m binds = rest ++ nr'
   where

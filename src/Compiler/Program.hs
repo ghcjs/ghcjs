@@ -24,9 +24,7 @@ import           Data.IORef
 
 -- The official GHC API
 import qualified GHC
-import GHC              ( -- DynFlags(..), HscTarget(..),
-                          -- GhcMode(..), GhcLink(..),
-                          Ghc, GhcMonad(..),
+import GHC              ( Ghc, GhcMonad(..),
                           LoadHowMuch(..) )
 import CmdLineParser
 
@@ -294,7 +292,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        DoEval exprs           -> (ghciUI srcs $ Just $ reverse exprs) >> return True
        DoAbiHash              -> abiHash srcs >> return True
        DoGenerateLib          -> Ghcjs.generateLib ghcjsSettings >> return True
-       DoPrintRts             -> liftIO Ghcjs.printRts >> return True
+       DoPrintRts             -> liftIO (Ghcjs.printRts dflags6) >> return True
        DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings $ map fst srcs) >> return True
        DoPrintObj obj         -> liftIO (Ghcjs.printObj obj) >> return True
 

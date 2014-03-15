@@ -45,7 +45,7 @@ import Control.Monad.Identity
 
 import Data.Function
 import Data.Bits ((.&.), shiftR)
-import Data.Char (toLower, isControl, isAlpha, ord)
+import Data.Char (toLower, isControl, ord)
 import qualified Data.Map as M
 import qualified Data.Text.Lazy as TL
 import           Data.Text (Text)
@@ -611,7 +611,7 @@ defRenderJsS r (UOpStat op x)
         | isPre op = text (uOpText op) <> optParens r x
         | otherwise = optParens r x <> text (uOpText op)
 defRenderJsS r (AntiStat s) = error "defRenderJsS: AntiStat"
-defRenderJss r (BlockStat xs) = jsToDocR r (flattenBlocks xs)
+defRenderJsS r (BlockStat xs) = jsToDocR r (flattenBlocks xs)
 
 flattenBlocks :: [JStat] -> [JStat]
 flattenBlocks (BlockStat y:ys) = flattenBlocks y ++ flattenBlocks ys

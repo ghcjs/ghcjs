@@ -6,11 +6,11 @@
              NoMonomorphismRestriction,
              TupleSections,
              OverloadedStrings #-}
-{-
+{- |
 
   Optimizer:
 
-  Basic optimization of the generated JavaScript to 
+  Basic optimization of the generated JavaScript to
   reduce file size and improve readability
 
   assumptions:
@@ -45,12 +45,9 @@ import           Data.Word
 
 import           Compiler.JMacro
 
+import           Gen2.Dataflow
 import           Gen2.Rts
 import           Gen2.RtsTypes
-import           Gen2.Utils
-import           Gen2.Dataflow
-
-import           Debug.Trace
 
 optimize :: JStat -> JStat
 #ifdef DISABLE_OPTIMIZER
@@ -135,8 +132,13 @@ localVars = universeOf subStats >=> getLocals
     getLocals (TryStat _ i _ _) = []  -- is this correct?
     getLocals _ = []
 
+localIdents :: Traversal' JStat Ident
 localIdents = template . localFunctionVals . _JVar
+
+allIdents :: Traversal' JStat Ident
 allIdents = template . functionVals . _JVar
+
+nestedFuns :: Traversal' JStat ([JExpr], JStat)
 nestedFuns = template . localFunctionVals . _JFunc
 
 -- all idents not in expressions in this function, including in declarations
@@ -158,12 +160,13 @@ nonExprLocalIdents f (BlockStat ss) = BlockStat <$> (traverse . nonExprLocalIden
 nonExprLocalIdents f (LabelStat l s) = LabelStat l <$> nonExprLocalIdents f s
 nonExprLocalIdents f s = pure s
 
-
+functionVals :: Traversal' JVal JVal
 functionVals f (JList es)      = JList <$> template (functionVals f) es
 functionVals f (JHash m)       = JHash <$> tinplate (functionVals f) m
 functionVals f v@(JFunc as es) = JFunc as <$> template (functionVals f) es
 functionVals f v               = f v
 
+localFunctionVals :: Traversal' JVal JVal
 localFunctionVals f (JList es)   = JList <$> template (localFunctionVals f) es
 localFunctionVals f (JHash m)    = JHash <$> tinplate (localFunctionVals f) m  -- lens bug?
 localFunctionVals f v            = f v
@@ -199,6 +202,7 @@ tup x = (x,x)
 --  a dead var is a local variable that is never read or assigned
 -----------------------------------------------------
 
+removeDeadVars :: JStat -> JStat
 removeDeadVars s = s & thisFunction . nestedFuns . _2 %~ removeDeadVars'
 
 removeDeadVars' :: JStat -> JStat

@@ -9,11 +9,6 @@
 
 module Gen2.Foreign where
 
-import qualified Crypto.Hash.SHA1 as SHA1
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import qualified Data.ByteString.Base16 as B16
-
 import Data.Maybe
 import Data.List (partition, isPrefixOf)
 
@@ -33,7 +28,6 @@ import DsMonad
 import Encoding
 import TcRnTypes
 import TcForeign
-import TcType
 import MonadUtils
 import RdrName
 import FastString

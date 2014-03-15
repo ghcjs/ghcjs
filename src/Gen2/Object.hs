@@ -7,7 +7,7 @@
              ScopedTypeVariables,
              Rank2Types #-}
 
-{-
+{- |
   Serialization/deserialization for the binary .js_o files
 
   The .js_o files contain dependency information and generated code
@@ -19,11 +19,12 @@
     serialized [Text] -> ([ClosureInfo], JStat) blocks
 
   file layout:
-  - header ["GHCJSOBJ", length of symbol table, length of dependencies, length of index]
-  - symbol table
-  - dependency info
-  - closureinfo index
-  - closureinfo data (offsets described by index)
+
+   - header ["GHCJSOBJ", length of symbol table, length of dependencies, length of index]
+   - symbol table
+   - dependency info
+   - closureinfo index
+   - closureinfo data (offsets described by index)
 -}
 
 module Gen2.Object ( object
@@ -63,7 +64,6 @@ import qualified Data.ByteString as BS
 import           Data.Data.Lens
 import           Data.Function (on)
 import qualified Data.Foldable as F
-import           Data.Hashable
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import           Data.Int
@@ -80,15 +80,14 @@ import           Data.Text.Binary ()
 import qualified Data.Text.Lazy as TL
 import           Data.Word
 
-import           Compiler.JMacro
 import           System.IO (openBinaryFile, hClose, hSeek, SeekMode(..), IOMode(..) )
+
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
-import           Gen2.Printer (pretty)
-import           Gen2.ClosureInfo hiding (Fun)
-import           Gen2.Utils
+import           Compiler.JMacro
 
-import Debug.Trace
+import           Gen2.ClosureInfo hiding (Fun)
+import           Gen2.Printer (pretty)
 
 data Header = Header { symbsLen :: !Int64
                      , depsLen  :: !Int64
@@ -558,7 +557,7 @@ instance Objectable CIRegs where
   get = getTag >>= \case
                       1 -> pure CIRegsUnknown
                       2 -> CIRegs <$> getIW16 <*> get
-
+                      n -> error ("Objectable get CIRegs: invalid tag: " ++ show n)
 instance Objectable JOp where
   put = putEnum
   get = getEnum

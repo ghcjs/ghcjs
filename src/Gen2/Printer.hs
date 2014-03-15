@@ -6,17 +6,19 @@
 -}
 module Gen2.Printer where
 
-import           Data.Char (isAlpha, isDigit)
+import           Data.Char                    (isAlpha, isDigit)
 import qualified Data.Map                     as M
 import qualified Data.Text.Lazy               as TL
 import qualified Data.Text                    as T
-import           Compiler.JMacro              (Ident, JExpr(..), JStat(..), JOp(..), JUOp(..),
-                                               JVal(..), jsToDocR, RenderJs(..), defaultRenderJs)
-import           Text.PrettyPrint.Leijen.Text (Doc, align, char, comma, empty,
+
+import           Text.PrettyPrint.Leijen.Text (Doc, align, char, comma,
                                                fillSep, hcat, nest, parens,
                                                punctuate, text, vcat, (<+>),
                                                (<>))
 import qualified Text.PrettyPrint.Leijen.Text as PP
+
+import           Compiler.JMacro              (Ident, JExpr(..), JStat(..), JOp(..),
+                                               JVal(..), jsToDocR, RenderJs(..), defaultRenderJs)
 
 
 pretty :: JStat -> Doc

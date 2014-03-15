@@ -10,61 +10,52 @@
 -}
 module Gen2.Linker where
 
+import           DynFlags
+import           Module                   (PackageId, packageIdString)
+
 import           Control.Applicative
-import           Control.Lens hiding ((<.>))
-import           Control.Monad
 import           Control.Concurrent.MVar
+import           Control.Monad
 import           Control.Parallel.Strategies
 
 import           Data.Array
-import           Data.ByteString          (ByteString)
-import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
-import           Data.Char                (isDigit)
-import qualified Data.Foldable            as F
 import           Data.Function            (on)
 import           Data.Int
-import           Data.List                ( partition, isSuffixOf, isPrefixOf, nub
+import qualified Data.IntSet              as IS
+import           Data.List                ( partition, isPrefixOf, nub
                                           , intercalate, group, sort, groupBy)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
-import           Data.Maybe               (fromMaybe, listToMaybe, isJust, isNothing)
+import           Data.Maybe               (fromMaybe, isJust, isNothing)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
-import qualified Data.IntSet              as IS
 import           Data.Text                (Text)
 import qualified Data.Text                as T
-import qualified Data.Text.Encoding       as TE
-import qualified Data.Text.Encoding.Error as TE
 import qualified Data.Text.IO             as T
 import qualified Data.Text.Lazy           as TL
 import qualified Data.Text.Lazy.IO        as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
-import qualified Data.Vector              as V
 
-import           Compiler.JMacro
-import           Language.Haskell.TH
-import           System.FilePath          (dropExtension, splitPath, (<.>), (</>))
+import           System.FilePath          (splitPath, (<.>), (</>))
 import           System.Directory         (createDirectoryIfMissing, doesFileExist)
+
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
-import           DynFlags
-import           Config
-import           Module                   (PackageId, packageIdString, ModuleName, moduleNameString)
-
 import           Compiler.Info
+import           Compiler.JMacro
 import           Compiler.Settings
 
-import           Gen2.StgAst
-import           Gen2.Rts                 (rtsText)
-import           Gen2.Shim
-import           Gen2.Printer             (pretty)
-import qualified Gen2.Compactor           as Compactor
 import           Gen2.ClosureInfo         hiding (Fun)
+import qualified Gen2.Compactor           as Compactor
 import           Gen2.Object
+import           Gen2.Printer             (pretty)
 import           Gen2.Utils
+import           Gen2.Rts                 (rtsText)
 import           Gen2.RtsTypes
+import           Gen2.Shim
+
 
 type LinkableUnit = (Package, Module, Int) -- module and the index of the block
 type Module       = Text
@@ -117,7 +108,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
       let statsFile = if genBase then "out.base.stats" else "out.stats"
       TL.writeFile (out </> statsFile) (linkerStats metaSize stats)
     getShims dflags settings jsFiles pkgs' (out </> "lib" <.> jsExt, out </> "lib1" <.> jsExt)
-    when (not $ gsNoRts settings) $ TL.writeFile (out </> "rts.js") (rtsText' debug)
+    when (not $ gsNoRts settings) $ TL.writeFile (out </> "rts.js") (rtsText' $ dfCgSettings dflags)
   if genBase
     then generateBase out base allDeps pkgsT renamerState
     else when (not (gsOnlyOut settings) && not (gsNoRts settings) && isNothing (gsUseBase settings)) $ do
@@ -208,7 +199,7 @@ linkerStats meta s =
       (map (\xs@(((p,_),_):_) -> showPkg p <> "\n" <> TL.unlines (map showMod xs)) pkgMods)
     metaStats = "packed metadata: " <> TL.pack (show meta)
 
-rtsText' :: Bool -> TL.Text
+rtsText' :: CgSettings -> TL.Text
 rtsText' = rtsText
 {- prerender RTS for faster linking (fixme this results in a build error, why?)
 rtsText' debug = if debug

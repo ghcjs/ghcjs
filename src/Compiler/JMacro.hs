@@ -76,11 +76,16 @@ module Compiler.JMacro (
   j, je
  ) where
 
+import Language.Haskell.TH.Quote (QuasiQuoter)
+
 import Compiler.JMacro.Base hiding (expr2stat)
 import Compiler.JMacro.QQ
 import Compiler.JMacro.Lens
 
--- shorter names for jmacro
+-- shorter names for jmacro / jmacroE
+j :: QuasiQuoter
 j  = jmacro
+
+je :: QuasiQuoter
 je = jmacroE
 

@@ -3,19 +3,11 @@
 module Gen2.ClosureInfo where
 
 import           Data.Bits ((.|.), shiftL)
-import           Data.List (foldl')
-import           Data.Maybe (fromMaybe)
-import           Data.Monoid
 import           Data.Text (Text)
-import qualified Data.Text as T
-
-import           Control.Applicative ((<$>))
 
 import           Compiler.JMacro
 
-import           Gen2.Utils
 import           Gen2.StgAst ()
-import           Gen2.RtsSettings
 
 import           StgSyn
 import           DataCon
@@ -115,15 +107,16 @@ uTypeVt ut
   | isPrimitiveType ut = primTypeVt ut
   | otherwise          = primRepVt . typePrimRep $ ut
   where
-    primRepVt VoidRep   = VoidV
-    primRepVt PtrRep    = PtrV -- fixme does ByteArray# ever map to this?
-    primRepVt IntRep    = IntV
-    primRepVt WordRep   = IntV
-    primRepVt Int64Rep  = LongV
-    primRepVt Word64Rep = LongV
-    primRepVt AddrRep   = AddrV
-    primRepVt FloatRep  = DoubleV
-    primRepVt DoubleRep = DoubleV
+    primRepVt VoidRep    = VoidV
+    primRepVt PtrRep     = PtrV -- fixme does ByteArray# ever map to this?
+    primRepVt IntRep     = IntV
+    primRepVt WordRep    = IntV
+    primRepVt Int64Rep   = LongV
+    primRepVt Word64Rep  = LongV
+    primRepVt AddrRep    = AddrV
+    primRepVt FloatRep   = DoubleV
+    primRepVt DoubleRep  = DoubleV
+    primRepVt (VecRep{}) = error "uTypeVt: vector types are unsupported"
 
 primTypeVt :: Type -> VarType
 primTypeVt t = case repType t of
@@ -255,7 +248,7 @@ implicitLayout ci
   | otherwise = False
 
 instance ToStat ClosureInfo where
-  toStat = closureInfoStat rtsDebug
+  toStat = closureInfoStat False
 
 closureInfoStat :: Bool -> ClosureInfo -> JStat
 closureInfoStat debug (ClosureInfo obj rs name layout CIThunk srefs) =

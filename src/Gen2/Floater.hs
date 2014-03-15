@@ -17,9 +17,8 @@ module Gen2.Floater where
 
 import           Data.Generics.Aliases
 import           Data.Generics.Schemes
-import           Data.List                  (isSuffixOf, partition)
-import           Data.Maybe                 (catMaybes)
 import           Data.Monoid
+
 import           Compiler.JMacro
 
 floatTop :: JStat -> JStat

@@ -10,20 +10,15 @@ module Gen2.DynamicLinking ( ghcjsLink
                            , ghcjsDoLink
                            ) where
 
-import Gen2.GHC.Linker -- use our own version!
-import Gen2.GHC.SysTools ( ghcjsPackageHsLibs, linkDynLib )
-
 import Id
 import Name
 import Outputable
 import FastString
-import PrelNames
 import HscTypes
 import ByteCodeGen
 import VarEnv
 import Panic
 import Util
-import Config
 import Exception
 import Packages
 import DynFlags
@@ -41,20 +36,24 @@ import SysTools hiding ( linkDynLib )
 import Platform
 import ErrUtils
 import DriverPhases
-import PipelineMonad
 import DriverPipeline hiding ( linkingNeeded )
 import UniqFM
 import Maybes hiding ( Succeeded )
 
-import Control.Monad
-import Data.Maybe
-import Data.List ( isPrefixOf, isInfixOf, sort )
-import System.FilePath
-import System.Directory
+import           Control.Monad
 
-import Compiler.Settings
-import Compiler.Variants
+import           Data.List ( isPrefixOf, sort )
+
+import           System.Directory
+import           System.FilePath
+
+import           Compiler.Settings
+import           Compiler.Variants
 import qualified Compiler.Utils as Utils
+
+import           Gen2.GHC.Linker -- use our own version!
+import           Gen2.GHC.SysTools ( ghcjsPackageHsLibs, linkDynLib )
+
 
 -------------------------------------------------------------------------------------------
 -- Link libraries

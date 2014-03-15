@@ -2,28 +2,23 @@
 
 module Gen2.Rts where
 
-import           Compiler.JMacro
-
-import           Gen2.Debug
-import           Gen2.RtsApply
-import           Gen2.RtsSettings
-import           Gen2.RtsTypes
-import           Gen2.Utils
-import           Gen2.ClosureInfo
-
 import           Data.Array
 import           Data.Bits
 import           Data.Char                        (toLower, toUpper)
-import qualified Data.List                        as L
 import qualified Data.Map                         as M
 import           Data.Monoid
-
 import qualified Data.Text                        as T
 import qualified Data.Text.Lazy                   as TL
-import           Gen2.Printer
+
 import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
 
-import           Encoding
+import           Compiler.JMacro
+
+import           Gen2.ClosureInfo
+import           Gen2.Printer
+import           Gen2.RtsApply
+import           Gen2.RtsTypes
+import           Gen2.Utils
 
 garbageCollector :: JStat
 garbageCollector =
@@ -46,8 +41,8 @@ resetResultVar r = [j| `r` = null; |]
           use h$c1, h$c2, h$c3, ... h$c24 instead of making objects manually
   so layouts and fields can be changed more easily
  -}
-closureConstructors :: Bool -> JStat
-closureConstructors debug =
+closureConstructors :: CgSettings -> JStat
+closureConstructors s =
   [j| fun h$c f { `checkC`; return { f: f, d1: null, d2: null, m: 0 }; }
       fun h$c0 f { `checkC`; return { f: f, d1: null, d2: null, m: 0 }; }
       fun h$c1 f x1 { `checkC`; return { f: f, d1: x1, d2: null, m: 0 }; }
@@ -57,9 +52,10 @@ closureConstructors debug =
   where
     -- only JSRef can typically contain undefined or null
     -- although it's possible (and legal) to make other Haskell types
-    -- to contain JS refs directly 
+    -- to contain JS refs directly
     -- this can cause false positives here
-    checkC | debug = [j| if(arguments[0] !== h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e) {
+    checkC | csAssertRts s =
+                     [j| if(arguments[0] !== h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e) {
                            for(var i=1;i<arguments.length;i++) {
                              if(arguments[i] === null || arguments[i] === undefined) {
                                var msg = "warning: undefined or null in argument: " 
@@ -73,7 +69,8 @@ closureConstructors debug =
            | otherwise = mempty
     -- h$d is never used for JSRef (since it's only for constructors with
     -- at least three fields, so we always warn here
-    checkD | debug = [j| for(var i=0;i<arguments.length;i++) {
+    checkD | csAssertRts s =
+                     [j| for(var i=0;i<arguments.length;i++) {
                            if(arguments[i] === null || arguments[i] === undefined) {
                              var msg = "warning: undefined or null in argument: " + i + " allocating fields";
                              if(console && console.trace) { console.trace(msg); }
@@ -128,15 +125,16 @@ bitsIdx n | n < 0 = error "bitsIdx: negative"
     go m b | testBit m b = b : go (clearBit m b) (b+1)
            | otherwise   = go (clearBit m b) (b+1)
 
-updateThunk :: JStat
-updateThunk
-  | rtsInlineBlackhole =
-      [j| `push' [toJExpr R1, jsv "h$upd_frame"]`;
+updateThunk :: CgSettings -> JStat
+updateThunk s
+  | csInlineBlackhole s =
+      [j| `push' s [toJExpr R1, jsv "h$upd_frame"]`;
           `R1`.f = h$blackhole;
           `R1`.d1 = h$currentThread;
           `R1`.d2 = null; // will be filled with waiters array
         |]
   | otherwise = [j| h$bh(); |]
+
 -- fixme move somewhere else
 declRegs :: JStat
 -- fixme prevent holes
@@ -175,10 +173,10 @@ loadRegs = mconcat $ map mkLoad [1..32]
 
 -- assign registers R1 ... Rn
 -- assigns Rn first
-assignRegs :: [JExpr] -> JStat
-assignRegs [] = mempty
-assignRegs xs
-  | l <= 32 && not rtsInlineLoadRegs
+assignRegs :: CgSettings -> [JExpr] -> JStat
+assignRegs _ [] = mempty
+assignRegs s xs
+  | l <= 32 && not (csInlineLoadRegs s)
       = ApplStat (ValExpr (JVar $ assignRegs'!l)) (reverse xs)
   | otherwise = mconcat . reverse $
       zipWith (\r e -> [j| `r` = `e` |]) (take l $ enumFrom R1) xs
@@ -186,7 +184,7 @@ assignRegs xs
     l = length xs
 
 assignRegs' :: Array Int Ident
-assignRegs' = listArray (1,32) (map (TxtI . T.pack . ("h$l"++) . show) [1..32])
+assignRegs' = listArray (1,32) (map (TxtI . T.pack . ("h$l"++) . show) [(1::Int)..32])
 
 declRets :: JStat
 declRets = mconcat $ map (decl . TxtI . T.pack . ("h$"++) . map toLower . show) (enumFrom Ret1)
@@ -224,14 +222,14 @@ logStack = [j| h$logStack(); |]
 
 -- rtsDebug = renderJs (addDebug $ jsSaturate (Just "h$RTS") rts')
 
-rtsText :: Bool -> TL.Text
-rtsText debug = displayT . renderPretty 0.8 150 . pretty $ rts debug
+rtsText :: CgSettings -> TL.Text
+rtsText = displayT . renderPretty 0.8 150 . pretty . rts
 
-rts :: Bool -> JStat
-rts debug = jsSaturate (Just "h$RTS") (rts' debug)
+rts :: CgSettings -> JStat
+rts s = jsSaturate (Just "h$RTS") (rts' s)
 
-rts' :: Bool -> JStat
-rts' debug = [j|
+rts' :: CgSettings -> JStat
+rts' s = [j|
 
 var !h$currentThread = null;      // thread state object for current thread
 var !h$stack         = null;      // stack for the current thread
@@ -247,13 +245,13 @@ var !h$staticThunksArr = [];      // indices of updatable thunks in static heap
 `declRets`;
 
 // use these things instead of building objects manually
-`closureConstructors debug`;
+`closureConstructors s`;
 
 `garbageCollector`;
 `stackManip`;
 
 fun h$bh {
-  `push' [toJExpr R1, jsv "h$upd_frame"]`;
+  `push' s [toJExpr R1, jsv "h$upd_frame"]`;
   `R1`.f  = h$blackhole;
   `R1`.d1 = h$currentThread;
   `R1`.d2 = null; // will be filled with waiters array
@@ -295,7 +293,6 @@ fun h$data1_e { return `Stack`[`Sp`]; }
 // generic data constructor with 2 non-heapobj fields
 fun h$data2_e { return `Stack`[`Sp`]; }
 `ClosureInfo "h$data2_e" (CIRegs 0 [PtrV]) "data2" (CILayoutFixed 2 [ObjV,ObjV]) (CICon 1) noStatic`;
-
 
 fun h$con_e { return `Stack`[`Sp`]; };
 
@@ -416,7 +413,7 @@ fun h$throw e async {
       if(async) { // async exceptions always propagate
         h$currentThread.transaction = null;
       } else if(!h$stmValidateTransaction()) { // restart transaction if invalid, don't propagate exception
-        `push' [jsv "h$checkInvariants_e"]`;
+        `push' s [jsv "h$checkInvariants_e"]`;
         return h$stmStartTransaction(`Stack`[`Sp`-2]);
       }
     }
@@ -758,7 +755,7 @@ fun h$logStack {
   }
 }
 
-`rtsApply`;
+`rtsApply s`;
 // rtsPrim
 `closureTypes`;
 
@@ -883,7 +880,7 @@ fun h$checkObj obj {
 }
 
 fun h$traceForeign f as {
-  if(`not rtsTraceForeign`) { return; }
+  if(`not (csTraceForeign s)`) { return; }
   var bs = [];
   for(var i=0;i<as.length;i++) {
     var ai = as[i];
@@ -949,7 +946,7 @@ fun h$reschedule {
 // carefully suspend the current thread, looking at the
 // function that would be called next
 fun h$suspendCurrentThread next {
-  `assertRts (next |!== (TxtI "h$reschedule")) ("suspend called with h$reschedule"::String)`;
+  `assertRts s (next |!== (TxtI "h$reschedule")) ("suspend called with h$reschedule"::String)`;
   if(next === h$reschedule) { throw "suspend called with h$reschedule"; }
   if(`Stack`[`Sp`] === h$restoreThread || next === h$return) {
     h$currentThread.sp = `Sp`;
@@ -1008,13 +1005,13 @@ fun h$dumpRes {
 fun h$resume_e {
   //h$logSched("resuming computation: " + `R1`.d2);
   //h$logStack();
-  var s = `R1`.d1;
-  `updateThunk`;
-  for(var i=0;i<s.length;i++) {
-    `Stack`[`Sp`+1+i] = s[i];
+  var ss = `R1`.d1;
+  `updateThunk s`;
+  for(var i=0;i<ss.length;i++) {
+    `Stack`[`Sp`+1+i] = ss[i];
   }
-  //h$dumpStackTop(`Stack`,`Sp`,`Sp`+s.length);
-  `Sp`=`Sp`+s.length;
+  //h$dumpStackTop(`Stack`,`Sp`,`Sp`+ss.length);
+  `Sp`=`Sp`+ss.length;
   `R1` = null;
   return `Stack`[`Sp`];
 }
@@ -1026,7 +1023,7 @@ fun h$unmaskFrame {
   `adjSpN 1`;
   // back to scheduler to give us async exception if pending
   if(h$currentThread.excep.length > 0) {
-    `push' [toJExpr R1, jsv "h$return"]`;
+    `push' s [toJExpr R1, jsv "h$return"]`;
     return h$reschedule;
   } else {
     return `Stack`[`Sp`];
@@ -1085,7 +1082,7 @@ fun h$atomically_e {
     `adjSpN 2`;
     return `Stack`[`Sp`];
   } else {
-    `push' [jsv "h$checkInvariants_e"]`;
+    `push' s [jsv "h$checkInvariants_e"]`;
     return h$stmStartTransaction(`Stack`[`Sp`-2]);
   }
 }
@@ -1105,7 +1102,7 @@ fun h$stmCheckInvariantStart_e {
   var t1 = new h$Transaction(inv.action, t);
   t1.checkRead = new goog.structs.Set();
   h$currentThread.transaction = t1;
-  `push' [t1, m, jsv "h$stmInvariantViolatedHandler", jsv "h$catchStm_e"]`;
+  `push' s [t1, m, jsv "h$stmInvariantViolatedHandler", jsv "h$catchStm_e"]`;
   `R1` = inv.action;
   return h$ap_1_0_fast();
 }
@@ -1156,11 +1153,10 @@ fun h$stmResumeRetry_e {
   }
   var blocked = `Stack`[`Sp`-1];
   `adjSpN 2`;
-  `push' [jsv "h$checkInvariants_e"]`;
+  `push' s [jsv "h$checkInvariants_e"]`;
   h$stmRemoveBlockedThread(blocked, h$currentThread);
   return h$stmStartTransaction(`Stack`[`Sp`-2]);
 }
 `ClosureInfo "h$stmResumeRetry_e" (CIRegs 0 [PtrV]) "resume retry" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
 |]
-

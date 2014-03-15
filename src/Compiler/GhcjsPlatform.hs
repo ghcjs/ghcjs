@@ -10,17 +10,14 @@ module Compiler.GhcjsPlatform
     , setDfOpts
     ) where
 
-import GHC
-import DynFlags
-import Platform
-import Outputable (showSDocOneLine)
+import           DynFlags
+import           Platform
 
-import Data.List (foldl', isPrefixOf)
+import           Data.List (foldl')
 
-import Compiler.Settings
-import Compiler.GhcjsHooks
-
-import qualified Compiler.Info  as Info
+import qualified Compiler.Info as Info
+import           Compiler.GhcjsHooks
+import           Compiler.Settings
 
 -- | configure the GHC API for building 32 bit JavaScript code
 setGhcjsPlatform :: GhcjsSettings
@@ -61,7 +58,7 @@ setNativePlatform gs df
 -- | Apply additional dynamic flags options.
 -- Currently: unset 'Opt_SplitObjs'
 setDfOpts :: DynFlags -> DynFlags
-setDfOpts df = foldl' setOpt (foldl' unsetOpt df unsetList) setList
+setDfOpts df = foldl' gopt_set (foldl' gopt_unset df unsetList) setList
   where
     setList = []
     unsetList = [Opt_SplitObjs]
@@ -112,8 +109,5 @@ addCpp cpp df = df { settings = settings1 }
   where
     settings0 = settings df
     settings1 = settings0 { sOpt_P = cpp ++ sOpt_P settings0 }
-
-setOpt = gopt_set
-unsetOpt = gopt_unset
 
 

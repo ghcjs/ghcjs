@@ -1,47 +1,37 @@
 {-# LANGUAGE OverloadedStrings, TupleSections #-}
 module Compiler.GhcjsHooks where
 
-import           Config               (cProjectVersion)
-import           Gen2.GHC.CoreToStg (coreToStg) -- version that does not generate StgLetNoEscape
-import           CorePrep (corePrepPgm)
-import           Distribution.Package (PackageName (..))
+import           CorePrep             (corePrepPgm)
 import           DriverPipeline
 import           DriverPhases
 import           DynFlags
 import           GHC
 import           GhcMonad
 import           Hooks
-import           HscTypes             (mkHsSOName, mkSOName, CgGuts(..), HscEnv(..))
-import           HscMain              (HscStatus(..))
-import           LoadIface
-import           Module
 import           Panic
-import           Packages
-import           Platform
 import qualified SysTools
 import           SimplStg             (stg2stg)
-import           UniqFM               (eltsUFM)
 import           HeaderInfo
 import           HscTypes
 
-import           Control.Applicative
 import           Control.Concurrent.MVar
 import           Control.Monad
+
 import qualified Data.ByteString      as B
-import           Data.List            (isInfixOf, isPrefixOf, sort)
 import qualified Data.Map             as M
-import           System.Directory     (doesFileExist, copyFile,
-                                       createDirectoryIfMissing)
+
+import           System.Directory     (copyFile, createDirectoryIfMissing)
 import           System.FilePath
 
-import           Compiler.Info
 import           Compiler.Settings
-import           Compiler.Variants
 import qualified Compiler.Utils       as Utils
+import           Compiler.Variants
 
-import qualified Gen2.PrimIface       as Gen2
-import qualified Gen2.Foreign         as Gen2
 import qualified Gen2.DynamicLinking  as Gen2
+import qualified Gen2.Foreign         as Gen2
+import           Gen2.GHC.CoreToStg   (coreToStg) -- version that does not generate StgLetNoEscape
+import qualified Gen2.PrimIface       as Gen2
+
 
 installGhcjsHooks :: GhcjsSettings
                   -> [FilePath]  -- ^ JS objects

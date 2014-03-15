@@ -3,41 +3,42 @@
 
 module Gen2.RtsAlloc where
 
-import Control.Lens
-import Data.Array
-import Data.Data.Lens
-import Data.Monoid
-import Compiler.JMacro
+import           Control.Lens
 
+import           Data.Array
+import           Data.Data.Lens
 import qualified Data.Map as M
+import           Data.Monoid
 import qualified Data.Text as T
-import Gen2.RtsSettings
-import Gen2.RtsTypes
-import Gen2.Utils
+
+import           Compiler.JMacro
+
+import           Gen2.RtsTypes
+import           Gen2.Utils
 
 allocClsA :: Array Int JExpr
-allocClsA = listArray (0, 1024) (toJExpr (TxtI "h$c") : map f [1..1024])
+allocClsA = listArray (0, 1024) (toJExpr (TxtI "h$c") : map f [(1::Int)..1024])
   where
     f n = toJExpr . TxtI . T.pack $ "h$c" ++ show n
 
 allocData :: Array Int JExpr
-allocData = listArray (1, 1024) (map f [1..1024])
+allocData = listArray (1, 1024) (map f [(1::Int)..1024])
   where
     f n = toJExpr . TxtI . T.pack $ "h$d" ++ show n
 
 -- allocate multiple, possibly mutually recursive, closures
 
-allocDynAll :: Bool -> [(Ident,JExpr,[JExpr])] -> JStat
-allocDynAll haveDecl [(to,entry,free)]
-  | to `notElem` (free ^.. template) = allocDynamic haveDecl to entry free
-allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
+allocDynAll :: CgSettings -> Bool -> [(Ident,JExpr,[JExpr])] -> JStat
+allocDynAll s haveDecl [(to,entry,free)]
+  | to `notElem` (free ^.. template) = allocDynamic s haveDecl to entry free
+allocDynAll s haveDecl cls = makeObjs <> fillObjs <> checkObjs
   where
     makeObjs
-      | rtsInlineAlloc = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0 } |]) cls
-      | otherwise      = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = h$c(`f`); |]) cls
+      | csInlineAlloc s = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0 } |]) cls
+      | otherwise       = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = h$c(`f`); |]) cls
     fillObjs = mconcat $ map fillObj cls
     fillObj (i,_,es)
-      | rtsInlineAlloc || length es > 24 =
+      | csInlineAlloc s || length es > 24 =
           case es of
             []      -> mempty
             [e]     -> [j| `i`.d1 = `e`; |]
@@ -55,19 +56,19 @@ allocDynAll haveDecl cls = makeObjs <> fillObjs <> checkObjs
     dataFields = map (T.pack . ('d':) . show) [(1::Int)..]
     dec i | haveDecl  = decl i
           | otherwise = mempty
-    checkObjs | rtsDebug  = mconcat $ map (\(i,_,_) -> [j| h$checkObj(`i`); |]) cls
+    checkObjs | csAssertRts s  = mconcat $ map (\(i,_,_) -> [j| h$checkObj(`i`); |]) cls
               | otherwise = mempty
 
-allocDynamic :: Bool -> Ident -> JExpr -> [JExpr] -> JStat
-allocDynamic haveDecl to entry free =
-  dec to <> [j| `to` = `allocDynamicE entry free`; |]
+allocDynamic :: CgSettings -> Bool -> Ident -> JExpr -> [JExpr] -> JStat
+allocDynamic s haveDecl to entry free =
+  dec to <> [j| `to` = `allocDynamicE s entry free`; |]
     where
       dec i | haveDecl  = decl i
             | otherwise = mempty
 
-allocDynamicE :: JExpr -> [JExpr] -> JExpr
-allocDynamicE entry free
-  | rtsInlineAlloc || length free > 24
+allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> JExpr
+allocDynamicE s entry free
+  | csInlineAlloc s || length free > 24
       = [je| { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |]
   | otherwise = ApplExpr allocFun (toJExpr entry : free)
   where

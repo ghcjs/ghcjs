@@ -4,12 +4,7 @@
 -}
 module Compiler.Variants where
 
-import           Module                (ModuleName)
-
 import           Data.ByteString       (ByteString)
-import qualified Data.ByteString       as B
-import qualified Data.Text             as T
-import qualified Data.Text.Encoding    as T
 
 import           Compiler.Settings
 
@@ -18,7 +13,6 @@ import qualified Gen2.Linker           as Gen2
 import qualified Gen2.Object           as Gen2
 
 import           DynFlags              (DynFlags)
-import           Id                    (Id)
 import           Module                (Module (..), PackageId)
 import           StgSyn                (StgBinding)
 

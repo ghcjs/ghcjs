@@ -30,9 +30,6 @@ import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH (mkName, appE)
 import Language.Haskell.TH.Quote
 
-import qualified Text.Parsec as TP
-import qualified Data.Functor.Identity as DFI
-
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Expr
 import Text.ParserCombinators.Parsec.Error

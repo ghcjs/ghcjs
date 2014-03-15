@@ -5,41 +5,41 @@ module Gen2.Prim where
 
 {-
   unboxed representations:
-  Int#    -> number
-  Double# -> number
-  Float#  -> number
-  Char#   -> number
-  Word#   -> number
-  Addr#   -> DataView / offset    [array/object, offset (number)]
-    properties: region: number, unique increasing number for comparisons?
-  MutVar# -> h$MutVar object
-  TVar#   -> [?]
-  MVar#   -> h$MVar object
-  Weak#   -> [weak object]
-  ThreadId -> h$Thread object
-  State#  -> nothing
-  StablePtr# -> DataView / offset (base pkg expects unsafeCoerce to Addr# to work)
-  MutableArrayArray# -> DataView
-  MutableByteArray#  -> DataView
-  ByteArray#         -> DataView
-  Array#             -> Array
+
+    Int#               -> number
+    Double#            -> number
+    Float#             -> number
+    Char#              -> number
+    Word#              -> number (values > 2^31 are mapped to negative numbers)
+    Addr#              -> wrapped buffer + offset (number)
+        (with some hacks for pointers to pointers in the .arr property)
+    MutVar#            -> h$MutVar object
+    TVar#              -> h$TVar object
+    MVar#              -> h$MVar object
+    Weak#              -> h$Weak object
+    ThreadId#          -> h$Thread object
+    State#             -> nothing
+    StablePtr#         -> wrapped buffer / offset (base pkg expects unsafeCoerce to Addr# to work)
+    MutableArrayArray# -> array
+    MutableByteArray#  -> wrapped buffer
+    ByteArray#         -> wrapped buffer
+    Array#             -> array
 
   Pointers to pointers use a special representation with the .arr property
 -}
 
-import           Gen2.RtsTypes
-import           Gen2.StgAst
-import           Gen2.Utils
-import           Compiler.JMacro (j, JExpr(..), JStat(..))
-import qualified Data.Text as T
-
-import           Data.Monoid
-
-import           Panic
 import           PrimOp
 import           TcType
 import           Type
 import           TyCon
+
+import           Data.Monoid
+
+import           Compiler.JMacro (j, JExpr(..), JStat(..))
+
+import           Gen2.RtsTypes
+import           Gen2.Utils
+
 
 data PrimRes = PrimInline JStat  -- ^ primop is inline, result is assigned directly
              | PRPrimCall JStat  -- ^ primop is async call, primop returns the next

@@ -1,26 +1,23 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Compiler.Info where
 
-import           Data.Version     as Version
-import           Data.Char (toLower)
-import           Control.Monad
-import           Control.Applicative
-import           Control.Monad.IO.Class
-import qualified Control.Exception as Ex
-import           System.Environment (getEnv)
-import           System.Directory (getAppUserDataDirectory)
-import           System.Info
+import           Data.Function      (on)
+import           Data.List          (nubBy)
+import qualified Data.Version as Version
 
-import           Data.Function    (on)
-import           Data.List        (nubBy)
-import           System.FilePath  ((</>))
+import           System.Directory   (getAppUserDataDirectory)
+import           System.FilePath    ((</>))
+import           System.Info
 
 import           Config           (cProjectVersion)
 import           DynFlags         (compilerInfo)
+
 import           GHC
 import qualified GHC.Paths
+
 import           Paths_ghcjs
 
+getCompilerInfo :: IO [([Char], [Char])]
 getCompilerInfo = do
       glbDb <- getGlobalPackageDB
       df <- runGhc (Just GHC.Paths.libdir) getSessionDynFlags
@@ -32,6 +29,7 @@ getCompilerInfo = do
            , ("LibDir", libDir)
            ] ++ compilerInfo df
 
+getGlobalPackageBase :: IO FilePath
 getGlobalPackageBase = do
   appdir <- getAppUserDataDirectory "ghcjs"
   return (appdir </> subdir)
@@ -40,27 +38,36 @@ getGlobalPackageBase = do
         targetOS   = os
         subdir     = targetARCH ++ '-':targetOS ++ '-':getFullCompilerVersion
 
+getGlobalPackageDB :: IO FilePath
 getGlobalPackageDB = fmap (</> "package.conf.d") getGlobalPackageInst
 
+getUserPackageDB :: IO FilePath
 getUserPackageDB = fmap (</> "package.conf.d") getGlobalPackageBase
 
+getGlobalPackageInst :: IO FilePath
 getGlobalPackageInst = fmap (</> "lib") getGlobalPackageBase
 
 -- Just the GHC version
+getGhcCompilerVersion :: String
 getGhcCompilerVersion = cProjectVersion
 
 -- GHCJS-GHC
+getFullCompilerVersion :: [Char]
 getFullCompilerVersion = Version.showVersion version ++ "-" ++ getGhcCompilerVersion
 
 -- Just the GHCJS version
-getCompilerVersion = Version.showVersion version -- ++ "." ++ cProjectVersion
+getCompilerVersion :: String
+getCompilerVersion = Version.showVersion version
 
 -- version in GHC format
+getShortCompilerVersion :: String
 getShortCompilerVersion =
   case Version.versionBranch version of
+    []      -> "0"
     [x]     -> show (100 * x)
     (x:y:_) -> show (100 * x + min 99 y)
 
+getCompilerSubdir :: [Char]
 getCompilerSubdir = "ghcjs-" ++ getCompilerVersion
 
 ghcjsDataDir :: IO FilePath

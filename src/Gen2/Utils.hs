@@ -5,19 +5,14 @@
 
 module Gen2.Utils where
 
-import           Control.Applicative
-import           Control.Lens
 import           Control.Monad.State.Strict
 
 import           Data.Char        (isSpace)
 import           Data.List        (isPrefixOf)
-import           Data.Map         (Map, singleton)
 import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Lazy as TL
 
-import           Language.Haskell.TH.Quote
 import           Compiler.JMacro
 
 import           DynFlags
@@ -47,6 +42,7 @@ jstr xs = toJExpr xs
 jint :: Integer -> JExpr
 jint n = ValExpr (JInt n)
 
+jzero :: JExpr
 jzero = jint 0
 
 decl :: Ident -> JStat
@@ -87,6 +83,7 @@ itxt (TxtI s) = s
 ji :: Int -> JExpr
 ji = toJExpr
 
+showIndent :: Show s => s -> String
 showIndent x = unlines . runIndent 0 . map trim . lines . replaceParens . show $ x
     where
       replaceParens ('(':xs) = "\n( " ++ replaceParens xs

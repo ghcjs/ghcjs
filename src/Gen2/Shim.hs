@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings, TupleSections #-}
 {-# LANGUAGE ScopedTypeVariables, FlexibleContexts #-}
-{-
+{- |
   Shims are non-Haskell dependencies, organized in the
-  shims repository
+  shims repository. Most of the GHCJS RTS is located there
+  too (except the generated parts in "Gen2.Rts" and
+  "Gen2.RtsApply").
 
   example shim yaml:
--}
 
-{-
 version:
 js:
  - src/edefw.js
@@ -26,34 +26,31 @@ js:
 
 module Gen2.Shim where
 
-import Prelude hiding (catch)
-import Control.Exception (SomeException, catch)
-import Control.Applicative hiding ((<|>))
-import Control.Monad
-import qualified Data.Yaml as Yaml
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
-import qualified Data.ByteString as B
-import Data.Text (Text)
-import Data.Aeson
-import Data.Maybe (fromMaybe)
-import Text.Parsec
-import Text.Parsec.Char
-import Text.Parsec.Text
-import qualified Data.Foldable as F
-import Data.Set (Set)
-import qualified Data.Set as S
-import System.FilePath ((<.>), (</>))
-import System.Directory (doesFileExist, canonicalizePath)
-import qualified Data.List as L
-import Data.Monoid
-
-import Compiler.Settings
-import qualified Compiler.Utils as Utils
-import DynFlags
-import Packages (getPackageIncludePath)
-import Config (cProjectVersionInt)
+import           DynFlags
 import qualified SysTools
+
+import           Control.Applicative hiding ((<|>))
+import           Control.Monad
+
+import qualified Data.ByteString as B
+import qualified Data.Foldable   as F
+import qualified Data.List       as L
+import           Data.Monoid
+import qualified Data.Set        as S
+import qualified Data.Text       as T
+import qualified Data.Text.IO    as T
+import           Data.Text (Text)
+import           Data.Aeson
+import qualified Data.Yaml       as Yaml
+
+import           System.FilePath ((<.>), (</>))
+import           System.Directory (doesFileExist, canonicalizePath)
+
+import           Text.Parsec
+import           Text.Parsec.Text ()
+
+import           Compiler.Settings
+import qualified Compiler.Utils  as Utils
 
 type Pkg     = Text
 type Version = [Integer]
@@ -63,10 +60,11 @@ data Shim = Shim { versionRange   :: VersionRange
                  , subs           :: [Shim]
                  } deriving (Eq, Ord, Show)
 
-data VersionRange = SingleVersion Version     -- v == v0
-                  | Interval (Maybe Version) (Maybe Version)  -- v in [v0,v1)
+data VersionRange = SingleVersion Version
+                  | Interval (Maybe Version) (Maybe Version)
              deriving (Eq, Ord, Show)
 
+emptyRange :: VersionRange
 emptyRange = Interval Nothing Nothing
 
 inRange :: Version -> Shim -> Bool
@@ -74,6 +72,7 @@ inRange ver shim = case versionRange shim of
                      Interval lo hi  -> maybe True (<=ver) lo && maybe True (> ver) hi
                      SingleVersion v -> ver == v
 
+emptyShim :: Shim
 emptyShim = Shim emptyRange [] []
 
 instance FromJSON Shim where

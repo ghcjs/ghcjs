@@ -27,35 +27,30 @@ module Compiler.Utils
     , simpleSrcErr
     ) where
 
-import DynFlags
-import DriverPhases
-import GHC
-import Platform
-import HscTypes
-import Bag
-import Outputable
-import ErrUtils      (mkPlainErrMsg)
+import           DynFlags
+import           GHC
+import           Platform
+import           HscTypes
+import           Bag
+import           Outputable
+import           ErrUtils          (mkPlainErrMsg)
+import           Packages          (getPackageIncludePath)
+import           Config            (cProjectVersionInt)
 import qualified SysTools
-import SrcLoc
-import Util          (looksLikeModuleName)
-import Packages      (getPackageIncludePath)
-import Config        (cProjectVersion, cProjectVersionInt)
 
-
+import           Control.Applicative
 import qualified Control.Exception as Ex
+import           Control.Monad
+import           Control.Monad.IO.Class
 
-import Control.Applicative
-import Control.Monad
-import Control.Monad.IO.Class
+import           Data.Char
+import           Data.List         (isPrefixOf)
 
-import Data.Char
-import Data.List         (isPrefixOf, partition)
+import           System.Directory  (doesFileExist, copyFile)
+import           System.Environment
+import           System.FilePath
 
-import System.Directory  (doesFileExist, copyFile)
-import System.Environment
-import System.FilePath
-
-import Gen2.Utils
+import           Gen2.Utils
 
 touchFile :: DynFlags -> FilePath -> IO ()
 touchFile df file = do

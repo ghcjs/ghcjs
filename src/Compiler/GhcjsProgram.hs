@@ -20,59 +20,50 @@ import           DsMeta
 import           LoadIface
 import           ErrUtils (fatalErrorMsg'')
 import           Panic (handleGhcException)
-
 import           Exception
-
-import           Distribution.System (buildOS, OS(..))
-import           Distribution.Verbosity (deafening, intToVerbosity)
-import           Distribution.Package (PackageName(..), PackageIdentifier(..))
-import           Distribution.Simple.BuildPaths (exeExtension)
-import           Distribution.Simple.Utils (installExecutableFile, installDirectoryContents)
-import           Distribution.Simple.Program (runProgramInvocation, simpleProgramInvocation)
 
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
 
-import           Options.Applicative
-import           Options.Applicative.Types
-import           Options.Applicative.Builder.Internal
-
 import           Data.IORef
-import           Data.List (isSuffixOf, isPrefixOf, tails, partition, nub,
-                            intercalate, foldl', isInfixOf, sort)
+import           Data.List (isSuffixOf, isPrefixOf, partition,)
 import qualified Data.List as L
-
 import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Monoid
-
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
-import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 
-import           System.Directory (createDirectoryIfMissing, getAppUserDataDirectory,
-                                   doesFileExist, doesDirectoryExist, copyFile)
-import           System.Environment (getArgs, getEnv, getEnvironment)
+import           Distribution.System (buildOS, OS(..))
+import           Distribution.Verbosity (deafening, intToVerbosity)
+import           Distribution.Package (PackageName(..))
+import           Distribution.Simple.BuildPaths (exeExtension)
+import           Distribution.Simple.Utils (installExecutableFile, installDirectoryContents)
+import           Distribution.Simple.Program (runProgramInvocation, simpleProgramInvocation)
+
+import           Options.Applicative
+
+import           System.Directory (doesFileExist, doesDirectoryExist)
+import           System.Environment (getArgs)
 import           System.Exit
 import           System.FilePath
 import           System.IO
 import           System.Process
 
-import           Compiler.Info
-import           Compiler.Variants
-import           Compiler.GhcjsHooks
 import           Compiler.GhcjsPlatform
+import           Compiler.Info
 import           Compiler.Settings
-import           Compiler.Utils         as Util
+import           Compiler.Utils
 
 -- fixme, make frontend independent of backend
-import qualified Gen2.Rts       as Gen2
-import qualified Gen2.Shim      as Gen2
-import qualified Gen2.Foreign   as Gen2
-import qualified Gen2.PrimIface as Gen2
 import qualified Gen2.Object    as Object
+import qualified Gen2.PrimIface as Gen2
+import qualified Gen2.Shim      as Gen2
+import qualified Gen2.Rts       as Gen2
+import qualified Gen2.RtsTypes  as Gen2
+
 
 {- |
   Check if we're building a Cabal Setup script, in which case automatically
@@ -101,13 +92,14 @@ buildingCabalSetup [hs_src] dflags
 buildingCabalSetup _ _ = False
 
 getGhcjsSettings :: [Located String] -> IO ([Located String], GhcjsSettings)
-getGhcjsSettings args
-  | Left failure <- p = do
-     hPutStrLn stderr =<< errMessage failure "ghcjs"
-     exitWith (errExitCode failure)
-  | Right gs1 <- p = do
-     gs2 <- envSettings
-     return (args', gs1 <> gs2)
+getGhcjsSettings args =
+  case p of
+    Left failure -> do
+      hPutStrLn stderr =<< errMessage failure "ghcjs"
+      exitWith (errExitCode failure)
+    Right gs1 -> do
+      gs2 <- envSettings
+      return (args', gs1 <> gs2)
   where
     (ga,args') = partition (\a -> any (`isPrefixOf` unLoc a) as) args
     p = execParserPure (prefs mempty) optParser' (map unLoc ga)
@@ -117,7 +109,6 @@ getGhcjsSettings args
          , "--strip-program="
          , "--log-commandline="
          , "--with-ghc="
---         , "--debug"
          , "--only-out"
          , "--no-rts"
          , "--no-stats"
@@ -130,7 +121,6 @@ getGhcjsSettings args
                                 <*> pure Nothing
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
                                 <*> getEnvMay "GHCJS_WITH_GHC"
---                                <*> getEnvOpt "GHCJS_DEBUG"
                                 <*> pure False
                                 <*> pure False
                                 <*> pure False
@@ -148,7 +138,6 @@ optParser = GhcjsSettings
             <*> optStr ( long "strip-program" )
             <*> optStr ( long "log-commandline" )
             <*> optStr ( long "with-ghc" )
---            <*> switch ( long "debug" )
             <*> switch ( long "only-out" )
             <*> switch ( long "no-rts" )
             <*> switch ( long "no-stats" )
@@ -166,8 +155,8 @@ printVersion = putStrLn $
 printNumericVersion :: IO ()
 printNumericVersion = putStrLn getCompilerVersion
 
-printRts :: IO ()
-printRts = TL.putStrLn (Gen2.rtsText False) >> exitSuccess
+printRts :: DynFlags -> IO ()
+printRts dflags = TL.putStrLn (Gen2.rtsText $ Gen2.dfCgSettings dflags) >> exitSuccess
 
 printDeps :: [String] -> IO ()
 printDeps ["--print-deps", file] = Object.readDepsFile file >>= TL.putStrLn . Object.showDeps

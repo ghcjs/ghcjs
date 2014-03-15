@@ -18,9 +18,7 @@ import Id
 import IdInfo
 import MkId
 import Name
-import PrelInfo
 import PrelNames
-import PrelRules
 import PrimOp
 import Rules
 import TyCon

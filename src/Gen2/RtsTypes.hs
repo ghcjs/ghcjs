@@ -7,7 +7,18 @@
 
 module Gen2.RtsTypes where
 
-import           Compiler.JMacro
+import           DynFlags
+import           Encoding
+import           Id
+import           Module
+import           Name
+import           Outputable hiding ((<>))
+import           StgSyn
+import           Unique
+import           UniqFM
+import           VarSet
+import           UniqSet
+import           SrcLoc
 
 import           Control.Applicative
 import qualified Control.Exception as Ex
@@ -15,10 +26,9 @@ import           Control.Lens
 import           Control.Monad.State.Strict
 
 import           Data.Array   (Array, (!), listArray)
-import           Data.Char    (toLower)
 import           Data.Bits
-import           Data.IntMap  (IntMap)
-import qualified Data.IntMap  as IM
+import           Data.Char    (toLower)
+import           Data.Default
 import           Data.Ix
 import qualified Data.List    as L
 import qualified Data.Map     as M
@@ -27,43 +37,104 @@ import           Data.Monoid
 import           Data.Text    (Text)
 import qualified Data.Text    as T
 
-import           DataCon
-import           DynFlags
-import           Encoding
-import           Id
-import           Module
-import           Name
-import           Outputable hiding ((<>))
-import           Panic
-import           StgSyn
-import           TyCon
-import           Type
-import           Unique
-import           UniqFM
-import           VarSet
-import           UniqSet
-import           SrcLoc
-import           TysWiredIn
-
+import           Compiler.JMacro
+import           Compiler.Settings
 import           Compiler.Utils
 
 import           Gen2.ClosureInfo
-import qualified Gen2.Object as Object
-import           Gen2.RtsSettings
-import           Gen2.StgAst
 import           Gen2.Utils
 
+data CgSettings = CgSettings { csInlinePush      :: Bool
+                             , csInlineBlackhole :: Bool
+                             , csInlineLoadRegs  :: Bool
+                             , csInlineEnter     :: Bool
+                             , csInlineAlloc     :: Bool
+                             , csTraceRts        :: Bool
+                             , csAssertRts       :: Bool
+                             , csTraceForeign    :: Bool
+                             } deriving (Show, Eq, Ord)
 
+instance Default CgSettings where
+  def = CgSettings False False False False False False False False
 
--- showPpr' :: Outputable a => a -> G String
--- showSDoc' :: SDoc -> G String
+-- fixme, make better configurable
+dfCgSettings :: DynFlags -> CgSettings
+dfCgSettings df = def { csAssertRts = buildingDebug df }
+
+traceRts :: ToJExpr a => CgSettings -> a -> JStat
+traceRts s e = jStatIf (csTraceRts s) [j| h$log(`e`); |]
+
+assertRts :: ToJExpr a => CgSettings -> JExpr -> a -> JStat
+assertRts s e m = jStatIf (csAssertRts s) [j| if(!`e`) { throw `m`; } |]
+
+jStatIf :: Bool -> JStat -> JStat
+jStatIf True s = s
+jStatIf _    _ = mempty
+
+clName :: JExpr -> JExpr
+clName c = [je| `c`.n |]
+
+clTypeName :: JExpr -> JExpr
+clTypeName c = [je| h$closureTypeName(`c`.t) |]
+
+infixr 1 |+
+infixr 1 |-
+infixl 3 |.
+infixl 2 |!
+infixl 2 |!!
+
+-- a + b
+(|+) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|+) e1 e2 = [je| `e1` + `e2` |]
+
+-- a - b
+(|-) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|-) e1 e2 = [je| `e1` - `e2` |]
+
+-- a & b
+(|&) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|&) e1 e2 = [je| `e1` & `e2` |]
+
+-- a.b
+(|.) :: ToJExpr a => a -> Text -> JExpr
+(|.) e i = SelExpr (toJExpr e) (TxtI i)
+
+-- a[b]
+(|!) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|!) e i = [je| `e`[`i`] |]
+
+-- a[b] with b int
+(|!!) :: ToJExpr a => a -> Int -> JExpr
+(|!!) = (|!)
+
+-- a(b1,b2,...)
+(|^) :: ToJExpr a => a -> [JExpr] -> JExpr
+(|^) a bs = ApplExpr (toJExpr a) bs
+
+(|^^) :: Text -> [JExpr] -> JExpr
+(|^^) a bs = ApplExpr (jsv a) bs
+
+(|||) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|||) a b = [je| `a` || `b` |]
+
+(|&&) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|&&) a b = [je| `a` && `b` |]
+
+(|===) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|===) a b = [je| `a` === `b` |]
+
+(|!==) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
+(|!==) a b = [je| `a` !== `b` |]
+
+showPpr' :: Outputable a => a -> G String
 showPpr' a = do
   df <- _gsDynFlags <$> get
   return (showPpr df a)
+
+showSDoc' :: SDoc -> G String
 showSDoc' a = do
   df <- _gsDynFlags <$> get
   return (showSDoc df a)
-
 
 -- fixme this is getting out of hand...
 data StgReg = R1  | R2  | R3  | R4  | R5  | R6  | R7  | R8
@@ -133,6 +204,7 @@ data IdType = IdPlain | IdEntry | IdConEntry deriving (Enum, Eq, Ord, Show)
 data IdKey = IdKey !Int !Int !IdType deriving (Eq, Ord)
 newtype IdCache = IdCache (M.Map IdKey Ident)
 
+emptyIdCache :: IdCache
 emptyIdCache = IdCache M.empty
 
 -- | the current code generator state
@@ -147,6 +219,7 @@ data GenState = GenState
   , _gsIdents        :: IdCache        -- | hash consing for identifiers from a Unique
   , _gsUnfloated     :: UniqFM StgExpr -- | unfloated arguments
   , _gsInitialised   :: IdSet          -- | already initialized idents in this module
+  , _gsCgSettings    :: CgSettings     -- | settings for the code generator
   }
 
 type C   = State GenState JStat
@@ -227,7 +300,8 @@ throwSimpleSrcErr :: DynFlags -> SrcSpan -> String -> G a
 throwSimpleSrcErr df span msg = return $! Ex.throw (simpleSrcErr df span msg)
 
 initState :: DynFlags -> Module -> UniqFM StgExpr -> GenState
-initState df m unfloat = GenState m Nothing [] [] 1 df [] emptyIdCache unfloat emptyVarSet
+initState df m unfloat =
+  GenState m Nothing [] [] 1 df [] emptyIdCache unfloat emptyVarSet (dfCgSettings df)
 
 runGen :: DynFlags -> Module -> UniqFM StgExpr -> G a -> a
 runGen df m unfloat = flip evalState (initState df m unfloat)
@@ -264,13 +338,13 @@ preamble :: JStat
 preamble = mempty
 
 pushN :: Array Int Ident
-pushN = listArray (1,32) $ map (TxtI . T.pack . ("h$p"++) . show) [1..32]
+pushN = listArray (1,32) $ map (TxtI . T.pack . ("h$p"++) . show) [(1::Int)..32]
 
 pushN' :: Array Int JExpr
 pushN' = fmap (ValExpr . JVar) pushN
 
 pushNN :: Array Integer Ident
-pushNN = listArray (1,255) $ map (TxtI . T.pack . ("h$pp"++) . show) [1..255]
+pushNN = listArray (1,255) $ map (TxtI . T.pack . ("h$pp"++) . show) [(1::Int)..255]
 
 pushNN' :: Array Integer JExpr
 pushNN' = fmap (ValExpr . JVar) pushNN
@@ -279,10 +353,12 @@ pushNN' = fmap (ValExpr . JVar) pushNN
 -- slots are True if the right value is already there
 pushOptimized :: [(JExpr,Bool)] -> C
 pushOptimized [] = return mempty
-pushOptimized xs = dropSlots l >> return go
+pushOptimized xs = do
+  dropSlots l
+  go .  csInlinePush <$> use gsCgSettings
   where
-    go
-     | rtsInlinePush               = inlinePush
+    go True = inlinePush
+    go _
      | all snd xs                  = adjSp l
      | all (not.snd) xs && l <= 32 =
         ApplStat (pushN' ! l) (map fst xs)
@@ -299,13 +375,15 @@ pushOptimized xs = dropSlots l >> return go
              | otherwise = [je| `Sp` - `l-i` |]
 
 push :: [JExpr] -> C
-push xs = dropSlots (length xs) >> return (push' xs)
+push xs = do
+  dropSlots (length xs)
+  flip push' xs <$> use gsCgSettings
 
-push' :: [JExpr] -> JStat
-push' [] = mempty
-push' xs
-   | rtsInlinePush || l > 32 || l < 2 = adjSp l <> mconcat items
-   | otherwise                        = ApplStat (toJExpr $ pushN ! l) xs
+push' :: CgSettings -> [JExpr] -> JStat
+push' _ [] = mempty
+push' cs xs
+   | csInlinePush cs || l > 32 || l < 2 = adjSp l <> mconcat items
+   | otherwise                          = ApplStat (toJExpr $ pushN ! l) xs
   where
     items = zipWith (\i e -> [j| `Stack`[`offset i`] = `e`; |]) [(1::Int)..] xs
     offset i | i == l    = [je| `Sp` |]
@@ -374,6 +452,8 @@ closureType c = [je| `c`.f.t |]
 
 isThunk :: JExpr -> JExpr
 isThunk c = [je| `c`.f.t === `Thunk` |]
+
+isThunk' :: JExpr -> JExpr
 isThunk' f = [je| `f`.t === `Thunk` |]
 
 isFun :: JExpr -> JExpr
@@ -396,6 +476,8 @@ isCon' f = [je| `f`.t === `Con` |]
 
 conTag :: JExpr -> JExpr
 conTag c = [je| `c`.f.a |]
+
+conTag' :: JExpr -> JExpr
 conTag' f = [je| `f`.a |]
 
 entry :: JExpr -> JExpr
@@ -418,13 +500,13 @@ papArity tgt p = [j| `tgt` = 0;
                        var a = cur.d2.d1;
                        regs += a >> 8;
                        args += a & 0xff;
-                       `traceRts $ "pap: " |+ regs |+ " " |+ args`;
+                       // traceRts $ "pap: " |+ regs |+ " " |+ args;
                        cur = cur.d1;
                      } while(cur.f.t === `Pap`);
                      var fa = cur.f.a;
-                     `traceRts $ "pap base: " |+ fa`;
+                     // traceRts $ "pap base: " |+ fa;
                      `tgt` = (((fa>>8)-regs)<<8)|((fa&0xFF)-args);
-                     `traceRts $ "pap arity: " |+ tgt`;
+                     // traceRts $ "pap arity: " |+ tgt;
                    |]
 
 -- some utilities do do something with a range of regs

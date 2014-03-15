@@ -13,6 +13,8 @@
  -}
 module Gen2.Compactor where
 
+import           DynFlags
+
 import           Control.Applicative
 import           Control.Lens
 import           Control.Monad.State.Strict
@@ -24,13 +26,12 @@ import qualified Data.Binary.Put as DB
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BL
 import           Data.Char (chr)
-import           Data.Data.Lens
 import           Data.Function (on)
+import           Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HM
 import           Data.List
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HM
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Set (Set)
@@ -39,15 +40,11 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 
 import           Compiler.JMacro
-
 import           Compiler.Settings
 
-import           Gen2.Utils
 import           Gen2.ClosureInfo
 import           Gen2.Object
 import qualified Gen2.Optimizer as Optimizer
-
-import           DynFlags
 
 compact :: GhcjsSettings
         -> DynFlags
@@ -229,9 +226,11 @@ renderBase rs packages funs = DB.runPut $ do
     mods  = uniq (map (\(_,x,_) -> x) $ S.toList funs)
     modsM = M.fromList (zip mods [(0::Int)..])
     putList f xs = pi (length xs) >> mapM_ f xs
+    putRs (RenamerState [] _) = error "renderBase: putRs exhausted renamer symbol names"
     putRs (RenamerState (ns:_) hm) = do
       pi (HM.size hm)
       putRs' renamedVars (HM.fromList . map (\(x,y) -> (y,x)) . HM.toList $ hm)
+    putRs' [] _ = error "renderBase: putRs' exhausted renamer symbol names"
     putRs' (n:ns) hm
       | Just v <- HM.lookup n hm = DB.put v >> putRs' ns hm
       | otherwise                = return ()

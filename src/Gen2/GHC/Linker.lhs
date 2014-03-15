@@ -51,9 +51,8 @@ import UniqSet
 import FastString
 import Config
 import Platform
-import SysTools hiding ( linkDynLib )
+import SysTools hiding ( linkDynLib ) -- use our own linkDynLib
 import Gen2.GHC.SysTools
-import PrelNames
 
 -- Standard libraries
 import Control.Monad
