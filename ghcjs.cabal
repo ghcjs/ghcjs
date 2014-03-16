@@ -126,6 +126,18 @@ Executable ghcjs
                     ghcjs
     GHC-Options:    -O2 -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded
 
+Executable haddock-ghcjs
+    if os(Windows)
+      cpp-options: -DWINDOWS
+    Main-Is:        Haddock.hs
+    Default-Language: Haskell2010
+    hs-source-dirs: src-bin
+    Build-Depends:  base                >= 4    &&  < 5,
+                    process,
+                    filepath,
+                    ghcjs
+    GHC-Options:    -O
+
 Executable ghcjs-pkg
     if flag(compiler-only)
       Buildable:      False
