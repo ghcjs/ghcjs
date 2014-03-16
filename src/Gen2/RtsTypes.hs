@@ -209,17 +209,17 @@ emptyIdCache = IdCache M.empty
 
 -- | the current code generator state
 data GenState = GenState
-  { _gsModule        :: Module         -- | the module we're compiling, used for generating names
-  , _gsToplevel      :: Maybe Id       -- | the toplevel function group we're generating
-  , _gsToplevelStats :: [JStat]        -- | extra toplevel statements that our current function emits
-  , _gsClosureInfo   :: [ClosureInfo]  -- | closure information in the current function group
-  , _gsId            :: Int            -- | integer for the id generator
-  , _gsDynFlags      :: DynFlags       -- | the DynFlags, used for prettyprinting etc
-  , _gsStack         :: [StackSlot]    -- | what's currently on the stack, above h$sp
-  , _gsIdents        :: IdCache        -- | hash consing for identifiers from a Unique
-  , _gsUnfloated     :: UniqFM StgExpr -- | unfloated arguments
-  , _gsInitialised   :: IdSet          -- | already initialized idents in this module
-  , _gsCgSettings    :: CgSettings     -- | settings for the code generator
+  { _gsModule        :: Module         -- ^ the module we're compiling, used for generating names
+  , _gsToplevel      :: Maybe Id       -- ^ the toplevel function group we're generating
+  , _gsToplevelStats :: [JStat]        -- ^ extra toplevel statements that our current function emits
+  , _gsClosureInfo   :: [ClosureInfo]  -- ^ closure information in the current function group
+  , _gsId            :: Int            -- ^ integer for the id generator
+  , _gsDynFlags      :: DynFlags       -- ^ the DynFlags, used for prettyprinting etc
+  , _gsStack         :: [StackSlot]    -- ^ what's currently on the stack, above h$sp
+  , _gsIdents        :: IdCache        -- ^ hash consing for identifiers from a Unique
+  , _gsUnfloated     :: UniqFM StgExpr -- ^ unfloated arguments
+  , _gsInitialised   :: IdSet          -- ^ already initialized idents in this module
+  , _gsCgSettings    :: CgSettings     -- ^ settings for the code generator
   }
 
 type C   = State GenState JStat
