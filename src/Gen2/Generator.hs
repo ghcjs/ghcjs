@@ -372,7 +372,7 @@ genExpr top (StgOpApp (StgFCallOp f _) args t) = do
 genExpr top (StgOpApp (StgPrimOp op) args t) = genPrimOp op args t
 genExpr top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall c args t
 genExpr top (StgLam{}) = error "genExpr: StgLam"
-genExpr top (StgCase e live1 liveRhs b srt at alts) = genCase top b e at alts live1 srt -- check?
+genExpr top (StgCase e live1 liveRhs b srt at alts) = genCase top b e at alts liveRhs srt
 genExpr top (StgLet b e) = genBind top b <> genExpr top e
 
 genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
