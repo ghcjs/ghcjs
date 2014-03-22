@@ -614,13 +614,14 @@ papGen :: CgSettings -> JStat
 papGen s = [j| fun h$pap_gen {
                var c = `R1`.d1;
                var d = `R1`.d2;
-               var r = d.d1;
+               var r = d.d1 >> 8;
                var f = c.f;
                `assertRts s (isFun' f ||| isPap' f) $ t "h$pap_gen: expected function or pap"`;
                var extra;
-               if(`isFun f`) {
+               if(`isFun' f`) {
                  extra = (f.a>>8) - r;
                } else {
+                 `papArity extra c`;
                  extra = (extra>>8) - r;
                }
                `traceRts s $ (t "h$pap_gen: generic pap extra args moving: " |+ extra)`;
@@ -646,16 +647,16 @@ moveRegs2 = [j| fun h$moveRegs2 n m {
                }
              |]
   where
-    moveSwitch n m = SwitchStat [je| (n << 8 | m) |] switchCases (defaultCase n m)
+    moveSwitch n m = SwitchStat [je| (`n` << 8 | `m`) |] switchCases (defaultCase n m)
     -- fast cases
     switchCases = [switchCase n m | n <- [1..5], m <- [1..4]] -- tune the parameteters for performance and size
     switchCase :: Int -> Int -> (JExpr, JStat)
     switchCase n m = (toJExpr $ (n `shiftL` 8) .|. m, mconcat (map (\n -> moveRegFast n m) [n+1,n..2]) <> [j| break; |])
-    moveRegFast n m = [j| `numReg n` = `numReg (n+m)`; |]
+    moveRegFast n m = [j| `numReg (n+m)` = `numReg n`; |]
     -- fallback
-    defaultCase n m = [j| for(var i=n;i>0;i--) {
-                            h$setReg(i+1, h$getReg(i+1+m));
+    defaultCase n m = [j| for(var i=`n`;i>0;i--) {
+                            h$setReg(i+1+`m`, h$getReg(i+1));
                           }
                         |]
-    moveReg n m = [j| h$setReg(`n`, h$getReg(`n+m`)); |]
+    moveReg n m = [j| h$setReg(`n+m`, h$getReg(`n`)); |]
 
