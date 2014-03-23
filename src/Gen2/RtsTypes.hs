@@ -487,27 +487,21 @@ entry p = [je| `p`.f |]
 funArity :: JExpr -> JExpr
 funArity c = [je| `c`.f.a |]
 
+-- function arity with raw reference to the entry
 funArity' :: JExpr -> JExpr
 funArity' f = [je| `f`.a |]
 
--- expects heap pointer to entry (fixme document this better or make typesafe)
-papArity :: JExpr -> JExpr -> JStat
-papArity tgt p = [j| `tgt` = 0;
-                     var cur = `p`;
-                     var args = 0;
-                     var regs = 0;
-                     do {
-                       var a = cur.d2.d1;
-                       regs += a >> 8;
-                       args += a & 0xff;
-                       // traceRts $ "pap: " |+ regs |+ " " |+ args;
-                       cur = cur.d1;
-                     } while(cur.f.t === `Pap`);
-                     var fa = cur.f.a;
-                     // traceRts $ "pap base: " |+ fa;
-                     `tgt` = (((fa>>8)-regs)<<8)|((fa&0xFF)-args);
-                     // traceRts $ "pap arity: " |+ tgt;
-                   |]
+-- arity of a partial application
+papArity :: JExpr -> JExpr
+papArity cp = [je| `cp`.d2.d1 |]
+
+funOrPapArity :: JExpr       -- ^ heap object
+              -> Maybe JExpr -- ^ reference to entry, if you have one already (saves a c.f lookup twice)
+              -> JExpr       -- ^ arity tag (tag >> 8 = registers, tag & 0xff = arguments)
+funOrPapArity c Nothing =
+  [je| `isFun c` ? `funArity c` : `papArity c` |]
+funOrPapArity c (Just f) =
+  [je| `isFun' f` ? `funArity' f` : `papArity c` |]
 
 -- some utilities do do something with a range of regs
 -- start or end possibly supplied as javascript expr
