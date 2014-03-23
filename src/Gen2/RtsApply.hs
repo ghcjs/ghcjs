@@ -95,22 +95,19 @@ genericStackApply :: CgSettings -> JStat
 genericStackApply s =
   [j| fun h$ap_gen {
         `traceRts s $ t"h$ap_gen"`;
-        var c = `R1`.f;
+        var cf = `R1`.f;
         switch(c.t) {
           case `Thunk`:
-            return c;
+            return cf;
           case `Fun`:
-            var farity = `funArity' c`;
-            `funCase c farity`;
+            `funCase cf (funArity' cf)`;
           case `Pap`:
-            var parity;
-            `papArity parity (toJExpr R1)`;
-            `funCase c parity`;
+            `funCase cf (papArity (toJExpr R1))`;
           case `Blackhole`:
             `push' s [toJExpr R1, jsv "h$return"]`;
             return h$blockOnBlackhole(`R1`);
           default:
-            throw "h$ap_gen: unexpected closure type";
+            throw ("h$ap_gen: unexpected closure type " + cf.t);
         }
       }
       `ClosureInfo "h$ap_gen" (CIRegs 0 [PtrV]) "h$ap_gen" CILayoutVariable CIStackFrame noStatic`;
@@ -178,8 +175,7 @@ genericFastApply s =
             `traceRts s $ t"h$ap_gen_fast: fun " |+ farity`;
             `funCase c tag farity`;
           case `Pap`:
-            var parity;
-            `papArity parity (toJExpr R1)`;
+            var parity = `papArity (toJExpr R1)`;
             `traceRts s $ t"h$ap_gen_fast: pap " |+ parity`;
             `funCase c tag parity`;
           case `Con`:
@@ -311,10 +307,9 @@ stackApply s r n = [j| `decl func`;
 
     papCase :: JExpr -> JStat
     papCase c = withIdent $ \pap ->
-                [j| var arity0;
-                    `papArity arity0 (toJExpr R1)`;
+                [j| var arity0 = `papArity (toJExpr R1)`;
                     var arity = arity0 & 0xFF;
-                    `traceRts s $ (funcName <> ": found pap, arity: ") |+ arity0`;
+                    `traceRts s $ (funcName <> ": found pap, arity: ") |+ arity`;
                     if(`n` === arity) {
                       `traceRts s $ funcName <> ": exact"`;
                       `funExact c`;
@@ -351,7 +346,7 @@ stackApply s r n = [j| `decl func`;
 
     -- oversat: call the function but keep enough on the stack for the next
     oversatCase :: JExpr -- function
-                -> JExpr -- the arity value
+                -> JExpr -- the arity tag
                 -> JExpr -- real arity (arity & 0xff)
                 -> JStat
     oversatCase c arity arity0 =
@@ -402,8 +397,7 @@ fastApply s r n =
                      `funCase c farity`;
                    case `Pap`:
                      `traceRts s $ (funName <> ": pap")`;
-                     var arity;
-                     `papArity arity (toJExpr R1)`;
+                     var arity = `papArity (toJExpr R1)`;
                      `funCase c arity`;
                    case `Thunk`:
                      `traceRts s $ (funName <> ": thunk")`;
@@ -559,8 +553,9 @@ mkPap :: CgSettings
       -> JStat
 mkPap s tgt fun n values =
       traceRts s ("making pap with: " ++ show (length values) ++ " items") <>
-      allocDynamic s True tgt (iex entry) (fun:[je| `length values * 256`+`n`|]:map toJExpr values')
+      allocDynamic s True tgt (iex entry) (fun:papAr:map toJExpr values')
   where
+    papAr = [je| `funOrPapArity fun Nothing` - `length values * 256` - `n` |]
     values' | null values = [jnull]
             | otherwise   = values
     entry | length values > numSpecPap = TxtI "h$pap_gen"
@@ -590,13 +585,7 @@ pap s r = [j| `decl func`;
                var d = `R1`.d2;
                var f = c.f;
                `assertRts s (isFun' f ||| isPap' f) (funcName <> ": expected function or pap")`;
-               var extra;
-               if(`isFun' f`) {
-                 extra = (f.a>>8) - `r`;
-               } else {
-                 `papArity extra c`;
-                 extra = (extra>>8) - `r`;
-               }
+               var extra = (`funOrPapArity c (Just f)` >> 8) - `r`;
                `traceRts s $ (funcName <> ": pap extra args moving: ") |+ extra`;
                `moveBy extra`;
                `loadOwnArgs d`;
@@ -613,19 +602,14 @@ pap s r = [j| `decl func`;
 papGen :: CgSettings -> JStat
 papGen s = [j| fun h$pap_gen {
                var c = `R1`.d1;
-               var d = `R1`.d2;
-               var r = d.d1 >> 8;
                var f = c.f;
+               var d = `R1`.d2;
+               var pr = `funOrPapArity c (Just f)` >> 8;
+               var or = `papArity (toJExpr R1)` >> 8;
+               var r = pr - or;
                `assertRts s (isFun' f ||| isPap' f) $ t "h$pap_gen: expected function or pap"`;
-               var extra;
-               if(`isFun' f`) {
-                 extra = (f.a>>8) - r;
-               } else {
-                 `papArity extra c`;
-                 extra = (extra>>8) - r;
-               }
-               `traceRts s $ (t "h$pap_gen: generic pap extra args moving: " |+ extra)`;
-               h$moveRegs2(extra, r);
+               `traceRts s $ (t "h$pap_gen: generic pap extra args moving: " |+ or)`;
+               h$moveRegs2(or, r);
                `loadOwnArgs d r`;
                `R1` = c;
                return f;
