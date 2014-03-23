@@ -957,9 +957,7 @@ fun h$suspendCurrentThread next {
    var t = next.t;
   // pap arity
   if(t === `Pap`) {
-    var pa;
-    `papArity pa (toJExpr R1)`;
-    nregs = (pa >> 8) + 1;
+    nregs = ((`papArity (toJExpr R1)`) >> 8) + 1;
   } else if(t === `Fun` || t === `StackFrame`) {
     // for normal functions, the number active registers is in the .r proprty
     nregs    = next.r >> 8;
