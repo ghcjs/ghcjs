@@ -55,7 +55,8 @@ compiler in your `PATH`. Next, make sure that you have all the prerequisites for
 
 Run the following script to install an updated `Cabal` and `cabal-install` with GHCJS
 support. Note that this will overwrite the `cabal` executable in your cabal executable
-installation path (typically `~/.cabal/bin`), you might want to backup your current version.
+installation path (typically `~/.cabal/bin`), you might want to backup your current version or
+append a custom program suffix with a `cabal` option such as `--program-suffix=-js`.
 
 ```bash
 #!/bin/sh
