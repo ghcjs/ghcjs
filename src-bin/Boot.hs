@@ -505,7 +505,7 @@ installBootPackages s = sub $ do
   p <- pwd
   forM_ bootPackages (preparePackage s)
   when (not $ null bootPackages) $ do
-    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
+    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown", "--ghcjs-option=-XMagicHash"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
     when (gmpInTree s) installInTreeGmp
     where
       configureOpts p = map ("--configure-option=" <>) $ catMaybes
