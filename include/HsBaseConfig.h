@@ -1,3 +1,7 @@
+#ifndef ghcjs_HOST_OS
+#include "../../ghcjs-boot/boot/base/include/HsBaseConfig.h"
+#else
+
 /* include/HsBaseConfig.h.  Generated from HsBaseConfig.h.in by configure.  */
 /* include/HsBaseConfig.h.in.  Generated from configure.ac by autoheader.  */
 
@@ -612,3 +616,5 @@
 
 /* Define for large files, on AIX-style hosts. */
 /* #undef _LARGE_FILES */
+
+#endif
