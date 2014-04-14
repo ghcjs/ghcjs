@@ -61,7 +61,6 @@ main = do
       setenv "CFLAGS" $ "-I" <> toTextIgnore (base </> "lib" </> "include")
       installFakes
       installBootPackages s
-      installGhcjsPrim s
       checkShims
       if quick s then do
                    installGhcjsPackages s
@@ -256,24 +255,27 @@ initPackageDB = do
 
 -- | these need to be installed in the boot setting:
 --   fake Cabal package registered, GHCJS_BOOTING environment variable set
-bootPackages :: [String]
-bootPackages = [ "ghc-prim"
-               , "integer-gmp"
-               , "base"
-               , "deepseq"
-               , "containers"
-               , "directory"
-               , "template-haskell"
-               , "array"
-               , "pretty"
-               , "time"
-               , "process"
+bootPackages1 :: [String]
+bootPackages1 = [ "ghc-prim"
+                , "integer-gmp"
+                , "base"
+                ]
+
+bootPackages2 :: [String]
+bootPackages2 = [ "deepseq"
+                , "containers"
+                , "directory"
+                , "template-haskell"
+                , "array"
+                , "pretty"
+                , "time"
+--                , "process"
 #ifdef WINDOWS
-               , "Win32"
+                , "Win32"
 #else
-               , "unix"
+                , "unix"
 #endif
-               ]
+                ]
 
 -- | We need to pretend that these are installed while building bootPackages
 --   GHCJS itself will call GHC when any of these are used
@@ -321,7 +323,7 @@ initSourceTree localTree settings = do
            git ["clone", "http://github.com/ghcjs/ghcjs-boot"]
            cd "ghcjs-boot"
            git ["submodule", "update", "--init", "--recursive"]
-  forM_ bootPackages (patchPackage "boot")
+  forM_ (bootPackages1++bootPackages2) (patchPackage "boot")
   extraPackages <- ls "extra"
   forM_ extraPackages $ \p -> do
                            isDir <- test_d p
@@ -503,10 +505,13 @@ installBootPackages s = sub $ do
   echo "installing boot packages"
   cd "boot"
   p <- pwd
-  forM_ bootPackages (preparePackage s)
-  when (not $ null bootPackages) $ do
-    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown", "--ghcjs-option=-XMagicHash"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages)
+  forM_ (bootPackages1++bootPackages2) (preparePackage s)
+  when (not $ null bootPackages1) $ do
+    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown", "--ghcjs-option=-XMagicHash"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages1)
     when (gmpInTree s) installInTreeGmp
+  sub (cd ".." >> installGhcjsPrim s)
+  when (not $ null bootPackages2) $
+    (cabalBoot $ ["install", "--ghcjs"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages2)
     where
       configureOpts p = map ("--configure-option=" <>) $ catMaybes
             [ fmap ("--with-iconv-includes="  <>) (iconvInclude s)
