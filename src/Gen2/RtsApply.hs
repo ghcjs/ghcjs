@@ -119,7 +119,7 @@ genericStackApply s =
           var myAr = myArity & 0xFF;
           var myRegs = myArity >> 8;
           `traceRts s $ t"h$ap_gen: args: " |+ myAr |+ t" regs: " |+ myRegs`;
-          if(myAr == ar) {
+          if(myAr === ar) {
             `traceRts s $ t"h$ap_gen: exact"`;
             for(var i=0;i<myRegs;i++) {
               h$setReg(i+2,`Stack`[`Sp`-2-i]);
@@ -147,12 +147,12 @@ genericStackApply s =
           } else {
             `traceRts s $ t"h$ap_gen: undersat"`;
             var p = h$paps[myRegs];
-            var dat = [`R1`,myAr];
+            var dat = [`R1`,(((ar >> 8)-myRegs))*256+ar-myAr];
             for(var i=0;i<myRegs;i++) {
                dat.push(`Stack`[`Sp`-i-1]);
             }
             `Sp` = `Sp` - myRegs - 2;
-            `R1` = h$init_closure(p, dat);
+            `R1` = h$init_closure({ f: p, d1: null, d2: null, m: 0 }, dat);
             return `Stack`[`Sp`];
           }
         |]
@@ -239,12 +239,11 @@ genericFastApply s =
             if(`tag` != 0) {
               var p = h$paps[myRegs];
               `traceRts s $ t"h$ap_gen_fast: got pap: " |+ (p|."n")`;
-              var dat = [`R1`,myAr];
+              var dat = [`R1`,(((ar >> 8)-myRegs))*256+ar-myAr];
               for(var i=0;i<myRegs;i++) {
                 dat.push(h$getReg(i+2));
               }
-              `R1` = { f: p, d1: null, d2: null, m: 0 };
-              h$init_closure(`R1`, dat);
+              `R1` = h$init_closure({ f: p, d1: null, d2: null, m: 0 }, dat);
             }
             return `Stack`[`Sp`];
           }
