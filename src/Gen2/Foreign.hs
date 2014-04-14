@@ -622,12 +622,22 @@ checkNamedTyCon tys dflags tc = any (\(p,m,n) -> p `isPrefixOf` pkg && m == mod 
       where
         -- comparing strings is probably not too fast, perhaps search
         -- for the types first and use some cache
-        n = tyConName tc
+        n = tyConName (repTc tc)
         (pkg, mod) = case nameModule_maybe n of
                        Nothing -> ("", "")
                        Just m  -> ( packageIdString (modulePackageId m)
                                   , moduleNameString (moduleName m))
         name = occNameString (nameOccName n)
+
+repTc :: TyCon -> TyCon
+repTc = go
+  where
+    go :: TyCon -> TyCon
+    go tc | Just (tvs, t, _) <- unwrapNewTyCon_maybe tc =
+              case splitTyConApp_maybe (dropForAlls t) of
+                Nothing       -> error "repTc: not a tycon application"
+                Just (tc', _) -> go tc'
+          | otherwise = tc
 
 jsFfiTys :: [(String, String, String)]
 jsFfiTys = [jsRefTy]
