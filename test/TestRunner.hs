@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, OverloadedStrings, TupleSections, ScopedTypeVariables, ExtendedDefaultRules #-}
+{-# LANGUAGE CPP, OverloadedStrings, TupleSections, ScopedTypeVariables, ExtendedDefaultRules, LambdaCase #-}
 
 module Main where
 
@@ -78,7 +78,7 @@ main' log = do
   (baseSymbs, baseJs) <- prepareBaseBundle
   onlyOpt <- getEnvOpt "GHCJS_TEST_ONLYOPT"
   onlyUnopt <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
-  shellyNoDir . silently . withTmpDir $ \symbsDir -> do
+  shellyE . silently . withTmpDir $ \symbsDir -> do
     let symbsFile = symbsDir </> "base.symbs"
     liftIO $ do
       B.writeFile (encodeString symbsFile) baseSymbs
@@ -186,7 +186,7 @@ testCaseLog opts name assertion = testCase name assertion'
    - that start with a lowercase letter
 -}
 -- allTestsIn :: FilePath -> IO [Test]
-allTestsIn testOpts path = shellyNoDir $
+allTestsIn testOpts path = shelly $
   map (stdioTest testOpts) <$> findWhen (return . isTestFile) path
   where
     testFirstChar c = isLower c || isDigit c
@@ -469,7 +469,7 @@ readExitCode = fmap convert . readMaybe . T.unpack
     convert n = ExitFailure n
 
 checkRequiredPackages :: IO ()
-checkRequiredPackages = shellyNoDir . silently $ do
+checkRequiredPackages = shelly . silently $ do
   installedPackages <- T.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
   forM_ requiredPackages $ \pkg -> do
     when (not $ any ((pkg <> "-") `T.isPrefixOf`) installedPackages) $ do
@@ -477,7 +477,7 @@ checkRequiredPackages = shellyNoDir . silently $ do
 --      liftIO exitFailure
 
 prepareBaseBundle :: IO (B.ByteString, B.ByteString)
-prepareBaseBundle = shellyNoDir . silently . sub . withTmpDir $ \tmp -> do
+prepareBaseBundle = shellyE . silently . sub . withTmpDir $ \tmp -> do
   cp "test/TestLinkBase.hs" tmp
   cp "test/TestLinkMain.hs" tmp
   cd tmp
@@ -493,3 +493,12 @@ getEnvMay xs = fmap Just (getEnv xs)
 
 getEnvOpt :: MonadIO m => String -> m Bool
 getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)
+
+shellyE :: Sh a -> IO a
+shellyE m = do
+  r <- newIORef (Left undefined)
+  let wio r v = liftIO (writeIORef r v)
+  a <- shelly $ (wio r . Right =<< m) `catch_sh` \(e::C.SomeException) -> wio r (Left e)
+  readIORef r >>= \case
+                     Left e  -> C.throw e
+                     Right a -> return a
