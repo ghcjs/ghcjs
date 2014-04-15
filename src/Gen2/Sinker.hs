@@ -139,7 +139,7 @@ foldArgsA f (StgVarArg i) = StgVarArg <$> f i
 foldArgsA _ a             = pure a
 
 isLocal :: Id -> Bool
-isLocal i = isNothing (nameModule_maybe . idName $ i)
+isLocal i = isNothing (nameModule_maybe . idName $ i) && not (isExportedId i)
 
 {- | since we have sequential initialization,
      topsort the non-recursive constructor bindings
