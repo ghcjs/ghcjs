@@ -58,11 +58,12 @@ import           Compiler.Settings
 import           Compiler.Utils
 
 -- fixme, make frontend independent of backend
-import qualified Gen2.Object    as Object
-import qualified Gen2.PrimIface as Gen2
-import qualified Gen2.Shim      as Gen2
-import qualified Gen2.Rts       as Gen2
-import qualified Gen2.RtsTypes  as Gen2
+import qualified Gen2.Object      as Object
+import qualified Gen2.ClosureInfo as Gen2
+import qualified Gen2.PrimIface   as Gen2
+import qualified Gen2.Shim        as Gen2
+import qualified Gen2.Rts         as Gen2
+import qualified Gen2.RtsTypes    as Gen2
 
 
 {- |

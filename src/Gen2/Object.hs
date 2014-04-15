@@ -101,7 +101,10 @@ data Deps = Deps { depsPackage :: !Package
                  , depsDeps    :: Map Fun Int
                  }
 
-instance NFData Deps where rnf (Deps p m a d) = p `seq` m `seq` rnf a `seq` rnf d `seq` ()
+instance NFData Deps where rnf (Deps p m a d) = p     `seq`
+                                                m     `seq`
+                                                rnf a `seq`
+                                                rnf d `seq` ()
 
 data Fun = Fun { funPackage :: !Package
                , funModule  :: !Text
@@ -185,6 +188,7 @@ runPutS st ps = DB.runPutM (execStrictStateT ps st)
 -- one toplevel block in the object file
 data ObjUnit = ObjUnit { oiSymbols :: [Text]         -- toplevel symbols (stored in index)
                        , oiClInfo  :: [ClosureInfo]  -- closure information of all closures in block
+                       , oiStatic  :: [StaticInfo]   -- static closure data
                        , oiStat    :: JStat          -- the code
                        }
 
@@ -192,16 +196,21 @@ object :: Deps -> [ObjUnit] -> ByteString
 object ds units = object' symbs ds xs
   where
     (xs, symbs) = go emptySymbolTable units
-    go st0 (ObjUnit sy cl st : ys) =
-      let (st1, bs)  = serializeStat st0 cl st
+    go st0 (ObjUnit sy cl si st : ys) =
+      let (st1, bs)  = serializeStat st0 cl si st
           (bss, st2) = go st1 ys
       in  ((sy,bs):bss, st2)
     go st0 [] = ([], st0)
 
-serializeStat :: SymbolTable -> [ClosureInfo] -> JStat -> (SymbolTable, ByteString)
-serializeStat st ci s = let (st', bs) = runPutS st (put ci >> put s)
-                            bs' = B.toStrict bs
-                        in  (st', B.fromChunks [bs'])
+serializeStat :: SymbolTable
+              -> [ClosureInfo]
+              -> [StaticInfo]
+              -> JStat
+              -> (SymbolTable, ByteString)
+serializeStat st ci si s =
+  let (st', bs) = runPutS st (put ci >> put s >> put si) -- fixme order
+      bs' = B.toStrict bs
+  in  (st', B.fromChunks [bs'])
 
 object' :: SymbolTable -> Deps -> [([Text],ByteString)] -> ByteString
 object' st0 deps0 os = rnf deps0 `seq` (hdr <> symbs <> deps1 <> idx <> mconcat (map snd os))
@@ -286,13 +295,17 @@ readObjectKeys name p bs =
           bsobjs  = B.drop (fromIntegral $ idxLen hdr) bsidx
       in readObjectKeys' p (getSymbolTable bssymbs) bsidx bsobjs
 
-readObjectKeys' :: (Int -> [Text] -> Bool) -> SymbolTableR -> ByteString -> ByteString -> [ObjUnit]
+readObjectKeys' :: (Int -> [Text] -> Bool)
+                -> SymbolTableR
+                -> ByteString
+                -> ByteString
+                -> [ObjUnit]
 readObjectKeys' p st bsidx bsobjs = catMaybes (zipWith readObj [0..] idx)
     where
       idx = getIndex st bsidx
       readObj n (x,off)
-        | p n x     = let (ci, s) = runGetS st ((,) <$> get <*> get) (B.drop off bsobjs)
-                      in  Just (ObjUnit x ci s)
+        | p n x     = let (ci, s, si) = runGetS st ((,,) <$> get <*> get <*> get) (B.drop off bsobjs) -- fixme order!
+                      in  Just (ObjUnit x ci si s)
         | otherwise = Nothing
 
 getSymbolTable :: ByteString -> SymbolTableR
@@ -337,12 +350,15 @@ showObject :: [ObjUnit] -> TL.Text
 showObject xs = mconcat (zipWith showSymbol xs [0..])
   where
     showSymbol :: ObjUnit -> Int -> TL.Text
-    showSymbol (ObjUnit symbs cis stat) n
+    showSymbol (ObjUnit symbs cis sis stat) n -- fixme show static data
       | "h$debug" `elem` symbs =
            "/*\n" <> (TL.fromStrict $ T.unlines ( stat ^.. template . _JStr )) <> "\n*/\n"
       | otherwise = TL.unlines
         [ "// begin: [" <> TL.intercalate "," (map TL.fromStrict symbs) <> "] (" <> TL.pack (show n) <> ")"
         , displayT . renderPretty 0.8 150 . pretty $ (stat <> mconcat (map toStat cis))
+        , "/* static:"
+        , TL.pack (show sis)
+        , "end of static */"
         , "// end: [" <> TL.intercalate "," (map TL.fromStrict symbs) <> "]"
         ]
 
@@ -607,6 +623,11 @@ putIW16 i | i > 65535 || i < 0 = error ("putIW16: out of range: " ++ show i)
 getIW16 :: GetS Int
 getIW16 = lift (fmap fromIntegral DB.getWord16le)
 
+-- the binary instance stores ints as 64 bit
+instance Objectable Int where
+  put = lift . DB.put
+  get = lift DB.get
+
 instance Objectable Fun where
   put (Fun pkg modu symb) = put pkg >> put modu >> put symb
   get = Fun <$> get <*> get <*> get
@@ -631,3 +652,62 @@ instance Objectable Bool where
                       2 -> return True
                       n -> error ("Objectable get Bool: invalid tag: " ++ show n)
 
+instance Objectable StaticInfo where
+  put (StaticInfo ident val) = put ident >> put val
+  get = StaticInfo <$> get <*> get
+
+instance Objectable StaticVal where
+  put (StaticFun f)        = tag 1 >> put f
+  put (StaticThunk t)      = tag 2 >> put t
+  put (StaticUnboxed u)    = tag 3 >> put u
+  put (StaticData dc args) = tag 4 >> put dc >> put args
+  put (StaticList xs t)    = tag 5 >> put xs >> put t
+  get = getTag >>= \case
+                      1 -> StaticFun     <$> get
+                      2 -> StaticThunk   <$> get
+                      3 -> StaticUnboxed <$> get
+                      4 -> StaticData    <$> get <*> get
+                      5 -> StaticList    <$> get <*> get
+                      n -> error ("Objectable get StaticVal: invalid tag " ++ show n)
+
+instance Objectable StaticUnboxed where
+   put (StaticUnboxedBool b)   = tag 1 >> put b
+   put (StaticUnboxedInt i)    = tag 2 >> put i
+   put (StaticUnboxedDouble d) = tag 3 >> put d
+   get = getTag >>= \case
+                       1 -> StaticUnboxedBool   <$> get
+                       2 -> StaticUnboxedInt    <$> get
+                       3 -> StaticUnboxedDouble <$> get
+                       n -> error ("Objectable get StaticUnboxed: invalid tag " ++ show n)
+
+instance Objectable StaticArg where
+  put (StaticObjArg i)      = tag 1 >> put i
+  put (StaticLitArg p)      = tag 2 >> put p
+  put (StaticConArg c args) = tag 3 >> put c >> put args
+  get = getTag >>= \case
+                      1 -> StaticObjArg <$> get
+                      2 -> StaticLitArg <$> get
+                      3 -> StaticConArg <$> get <*> get
+                      n -> error ("Objectable get StaticArg: invalid tag " ++ show n)
+
+instance Objectable StaticLit where
+  put (BoolLit b)    = tag 1 >> put b
+  put (IntLit i)     = tag 2 >> put i
+  put NullLit        = tag 3
+  put (DoubleLit d)  = tag 4 >> put d
+  put (StringLit t)  = tag 5 >> put t
+  put (BinLit b)     = tag 6 >> put b
+  put (LabelLit b t) = tag 7 >> put b >> put t
+  get = getTag >>= \case
+                      1 -> BoolLit   <$> get
+                      2 -> IntLit    <$> get
+                      3 -> pure NullLit
+                      4 -> DoubleLit <$> get
+                      5 -> StringLit <$> get
+                      6 -> BinLit    <$> get
+                      7 -> LabelLit  <$> get <*> get
+                      n -> error ("Objectable get StaticLit: invalid tag " ++ show n)
+
+instance Objectable BS.ByteString where
+  put = lift . DB.put
+  get = lift DB.get

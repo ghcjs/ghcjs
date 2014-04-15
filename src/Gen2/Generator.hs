@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, QuasiQuotes, TupleSections, CPP, OverloadedStrings, LambdaCase #-}
+{-# LANGUAGE QuasiQuotes, TupleSections, CPP, OverloadedStrings, LambdaCase #-}
 
 {-
   Main generator module
@@ -78,6 +78,8 @@ import qualified Gen2.Optimizer as O
 import qualified Gen2.Object    as Object
 import           Gen2.Sinker
 
+import qualified Debug.Trace
+
 type StgPgm     = [StgBinding]
 type StaticRefs = [Id]
 
@@ -111,7 +113,7 @@ dumpAst st settings dflags s
   | buildingDebug dflags = (st', [(["h$debug", "h$dumpAst"], bs)])
   | otherwise        = (st, [])
       where
-        (st', bs) = Object.serializeStat st [] [j| h$dumpAst = `x` |]
+        (st', bs) = Object.serializeStat st [] [] [j| h$dumpAst = `x` |]
         x = (intercalate "\n\n" (map showIndent s))
 
 -- | variable prefix for the nth block in module
@@ -142,11 +144,12 @@ pass df m ss = go 1 Object.emptySymbolTable ss
         tl      <- genToplevel decl
         extraTl <- use gsToplevelStats
         ci      <- use gsClosureInfo
+        si      <- use gsStatic
         unf     <- use gsUnfloated
         resetToplevel
         let allDeps = collectIds unf decl
             topDeps = collectTopIds decl
-        (st', ss, bs) <- objectEntry m st topDeps ci
+        (st', ss, bs) <- objectEntry m st topDeps ci si
                            . O.optimize
                            . jsSaturate (Just $ modulePrefix m n)
                            $ mconcat (reverse extraTl) <> tl
@@ -157,11 +160,12 @@ objectEntry :: Module
             -> Object.SymbolTable
             -> [Id]
             -> [ClosureInfo]
+            -> [StaticInfo]
             -> JStat
             -> G (Object.SymbolTable, [Text], BL.ByteString)
-objectEntry m st i ci stat = do
+objectEntry m st i ci si stat = do
   i' <- mapM idStr i
-  let (st', o) = Object.serializeStat st ci stat
+  let (st', o) = Object.serializeStat st ci si stat
   rnf i' `seq` rnf o `seq` return (st', i', o)
     where
       idStr i = itxt <$> jsIdI i
@@ -237,17 +241,24 @@ modulePackageText m
     (n, v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
 
 genToplevel :: StgBinding -> C
-genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs False
+genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs
 genToplevel (StgRec bs)          =
-  mconcat $ map (\(bndr, rhs) -> genToplevelDecl bndr rhs True) bs
+  mconcat $ map (\(bndr, rhs) -> genToplevelDecl bndr rhs) bs
 
 lookupStaticRefs :: Id -> [(Id, [Id])] -> StaticRefs
 lookupStaticRefs i xs = fromMaybe [] (lookup i xs)
 
-genToplevelDecl :: Id -> StgRhs -> Bool -> C
-genToplevelDecl i rhs isRecursive = do
+-- entry function of the worker
+enterDataCon :: DataCon -> G JExpr
+enterDataCon d = jsDcEntryId (dataConWorkId d)
+
+enterDataConI :: DataCon -> G Ident
+enterDataConI d = jsDcEntryIdI (dataConWorkId d)
+
+genToplevelDecl :: Id -> StgRhs -> C
+genToplevelDecl i rhs = do
   s1 <- resetSlots (genToplevelConEntry i rhs)
-  s2 <- resetSlots (genToplevelRhs i rhs isRecursive)
+  s2 <- resetSlots (genToplevelRhs i rhs)
   addInitialized i
   return (s1 <> s2)
 
@@ -272,59 +283,35 @@ getStaticRef = fmap (itxt.head) . genIdsI
 
 genToplevelRhs :: Id
                -> StgRhs
-               -> Bool   -- ^ is this a recursive binding group?
                -> C
-genToplevelRhs i (StgRhsCon _cc con args) isRecursive
-  | isBoolTy (dataConType con) && dataConTag con == 1 =
-      declIds i <> ((\id -> [j| `id` = false; |]) <$> jsId i)
-  | isBoolTy (dataConType con) && dataConTag con == 2 =
-      declIds i <> ((\id -> [j| `id` = true;  |]) <$> jsId i)
-  | [x] <- args, isUnboxableCon con = do
-      [a] <- genArg x
-      id  <- jsId i
-      declIds i <> return [j| `id` = `a`; |]
-  | otherwise =
-    typeComment i <>
-    do
-      id <- jsIdI i
-      eid <- jsEntryIdI i
-      ec <- enterDataCon con
-      return (decl eid <> [j| `eid` = `ec` |]) <> declIds i <> allocConStatic id con args isRecursive
-genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) _ = do
-        eid <- jsEnIdI i
-        eid' <- jsEnId i
-        idi <- jsIdI i
-        id  <- jsIdI i
+genToplevelRhs i (StgRhsCon _cc con args) = do
+  ii <- jsIdI i
+  allocConStatic ii con args
+  return mempty
+genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) = do
+        eid@(TxtI eidt) <- jsEnIdI i
+        id@(TxtI idt)   <- jsIdI i
         body0 <- genBody i [] body Updatable i
-        tci <- typeComment i
+--        tci <- typeComment i
         sr <- genStaticRefs srt
         cs <- use gsCgSettings
         -- fixme can we skip the first reg here?
-        emitClosureInfo (ClosureInfo (itxt eid) (CIRegs 0 [PtrV]) (itxt idi) (CILayoutFixed 0 []) CIThunk sr)
-        return [j| `tci`;
-                   `decl eid`;
-                   `eid` = `JFunc funArgs (preamble <> updateThunk cs <> body0)`;
-                   `decl id`;
-                   `id` = h$static_thunk(`eid`);
-                 |]
-genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) _ = do
-        eid <- jsEnIdI i
-        eid' <- jsEnId i
-        idi <- jsIdI   i
-        id  <- jsId i
+        emitClosureInfo (ClosureInfo eidt (CIRegs 0 [PtrV]) idt (CILayoutFixed 0 []) CIThunk sr)
+        emitStatic idt (StaticThunk eidt)
+        return $ decl eid <> [j| `eid` = `JFunc funArgs (preamble <> updateThunk cs <> body0)`; |]
+
+genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
+        eid@(TxtI eidt) <- jsEnIdI i
+        id@(TxtI idt) <- jsIdI i
         body0 <- genBody i args body upd_flag i
         et <- genEntryType args
-        tci <- typeComment i
+--        tci <- typeComment i
         sr <- genStaticRefs srt
-        emitClosureInfo (ClosureInfo (itxt eid)
+        emitClosureInfo (ClosureInfo eidt
                            (CIRegs 1 $ concatMap idVt args)
-                           (itxt idi) (CILayoutFixed 0 []) et sr)
-        return [j| `tci`;
-                   `decl eid`;
-                   `eid` = `JFunc funArgs (preamble <> body0)`;
-                   `decl idi`;
-                   `id` = h$static_fun(`eid`);
-                 |]
+                           idt (CILayoutFixed 0 []) et sr)
+        emitStatic idt (StaticFun eidt)
+        return $ decl eid <> [j| `eid` = `JFunc funArgs (preamble <> body0)`; |]
 
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
@@ -471,7 +458,6 @@ genApp force mstackTop i a
       return $ mconcat $ zipWith (\r u -> [j| `r`=`u`; |]) (enumFrom R1) ids
     n = length a
 
-
 pushCont :: [StgArg] -> C
 pushCont as = do
   as' <- concatMapM genArg as
@@ -575,8 +561,6 @@ allocCls xs = do
       ii <- jsIdI i
       Left <$> (allocCon ii con =<< genArg a)
     toCl (i, StgRhsCon _cc con ar) = Right <$> ((,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar)  -- fixme do we need to handle unboxed?
---    toCl (i, StgRhsClosure _cc _bi live Updatable _srt _args _body) =
---        Right (jsIdI i, updateEntry live, map jsId live)
     toCl (i, StgRhsClosure _cc _bi live upd_flag _srt _args _body) =
         Right <$> ((,,) <$> jsIdI i <*> jsEntryId i <*> concatMapM genIds live)
 
@@ -757,7 +741,6 @@ optimizeFree ids = do
 
 pushRetArgs :: [(Id,Int,Bool)] -> JExpr -> C
 pushRetArgs free fun = do
---  c <- comment . ("slots: " ++) . show <$> (mapM showSlot =<< getSlots)
   p <- pushOptimized . (++[(fun,False)]) =<< mapM (\(i,n,b) -> (\es->(es!!(n-1),b)) <$> genIdArg i) free
 --  p <- push . (++[fun]) =<< mapM (\(i,n,b) -> (\es->es!!(n-1)) <$> genIdArg i) free
   return ({- c <> -} p)
@@ -780,9 +763,6 @@ genAlts top e (PrimAlt tc) [(_, bs, use, expr)] = do
 {-  loadParams ie bs use <> -}
   bss <- concatMapM genIds bs
   mconcat (map declIds bs) <> return (assignAll bss ie) <> genExpr top expr
--- fixme: for 2-value arguments use more regs
--- fixme this switch is wrong
--- genAlts top e (PrimAlt tc) alts = mkSwitch [je| `Heap`[`R1`] |] <$> mapM (mkPrimBranch top (tyConVt tc)) alts
 genAlts top e (PrimAlt tc) alts = do
   ie <- genIds e
   mkSw ie <$> mapM (mkPrimIfBranch top (tyConVt tc)) alts
@@ -811,31 +791,6 @@ genAlts top e (AlgAlt tc) alts
 genAlts top e a l = do
   ap <- showPpr' a
   error $ "genAlts: unhandled case variant: " ++ ap ++ " (" ++ show (length l) ++ ")"
-{-
-checkClosure :: Id -> JStat
-checkClosure i
-  | rtsChecks = [j| var |]
-  | otherwise = mempty
-  where
-    t        = idType i
-    actual   = [je| `Heap`[`jsId i`].n |]
-    expected = 
--}
--- check that the constructor we get is the one we expect
-checkAlgBranch :: StgAlt -> Id -> C
-checkAlgBranch ((DataAlt dc),_,_,_) i
-{-
-  | rtsChecks && not (isTup dc || isPrimTyCon (dataConTyCon dc) || "#" `L.isSuffixOf` expected) = do
-      actual <- (\ii -> [je| `Heap`[`ii`].n |]) <$> jsId i
-      return [j| if(`expected` !== `actual`) {
-                   throw(`"wrong pattern match, expected: " ++ expected ++ " got: "` + `actual`);
-                 }
-               |] -}
-  | otherwise = mempty
-  where  expected = show dc
-         isTup = isTupleDataCon
-
-checkAlgBranch _ _ = mempty
 
 loadUbxTup :: [Id] -> Int -> C
 loadUbxTup bs n = do
@@ -851,19 +806,15 @@ mkSw es cases = mkIfElse es cases
 -- switch for pattern matching on constructors or prims
 mkSwitch :: JExpr -> [(Maybe JExpr, JStat)] -> JStat
 mkSwitch e cases
-    | [(Just c1,s1)] <- n, [(_,s2)] <- d = checkIsCon e <> IfStat [je| `e` === `c1` |] s1 s2
-    | [(Just c1,s1),(_,s2)] <- n, null d = checkIsCon e <> IfStat [je| `e` === `c1` |] s1 s2
-    | null d        = checkIsCon e <> SwitchStat e (map addBreak (init n)) (snd $ last n)
-    | [(_,d0)] <- d = checkIsCon e <> SwitchStat e (map addBreak n) d0
+    | [(Just c1,s1)] <- n, [(_,s2)] <- d = IfStat [je| `e` === `c1` |] s1 s2
+    | [(Just c1,s1),(_,s2)] <- n, null d = IfStat [je| `e` === `c1` |] s1 s2
+    | null d        = SwitchStat e (map addBreak (init n)) (snd $ last n)
+    | [(_,d0)] <- d = SwitchStat e (map addBreak n) d0
     | otherwise     = error "mkSwitch: multiple default cases"
     where
       addBreak (Just c,s) = (c, s) -- [j| `s`; break |]) -- fixme: rename, does not add break anymore
       addBreak _          = error "mkSwitch: addBreak"
       (n,d) = partition (isJust.fst) cases
-
-checkIsCon :: JExpr -> JStat
--- checkIsCon e = assertRts [je| `e` !== undefined |] ("unexpected undefined, expected datacon or prim"::String)
-checkIsCon _ = mempty -- fixme
 
 -- if/else for pattern matching on things that js cannot switch on
 mkIfElse :: [JExpr] -> [(Maybe [JExpr], JStat)] -> JStat
@@ -983,8 +934,6 @@ genArg a@(StgVarArg i) = do
 
      unfloated :: StgExpr -> G [JExpr]
      unfloated (StgLit l) = genLit l
---     unfloated (StgConApp dc [h,t])
---       | dc == consDataCon = (:[]) <$> allocateList [h] t
      unfloated (StgConApp dc args)
        | isBoolTy (dataConType dc) || isUnboxableCon dc =
            (:[]) . allocUnboxedCon dc . concat <$> mapM genArg args
@@ -996,38 +945,55 @@ genArg a@(StgVarArg i) = do
            return [allocDynamicE cs e as]
      unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
 
-allocateList :: [StgArg] -> StgArg -> G JExpr
-allocateList xs a@(StgVarArg i)
+genStaticArg :: StgArg -> G [StaticArg]
+genStaticArg (StgLitArg l) = map StaticLitArg <$> genStaticLit l
+genStaticArg a@(StgVarArg i) = do
+  unFloat <- use gsUnfloated
+  case lookupUFM unFloat i of
+    Nothing -> reg
+    Just expr -> unfloated expr
+   where
+     r = uTypeVt . stgArgType $ a
+     reg
+       | isVoid r            = return []
+       | i == trueDataConId  = return [StaticLitArg (BoolLit True)]
+       | i == falseDataConId = return [StaticLitArg (BoolLit False)]
+       | isMultiVar r = map (\(TxtI t) -> StaticObjArg t) <$> mapM (jsIdIN i) [1..varSize r] -- this seems wrong, not an obj?
+       | otherwise    = (\(TxtI it) -> [StaticObjArg it]) <$> jsIdI i
+
+     unfloated :: StgExpr -> G [StaticArg]
+     unfloated (StgLit l) = map StaticLitArg <$> genStaticLit l
+     unfloated (StgConApp dc args)
+       | isBoolTy (dataConType dc) || isUnboxableCon dc =
+           (:[]) . allocUnboxedConStatic dc . concat <$> mapM genStaticArg args -- fixme what is allocunboxedcon?
+       | null args = (\(TxtI t) -> [StaticObjArg t]) <$> jsIdI (dataConWorkId dc)
+       | otherwise = do
+           as       <- concat <$> mapM genStaticArg args
+           (TxtI e) <- enterDataConI dc
+           return [StaticConArg e as]
+     unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
+
+allocateStaticList :: [StgArg] -> StgArg -> G StaticVal
+allocateStaticList xs a@(StgVarArg i)
   | isDataConId_maybe i == Just nilDataCon = listAlloc xs Nothing
   | otherwise = do
       unFloat <- use gsUnfloated
       case lookupUFM unFloat i of
         Just (StgConApp dc [h,t])
-          | dc == consDataCon -> allocateList (h:xs) t
+          | dc == consDataCon -> allocateStaticList (h:xs) t
         _ -> listAlloc xs (Just a)
   where
-    listAlloc :: [StgArg] -> Maybe StgArg -> G JExpr
-    -- use regular allocator for one element
-    listAlloc [h] (Just t) = do
-      as <- concat <$> mapM genArg [h,t]
-      c  <- jsDcEntryId (dataConWorkId consDataCon)
-      cs <- use gsCgSettings
-      return $ allocDynamicE cs c as
-    listAlloc [h] Nothing = do
-      as <- concat <$> mapM genArg [h,StgVarArg (dataConWorkId nilDataCon)]
-      c  <- jsDcEntryId (dataConWorkId consDataCon)
-      cs <- use gsCgSettings
-      return $ allocDynamicE cs c as
+    listAlloc :: [StgArg] -> Maybe StgArg -> G StaticVal
     listAlloc xs Nothing  = do
-      as <- concat . reverse <$> mapM genArg xs
-      return [je| h$cl(`as`) |]
+      as <- concat . reverse <$> mapM genStaticArg xs
+      return (StaticList as Nothing)
     listAlloc xs (Just r) = do
-      as <- concat . reverse <$> mapM genArg xs
-      rs <- genArg r
-      case rs of
-        [r] -> return [je| h$clr(`as`,`r`) |]
-        _   -> error "allocateList: unexpected multi-var list tail"
-allocateList _ _ = error "allocateList: unexpected literal in list"
+      as <- concat . reverse <$> mapM genStaticArg xs
+      r' <- genStaticArg r
+      case r' of
+        [StaticObjArg ri] -> return (StaticList as (Just ri))
+        _                 -> error ("allocateStaticList: invalid argument (tail): " ++ show xs ++ " " ++ show r)
+allocateStaticList _ _ = error "allocateStaticList: unexpected literal in list"
 
 -- generate arg to be passed to FFI call, with marshalling JStat to be run before the call
 -- currently marshalling:
@@ -1046,47 +1012,6 @@ genFFIArg a@(StgVarArg i)
     | otherwise                 = (\x -> (mempty,[x])) <$> jsId i
    where
      r = uTypeVt . stgArgType $ a
-
--- Ptr JSChar
-isJSCStringType :: Type -> Bool
-isJSCStringType t
-  | Just {-[p]-}(p:_) <- matchTyCon "base:GHC.Ptr.Ptr" t = isJSCharType p
-  | otherwise = False
-
--- ghcjs-base:GHCJS.Types.JSChar
-isJSCharType :: Type -> Bool
-isJSCharType t
-  | Just {-[]-}_ <- matchTyCon "ghcjs-base:GHCJS.Types.JSChar" t = True
-  | otherwise = False
-
-getTyCon :: Type -> String
-getTyCon t = case repType t of
-                    UnaryRep ut -> case splitTyConApp_maybe ut of
-                      Just (tc,args) -> show (tyConName tc) ++ " " ++ show (map getTyCon args)
-                      _ -> ""
-                    _ -> ""
--- match a type constructor, looking through predicates, synonyms, foralls,
--- but not through newtypes
--- return args
-matchTyCon :: String -> Type -> Maybe [Type]
-matchTyCon xs t = case repType' t of
-                    UnaryRep ut -> case splitTyConApp_maybe ut of
-                      Just (tc,args) -> Just args -- | show (tyConName tc) == xs -> Just args
-                      _ -> Nothing
-                    _ -> Nothing
-  where
-    repType' :: Type -> RepType
-    repType' ty = go emptyNameSet ty
-      where
-        go :: NameSet -> Type -> RepType
-        go rec_nts ty
-          | Just ty' <- coreView ty = go rec_nts ty' -- Expand predicates and synonyms
-          | Just (_, ty') <- splitForAllTy_maybe ty = go rec_nts ty' -- Drop foralls
-          | Just (tc, tys) <- splitTyConApp_maybe ty, isUnboxedTupleTyCon tc =
-               if null tys
-                 then UnaryRep realWorldStatePrimTy
-                 else UbxTupleRep (concatMap (flattenRepType . go rec_nts) tys) -- fixme this part does look through newtype
-          | otherwise = UnaryRep ty
 
 genIdArg :: Id -> G [JExpr]
 genIdArg i
@@ -1140,6 +1065,23 @@ genLit (MachLabel name size fod)
   | otherwise         = return [ iex (TxtI . T.pack $ "h$" ++ unpackFS name), [je| 0 |] ]
 genLit (LitInteger i id) = return [ [je| `i` |] ] -- fixme, convert to bytes and JSBN int?
 
+-- | generate a literal for the static init tables
+genStaticLit :: Literal -> G [StaticLit]
+genStaticLit (MachChar c)         = return [ IntLit (fromIntegral $ ord c) ]
+genStaticLit (MachStr  str)       =
+  case T.decodeUtf8' str of
+                         Right t -> return [ StringLit t, IntLit 0 ]
+                         Left _  -> return [ BinLit str, IntLit 0]
+genStaticLit MachNullAddr         = return [ NullLit, IntLit 0 ]
+genStaticLit (MachInt i)          = return [ IntLit (fromIntegral i) ]
+genStaticLit (MachInt64 i)        = return [ IntLit (i `shiftR` 32), IntLit (toSigned i) ]
+genStaticLit (MachWord w)         = return [ IntLit (toSigned w) ]
+genStaticLit (MachWord64 w)       = return [ IntLit (toSigned (w `shiftR` 32)), IntLit (toSigned w) ]
+genStaticLit (MachFloat r)        = return [ DoubleLit . SaneDouble . r2d $ r ]
+genStaticLit (MachDouble r)       = return [ DoubleLit . SaneDouble . r2d $ r ]
+genStaticLit (MachLabel name _size fod) =
+  return [ LabelLit (fod == IsFunction) (T.pack $ "h$" ++ unpackFS name) , IntLit 0 ]
+
 -- make a signed 32 bit int from this unsigned one, lower 32 bits
 toSigned :: Integer -> Integer
 toSigned i | testBit i 31 = complement (0x7FFFFFFF `xor` (i.&.0x7FFFFFFF))
@@ -1165,10 +1107,6 @@ genCon con args
                  return `Stack`[`Sp`];
                |]
 
--- entry function of the worker
-enterDataCon :: DataCon -> G JExpr
-enterDataCon d = jsDcEntryId (dataConWorkId d)
-
 allocCon :: Ident -> DataCon -> [JExpr] -> C
 allocCon to con xs
   | isBoolTy (dataConType con) || isUnboxableCon con = do
@@ -1189,50 +1127,43 @@ allocUnboxedCon con [x]
   | isUnboxableCon con = x
 allocUnboxedCon con _ = error ("allocUnboxedCon: not an unboxed constructor: " ++ show con)
 
-allocConStatic :: Ident -> DataCon -> [GenStgArg Id] -> Bool -> C
-allocConStatic to con args isRecursive = do
-  as <- mapM genArg args
-  allocConStatic' . concat $ as
+allocUnboxedConStatic :: DataCon -> [StaticArg] -> StaticArg
+allocUnboxedConStatic con []
+  | isBoolTy (dataConType con) && dataConTag con == 1      = StaticLitArg (BoolLit False)
+  | isBoolTy (dataConType con) && dataConTag con == 2      = StaticLitArg (BoolLit True)
+allocUnboxedConStatic _   [a@(StaticLitArg (IntLit i))]    = a
+allocUnboxedConStatic _   [a@(StaticLitArg (DoubleLit d))] = a
+allocUnboxedConStatic con _                                =
+  error ("allocUnboxedConStatic: not an unboxed constructor: " ++ show con)
+
+allocConStatic :: Ident -> DataCon -> [GenStgArg Id] {- -> Bool -} -> G ()
+allocConStatic (TxtI to) con args -- isRecursive
+{-  | Debug.Trace.trace ("allocConStatic: " ++ show to ++ " " ++ show con ++ " " ++ show args) True -} = do
+  as <- mapM genStaticArg args
+  allocConStatic' (concat as)
   where
+    allocConStatic' :: [StaticArg] -> G ()
     allocConStatic' []
       | isBoolTy (dataConType con) && dataConTag con == 1 =
-        return [j| `to` = false; |]
+           emitStatic to $ StaticUnboxed (StaticUnboxedBool False)
       | isBoolTy (dataConType con) && dataConTag con == 2 =
-        return [j| `to` = true;  |]
+           emitStatic to $ StaticUnboxed (StaticUnboxedBool True)
       | otherwise = do
-        e <- enterDataCon con
-        return [j| `to` = h$c(`e`); |]
+           (TxtI e) <- enterDataConI con
+           emitStatic to (StaticData e [])
     allocConStatic' [x]
-      | isUnboxableCon con = return [j| `to` = `x` |]
-    allocConStatic' xs = do
-      mod <- use gsModule
-      ini <- use gsInitialised
-      unf <- use gsUnfloated
-      if any (argNeedDelayed mod unf ini) args then do
-        e <- enterDataCon con
-        return [j| `to` = h$c(`e`);
-                 h$sti(\ -> `toJExpr to:xs`);
-               |]
-      else do
-        if con == consDataCon
-          then do
-            e <- allocateList [args !! 0] (args !! 1)
-            return [j| `to` = `e`; |]
-          else do
-            e <- enterDataCon con
-            cs <- use gsCgSettings
-            return (allocDynamic cs False to e xs)
-
--- we track what variables we have already initialized
-argNeedDelayed :: Module -> UniqFM StgExpr -> VarSet -> StgArg -> Bool
-argNeedDelayed _ _ _ (StgLitArg{}) = False
-argNeedDelayed mod unfloat initialised a@(StgVarArg i)
-  | isLocalId = case lookupUFM unfloat i of
-                  Nothing -> not (elementOfUniqSet i initialised)
-                  Just _  -> False -- we inline init, so it's ok
-  | otherwise = needDelayedInit mod a
-  where
-    isLocalId = maybe True (== mod) (nameModule_maybe . idName $ i)
+      | isUnboxableCon con =
+        case x of
+          StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i)
+          StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b)
+          StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d)
+          _                          -> error $ "allocConStatic: invalid unboxed literal: " ++ show x
+    allocConStatic' xs =
+           if con == consDataCon
+              then emitStatic to =<< allocateStaticList [args !! 0] (args !! 1)
+              else do
+                (TxtI e) <- enterDataConI con
+                emitStatic to (StaticData e xs)
 
 -- avoid one indirection for global ids
 -- fixme in many cases we can also jump directly to the entry for local?
@@ -1447,9 +1378,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
          return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as++[cb])
       | (ts@(_:_)) <- tgt = do
          (stats, as) <- unzip <$> mapM genFFIArg args
-         (statR, (t:ts')) <- return (mempty, ts) {- case marshalFFIRet ts t of
-                                                      Nothing -> return (mempty, ts)
-                                                      Just m  -> m -}
+         (statR, (t:ts')) <- return (mempty, ts)
          cs <- use gsCgSettings
          return $ traceCall cs as
                 <> mconcat stats

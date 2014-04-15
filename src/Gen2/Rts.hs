@@ -231,14 +231,14 @@ rts s = jsSaturate (Just "h$RTS") (rts' s)
 rts' :: CgSettings -> JStat
 rts' s = [j|
 
-var !h$currentThread = null;      // thread state object for current thread
-var !h$stack         = null;      // stack for the current thread
-var !h$sp            = 0;         // stack pointer for the current thread
+var !h$currentThread   = null;      // thread state object for current thread
+var !h$stack           = null;      // stack for the current thread
+var !h$sp              = 0;         // stack pointer for the current thread
 
-var !h$initStatic = [];           // we need delayed initialization for static objects, push functions here
-                                  // to be initialized just before haskell runs
-var !h$staticThunks    = {};      // funcName -> heapidx map for srefs
-var !h$staticThunksArr = [];      // indices of updatable thunks in static heap
+var !h$initStatic      = [];        // we need delayed initialization for static objects, push functions here
+                                    // to be initialized just before haskell runs
+var !h$staticThunks    = {};        // funcName -> heapidx map for srefs
+var !h$staticThunksArr = [];        // indices of updatable thunks in static heap
 
 // stg registers
 `declRegs`;
@@ -542,11 +542,8 @@ fun h$setObjInfo o typ name fields a size regs srefs {
   o.n    = name;
   o.a    = a;
   o.r    = regs;        // active registers
-  o.s    = null;
+  o.s    = srefs;
   o.m    = 0;           // placeholder for uniqe idents
-  if(srefs !== null) {
-    h$initStatic.push(\x { o.s = srefs(); });
-  }
   o.size = size;
 }
 
@@ -663,7 +660,7 @@ fun h$init_closure c xs {
   }
 }
 
-fun h$run_init_static {
+fun h$runInitStatic {
   if(h$initStatic.length == 0) return;
   for(var i=h$initStatic.length - 1;i>=0;i--) {
     h$initStatic[i]();
@@ -712,7 +709,9 @@ fun h$printReg r {
   if(r === null) {
     return "null";
   } else if(typeof r === 'object' && r.hasOwnProperty('f') && r.hasOwnProperty('d1') && r.hasOwnProperty('d2')) {
-    if(r.f.t === `Blackhole` && r.x) {
+    if(typeof(r.f) !== 'function') {
+      return "dodgy object";
+    } else if(r.f.t === `Blackhole` && r.x) {
       return ("blackhole: -> " + h$printReg({ f: r.x.x1, d: r.d1.x2 }) + ")");
     } else {
       return (r.f.n + " (" + h$closureTypeName(r.f.t) + ", " + r.f.a + ")");
@@ -807,12 +806,16 @@ fun h$dumpStackTop stack start sp {
              if(s === null) {
                h$log("stack[" + i + "] = null WARNING DANGER");
              } else if(typeof s === 'object' && s !== null && s.hasOwnProperty("f") && s.hasOwnProperty("d1") && s.hasOwnProperty("d2")) {
-               if(s.d1 === undefined) { h$log("WARNING: stack[" + i + "] d1 undefined"); }
-               if(s.d2 === undefined) { h$log("WARNING: stack[" + i + "] d2 undefined"); }
-               if(s.f.t === `Blackhole` && s.d1 && s.d1.x1 && s.d1.x1.n) {
-                 h$log("stack[" + i + "] = blackhole -> " + s.d1.x1.n);
+               if(typeof(s.f) !== 'function') {
+                 h$log("stack[" + i + "] = WARNING: dodgy object");
                } else {
-                 h$log("stack[" + i + "] = -> " + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
+                 if(s.d1 === undefined) { h$log("WARNING: stack[" + i + "] d1 undefined"); }
+                 if(s.d2 === undefined) { h$log("WARNING: stack[" + i + "] d2 undefined"); }
+                 if(s.f.t === `Blackhole` && s.d1 && s.d1.x1 && s.d1.x1.n) {
+                   h$log("stack[" + i + "] = blackhole -> " + s.d1.x1.n);
+                 } else {
+                   h$log("stack[" + i + "] = -> " + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
+                 }
                }
              } else if(h$isInstanceOf(s,h$MVar)) {
                var val = s.val ===

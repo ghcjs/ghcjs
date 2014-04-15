@@ -1,5 +1,7 @@
 {-# LANGUAGE QuasiQuotes,
+             BangPatterns,
              ScopedTypeVariables,
+             TemplateHaskell,
              OverloadedStrings #-}
 
 {-
@@ -25,10 +27,14 @@ import qualified Data.Binary.Get as DB
 import qualified Data.Binary.Put as DB
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BL
-import           Data.Char (chr)
+import qualified Data.ByteString as BS
+import           Data.Char (chr, ord)
 import           Data.Function (on)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
+import           Data.HashSet (HashSet)
+import qualified Data.HashSet as HS
+import           Data.Int
 import           Data.List
 import           Data.Map (Map)
 import qualified Data.Map as M
@@ -46,92 +52,177 @@ import           Gen2.ClosureInfo
 import           Gen2.Object
 import qualified Gen2.Optimizer as Optimizer
 
-compact :: GhcjsSettings
-        -> DynFlags
-        -> RenamerState
-        -> [(JStat,[ClosureInfo])]
-        -> (RenamerState, [JStat],JStat)
-compact settings dflags rs input =
-  renameInternals settings dflags rs input
+import qualified Debug.Trace
 
-data RenamerState = RenamerState [Ident] (HashMap Text Ident)
+data CompactorState =
+  CompactorState { _identSupply   :: [Ident]               -- | ident supply for new names
+                 , _nameMap       :: !(HashMap Text Ident) -- | renaming mapping for internal names
+                 , _entries       :: !(HashMap Text Int)   -- | entry functions (these get listed in the metadata init array)
+                 , _numEntries    :: !Int
+                 , _statics       :: !(HashMap Text Int)   -- | mapping of global closure -> index in current block, for static initialisation
+                 , _numStatics    :: !Int                  -- | number of static entries
+                 , _parentEntries :: !(HashMap Text Int)   -- | entry functions we're not linking, offset where parent gets [0..n], grantparent [n+1..k] etc
+                 , _parentStatics :: !(HashMap Text Int)   -- | objects we're not linking in base bundle
+                 } deriving (Show)
+
+makeLenses ''CompactorState
 
 renamedVars :: [Ident]
 renamedVars = map (\(TxtI xs) -> TxtI ("h$$"<>xs)) Optimizer.newLocals
 
-emptyRenamerState :: RenamerState
-emptyRenamerState = RenamerState renamedVars HM.empty
+emptyCompactorState :: CompactorState
+emptyCompactorState = CompactorState renamedVars HM.empty HM.empty 0 HM.empty 0 HM.empty HM.empty
+
+-- | make a base state from a CompactorState: empty the current symbols sets, move everything to
+--   the parent
+makeCompactorParent :: CompactorState -> CompactorState
+makeCompactorParent (CompactorState is nm es nes ss nss pes pss) =
+  CompactorState is nm HM.empty 0 HM.empty 0 (HM.union (fmap (+nes) pes) es) (HM.union (fmap (+nss) pss) ss)
+
+-- | collect global objects (data / CAFs). rename them and add them to the table
+collectGlobals :: [StaticInfo]
+               -> State CompactorState ()
+collectGlobals = mapM_ (\(StaticInfo i _) -> renameObj i)
 
 renameInternals :: GhcjsSettings
                 -> DynFlags
-                -> RenamerState
-                -> [(JStat,[ClosureInfo])]
-                -> (RenamerState, [JStat], JStat)
-renameInternals settings dflags rs stats = (rs', stats', meta)
+                -> CompactorState
+                -> [(JStat, [ClosureInfo], [StaticInfo])]
+                -> (CompactorState, [JStat], JStat)
+renameInternals settings dflags cs0 stats0 = (cs, stats, meta)
   where
-    ((stats', meta), rs') = runState renamed rs
-    renamed = (,) <$> mapM doRename stats <*> metadata (stats >>= snd)
-    doRename (stat, ci)
+    ((stats, meta), cs) = runState renamed cs0
+    renamed :: State CompactorState ([JStat], JStat)
+    renamed
       | buildingDebug dflags = do
-         rci <- renderClosureInfo settings dflags ci
-         return (stat <> rci)
-      | otherwise = identsS renameVar stat
-    metadata cis
-      | buildingDebug dflags = return mempty -- encoded for each block separately
-      | otherwise        = renderClosureInfo settings dflags cis
+        cs <- get
+        let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs) stats0
+            statics      = map (renameStaticInfo cs)  $ concatMap (\(_,_,x) -> x) stats0
+            infos        = map (renameClosureInfo cs) $ concatMap (\(_,x,_) -> x) stats0
+            -- render metadata as individual statements
+            meta = mconcat (map staticDeclStat statics) <>
+                   mconcat (map staticInitStat statics) <>
+                   mconcat (map (closureInfoStat True) infos)
+        return (renamedStats, meta)
+      | otherwise = do
+        -- collect all global objects and entries, add them to the renaming table
+        mapM_ (\(_, cis, sis) -> do
+               mapM_ (renameEntry . TxtI . ciVar) cis
+               mapM_ (renameObj . siVar) sis) stats0
+        -- sort our entries, store the results
+        -- propagate all renamings throughtout the code
+        cs <- get
+        let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs) stats0
+            sortedInfo   = concatMap (\(_,xs,_) -> map (renameClosureInfo cs) xs) stats0
+            entryArr     = map (TxtI . fst) . sortBy (compare `on` snd) . HM.toList $ cs ^. entries
+            ss           = concatMap (\(_,_,xs) -> map (renameStaticInfo cs) xs) stats0
+            infoBlock    = encodeStr (concatMap (encodeInfo cs) sortedInfo)
+            staticBlock  = encodeStr (concatMap (encodeStatic cs) ss)
+            staticDecls  = mconcat (map staticDeclStat ss)
+            meta = staticDecls <>
+                   [j| h$scheduleInit(`entryArr`, h$staticDelayed, `infoBlock`, `staticBlock`);
+                       h$staticDelayed = [];
+                     |]
+        return (renamedStats, meta)
 
-renameVar :: Ident -> State RenamerState Ident
-renameVar i@(TxtI xs)
-  | "h$$" `T.isPrefixOf` xs = do
-      (RenamerState (y:ys) m) <- get
-      case HM.lookup xs m of
+
+-- | rename a heap object, which means adding it to the
+--  static init table in addition to the renamer
+renameObj :: Text
+          -> State CompactorState Text
+renameObj xs = do
+  (TxtI xs') <- renameVar (TxtI xs)
+  addStatic xs'
+  return xs'
+
+addStatic :: Text
+          -> State CompactorState ()
+addStatic i = do
+  s <- use statics
+  case HM.lookup i s of
+    Just _  -> return ()
+    Nothing -> do
+      ns <- use numStatics
+      statics %= HM.insert i ns
+      numStatics += 1
+
+renameEntry :: Ident
+            -> State CompactorState Ident
+renameEntry i = do
+  i'@(TxtI i'') <- renameVar i
+  addEntry i''
+  return i'
+
+addEntry :: Text
+         -> State CompactorState ()
+addEntry i = do
+  s <- use entries
+  case HM.lookup i s of
+    Just _  -> return ()
+    Nothing -> do
+      ne <- use numEntries
+      entries %= HM.insert i ne
+      numEntries += 1
+
+lookupRenamed :: CompactorState -> Ident -> Ident
+lookupRenamed cs i@(TxtI t) =
+  case HM.lookup t (cs ^. nameMap) of
+    Nothing -> i
+    Just i' -> i'
+
+renameVar :: Ident                      -- ^ text identifier to rename
+          -> State CompactorState Ident -- ^ the updated renamer state and the new ident
+renameVar i@(TxtI t)
+  | "h$$" `T.isPrefixOf` t = do
+      m <- use nameMap
+      case HM.lookup t m of
         Just r  -> return r
-        Nothing -> put (RenamerState ys (HM.insert xs y m)) >> return y
+        Nothing -> do
+          y <- newIdent
+          nameMap %= HM.insert t y
+          return y
   | otherwise = return i
 
+newIdent :: State CompactorState Ident
+newIdent = do
+  (y:ys) <- use identSupply
+  identSupply .= ys
+  return y
 
-renderClosureInfo :: GhcjsSettings
-                  -> DynFlags
-                  -> [ClosureInfo]
-                  -> State RenamerState JStat
-renderClosureInfo settings dflags cis =
-   fmap (renderInfoBlock settings dflags . renameClosureInfo cis) get
+-- | rename a compactor info entry according to the compactor state (no new renamings are added)
+renameClosureInfo :: CompactorState
+                  -> ClosureInfo
+                  -> ClosureInfo
+renameClosureInfo cs (ClosureInfo v rs n l t s)  =
+  (ClosureInfo (renameV v) rs n l t (f s))
+    where
+      renameV t = maybe t (\(TxtI t') -> t') (HM.lookup t m)
+      m                   = cs ^. nameMap
+      f (CIStaticRefs rs) = CIStaticRefs (map renameV rs)
 
-renameClosureInfo :: [ClosureInfo] -> RenamerState -> [ClosureInfo]
-renameClosureInfo cis (RenamerState _ m) =
-  let m' = HM.fromList . map (\(k,TxtI v) -> (k, v)) $ HM.toList m
-  in  map (g m m') cis
-   where
-    g m0 m (ClosureInfo v rs n l t s) =
-        (ClosureInfo (fromMaybe v $ HM.lookup v m) rs n l t (h m s))
-    h m0 (CIStaticRefs rs) = CIStaticRefs (map (\sr -> fromMaybe sr $ HM.lookup sr m0) rs)
-
-renderInfoBlock :: GhcjsSettings -> DynFlags -> [ClosureInfo] -> JStat
-renderInfoBlock settings dflags infos
-  | buildingDebug dflags = mconcat (map (closureInfoStat True) infos)
-  | otherwise =
-      [j| h$initStatic.push(\ {
-            var !h$functions = `funArr`;
-            var !h$info      = `infoTables`;
-            h$initInfoTables(`nfuns`, h$functions, h$info);
-          });
-        |]
+-- | rename a static info entry according to the compactor state (no new renamings are added)
+renameStaticInfo :: CompactorState
+                 -> StaticInfo
+                 -> StaticInfo
+renameStaticInfo cs si = si & staticIdents %~ renameIdent
   where
-    infos' = sortBy (compare `on` ciVar) infos -- (filter (not . implicitLayout) infos)
-    infoTables :: String
-    infoTables = encodeStr (concatMap (encodeInfo m) infos')
-    funArr :: [Ident]
-    funArr = map TxtI (funs ++ extras)
-    s = S.fromList funs
-    m = M.fromList $ zip symbols [0..]
-    symbols = funs ++ extras
-    funs = map ciVar infos'
-    nfuns = length funs
-    extras = filter (`S.notMember` s) allSrts
+    renameIdent t = maybe t (\(TxtI t') -> t') (HM.lookup t $ cs ^. nameMap)
 
-    allSrts = let getSrts inf = case ciStatic inf of
-                                  CIStaticRefs xs -> xs
-              in S.toList $ S.fromList (concatMap getSrts infos)
+staticIdents :: Traversal' StaticInfo Text
+staticIdents f (StaticInfo i v) = StaticInfo <$> f i <*> staticIdentsV f v
+
+staticIdentsV :: Traversal' StaticVal Text
+staticIdentsV f (StaticFun i)         = StaticFun <$> f i
+staticIdentsV f (StaticThunk i)       = StaticThunk <$> f i
+staticIdentsV f (StaticData con args) = StaticData <$> f con <*> traverse (staticIdentsA f) args
+staticIdentsV f (StaticList xs t)     = StaticList <$> traverse (staticIdentsA f) xs <*> traverse f t
+staticIdentsV _ x                     = pure x
+
+staticIdentsA :: Traversal' StaticArg Text
+staticIdentsA f (StaticObjArg t) = StaticObjArg <$> f t
+staticIdentsA _ x                = pure x
+
+
 {-
    simple encoding of naturals using only printable low char points,
    rely on gzip to compress repeating sequences,
@@ -157,23 +248,42 @@ encodeStr = concatMap encodeChr
                       in [chr 125, c c1, c c2, c c3]
       | otherwise = error "encodeStr: overflow"
 
-encodeInfo :: Map Text Int -> ClosureInfo -> [Int]
-encodeInfo m (ClosureInfo var regs name layout typ static)
+entryIdx :: String
+         -> CompactorState
+         -> Text
+         -> Int
+entryIdx msg cs i = fromMaybe lookupParent (HM.lookup i (cs ^. entries))
+  where
+    lookupParent = maybe err (+ cs ^. numEntries) (HM.lookup i (cs ^. parentEntries))
+    err = error (msg ++ ": invalid entry: " ++ T.unpack i)
+
+objectIdx :: String
+          -> CompactorState
+          -> Text
+          -> Int
+objectIdx msg cs i = fromMaybe lookupParent (HM.lookup i (cs ^. statics))
+  where
+    lookupParent = maybe err (+ cs ^. numStatics) (HM.lookup i (cs ^. parentStatics))
+    err          = error (msg ++ ": invalid static: " ++ T.unpack i)
+
+encodeInfo :: CompactorState
+           -> ClosureInfo  -- ^ information to encode
+           -> [Int]
+encodeInfo cs (ClosureInfo var regs name layout typ static)
   | CIThunk             <- typ = [0] ++ ls
-  | (CIFun arity regs0) <- typ, regs0 /= argSize regs = error ("encodeInfo: inconsistent register metadata for " ++ T.unpack name)
+  | (CIFun arity regs0) <- typ, regs0 /= argSize regs
+     = error ("encodeInfo: inconsistent register metadata for " ++ T.unpack name)
   | (CIFun arity regs0) <- typ = [1, arity, encodeRegs regs] ++ ls
   | (CICon tag)         <- typ = [2, tag] ++ ls
   | CIStackFrame        <- typ = [3, encodeRegs regs] ++ ls
 -- | (CIPap ar)         <- typ = [4, ar] ++ ls  -- these should only appear during runtime
   | otherwise                 = error ("encodeInfo, unexpected closure type: " ++ show typ)
   where
-    vi       = funIdx var
-    funIdx t = fromMaybe (error $ "encodeInfo: funIdx: " ++ T.unpack t) (M.lookup t m)
-    ls       = encodeLayout layout ++ encodeSrt static
+    ls         = encodeLayout layout ++ encodeSrt static
     encodeLayout CILayoutVariable     = [0]
     encodeLayout (CILayoutUnknown s)  = [s+1]
     encodeLayout (CILayoutFixed s vs) = [s+1]
-    encodeSrt (CIStaticRefs rs) = length rs : map funIdx rs
+    encodeSrt (CIStaticRefs rs) = length rs : map (objectIdx "encodeInfo" cs) rs
     encodeRegs CIRegsUnknown = 0
     encodeRegs (CIRegs skip regTypes) = let nregs = sum (map varSize regTypes)
                                         in  encodeRegsTag skip nregs
@@ -182,6 +292,93 @@ encodeInfo m (ClosureInfo var regs name layout typ static)
       | otherwise            = (nregs `shiftL` 1) + skip
     argSize (CIRegs skip regTypes) = sum (map varSize regTypes) - 1 + skip
     argSize _ = 0
+
+encodeStatic :: CompactorState
+             -> StaticInfo
+             -> [Int]
+encodeStatic cs (StaticInfo to sv)
+    | StaticFun f <- sv                           = [1, entry f]
+    | StaticThunk t <- sv                         = [2, entry t]
+    | StaticUnboxed (StaticUnboxedBool b) <- sv   = [3 + fromEnum b]
+    | StaticUnboxed (StaticUnboxedInt i) <- sv    = [5] -- ++ encodeInt i
+    | StaticUnboxed (StaticUnboxedDouble d) <- sv = [6] -- ++ encodeDouble d
+--    | StaticString t <- sv         = [7, T.length t] ++ map encodeChar (T.unpack t)
+--    | StaticBin bs <- sv           = [8, BS.length bs] ++ map fromIntegral (BS.unpack bs)
+    | StaticList [] Nothing <- sv                 = [8]
+    | StaticList args t <- sv                     = [9, length args] ++ maybe [0] (\t' -> [1, obj t']) t ++ concatMap encodeArg (reverse args)
+    | StaticData con args <- sv =
+      (if length args <= 6 then [11+length args] else [10,length args]) ++ [entry con] ++ concatMap encodeArg args
+  where
+    obj   = objectIdx "encodeStatic" cs
+    entry = entryIdx  "encodeStatic" cs
+    -- | an argument is either a reference to a heap object or a primitive value
+    encodeArg (StaticLitArg (BoolLit b))   = [0 + fromEnum b]
+    encodeArg (StaticLitArg (IntLit 0))    = [2]
+    encodeArg (StaticLitArg (IntLit 1))    = [3]
+    encodeArg (StaticLitArg (IntLit i))    = [4] ++ encodeInt i
+    encodeArg (StaticLitArg NullLit)       = [5]
+    encodeArg (StaticLitArg (DoubleLit d)) = [6] ++ encodeDouble d
+    encodeArg (StaticLitArg (StringLit s)) = [7] ++ encodeString s
+    encodeArg (StaticLitArg (BinLit b))    = [8] ++ encodeBinary b
+    encodeArg (StaticConArg con args)      = [9, entry con, length args] ++ concatMap encodeArg args
+    encodeArg (StaticObjArg t)             = [10 + obj t]
+    encodeChar = ord -- fixme make characters more readable
+
+encodeString :: Text -> [Int]
+encodeString xs = T.length xs : map ord (T.unpack xs)
+
+-- ByteString is prefixed with length, then blocks of 4 numbers encoding 3 bytes
+encodeBinary :: BS.ByteString -> [Int]
+encodeBinary bs = let res = BS.length bs : go bs in Debug.Trace.trace ("binary: " ++ show res) res
+  where
+    go b | BS.null b = []
+         | l == 1    = let b0 = b `BS.index` 0
+                       in  map fromIntegral [ b0 `shiftR` 2, (b0 .&. 3) `shiftL` 4 ]
+         | l == 2    = let b0 = b `BS.index` 0
+                           b1 = b `BS.index` 1
+                       in  map fromIntegral [ b0 `shiftR` 2
+                                            , ((b0 .&. 3) `shiftL` 4) .|. (b1 `shiftR` 4)
+                                            , (b1 .&. 15) `shiftL` 2
+                                            ]
+         | otherwise = let b0 = b `BS.index` 0
+                           b1 = b `BS.index` 1
+                           b2 = b `BS.index` 2
+                       in  map fromIntegral [ b0 `shiftR` 2
+                                            , ((b0 .&. 3)  `shiftL` 4) .|. (b1 `shiftR` 4)
+                                            , ((b1 .&. 15) `shiftL` 2) .|. (b2 `shiftR` 6)
+                                            , b2 .&. 63
+                                            ] ++ go (BS.drop 3 b)
+      where l = BS.length b
+
+encodeInt :: Integer -> [Int]
+encodeInt i
+  | i >= -10 && i < encodeMax - 11 = [fromIntegral i + 12]
+  | i > 2^31-1 || i < -2^31        = error "encodeInt: integer outside 32 bit range"
+  | otherwise                      = let i' :: Int32 = fromIntegral i in [0, fromIntegral ((i' `shiftR` 16) .&. 0xffff), fromIntegral (i' .&. 0xffff)]
+
+-- encode a possibly 53 bit int
+encodeSignificand :: Integer -> [Int]
+encodeSignificand i
+  | i >= -10 && i < encodeMax - 11 = [fromIntegral i + 12]
+  | i > 2^52 || i < -2^52          = error "encodeInt: integer outside 53 bit range"
+  | i < 0                          = let i' = abs i
+                                     in  [0] ++ map (\r -> fromIntegral ((i' `shiftR` r) .&. 0xffff)) [48,32,16,0]
+  | otherwise                      =     [1] ++ map (\r -> fromIntegral ((i  `shiftR` r) .&. 0xffff)) [48,32,16,0]
+
+encodeDouble :: SaneDouble -> [Int]
+encodeDouble (SaneDouble d)
+  | isNegativeZero d      = [0]
+  | d == 0                = [1]
+  | isInfinite d && d > 0 = [2]
+  | isInfinite d          = [3]
+  | isNaN d               = [4]
+  | abs exponent <= 30    = [6 + fromIntegral exponent + 30] ++ encodeSignificand significand
+  | otherwise             = [5] ++ encodeInt (fromIntegral exponent) ++ encodeSignificand significand
+    where
+      (significand, exponent) = decodeFloat d
+
+encodeMax :: Integer
+encodeMax = 737189
 
 {-
   Base files contain a list of functions already linked from
@@ -197,21 +394,21 @@ encodeInfo m (ClosureInfo var regs name layout typ static)
   [symbols]
  -}
 
-data Base = Base { baseRenamerState :: RenamerState
-                 , basePkgs         :: [Text]
-                 , baseUnits        :: Set (Package, Text, Int)
+data Base = Base { baseCompactorState :: CompactorState
+                 , basePkgs           :: [Text]
+                 , baseUnits          :: Set (Package, Text, Int)
                  }
 
 emptyBase :: Base
-emptyBase = Base emptyRenamerState [] S.empty
+emptyBase = Base emptyCompactorState [] S.empty
 
-renderBase :: RenamerState                           -- ^ renamer state
-           -> [Text]                                 -- ^ package linked
+renderBase :: CompactorState                         -- ^ compactor state
+           -> [Text]                                 -- ^ packages linked
            -> Set (Package, Text, Int)               -- ^ linkable units contained in base
            -> BL.ByteString                          -- ^ rendered result
-renderBase rs packages funs = DB.runPut $ do
+renderBase cs packages funs = DB.runPut $ do
   DB.putByteString "GHCJSBASE"
-  putRs rs
+  putCs cs
   putList DB.put packages
   putList putPkg pkgs
   putList DB.put mods
@@ -226,14 +423,15 @@ renderBase rs packages funs = DB.runPut $ do
     mods  = uniq (map (\(_,x,_) -> x) $ S.toList funs)
     modsM = M.fromList (zip mods [(0::Int)..])
     putList f xs = pi (length xs) >> mapM_ f xs
-    putRs (RenamerState [] _) = error "renderBase: putRs exhausted renamer symbol names"
-    putRs (RenamerState (ns:_) hm) = do
-      pi (HM.size hm)
-      putRs' renamedVars (HM.fromList . map (\(x,y) -> (y,x)) . HM.toList $ hm)
-    putRs' [] _ = error "renderBase: putRs' exhausted renamer symbol names"
-    putRs' (n:ns) hm
-      | Just v <- HM.lookup n hm = DB.put v >> putRs' ns hm
-      | otherwise                = return ()
+    -- serialise the compactor state
+    putCs (CompactorState [] _ _ _ _ _ _ _) = error "renderBase: putCs exhausted renamer symbol names"
+    putCs (CompactorState (ns:_) nm es _ ss _ pes pss) = do
+      DB.put ns
+      DB.put (HM.toList nm)
+      DB.put (HM.toList es)
+      DB.put (HM.toList ss)
+      DB.put (HM.toList pes)
+      DB.put (HM.toList pss)
     putPkg (Package n v) = DB.put n >> DB.put v
     -- fixme group things first
     putFun (p,m,s) = pi (pkgsM M.! p) >> pi (modsM M.! m) >> DB.put s
@@ -248,20 +446,23 @@ loadBase (Just file) = DB.runGet getBase <$> BL.readFile file
     getFun ps ms = (,,) <$> ((ps!) <$> gi) <*> ((ms!) <$> gi) <*> DB.get
     la xs = listArray (0, length xs - 1) xs
     getPkg = Package <$> DB.get <*> DB.get
-    getRs = do
-      n  <- gi
-      let (used, unused) = splitAt n renamedVars
-      renamed <- replicateM n DB.get
-      return (RenamerState unused $ HM.fromList (zip renamed used))
+    getCs = do
+      n   <- DB.get
+      nm  <- HM.fromList <$> DB.get
+      es  <- HM.fromList <$> DB.get
+      ss  <- HM.fromList <$> DB.get
+      pes <- HM.fromList <$> DB.get
+      pss <- HM.fromList <$> DB.get
+      return (CompactorState (dropWhile (/=n) renamedVars) nm es (HM.size es) ss (HM.size ss) pes pss)
     getBase = do
       hdr <- DB.getByteString 9
       when (hdr /= "GHCJSBASE") (error "loadBase: invalid base file")
-      rs <- getRs
+      cs <- makeCompactorParent <$> getCs
       linkedPackages <- getList DB.get
       pkgs <- la <$> getList getPkg
       mods <- la <$> getList DB.get
       funs <- getList (getFun pkgs mods)
-      return (Base rs linkedPackages $ S.fromList funs)
+      return (Base cs linkedPackages $ S.fromList funs)
 
 
 ----------------------------
@@ -309,3 +510,16 @@ identsV _ r@(JRegEx{})   = pure r
 identsV f (JHash m)      = JHash <$> (traverse . identsE) f m
 identsV f (JFunc args s) = JFunc <$> traverse f args <*> identsS f s
 identsV _ (UnsatVal{})   = error "identsV: UnsatVal"
+
+instance DB.Binary Ident where
+  put (TxtI t) = DB.put t
+  get = fmap TxtI DB.get
+
+compact :: GhcjsSettings
+        -> DynFlags
+        -> CompactorState
+        -> [(JStat, [ClosureInfo], [StaticInfo])]
+        -> (CompactorState, [JStat], JStat) -- ^ renamer state, statements for each unit, metadata
+compact settings dflags rs input =
+  renameInternals settings dflags rs input
+

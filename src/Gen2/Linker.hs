@@ -71,10 +71,9 @@ link :: DynFlags
      -> [FilePath]                -- ^ the object files we're linking
      -> [FilePath]                -- ^ extra js files to include
      -> (Fun -> Bool)             -- ^ functions from the objects to use as roots (include all their deps)
-     -> IO [String]               -- ^ arguments for the closure compiler to minify our result
-
+     -> IO ()
 link dflags settings out include pkgs objFiles jsFiles isRootFun
-  | gsNativeExecutables settings = return []
+  | gsNativeExecutables settings = return ()
   | otherwise = do
   objDeps <- mapM readDepsFile objFiles
   let genBase = isJust (gsGenBase settings)
@@ -99,7 +98,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
                 (Compactor.baseUnits base)
                 (roots `S.union` rtsDeps (map fst pkgs))
   createDirectoryIfMissing False out
-  let (outJs, metaSize, renamerState, stats) = renderLinker settings dflags (Compactor.baseRenamerState base) code
+  let (outJs, metaSize, compactorState, stats) = renderLinker settings dflags (Compactor.baseCompactorState base) code
       pkgs' = filter (\p -> T.pack (packageIdString p) `notElem` Compactor.basePkgs base) (map fst pkgs)
       pkgsT = map (T.pack . packageIdString) pkgs'
   BL.writeFile (out </> "out" <.> jsExt) outJs
@@ -110,11 +109,10 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
     getShims dflags settings jsFiles pkgs' (out </> "lib" <.> jsExt, out </> "lib1" <.> jsExt)
     when (not $ gsNoRts settings) $ TL.writeFile (out </> "rts.js") (rtsText' $ dfCgSettings dflags)
   if genBase
-    then generateBase out base allDeps pkgsT renamerState
+    then generateBase out base allDeps pkgsT compactorState
     else when (not (gsOnlyOut settings) && not (gsNoRts settings) && isNothing (gsUseBase settings)) $ do
            writeHtml out
            combineFiles out
-  return []
   where
     pkgPaths :: Map Text [FilePath]
     pkgPaths = M.fromList pkgs'
@@ -167,15 +165,15 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
 
 renderLinker :: GhcjsSettings
              -> DynFlags
-             -> Compactor.RenamerState
-             -> [(Package, Module, JStat, [ClosureInfo])] -- ^ linked code per module
-             -> (BL.ByteString, Int64, Compactor.RenamerState, LinkerStats)
+             -> Compactor.CompactorState
+             -> [(Package, Module, JStat, [ClosureInfo], [StaticInfo])] -- ^ linked code per module
+             -> (BL.ByteString, Int64, Compactor.CompactorState, LinkerStats)
 renderLinker settings dflags renamerState code =
-  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map (\(_,_,s,ci) -> (s,ci)) code)
+  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map (\(_,_,s,ci,si) -> (s,ci,si)) code)
       pe = TLE.encodeUtf8 . (<>"\n") . displayT . renderPretty 0.8 150 . pretty
       rendered  = parMap rdeepseq pe compacted
       renderedMeta = pe meta
-      mkStat (p,m,_,_) b = ((p,m), BL.length b)
+      mkStat (p,m,_,_,_) b = ((p,m), BL.length b)
   in ( mconcat rendered <> renderedMeta
      , BL.length renderedMeta
      , renamerState'
@@ -337,7 +335,7 @@ getDepsSources lookup base roots = do
 collectDeps :: (String -> Package -> Module -> IO FilePath)
             -> Set LinkableUnit -- Fun -- ^ do not include these
             -> Set Fun -- ^ roots
-            -> IO (Set LinkableUnit, [(Package, Module, JStat, [ClosureInfo])])
+            -> IO (Set LinkableUnit, [(Package, Module, JStat, [ClosureInfo], [StaticInfo])])
 collectDeps lookup base roots = do
   (allDeps, srcs0) <- getDepsSources lookup base roots
   -- read ghc-prim first, since we depend on that for static initialization
@@ -348,12 +346,12 @@ collectDeps lookup base roots = do
 
 extractDeps :: FilePath
             -> Set LinkableUnit
-            -> IO (Package, Module, JStat, [ClosureInfo])
+            -> IO (Package, Module, JStat, [ClosureInfo], [StaticInfo])
 extractDeps file units = do
   let symbs     = IS.fromList . map (\(_,_,n) -> n) . S.toList $ units
       (p, m, _) = S.elemAt 0 units
   l <- readObjectFileKeys (\n _ -> n `IS.member` symbs) file
-  return (p, m, mconcat (map oiStat l), concatMap oiClInfo l)
+  return (p, m, mconcat (map oiStat l), concatMap oiClInfo l, concatMap oiStatic l)
 
 pkgTxt :: Package -> Text
 pkgTxt p = packageName p <> "-" <> packageVersion p
@@ -410,7 +408,7 @@ rtsDeps pkgs =
      ]
 
 generateBase :: FilePath -> Compactor.Base -> Set LinkableUnit
-             -> [Text] -> Compactor.RenamerState -> IO ()
+             -> [Text] -> Compactor.CompactorState -> IO ()
 generateBase outDir oldBase funs pkgs rs = do
   BL.writeFile (outDir </> "out.base.symbs") $
     Compactor.renderBase rs (nub $ pkgs ++ Compactor.basePkgs oldBase)

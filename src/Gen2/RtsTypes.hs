@@ -44,23 +44,6 @@ import           Compiler.Utils
 import           Gen2.ClosureInfo
 import           Gen2.Utils
 
-data CgSettings = CgSettings { csInlinePush      :: Bool
-                             , csInlineBlackhole :: Bool
-                             , csInlineLoadRegs  :: Bool
-                             , csInlineEnter     :: Bool
-                             , csInlineAlloc     :: Bool
-                             , csTraceRts        :: Bool
-                             , csAssertRts       :: Bool
-                             , csTraceForeign    :: Bool
-                             } deriving (Show, Eq, Ord)
-
-instance Default CgSettings where
-  def = CgSettings False False False False False False False False
-
--- fixme, make better configurable
-dfCgSettings :: DynFlags -> CgSettings
-dfCgSettings df = def { csAssertRts = buildingDebug df }
-
 traceRts :: ToJExpr a => CgSettings -> a -> JStat
 traceRts s e = jStatIf (csTraceRts s) [j| h$log(`e`); |]
 
@@ -213,6 +196,7 @@ data GenState = GenState
   , _gsToplevel      :: Maybe Id       -- ^ the toplevel function group we're generating
   , _gsToplevelStats :: [JStat]        -- ^ extra toplevel statements that our current function emits
   , _gsClosureInfo   :: [ClosureInfo]  -- ^ closure information in the current function group
+  , _gsStatic        :: [StaticInfo]   -- ^ static data for the current function group
   , _gsId            :: Int            -- ^ integer for the id generator
   , _gsDynFlags      :: DynFlags       -- ^ the DynFlags, used for prettyprinting etc
   , _gsStack         :: [StackSlot]    -- ^ what's currently on the stack, above h$sp
@@ -238,9 +222,13 @@ resetToplevel :: G ()
 resetToplevel = do
   gsToplevelStats .= []
   gsClosureInfo   .= []
+  gsStatic        .= []
 
 emitClosureInfo :: ClosureInfo -> G ()
 emitClosureInfo ci = gsClosureInfo %= (ci:)
+
+emitStatic :: Text -> StaticVal -> G ()
+emitStatic ident val = gsStatic %= (StaticInfo ident val:)
 
 dropSlots :: Int -> G ()
 dropSlots n = gsStack %= drop n
@@ -301,7 +289,7 @@ throwSimpleSrcErr df span msg = return $! Ex.throw (simpleSrcErr df span msg)
 
 initState :: DynFlags -> Module -> UniqFM StgExpr -> GenState
 initState df m unfloat =
-  GenState m Nothing [] [] 1 df [] emptyIdCache unfloat emptyVarSet (dfCgSettings df)
+  GenState m Nothing [] [] [] 1 df [] emptyIdCache unfloat emptyVarSet (dfCgSettings df)
 
 runGen :: DynFlags -> Module -> UniqFM StgExpr -> G a -> a
 runGen df m unfloat = flip evalState (initState df m unfloat)
@@ -649,3 +637,5 @@ declIds  i
   where
     s  = varSize vt
     vt = uTypeVt . idType $ i
+
+

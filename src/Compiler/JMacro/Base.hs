@@ -261,7 +261,8 @@ uOpText PostInc  = "++"
 uOpText PreDec   = "--"
 uOpText PostDec  = "--"
 
-newtype SaneDouble = SaneDouble Double deriving (Data, Typeable, Fractional, Num)
+newtype SaneDouble = SaneDouble { unSaneDouble :: Double }
+                   deriving (Data, Typeable, Fractional, Num)
 
 instance Eq SaneDouble where
     (SaneDouble x) == (SaneDouble y) = x == y || (isNaN x && isNaN y)

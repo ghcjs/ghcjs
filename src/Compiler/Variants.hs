@@ -30,7 +30,7 @@ data Variant = Variant
                                -> [FilePath]                -- ^ object files
                                -> [FilePath]                -- ^ extra JavaScript files
                                -> (Gen2.Fun -> Bool)        -- ^ function to use as roots
-                               -> IO [String]
+                               -> IO ()
     }
 
 variants :: [Variant]

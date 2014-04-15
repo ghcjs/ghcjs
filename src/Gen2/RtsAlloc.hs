@@ -13,18 +13,9 @@ import qualified Data.Text as T
 
 import           Compiler.JMacro
 
+import           Gen2.ClosureInfo
 import           Gen2.RtsTypes
 import           Gen2.Utils
-
-allocClsA :: Array Int JExpr
-allocClsA = listArray (0, 1024) (toJExpr (TxtI "h$c") : map f [(1::Int)..1024])
-  where
-    f n = toJExpr . TxtI . T.pack $ "h$c" ++ show n
-
-allocData :: Array Int JExpr
-allocData = listArray (1, 1024) (map f [(1::Int)..1024])
-  where
-    f n = toJExpr . TxtI . T.pack $ "h$d" ++ show n
 
 -- allocate multiple, possibly mutually recursive, closures
 
@@ -51,7 +42,7 @@ allocDynAll s haveDecl cls = makeObjs <> fillObjs <> checkObjs
             (e:es)  -> [j| `i`.d1 = `e`; `i`.d2 = `fillFun es`; |]
 
     fillFun [] = [je| null |]
-    fillFun es = ApplExpr (allocData ! length es) es -- (toJExpr . TxtI $ "h$d" ++ show (length es)) es
+    fillFun es = ApplExpr (allocData ! length es) es
 
     dataFields = map (T.pack . ('d':) . show) [(1::Int)..]
     dec i | haveDecl  = decl i
@@ -65,21 +56,6 @@ allocDynamic s haveDecl to entry free =
     where
       dec i | haveDecl  = decl i
             | otherwise = mempty
-
-allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> JExpr
-allocDynamicE s entry free
-  | csInlineAlloc s || length free > 24
-      = [je| { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |]
-  | otherwise = ApplExpr allocFun (toJExpr entry : free)
-  where
-    allocFun = allocClsA ! length free
-    (fillObj1,fillObj2)
-       = case free of
-                []  -> (jnull, jnull)
-                [x] -> (x,jnull)
-                [x,y] -> (x,y)
-                (x:xs) -> (x,toJExpr (JHash $ M.fromList (zip dataFields xs)))
-    dataFields = map (T.pack . ('d':) . show) [(1::Int)..]
 
 -- fixme push unupdate thunks?
 {-

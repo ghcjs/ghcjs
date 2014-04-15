@@ -1,6 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 
-module Gen2.Sinker (sinkPgm, needDelayedInit) where
+module Gen2.Sinker (sinkPgm) where
 
 import UniqSet
 import VarSet
@@ -75,29 +75,12 @@ onceSinkable :: Module -> StgBinding -> [(Id, StgExpr)]
 onceSinkable m (StgNonRec b rhs)
   | Just e <- getSinkable rhs, isLocal b = [(b,e)]
   where
-    getSinkable (StgRhsCon _ccs dc args) | not (any (needDelayedInit m) args)
+    getSinkable (StgRhsCon _ccs dc args)
       = Just (StgConApp dc args)
     getSinkable (StgRhsClosure _ccs _bi _ _upd _srt _ e@(StgLit{}))
       = Just e
     getSinkable _ = Nothing
 onceSinkable _ _ = []
-
-{- |
-  does this argument force us to do delayed initialization:
-    symbols in the current module are sorted, so in non-recursive
-    bindings, we don't need to delay initialization
-
-    names from ghc-prim are special, we make sure this package is
-    always linked first
--}
-needDelayedInit :: Module -> StgArg -> Bool
-needDelayedInit m (StgVarArg i) =
-  maybe False checkModule (nameModule_maybe . idName $ i)
-    where
-      checkModule m' =
-        moduleName m' /= moduleName m &&
-        not (modulePackageId m' == primPackageId && modulePackageId m /= primPackageId)
-needDelayedInit _ _ = False
 
 -- | collect all idents used only once in an argument at the top level
 --   and never anywhere else

@@ -1,14 +1,25 @@
-{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE QuasiQuotes, DeriveDataTypeable, OverloadedStrings #-}
 
 module Gen2.ClosureInfo where
 
+import           Data.Array
 import           Data.Bits ((.|.), shiftL)
+import           Data.ByteString (ByteString)
+import qualified Data.ByteString as B
+import           Data.Default
+import qualified Data.Map as M
+import           Data.Monoid
 import           Data.Text (Text)
+import qualified Data.Text as T
+import           Data.Typeable (Typeable)
 
 import           Compiler.JMacro
+import           Compiler.Settings
 
 import           Gen2.StgAst ()
+import           Gen2.Utils
 
+import           DynFlags
 import           StgSyn
 import           DataCon
 import           TyCon
@@ -200,12 +211,11 @@ data CIStatic = -- CIStaticParent { staticParent :: Ident } -- ^ static refs are
 noStatic :: CIStatic
 noStatic = CIStaticRefs []
 
--- | static refs: array = references, single var = follow parent link, null = nothing to report
+-- | static refs: array = references, null = nothing to report
+--   note: only works after all top-level objects have been created
 instance ToJExpr CIStatic where
---  toJExpr (CIStaticParent p) = iex p -- jsId p
   toJExpr (CIStaticRefs [])  = [je| null |]
-  toJExpr (CIStaticRefs rs)  = [je| \ -> `toJExpr rs` |]
-
+  toJExpr (CIStaticRefs rs)  = toJExpr (map TxtI rs)
 
 data CILayout = CILayoutVariable            -- layout stored in object itself, first position from the start
               | CILayoutUnknown             -- fixed size, but content unknown (for example stack apply frame)
@@ -247,6 +257,7 @@ implicitLayout ci
       null (filter (==ObjV) layout)
   | otherwise = False
 
+-- | note: the statements only work after all top-level objects have been created
 instance ToStat ClosureInfo where
   toStat = closureInfoStat False
 
@@ -310,3 +321,115 @@ setObjInfo debug obj t name fields a size regs static
     regTag (CIRegs skip types) =
       let nregs = sum $ map varSize types
       in  skip + (nregs `shiftL` 8)
+
+
+data StaticInfo = StaticInfo { siVar    :: !Text      -- | global object
+                             , siVal    :: !StaticVal -- | static initialization
+                             }
+  deriving (Eq, Ord, Show, Typeable)
+
+data StaticVal = StaticFun     !Text                     -- ^ heap object for function
+               | StaticThunk   !Text                     -- ^ heap object for CAF
+               | StaticUnboxed !StaticUnboxed            -- ^ unboxed bool
+               | StaticData    !Text [StaticArg]         -- ^ regular datacon app
+               | StaticList    [StaticArg] (Maybe Text)  -- ^ list initializer (with optional tail)
+  deriving (Eq, Ord, Show, Typeable)
+
+data StaticUnboxed = StaticUnboxedBool   !Bool
+                   | StaticUnboxedInt    !Integer
+                   | StaticUnboxedDouble !SaneDouble
+  deriving (Eq, Ord, Show, Typeable)
+
+data StaticArg = StaticObjArg !Text             -- ^ reference to a heap object
+               | StaticLitArg !StaticLit        -- ^ literal
+               | StaticConArg !Text [StaticArg] -- ^ unfloated constructor
+  deriving (Eq, Ord, Show, Typeable)
+
+data StaticLit = BoolLit   !Bool
+               | IntLit    !Integer
+               | NullLit
+               | DoubleLit !SaneDouble -- should we actually use double here?
+               | StringLit !Text
+               | BinLit    !ByteString
+               | LabelLit  !Bool !Text -- | is function pointer, label (also used for string / binary init)
+  deriving (Eq, Ord, Show, Typeable)
+
+instance ToJExpr StaticArg where
+  toJExpr (StaticLitArg l) = toJExpr l
+  toJExpr (StaticObjArg t) = ValExpr (JVar (TxtI t))
+  toJExpr (StaticConArg c args) = allocDynamicE def (ValExpr . JVar . TxtI $ c) (map toJExpr args)
+
+instance ToJExpr StaticLit where
+  toJExpr (BoolLit b)   = toJExpr b
+  toJExpr (IntLit i)    = toJExpr i
+  toJExpr NullLit       = jnull
+  toJExpr (DoubleLit d) = toJExpr (unSaneDouble d)
+  toJExpr (StringLit t) = [je| h$str(`t`) |]                           -- fixme this duplicates the string!
+  toJExpr (BinLit b)    = [je| h$rstr(`map toInteger (B.unpack b)`) |] -- fixme this duplicates the string
+
+-- | declare and do first-pass init of a global object (create JS object for heap objects)
+staticDeclStat :: StaticInfo
+               -> JStat
+staticDeclStat (StaticInfo si sv) =
+  let si' = TxtI si
+      ssv (StaticUnboxed u)       = ssu u
+      ssv _                       = [je| h$d() |]
+      ssu (StaticUnboxedBool b)   = [je| h$p(`b`) |]
+      ssu (StaticUnboxedInt i)    = [je| h$p(`i`) |]
+      ssu (StaticUnboxedDouble d) = [je| h$p(`unSaneDouble d`) |]
+  in  DeclStat si' <> [j| `si'` = `ssv sv`; |]
+
+-- | initialize a global object. all global objects have to be declared (staticInfoDecl) first
+--   (this is only used with -debug, normal init would go through the static data table)
+staticInitStat :: StaticInfo
+               -> JStat
+staticInitStat (StaticInfo i sv)
+  | StaticData con args <- sv = [j| h$sti(`TxtI i`,`TxtI con`, `args`); |]
+  | StaticFun f         <- sv = [j| h$sti(`TxtI i`, `TxtI f`, []); |]
+  | StaticList args mt  <- sv = [j| h$stl(`TxtI i`, `args`, `maybe jnull (toJExpr . TxtI) mt`); |]
+  | StaticThunk f       <- sv = [j| h$stc(`TxtI i`, `TxtI f`); |]
+  | otherwise                 = mempty -- StaticFun / StaticPrim don't need any init here
+
+
+
+allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> JExpr
+allocDynamicE s entry free
+  | csInlineAlloc s || length free > 24
+      = [je| { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |]
+  | otherwise = ApplExpr allocFun (toJExpr entry : free)
+  where
+    allocFun = allocClsA ! length free
+    (fillObj1,fillObj2)
+       = case free of
+                []  -> (jnull, jnull)
+                [x] -> (x,jnull)
+                [x,y] -> (x,y)
+                (x:xs) -> (x,toJExpr (JHash $ M.fromList (zip dataFields xs)))
+    dataFields = map (T.pack . ('d':) . show) [(1::Int)..]
+
+allocClsA :: Array Int JExpr
+allocClsA = listArray (0, 1024) (toJExpr (TxtI "h$c") : map f [(1::Int)..1024])
+  where
+    f n = toJExpr . TxtI . T.pack $ "h$c" ++ show n
+
+allocData :: Array Int JExpr
+allocData = listArray (1, 1024) (map f [(1::Int)..1024])
+  where
+    f n = toJExpr . TxtI . T.pack $ "h$d" ++ show n
+
+data CgSettings = CgSettings { csInlinePush      :: Bool
+                             , csInlineBlackhole :: Bool
+                             , csInlineLoadRegs  :: Bool
+                             , csInlineEnter     :: Bool
+                             , csInlineAlloc     :: Bool
+                             , csTraceRts        :: Bool
+                             , csAssertRts       :: Bool
+                             , csTraceForeign    :: Bool
+                             } deriving (Show, Eq, Ord)
+
+instance Default CgSettings where
+  def = CgSettings False False False False False False False False
+
+-- fixme, make better configurable
+dfCgSettings :: DynFlags -> CgSettings
+dfCgSettings df = def { csAssertRts = buildingDebug df }
