@@ -10,7 +10,7 @@ Haskell to JavaScript compiler
 
 GHCJS is a Haskell to JavaScript compiler that uses the GHC API. Our first official release is planned
 to coincide with the release of GHC 7.8.1. 
-au
+
 GHCJS supports many modern Haskell features, including:
 
  * All type system extensions supported by GHC
