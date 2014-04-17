@@ -10,7 +10,7 @@ Haskell to JavaScript compiler
 
 GHCJS is a Haskell to JavaScript compiler that uses the GHC API. Our first official release is planned
 to coincide with the release of GHC 7.8.1. 
-
+au
 GHCJS supports many modern Haskell features, including:
 
  * All type system extensions supported by GHC
@@ -42,7 +42,7 @@ compiler in your `PATH`. Next, make sure that you have all the prerequisites for
 #### Linux / OS X
 
  * a recent version of `alex` and `happy` need to be in your `PATH`
- * `git`, `make`, `cpp`, `autoremake`, `patch` need to be in your `PATH`
+ * `git`, `make`, `cpp`, `autoreconf`, `patch` need to be in your `PATH`
  * by default, `ghcjs-boot` will try to use the system GMP library, see
    `ghcjs-boot --help` for more info.
 
