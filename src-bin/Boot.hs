@@ -83,6 +83,8 @@ data BootSettings = BootSettings { initTree  :: Bool      -- ^ initialize the so
                                  , gmpLib       :: Maybe Text -- ^ directory containing gmp library
                                  , gmpFramework :: Bool       -- ^ with-gmp-framework-preferred
                                  , gmpInTree    :: Bool       -- ^ force using the in-tree GMP
+                                 , withCabal    :: Text -- ^ name of cabal executable, should be in PATH
+                                 , withCompiler :: Text -- ^ name of ghcjs compiler, should be in PATH
                                  } deriving (Ord, Eq)
 
 adjustDefaultSettings :: BootSettings -> BootSettings
@@ -240,6 +242,10 @@ optParser = BootSettings
                   help "on OSX, prefer the GMP framework to the gmp lib" )
             <*> switch ( long "with-intree-gmp" <>
                   help "force using the in-tree GMP" )
+            <*> (fmap T.pack . strOption) ( long "with-cabal" <> metavar "PROGRAM" <> value "cabal" <>
+                  help "cabal program to use" )
+            <*> (fmap T.pack . strOption) ( long "with-compiler" <> metavar "PROGRAM" <> value "ghcjs" <>
+                  help "ghcjs program to use" )
 
 initPackageDB :: Sh ()
 initPackageDB = do
@@ -507,11 +513,11 @@ installBootPackages s = sub $ do
   p <- pwd
   forM_ (bootPackages1++bootPackages2) (preparePackage s)
   when (not $ null bootPackages1) $ do
-    (cabalBoot $ ["install", "--ghcjs", "--solver=topdown", "--ghcjs-option=-XMagicHash"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages1)
+    (cabalBoot s $ ["install", "--ghcjs", "--solver=topdown", "--ghcjs-option=-XMagicHash"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages1)
     when (gmpInTree s) installInTreeGmp
   sub (cd ".." >> installGhcjsPrim s)
   when (not $ null bootPackages2) $
-    (cabalBoot $ ["install", "--ghcjs"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages2)
+    (cabalBoot s $ ["install", "--ghcjs"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages2)
     where
       configureOpts p = map ("--configure-option=" <>) $ catMaybes
             [ fmap ("--with-iconv-includes="  <>) (iconvInclude s)
@@ -548,12 +554,12 @@ installExtraPackages :: BootSettings -> Sh ()
 installExtraPackages s = sub $ do
   echo "installing Cabal and extra packages"
   cd "extra"
-  installExtra cabalBoot =<< readExtra "extra0"
-  sub (cd ("cabal" </> "Cabal") >> cabal ["clean"])
-  cabal $ ["install", "--ghcjs", "./cabal/Cabal", "--only-dependencies"]
+  installExtra (cabalBoot s) =<< readExtra "extra0"
+  sub (cd ("cabal" </> "Cabal") >> cabal s ["clean"])
+  cabal s $ ["install", "--ghcjs", "./cabal/Cabal", "--only-dependencies"]
   removeFakes
-  cabal $ ["install", "--ghcjs", "./cabal/Cabal"] ++ cabalFlags False s
-  installExtra cabal =<< readExtra "extra1"
+  cabal s $ ["install", "--ghcjs", "./cabal/Cabal"] ++ cabalFlags False s
+  installExtra (cabal s) =<< readExtra "extra1"
     where
       ignored x = T.null x || "#" `T.isPrefixOf` x
       readExtra file =
@@ -571,13 +577,13 @@ installGhcjsPrim s = sub $ do
   cd "ghcjs"
   forM_ pkgs (preparePackage s)
   when (not $ null pkgs)
-    (cabalBoot $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) pkgs)
+    (cabalBoot s $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) pkgs)
 
 installGhcjsPackages :: BootSettings -> Sh ()
 installGhcjsPackages s = sub $ do
   echo "installing GHCJS-specific base libraries"
   let pkgs = if quick s then ghcjsQuickPackages else ghcjsPackages
-      c    = if quick s then cabalBoot else cabal
+      c    = if quick s then cabalBoot s else cabal s
   cd "ghcjs"
   forM_ pkgs (preparePackage s)
   when (not $ null pkgs)
@@ -592,7 +598,7 @@ preparePackage s pkg = sub $ do
     echo ("generating configure script for " <> T.pack pkg)
     autoreconf []
   rm_rf "dist"
---  cabal ["clean"]
+--  cabal s ["clean"]
 
 fixRtsConf :: Text -> Text -> Text -> Text
 fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
@@ -693,10 +699,15 @@ ghc          = run_ "ghc"
 ghc_pkg      = run  "ghc-pkg"
 ghcjs_pkg    = run  "ghcjs-pkg"
 ghcjs_pkg'   = run_  "ghcjs-pkg"
-cabalBoot xs = sub (setenv "GHCJS_BOOTING" "1" >> run_ "cabal" xs)
-cabal        = run_ "cabal"
 patch        = run_ "patch"
 cpp       xs = run  "cpp" xs
+
+cabal, cabalBoot :: BootSettings -> [Text] -> Sh ()
+cabalBoot s xs = sub (setenv "GHCJS_BOOTING" "1" >> cabal s xs)
+cabal     s xs = run_ prog args
+    where
+    prog = fromText $ withCabal s
+    args = xs ++ ["--with-compiler", withCompiler s]
 
 #ifdef WINDOWS
 bash cmd xs = run_ "bash" ["-c", T.unwords (map escapeArg (cmd:xs))]
