@@ -555,7 +555,7 @@ installExtraPackages s = sub $ do
   echo "installing Cabal and extra packages"
   cd "extra"
   installExtra (cabalBoot s) =<< readExtra "extra0"
-  sub (cd ("cabal" </> "Cabal") >> cabal s ["clean"])
+  sub (cd ("cabal" </> "Cabal") >> cabalClean s)
   cabal s $ ["install", "--ghcjs", "./cabal/Cabal", "--only-dependencies"]
   removeFakes
   cabal s $ ["install", "--ghcjs", "./cabal/Cabal"] ++ cabalFlags False s
@@ -598,7 +598,7 @@ preparePackage s pkg = sub $ do
     echo ("generating configure script for " <> T.pack pkg)
     autoreconf []
   rm_rf "dist"
---  cabal s ["clean"]
+--  cabalClean s
 
 fixRtsConf :: Text -> Text -> Text -> Text
 fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
@@ -708,6 +708,10 @@ cabal     s xs = run_ prog args
     where
     prog = fromText $ withCabal s
     args = xs ++ ["--with-compiler", withCompiler s]
+
+cabalClean :: BootSettings -> Sh ()
+cabalClean s = run_ prog ["clean"]
+    where prog = fromText $ withCabal s
 
 #ifdef WINDOWS
 bash cmd xs = run_ "bash" ["-c", T.unwords (map escapeArg (cmd:xs))]
