@@ -92,6 +92,8 @@ Check that you have the correct version of `GHCJS` in your PATH:
 Build the base libraries for `GHCJS`:
 
     $ ghcjs-boot --init
+    or
+    $ ghcjs-boot --init --with-cabal cabal-js # if you used --program-suffix=-js earlier
 
 
 Usage
