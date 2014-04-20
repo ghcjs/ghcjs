@@ -96,7 +96,7 @@ genericStackApply s =
   [j| fun h$ap_gen {
         `traceRts s $ t"h$ap_gen"`;
         var cf = `R1`.f;
-        switch(c.t) {
+        switch(cf.t) {
           case `Thunk`:
             return cf;
           case `Fun`:
