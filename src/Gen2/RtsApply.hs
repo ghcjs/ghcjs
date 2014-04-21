@@ -147,7 +147,7 @@ genericStackApply s =
           } else {
             `traceRts s $ t"h$ap_gen: undersat"`;
             var p = h$paps[myRegs];
-            var dat = [`R1`,(((ar >> 8)-myRegs))*256+ar-myAr];
+            var dat = [`R1`,(((`arity` >> 8)-myRegs))*256+ar-myAr];
             for(var i=0;i<myRegs;i++) {
                dat.push(`Stack`[`Sp`-i-1]);
             }
@@ -239,7 +239,7 @@ genericFastApply s =
             if(`tag` != 0) {
               var p = h$paps[myRegs];
               `traceRts s $ t"h$ap_gen_fast: got pap: " |+ (p|."n")`;
-              var dat = [`R1`,(((ar >> 8)-myRegs))*256+ar-myAr];
+              var dat = [`R1`,(((`arity` >> 8)-myRegs))*256+ar-myAr];
               for(var i=0;i<myRegs;i++) {
                 dat.push(h$getReg(i+2));
               }
