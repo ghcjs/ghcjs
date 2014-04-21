@@ -432,4 +432,6 @@ instance Default CgSettings where
 
 -- fixme, make better configurable
 dfCgSettings :: DynFlags -> CgSettings
-dfCgSettings df = def { csAssertRts = buildingDebug df }
+dfCgSettings df = def { csAssertRts = buildingDebug df
+                      , csTraceRts  = "-DGHCJS_TRACE_RTS" `elem` opt_P df
+                      }
