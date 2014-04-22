@@ -159,12 +159,11 @@ printNumericVersion = putStrLn getCompilerVersion
 printRts :: DynFlags -> IO ()
 printRts dflags = TL.putStrLn (Gen2.rtsText $ Gen2.dfCgSettings dflags) >> exitSuccess
 
-printDeps :: [String] -> IO ()
-printDeps ["--print-deps", file] = Object.readDepsFile file >>= TL.putStrLn . Object.showDeps
-printDeps _                    = putStrLn "usage: ghcjs --print-deps objfile" >> exitFailure
+printDeps :: FilePath -> IO ()
+printDeps = Object.readDepsFile >=> TL.putStrLn . Object.showDeps
 
 printObj :: FilePath -> IO ()
-printObj file = Object.readObjectFile file >>= TL.putStrLn . Object.showObject
+printObj = Object.readObjectFile >=> TL.putStrLn . Object.showObject
 
 -- replace primops in the name cache so that we get our correctly typed primops
 fixNameCache :: GhcMonad m => m ()

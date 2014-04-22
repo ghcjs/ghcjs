@@ -229,8 +229,8 @@ genMetaData p1 = do
 moduleNameText :: Module -> Text
 moduleNameText m
   | xs == ":Main" = T.pack "Main"
-  | otherwise = T.pack xs
-    where xs = moduleNameString . moduleName $ m
+  | otherwise     = T.pack xs
+    where xs      = moduleNameString . moduleName $ m
 
 modulePackageText :: Module -> Object.Package
 modulePackageText m 
@@ -958,8 +958,8 @@ genStaticArg a@(StgVarArg i) = do
        | isVoid r            = return []
        | i == trueDataConId  = return [StaticLitArg (BoolLit True)]
        | i == falseDataConId = return [StaticLitArg (BoolLit False)]
-       | isMultiVar r = map (\(TxtI t) -> StaticObjArg t) <$> mapM (jsIdIN i) [1..varSize r] -- this seems wrong, not an obj?
-       | otherwise    = (\(TxtI it) -> [StaticObjArg it]) <$> jsIdI i
+       | isMultiVar r        = map (\(TxtI t) -> StaticObjArg t) <$> mapM (jsIdIN i) [1..varSize r] -- this seems wrong, not an obj?
+       | otherwise           = (\(TxtI it) -> [StaticObjArg it]) <$> jsIdI i
 
      unfloated :: StgExpr -> G [StaticArg]
      unfloated (StgLit l) = map StaticLitArg <$> genStaticLit l

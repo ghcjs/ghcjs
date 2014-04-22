@@ -295,6 +295,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        DoPrintRts             -> liftIO (Ghcjs.printRts dflags6) >> return True
        DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings $ map fst srcs) >> return True
        DoPrintObj obj         -> liftIO (Ghcjs.printObj obj) >> return True
+       DoPrintDeps obj        -> liftIO (Ghcjs.printDeps obj) >> return True
 
   liftIO $ dumpFinalStats dflags6
   return (skipJs || buildingSetup)
@@ -517,6 +518,7 @@ data PostLoadMode
   | DoPrintRts                            -- ghcjs --print-rts
   | DoInstallExecutable                   -- ghcjs --install-executable ? -o ?
   | DoPrintObj FilePath                   -- ghcjs --print-obj file
+  | DoPrintDeps FilePath                  -- ghcjs --print-deps file
 
 doGenerateLib, doPrintRts :: Mode
 doGenerateLib = mkPostLoadMode DoGenerateLib
@@ -527,6 +529,9 @@ doInstallExecutable = mkPostLoadMode DoInstallExecutable
 
 doPrintObj :: FilePath -> Mode
 doPrintObj file = mkPostLoadMode (DoPrintObj file)
+
+doPrintDeps :: FilePath -> Mode
+doPrintDeps file = mkPostLoadMode (DoPrintDeps file)
 ---- end GHCJS modes
 
 doMkDependHSMode, doMakeMode, doInteractiveMode, doAbiHashMode :: Mode
@@ -672,6 +677,7 @@ mode_flags =
   , Flag "-generate-lib"           (PassFlag (setMode doGenerateLib))
   , Flag "-install-executable"     (PassFlag (setMode doInstallExecutable))
   , Flag "-print-obj"              (HasArg (\f -> setMode (doPrintObj f) "--print-obj"))
+  , Flag "-print-deps"             (HasArg (\f -> setMode (doPrintDeps f) "--print-deps"))
   , Flag "-print-rts"              (PassFlag (setMode doPrintRts))
   , Flag "-numeric-ghc-version"    (PassFlag (setMode (showNumGhcVersionMode)))
   , Flag "-numeric-ghcjs-version"  (PassFlag (setMode (showNumVersionMode)))
