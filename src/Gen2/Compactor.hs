@@ -13,6 +13,7 @@
        these are internal names
   - write all function metadata compactly
  -}
+
 module Gen2.Compactor where
 
 import           DynFlags
@@ -52,8 +53,6 @@ import           Gen2.ClosureInfo
 import           Gen2.Object
 import qualified Gen2.Optimizer as Optimizer
 
-import qualified Debug.Trace
-
 data CompactorState =
   CompactorState { _identSupply   :: [Ident]               -- | ident supply for new names
                  , _nameMap       :: !(HashMap Text Ident) -- | renaming mapping for internal names
@@ -83,6 +82,9 @@ makeCompactorParent (CompactorState is nm es nes ss nss pes pss) =
 collectGlobals :: [StaticInfo]
                -> State CompactorState ()
 collectGlobals = mapM_ (\(StaticInfo i _) -> renameObj i)
+
+debugShowStat :: (JStat, [ClosureInfo], [StaticInfo]) -> String
+debugShowStat (s, cis, sis) = "closures:\n" ++ unlines (map show cis) ++ "\nstatics:" ++ unlines (map show sis) ++ "\n\n"
 
 renameInternals :: GhcjsSettings
                 -> DynFlags
@@ -252,19 +254,21 @@ entryIdx :: String
          -> CompactorState
          -> Text
          -> Int
-entryIdx msg cs i = fromMaybe lookupParent (HM.lookup i (cs ^. entries))
+entryIdx msg cs i = fromMaybe lookupParent (HM.lookup i' (cs ^. entries))
   where
-    lookupParent = maybe err (+ cs ^. numEntries) (HM.lookup i (cs ^. parentEntries))
-    err = error (msg ++ ": invalid entry: " ++ T.unpack i)
+    (TxtI i')    = lookupRenamed cs (TxtI i)
+    lookupParent = maybe err (+ cs ^. numEntries) (HM.lookup i' (cs ^. parentEntries))
+    err = error (msg ++ ": invalid entry: " ++ T.unpack i')
 
 objectIdx :: String
           -> CompactorState
           -> Text
           -> Int
-objectIdx msg cs i = fromMaybe lookupParent (HM.lookup i (cs ^. statics))
+objectIdx msg cs i = fromMaybe lookupParent (HM.lookup i' (cs ^. statics))
   where
-    lookupParent = maybe err (+ cs ^. numStatics) (HM.lookup i (cs ^. parentStatics))
-    err          = error (msg ++ ": invalid static: " ++ T.unpack i)
+    (TxtI i')    = lookupRenamed cs (TxtI i)
+    lookupParent = maybe err (+ cs ^. numStatics) (HM.lookup i' (cs ^. parentStatics))
+    err          = error (msg ++ ": invalid static: " ++ T.unpack i')
 
 encodeInfo :: CompactorState
            -> ClosureInfo  -- ^ information to encode
@@ -329,7 +333,7 @@ encodeString xs = T.length xs : map ord (T.unpack xs)
 
 -- ByteString is prefixed with length, then blocks of 4 numbers encoding 3 bytes
 encodeBinary :: BS.ByteString -> [Int]
-encodeBinary bs = let res = BS.length bs : go bs in Debug.Trace.trace ("binary: " ++ show res) res
+encodeBinary bs = BS.length bs : go bs
   where
     go b | BS.null b = []
          | l == 1    = let b0 = b `BS.index` 0
