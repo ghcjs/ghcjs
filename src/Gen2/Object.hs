@@ -58,9 +58,10 @@ import           Data.Array
 import qualified Data.Binary     as DB
 import qualified Data.Binary.Get as DB
 import qualified Data.Binary.Put as DB
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as B
 import           Data.ByteString.Lazy (ByteString)
-import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy.Char8 as C8 (pack, unpack)
 import           Data.Data.Lens
 import           Data.Function (on)
 import qualified Data.Foldable as F
@@ -85,9 +86,11 @@ import           System.IO (openBinaryFile, hClose, hSeek, SeekMode(..), IOMode(
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
 import           Compiler.JMacro
+import           Compiler.Info
 
 import           Gen2.ClosureInfo hiding (Fun)
 import           Gen2.Printer (pretty)
+import           Gen2.Utils (trim)
 
 data Header = Header { symbsLen :: !Int64
                      , depsLen  :: !Int64
@@ -250,8 +253,8 @@ readDepsFile :: FilePath -> IO Deps
 readDepsFile file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
-    Nothing -> error ("readDepsFile: not a valid GHCJS object: " ++ file)
-    Just hdr -> do
+    Left err -> error ("readDepsFile: not a valid GHCJS object: " ++ file ++ "\n    " ++ err)
+    Right hdr -> do
       bs <- B.hGet h (fromIntegral $ symbsLen hdr + depsLen hdr)
       let symbs = getSymbolTable bs
           deps  = getDeps symbs (B.drop (fromIntegral (symbsLen hdr)) bs)
@@ -260,8 +263,8 @@ readDepsFile file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
 -- | call with contents of the file
 readDeps :: String -> ByteString -> Deps
 readDeps name bs = case getHeader bs of
-                     Nothing -> error ("readDeps: not a valid GHCJS object: " ++ name)
-                     Just hdr ->
+                     Left err -> error ("readDeps: not a valid GHCJS object: " ++ name ++ "\n   " ++ err)
+                     Right hdr ->
                        let bsymbs = B.drop (fromIntegral headerLength) bs
                            bdeps  = B.drop (fromIntegral (symbsLen hdr)) bsymbs
                            symbs  = getSymbolTable bsymbs
@@ -275,8 +278,8 @@ readObjectFileKeys :: (Int -> [Text] -> Bool) -> FilePath -> IO [ObjUnit]
 readObjectFileKeys p file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
-    Nothing -> error ("readObjectFileKeys: not a valid GHCJS object: " ++ file)
-    Just hdr -> do
+    Left err -> error ("readObjectFileKeys: not a valid GHCJS object: " ++ file ++ "\n    " ++ err)
+    Right hdr -> do
       bss <- B.hGet h (fromIntegral $ symbsLen hdr)
       hSeek h RelativeSeek (fromIntegral $ depsLen hdr)
       bsi <- B.fromStrict <$> BS.hGetContents h
@@ -288,8 +291,8 @@ readObject name = readObjectKeys name (\_ _ -> True)
 readObjectKeys :: String -> (Int -> [Text] -> Bool) -> ByteString -> [ObjUnit]
 readObjectKeys name p bs =
   case getHeader bs of
-    Nothing  -> error ("readObjectKeys: not a valid GHCJS object: " ++ name)
-    Just hdr ->
+    Left err -> error ("readObjectKeys: not a valid GHCJS object: " ++ name ++ "\n    " ++ err)
+    Right hdr ->
       let bssymbs = B.drop (fromIntegral headerLength) bs
           bsidx   = B.drop (fromIntegral $ symbsLen hdr + depsLen hdr) bssymbs
           bsobjs  = B.drop (fromIntegral $ idxLen hdr) bsidx
@@ -329,19 +332,32 @@ putSymbolTable (SymbolTable _ hm)
       xs = map fst . sortBy (compare `on` snd) . HM.toList $ hm
 
 headerLength :: Int
-headerLength = 32
+headerLength = 64
 
-getHeader :: ByteString -> Maybe Header
-getHeader bs | B.length bs < fromIntegral headerLength = Nothing
-             | magic /= "GHCJSOBJ"                     = Nothing
-             | otherwise                               = Just header
+-- human readable version string in object
+versionTag :: ByteString
+versionTag = B.take 32 . C8.pack $ getFullCompilerVersion ++ replicate versionTagLength ' '
+
+versionTagLength :: Int
+versionTagLength = 32
+
+getHeader :: ByteString -> Either String Header
+getHeader bs | B.length bs < fromIntegral headerLength = Left "not enough input, file truncated?"
+             | magic /= "GHCJSOBJ"                     = Left "magic number incorrect, not a js_o file?"
+             | tag   /= versionTag                     = Left $ "incorrect version, expected " ++ getFullCompilerVersion ++
+                                                                    " but got " ++ (trim . C8.unpack $ tag)
+             | otherwise                               = Right header
    where
-     g = fromIntegral <$> DB.getWord64le
-     (magic, header) = DB.runGet ((,) <$> DB.getByteString 8 <*> (Header <$> g <*> g <*> g)) bs
+     g                    = fromIntegral <$> DB.getWord64le
+     (magic, tag, header) = DB.runGet ((,,) <$> DB.getByteString 8
+                                            <*> DB.getLazyByteString (fromIntegral versionTagLength)
+                                            <*> (Header <$> g <*> g <*> g)
+                                      ) bs
 
 putHeader :: Header -> ByteString
 putHeader (Header sl dl il) = DB.runPut $ do
   DB.putByteString "GHCJSOBJ"
+  DB.putLazyByteString versionTag
   mapM_ (DB.putWord64le . fromIntegral) [sl, dl, il]
 
 -- prettyprint object similar to how the old text based
