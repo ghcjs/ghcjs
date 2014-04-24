@@ -517,7 +517,7 @@ installBootPackages s = sub $ do
     when (gmpInTree s) installInTreeGmp
   sub (cd ".." >> installGhcjsPrim s)
   when (not $ null bootPackages2) $
-    (cabalBoot s $ ["install", "--ghcjs"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages2)
+    (cabalBoot s $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages2)
     where
       configureOpts p = map ("--configure-option=" <>) $ catMaybes
             [ fmap ("--with-iconv-includes="  <>) (iconvInclude s)
