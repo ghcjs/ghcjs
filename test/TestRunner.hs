@@ -380,15 +380,18 @@ outputPath = do
 runProcess :: MonadIO m => FilePath -> FilePath -> [String] -> String -> m (Maybe (StdioResult, Integer))
 runProcess workingDir pgm args input = do
   before <- liftIO getCurrentTime
-  (ex, out, err) <- liftIO $ readProcessWithExitCode' (encodeString workingDir) (encodeString pgm) args input
-  after <- liftIO getCurrentTime
-  return $
-    case ex of -- fixme is this the right way to find out that a program does not exist?
-      (ExitFailure 127) -> Nothing
-      _                 ->
-        Just ( StdioResult ex (T.pack out) (T.pack err)
-             , round $ 1000 * (after `diffUTCTime` before)
-             )
+  r <- liftIO (C.try $ readProcessWithExitCode' (encodeString workingDir) (encodeString pgm) args input)
+  case r of
+    Left (e::C.SomeException) -> return Nothing
+    Right (ex, out, err) -> do
+      after <- liftIO getCurrentTime
+      return $
+        case ex of -- fixme is this the right way to find out that a program does not exist?
+          (ExitFailure 127) -> Nothing
+          _                 ->
+            Just ( StdioResult ex (T.pack out) (T.pack err)
+                 , round $ 1000 * (after `diffUTCTime` before)
+                 )
 
 -- modified readProcessWithExitCode with working dir
 readProcessWithExitCode'
