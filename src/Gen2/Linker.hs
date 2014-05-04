@@ -73,7 +73,7 @@ link :: DynFlags
      -> (Fun -> Bool)             -- ^ functions from the objects to use as roots (include all their deps)
      -> IO ()
 link dflags settings out include pkgs objFiles jsFiles isRootFun
-  | gsNativeExecutables settings = return ()
+  | gsNoJSExecutables settings = return ()
   | otherwise = do
   objDeps <- mapM readDepsFile objFiles
   let genBase = isJust (gsGenBase settings)
