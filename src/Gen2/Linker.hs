@@ -213,7 +213,7 @@ getShims :: DynFlags -> GhcjsSettings -> [FilePath] -> [PackageId] -> (FilePath,
 getShims dflags settings extraFiles deps (fileBefore, fileAfter) = do
   base <- (</> "shims") <$> getGlobalPackageBase
   ((before, beforeFiles), (after, afterFiles))
-     <- collectShims dflags settings base (map convertPkg deps)
+     <- collectShims dflags settings base (("rts", []) : ("rts_" <> T.pack (rtsBuildTag dflags),[]) : map convertPkg deps)
   T.writeFile fileBefore before
   writeFile (fileBefore <.> "files") (unlines beforeFiles)
   t' <- mapM T.readFile extraFiles
