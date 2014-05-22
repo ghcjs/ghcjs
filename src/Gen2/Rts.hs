@@ -322,30 +322,39 @@ fun h$catch_e {
 
 // function application to one argument
 fun h$ap1_e {
-  var c = `R1`;
-  `R1` = c.d1;
-  `R2` = c.d2;
+  var d1 = `R1`.d1;
+  var d2 = `R1`.d2;
+  h$bh();
+  `R1` = d1;
+  `R2` = d2;
   return h$ap_1_1_fast();
 }
 `ClosureInfo "h$ap1_e" (CIRegs 0 [PtrV]) "apply1" (CILayoutFixed 2 [PtrV, PtrV]) CIThunk noStatic`;
 
 // function application to two arguments
 fun h$ap2_e {
-  var c = `R1`;
-  `R1` = c.d1;
-  `R2` = c.d2.d1;
-  `R3` = c.d2.d2;
+  var d1 = `R1`.d1;
+  var d2 = `R1`.d2.d1;
+  var d3 = `R1`.d2.d2;
+  h$bh();
+  `R1` = d1;
+  `R2` = d2;
+  `R3` = d3;
   return h$ap_2_2_fast();
 }
 `ClosureInfo "h$ap2_e" (CIRegs 0 [PtrV]) "apply2" (CILayoutFixed 3 [PtrV, PtrV, PtrV]) CIThunk noStatic`;
 
 // function application to three arguments
 fun h$ap3_e {
-  var c = `R1`;
-  `R1` = c.d1;
-  `R2` = c.d2.d1;
-  `R3` = c.d2.d2;
-  `R4` = c.d2.d3;
+  var d1 = `R1`.d1;
+  var d2 = `R1`.d2.d1;
+  var d3 = `R1`.d2.d2;
+  var d4 = `R1`.d2.d3;
+  h$bh();
+  `R1` = d1;
+  `R2` = d2;
+  `R3` = d3;
+  `R4` = d4;
   return h$ap_3_3_fast();
 }
 `ClosureInfo "h$ap3_e" (CIRegs 0 [PtrV]) "apply3" (CILayoutFixed 4 [PtrV, PtrV, PtrV, PtrV]) CIThunk noStatic`;
