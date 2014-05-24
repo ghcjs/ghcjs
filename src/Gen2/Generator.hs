@@ -707,6 +707,7 @@ genRet top e at as l srt = withNewIdent f
 
     altRegs = case at of
       PrimAlt ptc -> tyConVt ptc
+      UbxTupAlt n -> idVt e
       _           -> [PtrV]
 
     isBoxedAlt = case at of
