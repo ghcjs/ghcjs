@@ -639,7 +639,9 @@ genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l srt = do
 genCase top bnd x@(StgConApp c as) at [(DataAlt{}, bndrs, _, e)] l srt = do
   args' <- concatMapM genArg as
   ids   <- concatMapM genIds bndrs
-  mconcat (map declIds bndrs) <> return (assignAll ids args') <> genExpr top e
+  bndi  <- jsIdI bnd
+  declIds bnd <> allocCon bndi c args' <> mconcat (map declIds bndrs)
+              <> return (assignAll ids args') <> genExpr top e
 
 genCase top bnd expr at@PolyAlt alts l srt = do
   genRet top bnd at alts l srt <> genExpr top expr
