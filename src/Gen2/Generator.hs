@@ -1257,8 +1257,11 @@ genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) JavaScriptCa
   where
     catchExcep = playSafe safe || playInterruptible safe
     async      = playInterruptible safe
-genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safe)) t tgt args
-  = (,False) <$> parseFFIPattern False False False lbl t tgt args
+genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safety)) t tgt args
+  | playSafe safety || playInterruptible safety = do
+      fc <- parseFFIPattern False False False lbl t tgt args
+      return (fc <> mconcat (zipWith (\r a -> [j| `r` = `a`; |]) (enumFrom R1) tgt) <> [j| return `Stack`[`Sp`]; |], True)
+  | otherwise = (,False) <$> parseFFIPattern False False False lbl t tgt args
     where
       cl = unpackFS clbl
       lbl | wrapperPrefix `L.isPrefixOf` cl =
