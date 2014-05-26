@@ -19,7 +19,7 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime, diffUTCTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import           Filesystem (removeTree, isFile, getWorkingDirectory, copyFile)
+import           Filesystem (removeTree, isFile, getWorkingDirectory, createDirectory, copyFile)
 import           Filesystem.Path ( replaceExtension, basename, directory, extension, addExtension
                                  , filename, addExtensions, dropExtensions)
 import           Filesystem.Path.CurrentOS (encodeString, decodeString)
@@ -28,8 +28,11 @@ import qualified Prelude
 import           Shelly
 import           System.Environment (getArgs, getEnv)
 import           System.Exit (ExitCode(..), exitFailure, exitSuccess)
+import           System.IO (hClose, hFlush, hPutStr, hGetContents, Handle)
+import           System.IO.Error
 import           System.Process ( createProcess, proc, CreateProcess(..), StdStream(..)
-                                , terminateProcess, waitForProcess, readProcessWithExitCode )
+                                , terminateProcess, waitForProcess, readProcessWithExitCode
+                                , ProcessHandle )
 import           System.Random (randomRIO)
 import           Test.Framework
 import           Test.Framework.Providers.HUnit (testCase)
@@ -39,8 +42,6 @@ import qualified Data.Yaml as Yaml
 import           Data.Yaml (FromJSON(..), Value(..), (.:?), (.!=))
 import           Data.Default
 import           Foreign.C.Error (ePIPE, Errno(..))
-import           System.IO (hClose, hFlush, hPutStr, hGetContents)
-import           System.IO.Error
 import           Control.DeepSeq
 import           GHC.IO.Exception(IOErrorType(..), IOException(..))
 import qualified Control.Exception as C
@@ -89,13 +90,24 @@ main' log = do
             then putStrLn "warning: nothing to do, optimized and unoptimized disabled"
             else defaultMain =<< tests onlyOpt onlyUnopt log symbsFile baseJs
 
+-- temporary workaround, process-1.2.0.0 leaks when trying to run a nonexistent program
+checkPrograms :: IO (Bool, Bool)
+checkPrograms = do
+  let haveProg p as = either (\(e::C.SomeException) -> False) (const True) <$>
+                        C.try (readProcessWithExitCode' "/" p as "")
+  tNode         <- haveProg "node" ["--help"]
+  tSpiderMonkey <- haveProg "js" ["--help"]
+  return (tNode, tSpiderMonkey)
+
 benchmarks log baseSymbs baseJs = do
-  nofib <- allTestsIn (benchmark log baseSymbs baseJs) "test/nofib"
+  (n,s) <- checkPrograms
+  nofib <- allTestsIn (benchmark log baseSymbs baseJs n s) "test/nofib"
   return [ testGroup "Benchmarks from nofib" nofib
          ]
 
 tests onlyOpt onlyUnopt log baseSymbs baseJs = do
-  let test = TestOpts onlyOpt onlyUnopt log baseSymbs baseJs
+  (n,s) <- checkPrograms
+  let test = TestOpts onlyOpt onlyUnopt log baseSymbs baseJs n s
   fay     <- allTestsIn test "test/fay"
   ghc     <- allTestsIn test "test/ghc"
   arith   <- allTestsIn test "test/arith"
@@ -134,11 +146,13 @@ requiredPackages = [ "ghc-prim"
                    ]
 
 -- settings for the test suite
-data TestOpts = TestOpts { disableUnopt :: Bool
-                         , disableOpt   :: Bool
-                         , failedTests  :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
-                         , baseSymbs    :: FilePath
-                         , baseJs       :: B.ByteString
+data TestOpts = TestOpts { disableUnopt     :: Bool
+                         , disableOpt       :: Bool
+                         , failedTests      :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
+                         , baseSymbs        :: FilePath
+                         , baseJs           :: B.ByteString
+                         , haveNode         :: Bool
+                         , haveSpiderMonkey :: Bool
                          }
 benchmark = TestOpts True False
 
@@ -330,44 +344,52 @@ runGhcjsResult opts file = do
     where
       run settings optimize = do
         output <- outputPath
-        extra <- extraJsFiles file
+        extraFiles <- extraJsFiles file
         cd <- getWorkingDirectory
         -- compile test
-        let outputExe = addExtension output "jsexe"
-            outputRun = cd </> outputExe </> ("all.js"::FilePath)
+        let outputExe   = cd </> output </> "a"
+            outputExe'  = outputExe <.> "jsexe"
+            outputBuild = cd </> output </> "build"
+            outputRun   = outputExe' </> ("all.js"::FilePath)
             input  = encodeString file
             desc = ", optimization: " ++ show optimize
             inc = includeOpt file
             opt = if optimize then ["-O2"] else []
             compileOpts = [ inc
-                          , "--no-rts", "--no-stats", "-o"
+                          , "--no-rts", "--no-stats", "-o", encodeString outputExe
+                          , "-odir", encodeString outputBuild
+                          , "-hidir", encodeString outputBuild
                           , "--use-base=" ++ encodeString (baseSymbs opts)
-                          , encodeString output] ++ opt ++ [input] ++ extra
+                          , input
+                          ] ++ opt ++ extraFiles
             args = tsArguments settings
-        e <- liftIO $ runProcess cd "ghcjs" compileOpts ""
-        case e of
-          Nothing    -> assertFailure "cannot find ghcjs"
-          Just (r,_) -> assertEqual "compile error" ExitSuccess (stdioExit r)
-        -- copy data files for test
-        forM_ (tsCopyFiles settings) $ \cfile ->
-          let cfile' = fromText (T.pack cfile)
-          in  copyFile (directory file </> cfile') (cd </> outputExe </> cfile')
-        -- combine files with base bundle from incremental link
-        [out, lib, lib1] <- mapM (B.readFile . (\x -> encodeString (cd </> outputExe </> x))) ["out.js", "lib.js", "lib1.js"]
-        let runMain = "\nh$main(h$mainZCMainzimain);\n"
-        B.writeFile (encodeString outputRun) (baseJs opts <> lib <> lib1 <> out <> runMain)
-        -- run with node.js
-        nodeResult <-
-          case tsDisableNode settings of
-            False -> fmap (,"node" ++ desc) <$> runProcess (cd </> outputExe) "node" (encodeString outputRun:args) ""
-            True  -> return Nothing
-        -- run with SpiderMonkey
-        smResult <-
-          case tsDisableSpiderMonkey settings of
-            False -> fmap (,"SpiderMonkey" ++ desc) <$> runProcess (cd </> outputExe) "js" (encodeString outputRun:args) ""
-            True  -> return Nothing
-        liftIO $ removeTree outputExe
-        return $ catMaybes [nodeResult, smResult]
+            runTestPgm name pgm disabled havePgm
+              | not (disabled settings) && (havePgm opts) =
+                  fmap (,name ++ desc) <$>
+                      runProcess outputExe' pgm (encodeString outputRun:args) ""
+              | otherwise = return Nothing
+        C.bracket (createDirectory False output)
+                  (\_ -> removeTree output) $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
+          createDirectory False outputBuild
+          e <- liftIO $ runProcess cd "ghcjs" compileOpts ""
+          case e of
+            Nothing    -> assertFailure "cannot find ghcjs"
+            Just (r,_) -> do
+              when (stdioExit r /= ExitSuccess) (print r)
+              assertEqual "compile error" ExitSuccess (stdioExit r)
+          -- copy data files for test
+          forM_ (tsCopyFiles settings) $ \cfile ->
+            let cfile' = fromText (T.pack cfile)
+            in  copyFile (directory file </> cfile') (outputExe' </> cfile')
+          -- combine files with base bundle from incremental link
+          [out, lib, lib1] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
+                                ["out.js", "lib.js", "lib1.js"]
+          let runMain = "\nh$main(h$mainZCMainzimain);\n"
+          B.writeFile (encodeString outputRun) (baseJs opts <> lib <> lib1 <> out <> runMain)
+          -- run with node.js
+          nodeResult <- runTestPgm "node"         "node" tsDisableNode         haveNode
+          smResult   <- runTestPgm "SpiderMonkey" "js"   tsDisableSpiderMonkey haveSpiderMonkey
+          return $ catMaybes [nodeResult, smResult]
 
 
 outputPath :: IO FilePath
@@ -400,55 +422,82 @@ readProcessWithExitCode'
     -> [String]                 -- ^ any arguments
     -> String                   -- ^ standard input
     -> IO (ExitCode,String,String) -- ^ exitcode, stdout, stderr
-readProcessWithExitCode' workingDir cmd args input =
-    C.mask $ \restore -> do
-      (Just inh, Just outh, Just errh, pid) <- createProcess (proc cmd args)
-                                                   { std_in  = CreatePipe,
-                                                     std_out = CreatePipe,
-                                                     std_err = CreatePipe,
-                                                     cwd     = Just workingDir }
-      flip C.onException
-        (do hClose inh; hClose outh; hClose errh;
-            terminateProcess pid; waitForProcess pid) $ restore $ do
-        -- fork off a thread to start consuming stdout
+readProcessWithExitCode' workingDir cmd args input = do
+    let cp_opts = (proc cmd args) {
+                    std_in  = CreatePipe,
+                    std_out = CreatePipe,
+                    std_err = CreatePipe,
+                    cwd     = Just workingDir
+                  }
+    withCreateProcess cp_opts $
+      \(Just inh) (Just outh) (Just errh) ph -> do
+
         out <- hGetContents outh
-        waitOut <- forkWait $ C.evaluate $ rnf out
-
-        -- fork off a thread to start consuming stderr
         err <- hGetContents errh
-        waitErr <- forkWait $ C.evaluate $ rnf err
 
-        -- now write and flush any input
-        let writeInput = do
-              unless (null input) $ do
-                hPutStr inh input
-                hFlush inh
-              hClose inh
+        -- fork off threads to start consuming stdout & stderr
+        withForkWait  (C.evaluate $ rnf out) $ \waitOut ->
+         withForkWait (C.evaluate $ rnf err) $ \waitErr -> do
 
-        C.catch writeInput $ \e -> case e of
-          IOError { ioe_type = ResourceVanished
-                  , ioe_errno = Just ioe }
-            | Errno ioe == ePIPE -> return ()
-          _ -> C.throwIO e
+          -- now write any input
+          unless (null input) $
+            ignoreSigPipe $ hPutStr inh input
+          -- hClose performs implicit hFlush, and thus may trigger a SIGPIPE
+          ignoreSigPipe $ hClose inh
 
-        -- wait on the output
-        waitOut
-        waitErr
+          -- wait on the output
+          waitOut
+          waitErr
 
-        hClose outh
-        hClose errh
+          hClose outh
+          hClose errh
 
         -- wait on the process
-        ex <- waitForProcess pid
+        ex <- waitForProcess ph
 
         return (ex, out, err)
 
-forkWait :: IO a -> IO (IO a)
-forkWait a = do
-  res <- newEmptyMVar
-  _ <- C.mask $ \restore -> forkIO $ C.try (restore a) >>= putMVar res
-  return (takeMVar res >>= either (\ex -> C.throwIO (ex :: C.SomeException)) return)
+withCreateProcess
+  :: CreateProcess
+  -> (Maybe Handle -> Maybe Handle -> Maybe Handle -> ProcessHandle -> IO a)
+  -> IO a
+withCreateProcess c action =
+    C.bracketOnError (createProcess c) cleanupProcess
+                     (\(m_in, m_out, m_err, ph) -> action m_in m_out m_err ph)
 
+cleanupProcess :: (Maybe Handle, Maybe Handle, Maybe Handle, ProcessHandle)
+               -> IO ()
+cleanupProcess (mb_stdin, mb_stdout, mb_stderr, ph) = do
+    terminateProcess ph
+    -- Note, it's important that other threads that might be reading/writing
+    -- these handles also get killed off, since otherwise they might be holding
+    -- the handle lock and prevent us from closing, leading to deadlock.
+    maybe (return ()) (ignoreSigPipe . hClose) mb_stdin
+    maybe (return ()) hClose mb_stdout
+    maybe (return ()) hClose mb_stderr
+    -- terminateProcess does not guarantee that it terminates the process.
+    -- Indeed on Unix it's SIGTERM, which asks nicely but does not guarantee
+    -- that it stops. If it doesn't stop, we don't want to hang, so we wait
+    -- asynchronously using forkIO.
+    _ <- forkIO (waitForProcess ph >> return ())
+    return ()
+
+
+withForkWait :: IO () -> (IO () ->  IO a) -> IO a
+withForkWait async body = do
+  waitVar <- newEmptyMVar :: IO (MVar (Either C.SomeException ()))
+  C.mask $ \restore -> do
+    tid <- forkIO $ C.try (restore async) >>= putMVar waitVar
+    let wait = takeMVar waitVar >>= either C.throwIO return
+    restore (body wait) `C.onException` killThread tid
+
+ignoreSigPipe :: IO () -> IO ()
+ignoreSigPipe = C.handle $ \e -> case e of
+                                   IOError { ioe_type  = ResourceVanished
+                                           , ioe_errno = Just ioe }
+                                     | Errno ioe == ePIPE -> return ()
+                                   _ -> C.throwIO e
+-------------------
 
 {-
   a mocha test changes to the directory,

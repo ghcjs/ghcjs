@@ -7,12 +7,15 @@ module Gen2.Utils where
 
 import           Control.Monad.State.Strict
 
+import qualified Data.ByteString        as B
+import qualified Data.ByteString.Lazy   as BL
+import qualified Data.ByteString.Search as S
 import           Data.Char        (isSpace)
 import           Data.List        (isPrefixOf)
 import           Data.Monoid
 import           Data.Text (Text)
-import qualified Data.Text as T
-
+import qualified Data.Text              as T
+import qualified Data.Text.Encoding     as TE
 import           Compiler.JMacro
 
 import           DynFlags
@@ -116,6 +119,13 @@ jFalse = ve "false"
 jBool :: Bool -> JExpr
 jBool True = jTrue
 jBool False = jFalse
+
+-- GHC produces modified UTF8 that the Text package doesn't particularly like
+-- unmodify it before decoding
+decodeModifiedUTF8 :: B.ByteString -> Maybe Text
+decodeModifiedUTF8 = either (const Nothing) Just . TE.decodeUtf8' . unmodify
+  where
+    unmodify = BL.toStrict . S.replace (B.pack [192,128]) (B.singleton 0)
 
 -- use instead of ErrUtils variant to prevent being suppressed
 compilationProgressMsg :: DynFlags -> String -> IO ()

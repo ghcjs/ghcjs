@@ -16,7 +16,7 @@ import FastString
 import HscTypes
 import Id
 import IdInfo
-import MkId
+import MkId hiding (primOpRules) -- use our own corrected rules
 import Name
 import PrelNames
 import PrimOp
@@ -27,6 +27,8 @@ import TysPrim
 import TysWiredIn
 import Unique
 import CmmType
+
+import Gen2.GHC.PrelRules
 
 ghcjsPrimIface :: ModIface
 ghcjsPrimIface

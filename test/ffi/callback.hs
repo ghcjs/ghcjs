@@ -13,8 +13,8 @@ foreign import javascript unsafe "$1();" runCallback :: JSFun (IO ()) -> IO ()
 main = do
   mv1 <- newEmptyMVar
   mv2 <- newEmptyMVar
-  s1 <- syncCallback False False (putStrLn "b" >> takeMVar mv1 >> putStrLn "error")
-  s2 <- syncCallback False True  (putStrLn "d" >> takeMVar mv2 >> putStrLn "f")
+  s1 <- syncCallback AlwaysRetain False (putStrLn "b" >> takeMVar mv1 >> putStrLn "error")
+  s2 <- syncCallback AlwaysRetain True  (putStrLn "d" >> takeMVar mv2 >> putStrLn "f")
   putStrLn "a"
   runCallback s1
   putStrLn "c"

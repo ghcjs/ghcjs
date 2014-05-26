@@ -98,16 +98,43 @@ data Header = Header { symbsLen :: !Int64
                      } deriving (Eq, Ord, Show)
 
 -- | dependencies for a single module
-data Deps = Deps { depsPackage :: !Package
-                 , depsModule  :: !Text
-                 , depsBlocks  :: Array Int (Set Fun)
-                 , depsDeps    :: Map Fun Int
+data Deps = Deps { depsPackage  :: !Package
+                 , depsModule   :: !Text
+                 , depsExported :: Map Fun ExpFun
+                 , depsBlocks   :: Array Int (Set Fun)
+                 , depsDeps     :: Map Fun Int
                  }
 
-instance NFData Deps where rnf (Deps p m a d) = p     `seq`
-                                                m     `seq`
-                                                rnf a `seq`
-                                                rnf d `seq` ()
+data ExpFun = ExpFun { isIO   :: !Bool
+                     , args   :: [JSFFIType]
+                     , result :: !JSFFIType
+                     } deriving (Eq, Ord, Show)
+
+instance NFData ExpFun where
+  rnf (ExpFun x as r) = rnf as `seq` ()
+
+instance NFData JSFFIType where
+  rnf x = x `seq` ()
+
+data JSFFIType = Int8Type
+               | Int16Type
+               | Int32Type
+               | Int64Type
+               | Word8Type
+               | Word16Type
+               | Word32Type
+               | Word64Type
+               | DoubleType
+               | ByteArrayType
+               | PtrType
+               | RefType
+               deriving (Show, Ord, Eq, Enum)
+
+instance NFData Deps where rnf (Deps p m e a d) = p     `seq`
+                                                  m     `seq`
+                                                  rnf e `seq`
+                                                  rnf a `seq`
+                                                  rnf d `seq` ()
 
 data Fun = Fun { funPackage :: !Package
                , funModule  :: !Text
@@ -240,12 +267,17 @@ getDeps :: SymbolTableR -> ByteString -> Deps
 getDeps st bs = runGetS st get bs
 
 instance Objectable Deps where
-  put (Deps p m a d) = put p >> put m >> put (elems a) >>
-                       put (map (\(x,y) -> (x, fromIntegral y :: Int32)) $ M.toList d)
+  put (Deps p m e a d) = put p >> put m >> put (M.toList e) >> put (elems a) >>
+                         put (map (\(x,y) -> (x, fromIntegral y :: Int32)) $ M.toList d)
   get = Deps <$> get
              <*> get
+             <*> (M.fromList <$> get)
              <*> ((\xs -> listArray (0, length xs - 1) xs) <$> get)
              <*> (M.fromList . map (\(x,(y::Int32)) -> (x, fromIntegral y)) <$> get)
+
+instance Objectable ExpFun where
+  put (ExpFun isIO args res) = put isIO >> put args >> put res
+  get                        = ExpFun <$> get <*> get <*> get
 
 -- | reads only the part necessary to get the dependencies
 --   so it's potentially more efficient than readDeps <$> B.readFile file
@@ -379,9 +411,10 @@ showObject xs = mconcat (zipWith showSymbol xs [0..])
         ]
 
 showDeps :: Deps -> TL.Text
-showDeps (Deps p m a d) =
+showDeps (Deps p m e a d) =
   "package: " <> showPkg p <> "\n" <>
   "module: "  <> TL.fromStrict m <> "\n" <>
+  "exports: " <> TL.pack (show $ M.toList e) <> "\n" <>
   "deps:\n"   <> TL.unlines (map dumpDep $ M.toList d)
   where
     dumpDep (s, n) = TL.fromStrict (funSymbol s) <> " -> " <> TL.pack (show n) <> "\n" <> 
@@ -578,6 +611,10 @@ instance Objectable ClosureInfo where
   put (ClosureInfo v regs name layo typ static) = do
     put v >> put regs >> put name >> put layo >> put typ >> put static
   get = ClosureInfo <$> get <*> get <*> get <*> get <*> get <*> get
+
+instance Objectable JSFFIType where
+  put = putEnum
+  get = getEnum
 
 instance Objectable VarType where
   put = putEnum

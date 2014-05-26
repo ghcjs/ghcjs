@@ -202,7 +202,7 @@ ghcjsCompileModule settings jsEnv env core mod =
       core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
       stg <- coreToStg dflags (cg_module core) core_binds
       (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-      return $ variantRender gen2Variant settings dflags stg' (cg_module core)
+      return $ variantRender gen2Variant settings dflags core stg'
 
 doFakeNative :: DynFlags -> FilePath -> IO ()
 doFakeNative df base = do

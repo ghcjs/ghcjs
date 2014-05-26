@@ -515,13 +515,15 @@ updates s =
         // overwrite the object
         if(typeof `R1` === 'object') {
           `traceRts s $ t"$upd_frame: boxed: " |+ ((R1|."f")|."n")`;
-          updatee.f = `R1`.f;
+          updatee.f  = `R1`.f;
           updatee.d1 = `R1`.d1;
           updatee.d2 = `R1`.d2;
+          updatee.m  = `R1`.m;
         } else {
-          updatee.f = h$unbox_e;
+          updatee.f  = h$unbox_e;
           updatee.d1 = `R1`;
           updatee.d2 = null;
+          updatee.m  = 0;
         }
         `adjSpN 2`;
         `traceRts s $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;

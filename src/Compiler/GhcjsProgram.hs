@@ -65,6 +65,9 @@ import qualified Gen2.Shim        as Gen2
 import qualified Gen2.Rts         as Gen2
 import qualified Gen2.RtsTypes    as Gen2
 
+-- workaround for platform dependence bugs
+import           Rules (mkRuleBase)
+import qualified Gen2.GHC.PrelRules
 
 {- |
   Check if we're building a Cabal Setup script, in which case automatically
@@ -171,6 +174,8 @@ fixNameCache = do
   sess <- getSession
   liftIO $ modifyIORef (hsc_NC sess) $ \(NameCache u _) ->
     (initNameCache u knownNames)
+  liftIO $ modifyIORef (hsc_EPS sess) $ \eps ->
+    eps { eps_rule_base = mkRuleBase Gen2.GHC.PrelRules.builtinRules }
     where
       knownNames = map getName (filter (not.isPrimOp) wiredInThings) ++
                       basicKnownKeyNames ++
@@ -178,6 +183,7 @@ fixNameCache = do
                       map (getName . AnId . Gen2.mkGhcjsPrimOpId) allThePrimOps
       isPrimOp (AnId i) = isPrimOpId i
       isPrimOp _        = False
+
 
 checkIsBooted :: IO ()
 checkIsBooted = do

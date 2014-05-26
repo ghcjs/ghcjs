@@ -329,8 +329,8 @@ data StaticInfo = StaticInfo { siVar    :: !Text      -- | global object
   deriving (Eq, Ord, Show, Typeable)
 
 data StaticVal = StaticFun     !Text                     -- ^ heap object for function
-               | StaticThunk   !Text                     -- ^ heap object for CAF
-               | StaticUnboxed !StaticUnboxed            -- ^ unboxed bool
+               | StaticThunk   !(Maybe Text)             -- ^ heap object for CAF (field is Nothing when thunk is initialized in an alternative way, like string thunks through h$str)
+               | StaticUnboxed !StaticUnboxed            -- ^ unboxed constructor (Bool, Int, Double etc)
                | StaticData    !Text [StaticArg]         -- ^ regular datacon app
                | StaticList    [StaticArg] (Maybe Text)  -- ^ list initializer (with optional tail)
   deriving (Eq, Ord, Show, Typeable)
@@ -366,29 +366,32 @@ instance ToJExpr StaticLit where
   toJExpr (DoubleLit d) = toJExpr (unSaneDouble d)
   toJExpr (StringLit t) = [je| h$str(`t`) |]                           -- fixme this duplicates the string!
   toJExpr (BinLit b)    = [je| h$rstr(`map toInteger (B.unpack b)`) |] -- fixme this duplicates the string
+  toJExpr (LabelLit isFun lbl) = [je| `JVar (TxtI lbl)` |]
 
 -- | declare and do first-pass init of a global object (create JS object for heap objects)
 staticDeclStat :: StaticInfo
                -> JStat
 staticDeclStat (StaticInfo si sv) =
   let si' = TxtI si
-      ssv (StaticUnboxed u)       = ssu u
-      ssv _                       = [je| h$d() |]
+      ssv (StaticUnboxed u)       = Just (ssu u)
+      ssv (StaticThunk Nothing)   = Nothing
+      ssv _                       = Just [je| h$d() |]
       ssu (StaticUnboxedBool b)   = [je| h$p(`b`) |]
       ssu (StaticUnboxedInt i)    = [je| h$p(`i`) |]
       ssu (StaticUnboxedDouble d) = [je| h$p(`unSaneDouble d`) |]
-  in  DeclStat si' <> [j| `si'` = `ssv sv`; |]
+  -- fixme, we shouldn't do h$di, we need to record the statement to init the thunks
+  in maybe [j| h$di(`si'`); |] (\v -> DeclStat si' <> [j| `si'` = `v`; |]) (ssv sv)
 
 -- | initialize a global object. all global objects have to be declared (staticInfoDecl) first
 --   (this is only used with -debug, normal init would go through the static data table)
 staticInitStat :: StaticInfo
                -> JStat
 staticInitStat (StaticInfo i sv)
-  | StaticData con args <- sv = [j| h$sti(`TxtI i`,`TxtI con`, `args`); |]
-  | StaticFun f         <- sv = [j| h$sti(`TxtI i`, `TxtI f`, []); |]
-  | StaticList args mt  <- sv = [j| h$stl(`TxtI i`, `args`, `maybe jnull (toJExpr . TxtI) mt`); |]
-  | StaticThunk f       <- sv = [j| h$stc(`TxtI i`, `TxtI f`); |]
-  | otherwise                 = mempty -- StaticFun / StaticPrim don't need any init here
+  | StaticData con args  <- sv = [j| h$sti(`TxtI i`,`TxtI con`, `args`); |]
+  | StaticFun f          <- sv = [j| h$sti(`TxtI i`, `TxtI f`, []); |]
+  | StaticList args mt   <- sv = [j| h$stl(`TxtI i`, `args`, `maybe jnull (toJExpr . TxtI) mt`); |]
+  | StaticThunk (Just f) <- sv = [j| h$stc(`TxtI i`, `TxtI f`); |]
+  | otherwise                  = mempty -- StaticFun / StaticPrim / StaticThunk Nothing don't need any init here
 
 
 

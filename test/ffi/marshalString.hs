@@ -1,4 +1,4 @@
-{-# LANGUAGE ForeignFunctionInterface, JavaScriptFFI, CPP, OverloadedStrings #-}
+{-# LANGUAGE ForeignFunctionInterface, JavaScriptFFI, OverloadedStrings #-}
 
 module Main where
 
@@ -11,19 +11,11 @@ import qualified Data.Text.Encoding.Error as TE
 import qualified Data.ByteString as B
 import Data.Monoid
 
-#ifdef __GHCJS__
-foreign import javascript unsafe "log($1)"
+foreign import javascript unsafe "h$log($1)"
   js_log :: JSString -> IO ()
 
 foreign import javascript unsafe "$r = ''; for(var i=0;i< $1 ;i++) { $r += 'xyz'; }"
   js_makeSomeStr :: Int -> IO JSString
-#else
-js_log :: JSString -> IO ()
-js_log = error "only available from JavaScript"
-
-js_makeSomeStr :: Int -> IO JSString
-js_makeSomeStr = error "only available from JavaScript"
-#endif
 
 x :: T.Text
 x = "abc"

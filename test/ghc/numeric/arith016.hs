@@ -4,16 +4,17 @@ module Main where
 
 import GHC.Exts ( Float(F#), 
 		   eqFloat#, neFloat#, ltFloat#, 
-		   leFloat#, gtFloat#, geFloat# 
+		   leFloat#, gtFloat#, geFloat#,
+                   tagToEnum# 
 		 )
 
 fcmp_eq, fcmp_ne, fcmp_lt, fcmp_le, fcmp_gt, fcmp_ge :: (String, Float -> Float -> Bool)
-fcmp_eq = ("==", \ (F# a) (F# b) -> a `eqFloat#` b)
-fcmp_ne = ("/=", \ (F# a) (F# b) -> a `neFloat#` b)
-fcmp_lt = ("< ", \ (F# a) (F# b) -> a `ltFloat#` b)
-fcmp_le = ("<=", \ (F# a) (F# b) -> a `leFloat#` b)
-fcmp_gt = ("> ", \ (F# a) (F# b) -> a `gtFloat#` b)
-fcmp_ge = (">=", \ (F# a) (F# b) -> a `geFloat#` b)
+fcmp_eq = ("==", \ (F# a) (F# b) -> tagToEnum# (a `eqFloat#` b))
+fcmp_ne = ("/=", \ (F# a) (F# b) -> tagToEnum# (a `neFloat#` b))
+fcmp_lt = ("< ", \ (F# a) (F# b) -> tagToEnum# (a `ltFloat#` b))
+fcmp_le = ("<=", \ (F# a) (F# b) -> tagToEnum# (a `leFloat#` b))
+fcmp_gt = ("> ", \ (F# a) (F# b) -> tagToEnum# (a `gtFloat#` b))
+fcmp_ge = (">=", \ (F# a) (F# b) -> tagToEnum# (a `geFloat#` b))
 
 float_fns = [fcmp_eq, fcmp_ne, fcmp_lt, fcmp_le, fcmp_gt, fcmp_ge]
 

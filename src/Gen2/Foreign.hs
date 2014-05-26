@@ -9,8 +9,10 @@
 
 module Gen2.Foreign where
 
+import Control.Monad
+
 import Data.Maybe
-import Data.List (partition, isPrefixOf)
+import Data.List (partition, isPrefixOf, unzip4)
 
 import Hooks
 import DynFlags
@@ -20,12 +22,16 @@ import OrdList
 import Name
 import Bag
 import CoreSyn
+import ErrUtils
 import HscTypes
 import HsBinds
 import HsDecls
 import DsForeign
 import DsMonad
 import Encoding
+import HsUtils
+import TcEnv
+import TcExpr
 import TcRnTypes
 import TcForeign
 import MonadUtils
@@ -55,6 +61,11 @@ import Module
 import TcType
 import TcRnMonad
 import TcHsType
+import Platform
+
+import Gen2.PrimIface
+
+type Binding = (Id, CoreExpr)
 
 installForeignHooks :: Bool -> DynFlags -> DynFlags
 installForeignHooks generatingJs dflags =
@@ -66,49 +77,160 @@ installForeignHooks generatingJs dflags =
                     }
       f False h = h { dsForeignsHook       = Just ghcjsNativeDsForeigns
                     , tcForeignImportsHook = Just ghcjsNativeTcForeignImports
-                    , tcForeignExportsHook = Just ghcjsTcForeignExports
+                    , tcForeignExportsHook = Just ghcjsNativeTcForeignExports
                     }
 {-
    desugar foreign declarations for JavaScript
 -}
 ghcjsDsForeigns :: [LForeignDecl Id]
                 -> DsM (ForeignStubs, OrdList (Id, CoreExpr))
+ghcjsDsForeigns []
+  = return (NoStubs, nilOL)
 ghcjsDsForeigns fos = do
-  (stubs, ret) <- dsForeigns' fos'
-  retJs <- mapM imp_js jsImports
-  let jsBs = foldr (appOL . toOL . fst3) nilOL retJs
-      fst3 (x,_,_) = x
-  return (stubs, ret `appOL` jsBs)
-    where
-      imp_js (L loc fimp) = putSrcSpanDs loc (dsJsImport fimp)
-      (jsImports, fos') = partition isJsImport fos
-      isJsImport (L _ (ForeignImport _ _ _ (CImport _ _ _ _))) = True
-      isJsImport _ = False
+    fives <- mapM do_ldecl fos
+    let
+        (hs, cs, idss, bindss) = unzip4 fives
+        fe_ids = concat idss
 
-dsJsImport :: ForeignDecl Id -> DsM ([(Id, Expr TyVar)], SDoc, SDoc)
-dsJsImport (ForeignImport (L _ id) t co (CImport cconv safety mHeader spec)) =
-  case spec of
--- fixme do we need something special here?
-    CLabel cid -> do
-      dflags <- getDynFlags
-      let ty = pFst $ coercionKind co
-          fod = case tyConAppTyCon_maybe (dropForAlls ty) of
-                  Just tycon
-                    | tyConUnique tycon == funPtrTyConKey -> IsFunction
-                  _ -> IsData
-      (resTy, foRhs) <- jsResultWrapper ty
-      let
-        rhs = foRhs (Lit (MachLabel cid stdcall_info fod))
-        rhs' = Cast rhs co
-        stdcall_info = fun_type_arg_stdcall_info dflags cconv ty
-      return ([(id, rhs')], empty, empty)
-    CFunction target | cconv == PrimCallConv ->
-      dsPrimCall id co (CCall (CCallSpec target cconv safety))
-    CFunction target ->
-      dsJsCall id co (CCall (CCallSpec target cconv safety)) mHeader
-    CWrapper ->
-      dsFExportDynamic id co cconv
-dsJsImport _ = error "dsJsImport"
+    return (ForeignStubs
+             (vcat hs)
+             (vcat cs),
+            foldr (appOL . toOL) nilOL bindss)
+  where
+   do_ldecl (L loc decl) = putSrcSpanDs loc (do_decl decl)
+
+   do_decl (ForeignImport id _ co spec) = do
+      traceIf (text "fi start" <+> ppr id)
+      (bs, h, c) <- ghcjsDsFImport (unLoc id) co spec
+      traceIf (text "fi end" <+> ppr id)
+      return (h, c, [], bs)
+
+   do_decl (ForeignExport (L _ id) _ co (CExport (CExportStatic ext_nm cconv))) = do
+      (h, c, bs) <- ghcjsDsFExport id co ext_nm cconv False
+      return (h, c, [id], bs)
+
+ghcjsDsFExport :: Id                 -- Either the exported Id,
+                                     -- or the foreign-export-dynamic constructor
+               -> Coercion           -- Coercion between the Haskell type callable
+                                     -- from JS, and its representation type
+               -> CLabelString       -- The name to export to JS land
+               -> CCallConv
+               -> Bool               -- True => foreign export dynamic
+                                     --         so invoke IO action that's hanging off
+                                     --         the first argument's stable pointer
+               -> DsM ( SDoc         -- contents of Module_stub.h
+                      , SDoc         -- contents of Module_stub.c
+                      , [Binding]    -- bindings to include
+                      )
+
+ghcjsDsFExport fn_id co ext_name cconv isDyn = -- return (empty, empty, [])
+
+                                               do
+    let
+       ty                              = pSnd $ coercionKind co
+       (_tvs,sans_foralls)             = tcSplitForAllTys ty
+       (fe_arg_tys', orig_res_ty)      = tcSplitFunTys sans_foralls
+       -- We must use tcSplits here, because we want to see
+       -- the (IO t) in the corner of the type!
+       fe_arg_tys | isDyn     = tail fe_arg_tys'
+                  | otherwise = fe_arg_tys'
+    dflags <- getDynFlags
+    u <- newUnique
+    u1 <- newUnique
+    let bnd = mkExportedLocalId (mkSystemVarName u1 $ fsLit "dsjs") unitTy
+        bs  = mkFExportJsBits bnd dflags (cconv == JavaScriptCallConv) ext_name
+                     (if isDyn then Nothing else Just fn_id)
+                     fe_arg_tys orig_res_ty cconv u
+    
+    return (empty, empty, bs)
+
+mkFExportJsBits :: Id
+                -> DynFlags
+                -> Bool
+                -> FastString
+                -> Maybe Id -- Just==static, Nothing==dynamic
+                -> [Type]
+                -> Type
+                -> CCallConv
+                -> Unique
+                -> [Binding]
+mkFExportJsBits btgt dflags is_js_conv js_nm (Just target) arg_htys res_hty cc u =
+  let expr = mkApps (
+        Var mkExport) [ mkIntLit dflags $ if is_js_conv then 1 else 0
+                      , Lit (mkMachString $ unpackFS js_nm)
+                      , Var target
+                      ]
+      mkExport = mkFCallId dflags u
+                    (CCall (CCallSpec (StaticTarget (fsLit "__mkExport") Nothing True) JavaScriptCallConv PlayRisky))
+                    mkExportTy
+      mkExportTy = mkFunTys [intPrimTy, addrPrimTy, (mkFunTys arg_htys res_hty)] unitTy
+  in [(btgt, expr)]
+mkFExportJsBits _ _ _ _ _ _ _ _ _ = []
+
+ghcjsDsFImport :: Id
+               -> Coercion
+               -> ForeignImport
+               -> DsM ([Binding], SDoc, SDoc)
+ghcjsDsFImport id co (CImport cconv safety mHeader spec) = do
+    (ids, h, c) <- dsJsImport id co spec cconv safety mHeader
+    return (ids, h, c)
+
+
+dsJsImport :: Id
+           -> Coercion
+           -> CImportSpec
+           -> CCallConv
+           -> Safety
+           -> Maybe Header
+           -> DsM ([Binding], SDoc, SDoc)
+dsJsImport id co (CLabel cid) cconv _ _ = do
+   dflags <- getDynFlags
+   let ty = pFst $ coercionKind co
+       fod = case tyConAppTyCon_maybe (dropForAlls ty) of
+             Just tycon
+              | tyConUnique tycon == funPtrTyConKey ->
+                 IsFunction
+             _ -> IsData
+   (resTy, foRhs) <- resultWrapper ty
+--   ASSERT(fromJust resTy `eqType` addrPrimTy)    -- typechecker ensures this
+   let rhs = foRhs (Lit (MachLabel cid stdcall_info fod))
+       rhs' = Cast rhs co
+       stdcall_info = fun_type_arg_stdcall_info dflags cconv ty
+                      -- in
+   return ([(id, rhs')], empty, empty)
+
+dsJsImport id co (CFunction target) cconv@PrimCallConv safety _
+  = dsPrimCall id co (CCall (CCallSpec target cconv safety))
+dsJsImport id co (CFunction target) cconv safety mHeader
+  = dsJsCall id co (CCall (CCallSpec target cconv safety)) mHeader
+dsJsImport id co CWrapper cconv _ _
+  = dsJsFExportDynamic id co cconv
+
+-- fixme work in progress
+dsJsFExportDynamic :: Id
+                 -> Coercion
+                 -> CCallConv
+                 -> DsM ([Binding], SDoc, SDoc)
+dsJsFExportDynamic id co0 cconv = do
+    dflags <- getDynFlags
+    u <- newUnique
+    let fun_ty = head arg_tys
+    arg_id <- newSysLocalDs fun_ty
+    let mkExport = mkFCallId dflags u
+                      (CCall (CCallSpec (StaticTarget (fsLit "h$mkExportDyn") Nothing True) JavaScriptCallConv PlayRisky))
+                      (mkFunTy addrPrimTy ty)
+        mkExportTy = mkFunTy (mkFunTys arg_tys res_ty) unitTy
+        (fun_args0, fun_r) = splitFunTys (dropForAlls fun_ty)
+        expr       = Lam arg_id $ mkApps (Var mkExport) [Lit (mkMachString $ (snd (jsTySigLit dflags True fun_r) : ".") ++ map (snd . jsTySigLit dflags False) fun_args0), Var arg_id]
+        fed        = (id `setInlineActivation` NeverActive)
+    return ([(fed,expr)], empty, empty)
+
+ where
+  ty                       = pFst (coercionKind co0)
+  (tvs,sans_foralls)       = tcSplitForAllTys ty
+  (arg_tys, fn_res_ty)     = tcSplitFunTys sans_foralls
+  Just (io_tc, res_ty)     = tcSplitIOType_maybe fn_res_ty
+        -- Must have an IO type; hence Just
 
 dsJsCall :: Id -> Coercion -> ForeignCall -> Maybe Header
         -> DsM ([(Id, Expr TyVar)], SDoc, SDoc)
@@ -154,9 +276,9 @@ dsJsCall fn_id co fcall mDeclHeader = do
  -}
 
 unboxJsArg :: CoreExpr                  -- The supplied argument
-         -> DsM (CoreExpr,              -- To pass as the actual argument
-                 CoreExpr -> CoreExpr   -- Wrapper to unbox the arg
-                )
+           -> DsM (CoreExpr,              -- To pass as the actual argument
+                   CoreExpr -> CoreExpr   -- Wrapper to unbox the arg
+                  )
 unboxJsArg arg
   -- Primtive types: nothing to unbox
   | isPrimitiveType arg_ty
@@ -411,12 +533,12 @@ mkJsCall dflags u tgt args t =
 -- narrow int32 and word32 since JS numbers can contain more
 maybeJsNarrow :: DynFlags -> TyCon -> (CoreExpr -> CoreExpr)
 maybeJsNarrow dflags tycon
-  | tycon `hasKey` int8TyConKey   = \e -> App (Var (mkPrimOpId Narrow8IntOp)) e
-  | tycon `hasKey` int16TyConKey  = \e -> App (Var (mkPrimOpId Narrow16IntOp)) e
-  | tycon `hasKey` int32TyConKey  = \e -> App (Var (mkPrimOpId Narrow32IntOp)) e
-  | tycon `hasKey` word8TyConKey  = \e -> App (Var (mkPrimOpId Narrow8WordOp)) e
-  | tycon `hasKey` word16TyConKey = \e -> App (Var (mkPrimOpId Narrow16WordOp)) e
-  | tycon `hasKey` word32TyConKey = \e -> App (Var (mkPrimOpId Narrow32WordOp)) e
+  | tycon `hasKey` int8TyConKey   = \e -> App (Var (mkGhcjsPrimOpId Narrow8IntOp)) e
+  | tycon `hasKey` int16TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow16IntOp)) e
+  | tycon `hasKey` int32TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow32IntOp)) e
+  | tycon `hasKey` word8TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow8WordOp)) e
+  | tycon `hasKey` word16TyConKey = \e -> App (Var (mkGhcjsPrimOpId Narrow16WordOp)) e
+  | tycon `hasKey` word32TyConKey = \e -> App (Var (mkGhcjsPrimOpId Narrow32WordOp)) e
   | otherwise                     = id
 
 {-
@@ -433,7 +555,7 @@ ghcjsNativeDsForeigns :: [LForeignDecl Id]
                       -> DsM (ForeignStubs, OrdList (Id, CoreExpr))
 ghcjsNativeDsForeigns fos = do
   dflags <- getDynFlags
-  (stubs, ret) <- dsForeigns' (map (convertImport dflags) fos)
+  (stubs, ret) <- dsForeigns' (map (convertForeignDecl dflags) fos)
   case catMaybes $ map (importStub dflags) fos of
     [] -> return (stubs, ret)
     xs -> return (stubs `appendStubC'` vcat xs, ret)
@@ -443,10 +565,12 @@ ghcjsNativeDsForeigns fos = do
         ForeignStubs h (inclGhcjs $$ c $$ s)
       inclGhcjs = text "#include \"ghcjs.h\""
 
-      convertImport :: DynFlags -> LForeignDecl Id -> LForeignDecl Id
-      convertImport dflags (L l (ForeignImport n t c (CImport JavaScriptCallConv safety mheader spec))) =
+      convertForeignDecl :: DynFlags -> LForeignDecl Id -> LForeignDecl Id
+      convertForeignDecl dflags (L l (ForeignImport n t c (CImport JavaScriptCallConv safety mheader spec))) =
         (L l (ForeignImport n t c (CImport CCallConv PlaySafe mheader (convertSpec dflags n))))
-      convertImport _ x = x
+      convertForeignDecl dflags (L l (ForeignExport n t c (CExport (CExportStatic lbl JavaScriptCallConv)))) =
+        (L l (ForeignExport n t c (CExport (CExportStatic lbl CCallConv))))
+      convertForeignDecl _ x = x
 
       convertSpec :: DynFlags -> Located Id -> CImportSpec
       convertSpec dflags i = CFunction (StaticTarget (stubName dflags (unLoc i)) Nothing True)
@@ -462,7 +586,7 @@ ghcjsNativeDsForeigns fos = do
 
       mkImportStub :: DynFlags -> Id -> Coercion -> Safety -> CImportSpec -> SDoc
       mkImportStub dflags i c s spec =
-        resTy <+> ftext (stubName dflags i) <> stubArgs <+> braces body
+        text resTy <+> ftext (stubName dflags i) <> stubArgs <+> braces body
           where
            js :: SDoc
            js = case spec of
@@ -484,35 +608,34 @@ ghcjsNativeDsForeigns fos = do
            t = idType i
            (args, res) = tcSplitFunTys . snd . tcSplitForAllTys $ t
            argNames    = map ((text "arg" <>) . int) [1..]
-           (argTys, argsSig) = unzip $ map (tySig False) args
-           (resTy,  resSig) = tySig True res
+           (argTys, argsSig) = unzip $ map (jsTySigLit dflags False) args
+           (resTy,  resSig) = jsTySigLit dflags True res
            body | resSig == 'v' = vcat [text "int res;", call]
-                | otherwise     = vcat [resTy <+> text "res;", call, text "return res;"]
+                | otherwise     = vcat [text resTy <+> text "res;", call, text "return res;"]
            call = text "getJavaScriptHandler()" <> parens (pprWithCommas id handlerArgs) <> semi
            handlerArgs = [js, safety, escapeQuoted (resSig : argsSig), text "(void*)&res"]
                            ++ take (length args) argNames
-           stubArgs = parens $ pprWithCommas id (zipWith (<+>) argTys argNames)
+           stubArgs = parens $ pprWithCommas id (zipWith (\ty n -> text ty <+> n) argTys argNames)
 
-           tySig :: Bool -> Type -> (SDoc, Char)
-           tySig isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe t =
-                                 tySig isResult result
-                            | Just (_, t') <- splitForAllTy_maybe t = tySig isResult t'
-                            | Just (tc, _) <- splitTyConApp_maybe t =
-                                 let (d,c) = tcSig isResult tc
-                                 in (text d, c)
-                            | otherwise = error $ "ghcjsNativeDsForeigns: unexpected type: "
-                                                     ++ showSDoc dflags (ppr t)
+jsTySigLit :: DynFlags -> Bool -> Type -> (String, Char)
+jsTySigLit dflags isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe t =
+                                 jsTySigLit dflags isResult result
+                             | Just (_, t') <- splitForAllTy_maybe t = jsTySigLit dflags isResult t'
+                             | Just (tc, _) <- splitTyConApp_maybe t = tcSig isResult tc
+                             | otherwise = error $ "jsTySigLit: unexpected type: "
+                                                       ++ showSDoc dflags (ppr t)
+  where
            tcSig :: Bool -> TyCon -> (String, Char)
            tcSig isResult tc
              | isUnLiftedTyCon tc                                  = prim (tyConPrimRep tc)
              | Just r <- lookup (getUnique tc) boxed               = r
              | isResult && getUnique tc == unitTyConKey            = ("void", 'v')
              | isJSRefTyCon dflags tc = ("StgPtr", 'r')
-             | otherwise = error $ "ghcjsNativeDsForeigns: tcSig unexpected TyCon: "
+             | otherwise = error $ "jsTySigLit: unexpected TyCon: "
                                        ++ showSDoc dflags (ppr tc)
               where
-                 -- fixme is there alread a list of these somewhere else?
-                 prim VoidRep  = error "ghcjsNativeDsForeigns: VoidRep"
+                 -- fixme is there already a list of these somewhere else?
+                 prim VoidRep  = error "jsTySigLit: VoidRep"
                  prim PtrRep   = hsPtr
                  prim IntRep   = hsInt
                  prim WordRep  = hsWord
@@ -521,7 +644,7 @@ ghcjsNativeDsForeigns fos = do
                  prim AddrRep   = hsPtr
                  prim FloatRep  = hsFloat
                  prim DoubleRep = hsDouble
-                 prim (VecRep{}) = error "ghcjsNativeDsForeigns: VecRep"
+                 prim (VecRep{}) = error "jsTySigLit: VecRep"
                  boxed = [ (intTyConKey,        hsInt               )
                          , (int8TyConKey,       ("StgInt8",      'b'))
                          , (int16TyConKey,      ("StgInt16",     's'))
@@ -659,10 +782,92 @@ ghcjsNativeTcForeignImports :: [LForeignDecl Name]
                             -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
 ghcjsNativeTcForeignImports = ghcjsTcForeignImports
 
+ghcjsNativeTcForeignExports :: [LForeignDecl Name]
+                            -> TcM (LHsBinds TcId, [LForeignDecl TcId], Bag GlobalRdrElt)
+ghcjsNativeTcForeignExports = ghcjsTcForeignExports
+
 ghcjsTcForeignExports :: [LForeignDecl Name]
-                      -> TcM (LHsBinds TcId, [LForeignDecl TcId], Bag GlobalRdrElt)
-ghcjsTcForeignExports decls = do
---  liftIO $ putStrLn "typechecking foreign exports"
-  tcForeignExports' decls
+                 -> TcM (LHsBinds TcId, [LForeignDecl TcId], Bag GlobalRdrElt)
+-- For the (Bag GlobalRdrElt) result,
+-- see Note [Newtype constructor usage in foreign declarations]
+ghcjsTcForeignExports decls
+  = foldlM combine (emptyLHsBinds, [], emptyBag) (filter isForeignExport decls)
+  where
+   combine (binds, fs, gres1) (L loc fe) = do
+       (b, f, gres2) <- setSrcSpan loc (ghcjsTcFExport fe)
+       return ((FromSource, b) `consBag` binds, L loc f : fs, gres1 `unionBags` gres2)
+
+ghcjsTcFExport :: ForeignDecl Name -> TcM (LHsBind Id, ForeignDecl Id, Bag GlobalRdrElt)
+ghcjsTcFExport fo@(ForeignExport (L loc nm) hs_ty _ spec)
+  = addErrCtxt (foreignDeclCtxt fo) $ do
+
+    sig_ty <- tcHsSigType (ForSigCtxt nm) hs_ty
+    rhs <- tcPolyExpr (nlHsVar nm) sig_ty
+
+    (norm_co, norm_sig_ty, gres) <- normaliseFfiType sig_ty
+
+    spec' <- ghcjsTcCheckFEType norm_sig_ty spec
+
+           -- we're exporting a function, but at a type possibly more
+           -- constrained than its declared/inferred type. Hence the need
+           -- to create a local binding which will call the exported function
+           -- at a particular type (and, maybe, overloading).
 
 
+    -- We need to give a name to the new top-level binding that
+    -- is *stable* (i.e. the compiler won't change it later),
+    -- because this name will be referred to by the C code stub.
+    id  <- mkStableIdFromName nm sig_ty loc mkForeignExportOcc
+    return (mkVarBind id rhs, ForeignExport (L loc id) undefined norm_co spec', gres)
+tcFExport d = pprPanic "tcFExport" (ppr d)
+
+
+ghcjsTcCheckFEType :: Type -> ForeignExport -> TcM ForeignExport
+ghcjsTcCheckFEType sig_ty (CExport (CExportStatic str cconv)) = do
+--    checkCg checkCOrAsmOrLlvm
+    check (isCLabelString str) (badCName str)
+    cconv' <- ghcjsCheckCConv cconv
+    checkForeignArgs isFFIExternalTy arg_tys
+    checkForeignRes nonIOok noCheckSafe isFFIExportResultTy res_ty
+    return (CExport (CExportStatic str cconv'))
+  where
+      -- Drop the foralls before inspecting n
+      -- the structure of the foreign type.
+    (_, t_ty) = tcSplitForAllTys sig_ty
+    (arg_tys, res_ty) = tcSplitFunTys t_ty
+
+ghcjsCheckCConv :: CCallConv -> TcM CCallConv
+ghcjsCheckCConv CCallConv          = return CCallConv
+ghcjsCheckCConv CApiConv           = return CApiConv
+ghcjsCheckCConv JavaScriptCallConv = return JavaScriptCallConv
+
+ghcjsCheckCConv StdCallConv  = do dflags <- getDynFlags
+                                  let platform = targetPlatform dflags
+                                  if platformArch platform == ArchX86
+                                    then return StdCallConv
+                                    else do -- This is a warning, not an error. see #3336
+                                           when (wopt Opt_WarnUnsupportedCallingConventions dflags) $
+                                             addWarnTc (text "the 'stdcall' calling convention is unsupported on this platform," $$ text "treating as ccall")
+                                           return CCallConv
+ghcjsCheckCConv PrimCallConv = do addErrTc (text "The `prim' calling convention can only be used with `foreign import'")
+                                  return PrimCallConv
+
+
+checkCg :: (HscTarget -> Maybe SDoc) -> TcM ()
+checkCg check = do
+    dflags <- getDynFlags
+    let target = hscTarget dflags
+    case target of
+      HscNothing -> return ()
+      _ ->
+        case check target of
+          Nothing  -> return ()
+          Just err -> addErrTc (text "Illegal foreign declaration:" <+> err)
+
+check :: Bool -> MsgDoc -> TcM ()
+check True _       = return ()
+check _    the_err = addErrTc the_err
+
+badCName :: CLabelString -> MsgDoc
+badCName target
+  = sep [quotes (ppr target) <+> ptext (sLit "is not a valid C identifier")]

@@ -13,6 +13,7 @@ import           BasicTypes
 import           PrelNames
 import           DynFlags
 import           Encoding
+import           HscTypes
 import           TysPrim
 import           UniqSet
 import           NameSet
@@ -43,11 +44,12 @@ import           Data.Bits ((.|.), shiftL, shiftR, (.&.), testBit, xor, compleme
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
-import           Data.Char (ord, isDigit)
+import           Data.Char (ord, chr, isDigit)
 import           Data.Either (partitionEithers)
 import           Data.Function (on)
 import           Data.Generics.Aliases (mkT)
 import           Data.Generics.Schemes (everywhere)
+import           Data.Int
 import qualified Data.IntMap.Strict as IM
 import           Data.Monoid
 import           Data.Maybe (isJust, fromMaybe)
@@ -85,11 +87,12 @@ type StaticRefs = [Id]
 
 generate :: GhcjsSettings
          -> DynFlags
+         -> CgGuts
          -> StgPgm
-         -> Module
          -> ByteString -- ^ binary data for the .js_o object file
-generate settings df s m =
+generate settings df guts s =
   let (uf, s') = sinkPgm m s
+      m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
         (st, g) <- pass df m s'
         let (p, d) = unzip g
@@ -99,7 +102,7 @@ generate settings df s m =
           Object.object' st' deps (p ++ dbg) -- p first, so numbering of linkable units lines up
 
 {- |
-  Generate an extra linkable unit for the object file if --debug is active.
+  Generate an extra linkable unit for the object file if -debug is active.
   this unit is never actually linked, but it contains the optimized STG AST
   so it can be easily reviewed using ghcjs --print-obj to aid in solving
   code generator problems.
@@ -199,7 +202,8 @@ genMetaData p1 = do
       (dl, blocks) = unzip ds
       ba = listArray (0, length blocks - 1) blocks
       dm = M.fromList (concat dl)
-  return $ Object.Deps (modulePackageText m) (moduleNameText m) ba dm
+      es = M.empty -- fixme exports
+  return $ Object.Deps (modulePackageText m) (moduleNameText m) es ba dm
    where
     oneDep (symbs, deps) n = do
       ds <- S.fromList <$> mapM idFun deps
@@ -284,6 +288,16 @@ getStaticRef = fmap (itxt.head) . genIdsI
 genToplevelRhs :: Id
                -> StgRhs
                -> C
+-- special cases
+genToplevelRhs i (StgRhsClosure _cc _bi _ _ _ _ body)
+  -- foreign exports
+  | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget t _ _) _ _)) _)
+     [StgLitArg (MachInt is_js_conv), StgLitArg (MachStr js_name), StgVarArg tgt] _) <- body,
+     t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
+  -- top-level strings
+  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey     = genStrThunk i False bs
+  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey = genStrThunk i True bs
+-- general cases:
 genToplevelRhs i (StgRhsCon _cc con args) = do
   ii <- jsIdI i
   allocConStatic ii con args
@@ -297,7 +311,7 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] Updatable srt [] body) = do
         cs <- use gsCgSettings
         -- fixme can we skip the first reg here?
         emitClosureInfo (ClosureInfo eidt (CIRegs 0 [PtrV]) idt (CILayoutFixed 0 []) CIThunk sr)
-        emitStatic idt (StaticThunk eidt)
+        emitStatic idt (StaticThunk (Just eidt))
         return $ decl eid <> [j| `eid` = `JFunc funArgs (preamble <> updateThunk cs <> body0)`; |]
 
 genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
@@ -401,7 +415,9 @@ genApp _ _ i [StgLitArg (MachStr bs), x]
                    return `Stack`[`Sp`];
                  |]
 genApp force mstackTop i a
-    | not (isUnboxedTupleType (idType i)) && (isPrimitiveType (idType i) || isStrictType (idType i))
+    | not (isUnboxedTupleType (idType i)) &&
+      (isPrimitiveType (idType i) || isStrictType (idType i)) &&
+      not (might_be_a_function (idType i))
             = r1 <> return [j| return `Stack`[`Sp`]; |]
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do
           ii <- enterId
@@ -586,7 +602,7 @@ genCase top bnd (StgLit lit) at@(PrimAlt tc) [(_,[],_,e)] l srt = do
 genCase top bnd (StgApp i xs) at alts l srt =
   genRet top bnd at alts l srt <> genApp True False i xs
 
--- fixme?
+-- fixme, unnecessary continuation
 genCase top bnd x@(StgCase {}) at alts l srt =
   genRet top bnd at alts l srt <> genExpr top x
 
@@ -639,7 +655,6 @@ genCase top bnd x@(StgOpApp (StgPrimOp p) args t) at alts l srt = do
 genCase top bnd x@(StgConApp c as) at [(DataAlt{}, bndrs, _, e)] l srt = do
   args' <- concatMapM genArg as
   ids   <- concatMapM genIds bndrs
-  bndi  <- jsIdI bnd
   bndi  <- jsIdI bnd
   let ab = case at of
              PrimAlt{}   -> mempty
@@ -714,9 +729,6 @@ genRet top e at as l srt = withNewIdent f
       UbxTupAlt n -> idVt e
       _           -> [PtrV]
 
-    isBoxedAlt = case at of
-                   PrimAlt {} -> False
-                   _          -> True
     fun free = resetSlots $ do
       l <- if isUnboxedTupleType (idType e)
              then return mempty
@@ -1021,12 +1033,7 @@ genFFIArg a@(StgVarArg i)
      r = uTypeVt . stgArgType $ a
 
 genIdArg :: Id -> G [JExpr]
-genIdArg i
-    | isVoid r     = return []
-    | isMultiVar r = mapM (jsIdN i) [1..varSize r]
-    | otherwise    = (:[]) <$> jsId i
-    where
-      r = uTypeVt . idType $ i
+genIdArg i = genArg (StgVarArg i)
 
 genIdArgI :: Id -> G [Ident]
 genIdArgI i
@@ -1046,6 +1053,16 @@ genIdStackArgI i = zipWith f [1..] <$> genIdArgI i
 r2d :: Rational -> Double
 r2d = realToFrac
 
+genStrThunk :: Id -> Bool -> B.ByteString -> C
+genStrThunk i nonAscii str = do
+  ii@(TxtI iit) <- jsIdI i
+  let d = decl ii
+  emitStatic iit (StaticThunk Nothing)
+  return $ case decodeModifiedUTF8 str of
+             Just t -> d <> if nonAscii then [j| `ii` = h$strt(`T.unpack t`); |]
+                                        else [j| `ii` = h$strta(`T.unpack t`); |]
+             Nothing -> d <> if nonAscii then [j| `ii` = h$strtb(`map toInteger(B.unpack str)`); |]
+                                         else [j| `ii` = h$strta(`map (chr.fromIntegral) (B.unpack str)`); |]
 genLit :: Literal -> G [JExpr]
 genLit (MachChar c)      = return [ [je| `ord c` |] ]
 genLit (MachStr  str)    =
@@ -1061,8 +1078,8 @@ genLit (MachStr  str)    =
                      |]
       return [ [je| `ident`() |], [je| 0 |] ]
 genLit MachNullAddr      = return [ [je| null |], [je| 0 |] ]
-genLit (MachInt i)       = return [ [je| `i` |] ]
-genLit (MachInt64 i)     = return [ [je| `shiftR i 32` |] , [je| `toSigned i` |] ]
+genLit (MachInt i)       = return [ [je| `intLit i` |] ]
+genLit (MachInt64 i)     = return [ [je| `intLit (shiftR i 32)` |] , [je| `toSigned i` |] ]
 genLit (MachWord w)      = return [ [je| `toSigned w` |] ]
 genLit (MachWord64 w)    = return [ [je| `toSigned (shiftR w 32)` |] , [je| `toSigned w` |] ]
 genLit (MachFloat r)     = return [ [je| `r2d r` |] ]
@@ -1070,7 +1087,7 @@ genLit (MachDouble r)    = return [ [je| `r2d r` |] ]
 genLit (MachLabel name size fod)
   | fod == IsFunction = return [ [je| h$mkFunctionPtr(`TxtI . T.pack $ "h$" ++ unpackFS name`) |], [je| 0 |] ]
   | otherwise         = return [ iex (TxtI . T.pack $ "h$" ++ unpackFS name), [je| 0 |] ]
-genLit (LitInteger i id) = return [ [je| `i` |] ] -- fixme, convert to bytes and JSBN int?
+genLit (LitInteger i id) = error ("genLit: LitInteger") -- return [ [je| `intLit i` |] ] -- fixme, convert to bytes and JSBN int?
 
 -- | generate a literal for the static init tables
 genStaticLit :: Literal -> G [StaticLit]
@@ -1088,11 +1105,16 @@ genStaticLit (MachFloat r)        = return [ DoubleLit . SaneDouble . r2d $ r ]
 genStaticLit (MachDouble r)       = return [ DoubleLit . SaneDouble . r2d $ r ]
 genStaticLit (MachLabel name _size fod) =
   return [ LabelLit (fod == IsFunction) (T.pack $ "h$" ++ unpackFS name) , IntLit 0 ]
+genStaticLit l = error ("genStaticLit: " ++ show l)
 
 -- make a signed 32 bit int from this unsigned one, lower 32 bits
 toSigned :: Integer -> Integer
 toSigned i | testBit i 31 = complement (0x7FFFFFFF `xor` (i.&.0x7FFFFFFF))
            | otherwise    = i.&.0xFFFFFFFF
+
+-- truncate literal to fit in 32 bit int
+intLit :: Integer -> Integer
+intLit i = fromIntegral (fromIntegral i :: Int32)
 
 genSingleLit :: Literal -> G JExpr
 genSingleLit l = do
@@ -1216,25 +1238,9 @@ selectApply fast (args, as) = do
     fastSuff | fast      = "_fast"
              | otherwise = ""
 
--- insert delimiters around block so linker can extract this efficiently
--- abuses PPostStat to insert a comment!
-{-
-delimitBlock :: Module -> [Id] -> JStat -> C
-delimitBlock m i s = do
-  b <- block
-  return $ PPostStat True (start b) emptye <> s <> PPostStat True (end b) emptye
-  where
-    idStr i = istr <$> jsIdI i
-    block  = L.intercalate "," <$> mapM idStr i
-    emptye = iex (StrI "")
-    start block = T.unpack Linker.startMarker ++ block ++ ">"
-    end   block = T.unpack Linker.endMarker ++ block ++ ">"
--}
-
 -- this hack doesn't work anymore
 comment :: String -> JStat
 comment xs =  mempty -- True ("// " ++ xs) (iex $ TxtI "")
-
 
 typeComment :: Id -> C
 typeComment i = do
@@ -1256,11 +1262,11 @@ genPrimCall (PrimCall lbl _) args t =
     tgt = map toJExpr . take (typeSize t) $ enumFrom R1
 
 genForeignCall0 :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, Bool)
-genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) JavaScriptCallConv safe)) t tgt args
+genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) JavaScriptCallConv safety)) t tgt args
   = (,async) <$> parseFFIPattern catchExcep async True (unpackFS clbl) t tgt args
   where
-    catchExcep = playSafe safe || playInterruptible safe
-    async      = playInterruptible safe
+    catchExcep = playSafe safety || playInterruptible safety
+    async      = playInterruptible safety
 genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safety)) t tgt args
   | playSafe safety || playInterruptible safety = do
       fc <- parseFFIPattern False False False lbl t tgt args
@@ -1272,7 +1278,11 @@ genForeignCall0 (CCall (CCallSpec (StaticTarget clbl mpkg isFunPtr) conv safety)
               ("h$" ++ (drop 2 $ dropWhile isDigit $ drop (length wrapperPrefix) cl))
           | otherwise = "h$" ++ cl
       wrapperPrefix = "ghczuwrapperZC"
-genForeignCall0 (CCall (CCallSpec DynamicTarget conv safe)) t tgt args = return (mempty,False) -- fixme panic "unsupported foreign call"
+genForeignCall0 (CCall (CCallSpec DynamicTarget conv safety)) t tgt args =
+  (,async) <$> parseFFIPattern catchExcep async True "h$callDynamic" t tgt args
+  where
+    catchExcep = playSafe safety || playInterruptible safety
+    async      = playInterruptible safety
 genForeignCall0 _ _ _ _ = error "genForeignCall0: unsupported foreign call"
 
 {-

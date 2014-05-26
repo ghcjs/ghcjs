@@ -11,7 +11,7 @@
 module Gen2.Linker where
 
 import           DynFlags
-import           Module                   (PackageId, packageIdString)
+import           Module                   (PackageId, packageIdString, stringToPackageId)
 
 import           Control.Applicative
 import           Control.Concurrent.MVar
@@ -56,7 +56,6 @@ import           Gen2.Rts                 (rtsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
 
-
 type LinkableUnit = (Package, Module, Int) -- module and the index of the block
 type Module       = Text
 
@@ -99,7 +98,8 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
                 (roots `S.union` rtsDeps (map fst pkgs))
   createDirectoryIfMissing False out
   let (outJs, metaSize, compactorState, stats) = renderLinker settings dflags (Compactor.baseCompactorState base) code
-      pkgs' = filter (\p -> T.pack (packageIdString p) `notElem` Compactor.basePkgs base) (map fst pkgs)
+      rtsPkgs = if isJust (gsUseBase settings) then [] else map stringToPackageId ["rts", "rts_" ++ rtsBuildTag dflags]
+      pkgs' = rtsPkgs ++ filter (\p -> T.pack (packageIdString p) `notElem` Compactor.basePkgs base) (map fst pkgs)
       pkgsT = map (T.pack . packageIdString) pkgs'
   BL.writeFile (out </> "out" <.> jsExt) outJs
   when (not $ gsOnlyOut settings) $ do
@@ -142,7 +142,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
               -- putStrLn ("looked up: " ++ p)
               putMVar cache (M.insert k p c)
               return p
-        objs' = M.fromList $ map (\(Deps pkg m _ _, p) -> ((pkg,m),p)) objs
+        objs' = M.fromList $ map (\(Deps pkg m _ _ _, p) -> ((pkg,m),p)) objs
         l ext pkg mod
            -- already loaded objects
            | Just p    <- M.lookup (pkg, mod) objs' = return p
@@ -213,7 +213,7 @@ getShims :: DynFlags -> GhcjsSettings -> [FilePath] -> [PackageId] -> (FilePath,
 getShims dflags settings extraFiles deps (fileBefore, fileAfter) = do
   base <- (</> "shims") <$> getGlobalPackageBase
   ((before, beforeFiles), (after, afterFiles))
-     <- collectShims dflags settings base (("rts", []) : ("rts_" <> T.pack (rtsBuildTag dflags),[]) : map convertPkg deps)
+     <- collectShims dflags settings base (map convertPkg deps)
   T.writeFile fileBefore before
   writeFile (fileBefore <.> "files") (unlines beforeFiles)
   t' <- mapM T.readFile extraFiles
@@ -277,7 +277,7 @@ splitVersion t
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
-modFuns (Deps p m a d) = map fst (M.toList d)
+modFuns (Deps p m e a d) = map fst (M.toList d)
 
 -- | get all dependencies for a given set of roots
 getDeps :: (String -> Package -> Module -> IO FilePath)
@@ -297,7 +297,7 @@ getDeps lookup base fun = go' S.empty M.empty [] $
       in  case M.lookup (lpkg,lmod) deps of
             Nothing -> lookup "js_o" lpkg lmod >>= readDepsFile >>=
                          \d -> go result (M.insert key d deps) lls
-            Just (Deps _ _ a _) -> go' result deps ls (S.toList $ a ! n)
+            Just (Deps _ _ _ a _) -> go' result deps ls (S.toList $ a ! n)
 
     go' :: Set LinkableUnit
         -> Map (Package, Module) Deps
@@ -310,7 +310,7 @@ getDeps lookup base fun = go' S.empty M.empty [] $
         in  case M.lookup key deps of
             Nothing -> lookup "js_o" (funPackage f) (funModule f) >>= readDepsFile >>=
                            \d -> go' result (M.insert key d deps) open ffs
-            Just (Deps p m a d) ->
+            Just (Deps p m e a d) ->
                let lu = maybe err (p,m,) (M.lookup f d)
                    -- fixme, deps include nonexported symbols,
                    -- add error again when those have been removed

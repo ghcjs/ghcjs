@@ -1110,7 +1110,7 @@ fun h$stmCheckInvariantStart_e {
   var m   = h$currentThread.mask;
   `adjSpN 3`;
   var t1 = new h$Transaction(inv.action, t);
-  t1.checkRead = new goog.structs.Set();
+  t1.checkRead = new h$Set();
   h$currentThread.transaction = t1;
   `push' s [t1, m, jsv "h$stmInvariantViolatedHandler", jsv "h$catchStm_e"]`;
   `R1` = inv.action;
@@ -1168,5 +1168,13 @@ fun h$stmResumeRetry_e {
   return h$stmStartTransaction(`Stack`[`Sp`-2]);
 }
 `ClosureInfo "h$stmResumeRetry_e" (CIRegs 0 [PtrV]) "resume retry" (CILayoutFixed 0 []) CIStackFrame noStatic`;
+
+fun h$lazy_e {
+  var x = h$r1.d1();
+  h$bh();
+  h$r1 = x;
+  return h$stack[h$sp];
+}
+`ClosureInfo "h$lazy_e" (CIRegs 0 [PtrV]) "generic lazy value" (CILayoutFixed 0 []) CIThunk noStatic`;
 
 |]

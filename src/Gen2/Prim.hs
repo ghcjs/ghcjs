@@ -340,8 +340,7 @@ genPrim _ SetByteArrayOp [] [a,o,n,v] =
                    `a`.u8[`o`+i] = `v`;
                  }
                |]
-genPrim _ NewArrayArrayOp [r] [n] =
-  PrimInline [j| `r` = []; for(var i=0;i<`n`;i++) { `r`[i] = `r`; } |]
+genPrim _ NewArrayArrayOp [r] [n] = PrimInline (newArray r n jnull)
 genPrim _ SameMutableArrayArrayOp [r] [a1,a2] = PrimInline [j| `r` = (`a1` === `a2`) ? 1 : 0 |]
 genPrim _ UnsafeFreezeArrayArrayOp [r] [a] = PrimInline [j| `r` = `a` |]
 genPrim _ SizeofArrayArrayOp [r] [a] = PrimInline [j| `r` = `a`.length; |]
@@ -536,15 +535,14 @@ genPrim _ ThreadStatusOp [stat,cap,locked] [tid] = PrimInline
     |]
 genPrim _ MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = h$makeWeak(`o`,`b`,`c`); |]
 genPrim _ MkWeakNoFinalizerOp [r] [o,b] = PrimInline [j| `r` = h$makeWeakNoFinalizer(`o`,`b`); |]
-genPrim _ AddCFinalizerToWeakOp [r] [a1,a1o,a2,a2o,i,a3,a3o,w] = 
+genPrim _ AddCFinalizerToWeakOp [r] [a1,a1o,a2,a2o,i,a3,a3o,w] =
   PrimInline [j| `r` = 1; |]
-genPrim _ DeRefWeakOp        [f,v] [w] = PrimInline [j| `v` = `w`.val; 
+genPrim _ DeRefWeakOp        [f,v] [w] = PrimInline [j| `v` = `w`.val;
                                                       `f` = (`v`===null) ? 0 : 1;
                                                     |]
 genPrim _ FinalizeWeakOp     [fl,fin] [w] =
-  PrimInline [j| `fin` = `w`.finalizer;
-                 `w`.finalizer = null;
-                 `fl` = (`fin` === null) ? 0 : 1;
+  PrimInline [j| `fin` = h$finalizeWeak(`w`);
+                 `fl`  = `Ret1`;
                |]
 genPrim _ TouchOp [] [e] = PrimInline mempty -- fixme what to do?
 

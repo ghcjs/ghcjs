@@ -11,8 +11,8 @@ Build-Type:     Custom
 Cabal-Version:  >= 1.10
 data-dir:       .
 data-files:     include/*.h
-                include/prim/*.hs-incl
-                include/prim/*.txt
+                lib/boot.tar
+                lib/shims.tar
                 doc/ghcjs-usage.txt
                 doc/ghci-usage.txt
 
@@ -57,6 +57,7 @@ Library
                      Gen2.GHC.CoreToStg,
                      Gen2.GHC.Linker,
                      Gen2.GHC.SysTools,
+                     Gen2.GHC.PrelRules,
                      Compiler.GhcjsHooks,
                      Compiler.GhcjsPlatform,
                      Compiler.Info,
@@ -106,6 +107,7 @@ Library
                    hashable,
                    unordered-containers,
                    optparse-applicative       >= 0.7 && < 0.8,
+                   stringsearch               >= 0.3 && < 0.4,
                    -- for JMacro
                    regex-posix                >= 0.90 && < 0.100,
                    safe                       >= 0.3  && < 0.4,
@@ -116,7 +118,7 @@ Library
     buildable: True
     hs-source-dirs: src
     include-dirs: include
-    GHC-Options:    -O2 -fno-warn-orphans -auto-all
+    GHC-Options: -O2 -fno-warn-orphans -auto-all -Wall
 
 Executable ghcjs
     Main-Is:        Main.hs

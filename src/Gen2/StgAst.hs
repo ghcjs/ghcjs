@@ -13,6 +13,7 @@ import           BasicTypes
 import           Control.Lens
 import           CoreSyn
 import           CostCentre
+import           Data.Array
 import           Data.Char (isSpace)
 import qualified Data.Foldable as F
 import qualified Data.List      as L
@@ -32,6 +33,7 @@ import           StgSyn
 import           SysTools (initSysTools)
 import           TyCon
 import           Type
+import           Unique
 import           UniqFM
 import           UniqSet
 import qualified Var
@@ -81,7 +83,18 @@ instance Show Name where
                   Just m  -> show m ++ "." ++ show (nameOccName n)
 instance Show OccName where show = occNameString
 instance Show DataCon where show d = show (dataConName d)
-instance Show Var where show v = "(" ++ show (Var.varName v) ++ " :: " ++ show (Var.varType v) ++ ")"
+instance Show Var where show v = "(" ++ show (Var.varName v) ++ "[" ++
+                                 encodeUniqueA (getKey (getUnique v))
+                                 ++ "] :: " ++ show (Var.varType v) ++ ")"
+
+encodeUniqueA :: Int -> String
+encodeUniqueA = reverse . go  -- reversed is more compressible
+  where
+    charsA = listArray (0,61) (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
+    go n | n < 0  = '_' : encodeUniqueA (negate n)
+         | n > 61 = let (q,r) = n `quotRem` 62
+                          in  charsA ! r : encodeUniqueA q
+               | otherwise = [charsA ! n]
 
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat

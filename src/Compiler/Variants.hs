@@ -13,14 +13,15 @@ import qualified Gen2.Linker           as Gen2
 import qualified Gen2.Object           as Gen2
 
 import           DynFlags              (DynFlags)
+import           HscTypes              (CgGuts)
 import           Module                (Module (..), PackageId)
 import           StgSyn                (StgBinding)
 
 data Variant = Variant
     { variantRender            :: GhcjsSettings
                                -> DynFlags
+                               -> CgGuts
                                -> StgPgm
-                               -> Module
                                -> ByteString
     , variantLink              :: DynFlags
                                -> GhcjsSettings
