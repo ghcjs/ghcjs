@@ -274,16 +274,6 @@ addInitialized i = gsInitialised %= flip addOneToUniqSet i
 isInitialized :: Id -> G Bool
 isInitialized i = elementOfUniqSet i <$> use gsInitialised
 
-encodeUnique :: Int -> String
-encodeUnique = reverse . go  -- reversed is more compressible
-  where
-    go n | n < 0  = '_' : encodeUnique (negate n)
-         | n > 61 = let (q,r) = n `quotRem` 62
-                          in  chars ! r : encodeUnique q
-               | otherwise = [chars ! n]
-
-    chars = listArray (0,61) (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
-
 throwSimpleSrcErr :: DynFlags -> SrcSpan -> String -> G a
 throwSimpleSrcErr df span msg = return $! Ex.throw (simpleSrcErr df span msg)
 
@@ -617,8 +607,7 @@ genIds i
   | s == 1    = (:[]) <$> jsId i
   | otherwise = mapM (jsIdN i) [1..s]
   where
-    s  = varSize vt
-    vt = uTypeVt . idType $ i
+    s  = typeSize (idType i)
 
 -- | get all idents for an id
 genIdsI :: Id -> G [Ident]
@@ -626,16 +615,14 @@ genIdsI i
   | s == 1    = (:[]) <$> jsIdI i
   | otherwise = mapM (jsIdIN i) [1..s]
         where
-          s = varSize . uTypeVt . idType $ i
+          s = typeSize (idType i)
 
--- | declare all js vars for the id, cannot be an unboxed tuple
+-- | declare all js vars for the id
 declIds :: Id -> C
 declIds  i
   | s == 0    = return mempty
   | s == 1    = decl <$> jsIdI i
   | otherwise = mconcat <$> mapM (\n -> decl <$> jsIdIN i n) [1..s]
   where
-    s  = varSize vt
-    vt = uTypeVt . idType $ i
-
+    s  = typeSize (idType i)
 

@@ -32,6 +32,7 @@ module Gen2.Dataflow ( Graph(..), nodes, arcsIn, arcsOut, entry, nodeid, labels,
                      , constForward, constBackward
                      , foldForward, foldBackward
                      , orderedNodes
+                     , lookupNode
                      ) where
 
 import           Control.Arrow (second)
@@ -765,15 +766,15 @@ foldForward :: forall a b. Eq b
 foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
   where
     -- combine x with data from nodes, only if nodes have available data
-    combineWith :: b -> [NodeId] -> State (Facts b) b
-    combineWith x nids = do
+    combineWith :: Int -> b -> [NodeId] -> State (Facts b) b
+    combineWith factn x nids = do
       m <- get
-      return $ foldl' c x (map (\n -> lookupFact z n 1 m) nids)
+      return $ foldl' c x (map (\n -> lookupFact z n factn m) nids)
 
-    combineFrom :: [NodeId] -> State (Facts b) b
-    combineFrom nids = do
+    combineFrom :: Int -> [NodeId] -> State (Facts b) b
+    combineFrom factn nids = do
       m <- get
-      return $ foldl c z (map (\n -> lookupFact z n 1 m) nids) -- retrieve fact 1, flows out of node
+      return $ foldl c z (map (\n -> lookupFact z n factn m) nids)
 
     upd :: NodeId -> Int -> b -> State (Facts b) ()
     upd nid i x = modify (addFact nid i x)
@@ -817,12 +818,12 @@ foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
     go nid (WhileNode e s) x = do
       upd nid 0 x
       let (brks, conts) = getBreaksConts nid g
-      x0 <- combineWith x conts
+      x0 <- combineWith 0 x conts
       x1 <- (x0 `c`) <$> fact nid 2
       let (xt, xf) = fWhile f nid e x1
       s0 <- go' s xt
       upd nid 2 (x1 `c` s0)
-      x3 <- combineWith xf brks
+      x3 <- combineWith 0 xf brks
       upd nid 1 x3
       return x3
     go nid (DoWhileNode e s) x = do
@@ -830,23 +831,23 @@ foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
       let (brks, conts) = getBreaksConts nid g
       x0 <- (x `c`) <$> fact nid 3
       s0 <- go' s x0
-      x1 <- combineWith x0 conts
+      x1 <- combineWith 0 x0 conts
       upd nid 2 x1
       let (xt, xf) = fDoWhile f nid e x1
       upd nid 3 xt
-      x2 <- combineWith xf brks
+      x2 <- combineWith 0 xf brks
       upd nid 1 x2
       return x2
     go nid (ForInNode b i e s) x = do
       upds nid [0,2] x
       let (brks, conts) = getBreaksConts nid g
-      x0 <- combineWith x conts
+      x0 <- combineWith 0 x conts
       x1 <- (x0 `c`) <$> fact nid 3
       upd nid 2 x1
       let (xb, xf) = fForIn f nid b i e x1
       s0 <- go' s xb
       upd nid 3 s0
-      x3 <- combineWith xf brks
+      x3 <- combineWith 0 xf brks
       upd nid 1 x3
       return x3
     go nid (SwitchNode e ss s) x = do
@@ -859,7 +860,7 @@ foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
       upds nid [0,2] x
       s0 <- go0 xes ss
       s1 <- go' s (xd `c` s0)
-      s2 <- (`c` s1) <$> combineFrom brks
+      s2 <- (`c` s1) <$> combineFrom 0 brks
       upd nid 1 s2
       return s2
     go nid (ReturnNode e) x = do
@@ -1055,3 +1056,4 @@ orderedNodes g = go (g ^. entry)
     go' nid (SwitchNode _ xs d) = nid : (concatMap (go . snd) xs) ++ go d
     go' nid (TryNode t _ c f)   = go t ++ [nid] ++  go c ++ go f
     go' nid _                   = [nid]
+

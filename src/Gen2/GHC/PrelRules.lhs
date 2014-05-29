@@ -642,13 +642,15 @@ liftLitDynFlags f = do
   [Lit lit] <- getArgs
   return $ Lit (f dflags lit)
 
+-- since JavaScript numbers are not really 32 bit, we shouldn't remove things like NarrowOp
+-- even though we use WORD_SIZE_IN_BITS = 32
 removeOp32 :: RuleM CoreExpr
 -- #if WORD_SIZE_IN_BITS == 32
-removeOp32 = do
-  [e] <- getArgs
-  return e
+-- removeOp32 = do
+--  [e] <- getArgs
+--  return e
 -- #else
--- removeOp32 = mzero
+removeOp32 = mzero
 -- #endif
 
 getArgs :: RuleM [CoreExpr]

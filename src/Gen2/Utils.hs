@@ -7,6 +7,7 @@ module Gen2.Utils where
 
 import           Control.Monad.State.Strict
 
+import           Data.Array
 import qualified Data.ByteString        as B
 import qualified Data.ByteString.Lazy   as BL
 import qualified Data.ByteString.Search as S
@@ -57,6 +58,8 @@ decl' i e = decl i `mappend` AssignStat (ValExpr (JVar i)) e
 
 decls :: Text -> JStat
 decls s = DeclStat (TxtI s)
+
+
 
 -- generate an identifier, use it in both statements
 identBoth :: (Ident -> JStat) -> (Ident -> JStat) -> JStat
@@ -119,6 +122,18 @@ jFalse = ve "false"
 jBool :: Bool -> JExpr
 jBool True = jTrue
 jBool False = jFalse
+
+-- Encode integers (for example used as Unique keys) to a relatively short String
+-- that's valid as part of a JS indentifier (but it might start with a number)
+encodeUnique :: Int -> String
+encodeUnique = reverse . go  -- reversed is more compressible
+  where
+    chars = listArray (0,61) (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
+    go n | n < 0  = '_' : encodeUnique (negate n)
+         | n > 61 = let (q,r) = n `quotRem` 62
+                    in  chars ! r : encodeUnique q
+         | otherwise = [chars ! n]
+
 
 -- GHC produces modified UTF8 that the Text package doesn't particularly like
 -- unmodify it before decoding

@@ -275,7 +275,7 @@ dataflow = thisFunction . nestedFuns %~ f
                                        . constants args' locals c
                                        . liveness args' locals
                                        . constants args' locals c
-                                       . propagateStack args' locals c
+--                                       . propagateStack args' locals c  -- fixme this analysis is buggy and we run into bugs now that we generate branches that don't return
                                        $ g1
           where
             g0 = flattenSequences (cfg noAnnot stat)

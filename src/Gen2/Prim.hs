@@ -34,6 +34,7 @@ import           Type
 import           TyCon
 
 import           Data.Monoid
+import qualified Data.Set as S
 
 import           Compiler.JMacro (j, JExpr(..), JStat(..))
 
@@ -44,6 +45,24 @@ import           Gen2.Utils
 data PrimRes = PrimInline JStat  -- ^ primop is inline, result is assigned directly
              | PRPrimCall JStat  -- ^ primop is async call, primop returns the next
                                  --     function to run. result returned to stack top in registers
+
+isInlinePrimOp :: PrimOp -> Bool
+isInlinePrimOp p = p `S.notMember` notInlinePrims
+  where
+    -- all primops that might block the thread or manipulate stack directly
+    -- (and therefore might return PRPrimCall) must be listed here
+    notInlinePrims = S.fromList
+      [ CatchOp, RaiseOp, RaiseIOOp
+      , MaskAsyncExceptionsOp, MaskUninterruptibleOp, UnmaskAsyncExceptionsOp
+      , AtomicallyOp, RetryOp, CatchRetryOp, CatchSTMOp
+      , TakeMVarOp, PutMVarOp, ReadMVarOp
+      , DelayOp
+      , WaitReadOp, WaitWriteOp
+      , KillThreadOp
+      , YieldOp
+      , SeqOp
+      ]
+
 
 genPrim :: Type
         -> PrimOp   -- ^ the primitive operation

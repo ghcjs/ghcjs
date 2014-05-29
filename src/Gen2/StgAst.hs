@@ -44,6 +44,8 @@ import           Control.Monad
 import           System.Environment (getArgs)
 import           System.IO.Unsafe
 
+import           Gen2.Utils
+
 -- this is a hack to be able to use pprShow in a Show instance, should be removed
 {-# NOINLINE hackPprDflags #-}
 hackPprDflags :: DynFlags
@@ -84,17 +86,8 @@ instance Show Name where
 instance Show OccName where show = occNameString
 instance Show DataCon where show d = show (dataConName d)
 instance Show Var where show v = "(" ++ show (Var.varName v) ++ "[" ++
-                                 encodeUniqueA (getKey (getUnique v))
+                                 encodeUnique (getKey (getUnique v))
                                  ++ "] :: " ++ show (Var.varType v) ++ ")"
-
-encodeUniqueA :: Int -> String
-encodeUniqueA = reverse . go  -- reversed is more compressible
-  where
-    charsA = listArray (0,61) (['a'..'z'] ++ ['A'..'Z'] ++ ['0'..'9'])
-    go n | n < 0  = '_' : encodeUniqueA (negate n)
-         | n > 61 = let (q,r) = n `quotRem` 62
-                          in  charsA ! r : encodeUniqueA q
-               | otherwise = [charsA ! n]
 
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat
