@@ -404,7 +404,7 @@ genExpr top (StgLam{}) = error "genExpr: StgLam"
 genExpr top (StgCase e _ liveRhs b srt at alts) = genCase top b e at alts liveRhs srt
 genExpr top (StgLet b e) = do
   (b',top') <- genBind top b
-  (s,r)     <- genExpr top e
+  (s,r)     <- genExpr top' e
   return (b' <> s, r)
 genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
 genExpr top (StgSCC cc b1 b2 e) = genExpr top e
