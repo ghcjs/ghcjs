@@ -98,12 +98,14 @@ buildingCabalSetup _ _ = False
 getGhcjsSettings :: [Located String] -> IO ([Located String], GhcjsSettings)
 getGhcjsSettings args =
   case p of
-    Left failure -> do
-      hPutStrLn stderr =<< errMessage failure "ghcjs"
-      exitWith (errExitCode failure)
-    Right gs1 -> do
+    Failure failure -> do
+      let (msg, code) = execFailure failure "ghcjs"
+      hPutStrLn stderr msg
+      exitWith code
+    Success gs1 -> do
       gs2 <- envSettings
       return (args', gs1 <> gs2)
+    CompletionInvoked _ -> exitWith (ExitFailure 1)
   where
     (ga,args') = partition (\a -> any (`isPrefixOf` unLoc a) as) args
     p = execParserPure (prefs mempty) optParser' (map unLoc ga)
