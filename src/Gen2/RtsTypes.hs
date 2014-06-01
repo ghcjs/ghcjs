@@ -310,11 +310,6 @@ adjSp e = [j| h$sp = h$sp + `e`; |]
 adjSpN :: Int -> JStat
 adjSpN e = [j| h$sp = h$sp  - `e`; |]
 
--- stuff that functions are supposed to execute at the start of the body
--- (except very simple functions)
-preamble :: JStat
-preamble = mempty
-
 pushN :: Array Int Ident
 pushN = listArray (1,32) $ map (TxtI . T.pack . ("h$p"++) . show) [(1::Int)..32]
 

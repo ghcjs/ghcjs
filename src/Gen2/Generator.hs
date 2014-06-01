@@ -325,7 +325,7 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
           else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty)
   emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
   emitStatic idt static
-  return $ decl eid <> assignj eid (JFunc funArgs (preamble <> upd <> body))
+  return $ decl eid <> assignj eid (JFunc funArgs (upd <> body))
 
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
@@ -550,7 +550,7 @@ genEntry ctx i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlo
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
   body <- genBody (ctxEval ctx) i args body upd_flag
-  let f = JFunc funArgs (preamble <> ll <> upd <> body)
+  let f = JFunc funArgs (ll <> upd <> body)
   ei <- jsEntryIdI i
   et <- genEntryType args
   sr <- genStaticRefs srt
@@ -580,7 +580,7 @@ genSetConInfo i d srt = do
       fields = dataConRepArgTys d
 
 mkDataEntry :: JExpr
-mkDataEntry = ValExpr $ JFunc funArgs [j| `preamble`; return `Stack`[`Sp`]; |]
+mkDataEntry = ValExpr $ JFunc funArgs [j| return `Stack`[`Sp`]; |]
 
 genFunInfo :: Text -> [Id] -> JExpr
 genFunInfo name as = ValExpr . JList $ [s, jstr name] ++ map (toJExpr . uTypeVt . idType) as
