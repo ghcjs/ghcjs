@@ -495,9 +495,6 @@ enter s e =
               }
             |]
 
-enterv :: CgSettings -> JStat
-enterv s = push' s [jsv "h$ap_1_0"] <> enter s (toJExpr R1)
-
 updates :: CgSettings -> JStat
 updates s =
   [j|
@@ -529,9 +526,6 @@ updates s =
       };
       `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]
-
-mkFunc :: Ident -> JStat -> JStat
-mkFunc func body = [j| `decl func`; `JVar func` = `JFunc funArgs body`; |]
 
 {-
   Partial applications. There are two different kinds of partial application:
