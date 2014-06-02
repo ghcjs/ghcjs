@@ -52,17 +52,17 @@ import qualified Gen2.Object    as Object
 import qualified Gen2.Optimizer as Optimizer
 
 data CompactorState =
-  CompactorState { _identSupply   :: [Ident]               -- | ident supply for new names
-                 , _nameMap       :: !(HashMap Text Ident) -- | renaming mapping for internal names
-                 , _entries       :: !(HashMap Text Int)   -- | entry functions (these get listed in the metadata init array)
+  CompactorState { _identSupply   :: [Ident]               -- ^ ident supply for new names
+                 , _nameMap       :: !(HashMap Text Ident) -- ^ renaming mapping for internal names
+                 , _entries       :: !(HashMap Text Int)   -- ^ entry functions (these get listed in the metadata init array)
                  , _numEntries    :: !Int
-                 , _statics       :: !(HashMap Text Int)   -- | mapping of global closure -> index in current block, for static initialisation
-                 , _numStatics    :: !Int                  -- | number of static entries
-                 , _labels        :: !(HashMap Text Int)   -- | non-Haskell JS labels
-                 , _numLabels     :: !Int                  -- | number of labels
-                 , _parentEntries :: !(HashMap Text Int)   -- | entry functions we're not linking, offset where parent gets [0..n], grantparent [n+1..k] etc
-                 , _parentStatics :: !(HashMap Text Int)   -- | objects we're not linking in base bundle
-                 , _parentLabels  :: !(HashMap Text Int)   -- | non-Haskell JS labels in parent
+                 , _statics       :: !(HashMap Text Int)   -- ^ mapping of global closure -> index in current block, for static initialisation
+                 , _numStatics    :: !Int                  -- ^ number of static entries
+                 , _labels        :: !(HashMap Text Int)   -- ^ non-Haskell JS labels
+                 , _numLabels     :: !Int                  -- ^ number of labels
+                 , _parentEntries :: !(HashMap Text Int)   -- ^ entry functions we're not linking, offset where parent gets [0..n], grantparent [n+1..k] etc
+                 , _parentStatics :: !(HashMap Text Int)   -- ^ objects we're not linking in base bundle
+                 , _parentLabels  :: !(HashMap Text Int)   -- ^ non-Haskell JS labels in parent
                  } deriving (Show)
 
 makeLenses ''CompactorState
