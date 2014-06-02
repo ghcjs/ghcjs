@@ -23,7 +23,7 @@ import qualified Data.ByteString.Lazy     as BL
 import           Data.Function            (on)
 import           Data.Int
 import qualified Data.IntSet              as IS
-import           Data.List                ( partition, isPrefixOf, nub
+import           Data.List                ( partition, isPrefixOf, isSuffixOf, nub
                                           , intercalate, group, sort, groupBy)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
@@ -39,7 +39,8 @@ import qualified Data.Text.Lazy.IO        as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
 
 import           System.FilePath          (splitPath, (<.>), (</>))
-import           System.Directory         (createDirectoryIfMissing, doesFileExist)
+import           System.Directory         ( createDirectoryIfMissing, doesDirectoryExist
+                                          , doesFileExist, getDirectoryContents)
 
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
@@ -106,7 +107,8 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun
     when (not $ gsNoStats settings) $ do
       let statsFile = if genBase then "out.base.stats" else "out.stats"
       TL.writeFile (out </> statsFile) (linkerStats metaSize stats)
-    getShims dflags settings jsFiles pkgs' (out </> "lib" <.> jsExt, out </> "lib1" <.> jsExt)
+    libJsFiles <- concat <$> mapM getLibJsFiles (concatMap snd pkgs)
+    getShims dflags settings (jsFiles ++ libJsFiles) pkgs' (out </> "lib" <.> jsExt, out </> "lib1" <.> jsExt)
     when (not $ gsNoRts settings) $ TL.writeFile (out </> "rts.js") (rtsText' $ dfCgSettings dflags)
   if genBase
     then generateBase out base allDeps pkgsT compactorState
@@ -207,6 +209,15 @@ rtsText' debug = if debug
 
 splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
+
+getLibJsFiles :: FilePath -> IO [FilePath]
+getLibJsFiles path = do
+  let libDir = path </> "js"
+  exists <- doesDirectoryExist libDir
+  if exists
+    -- filter out ".", "..", and other unwanted files
+    then map (libDir </>) . filter (".js" `isSuffixOf`) <$> getDirectoryContents libDir
+    else return []
 
 -- fixme the wired-in package id's we get from GHC we have no version
 getShims :: DynFlags -> GhcjsSettings -> [FilePath] -> [PackageId] -> (FilePath, FilePath) -> IO ()
