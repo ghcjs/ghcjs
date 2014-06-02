@@ -271,7 +271,7 @@ stackApply :: CgSettings
            -> Int         -- ^ number of arguments
            -> JStat
 stackApply s r n = [j| `decl func`;
-                     `JVar func` = `JFunc funArgs (preamble <> body)`;
+                     `JVar func` = `JFunc funArgs body`;
                      `ClosureInfo funcName (CIRegs 0 [PtrV]) funcName layout CIStackFrame noStatic`;
                    |]
   where
@@ -369,7 +369,7 @@ stackApply s r n = [j| `decl func`;
 fastApply :: CgSettings -> Int -> Int -> JStat
 fastApply s r n =
   [j| `decl func`;
-      `JVar func` = `JFunc myFunArgs (preamble <> body)`;
+      `JVar func` = `JFunc myFunArgs body`;
     |]
     where
       funName = T.pack ("h$ap_" ++ show n ++ "_" ++ show r ++ "_fast")
@@ -444,12 +444,11 @@ fastApply s r n =
 
 zeroApply :: CgSettings -> JStat
 zeroApply s =
-            [j| fun h$ap_0_0_fast { `preamble`; `enter s (toJExpr R1)`; }
-                fun h$ap_0_0 { `preamble`; `adjSpN 1`; `enter s (toJExpr R1)`; }
+            [j| fun h$ap_0_0_fast { `enter s (toJExpr R1)`; }
+                fun h$ap_0_0 { `adjSpN 1`; `enter s (toJExpr R1)`; }
                 `ClosureInfo "h$ap_0_0" (CIRegs 0 [PtrV]) "h$ap_0_0" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
                 fun h$ap_1_0 x {
-                  `preamble`;
                   var c = `R1`.f;
                   `traceRts s $ t"h$ap_1_0: " |+ (c|."n") |+ t" :a " |+ (c|."a") |+ t" (" |+ (clTypeName c) |+ t")"`;
                   if(c.t === `Thunk`) {
@@ -464,7 +463,7 @@ zeroApply s =
                 }
                 `ClosureInfo "h$ap_1_0" (CIRegs 0 [PtrV]) "h$ap_1_0" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
-                fun h$e c { `preamble`; `R1` = c; `enter s c`; }
+                fun h$e c { `R1` = c; `enter s c`; }
 
               |]
 
@@ -496,14 +495,10 @@ enter s e =
               }
             |]
 
-enterv :: CgSettings -> JStat
-enterv s = push' s [jsv "h$ap_1_0"] <> enter s (toJExpr R1)
-
 updates :: CgSettings -> JStat
 updates s =
   [j|
       fun h$upd_frame {
-        `preamble`;
         var updatee = `Stack`[`Sp` - 1];
         // wake up threads blocked on blackhole
         var waiters = updatee.d2;
@@ -531,9 +526,6 @@ updates s =
       };
       `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]
-
-mkFunc :: Ident -> JStat -> JStat
-mkFunc func body = [j| `decl func`; `JVar func` = `JFunc funArgs body`; |]
 
 {-
   Partial applications. There are two different kinds of partial application:
@@ -574,7 +566,7 @@ pap :: CgSettings
     -> Int
     -> JStat
 pap s r = [j| `decl func`;
-             `iex func` = `JFunc [] (preamble <> body)`;
+             `iex func` = `JFunc [] body`;
              `ClosureInfo funcName CIRegsUnknown funcName (CILayoutUnknown (r+2)) CIPap noStatic`;
            |]
   where

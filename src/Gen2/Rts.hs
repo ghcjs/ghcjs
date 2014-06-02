@@ -297,7 +297,6 @@ fun h$data2_e { return `Stack`[`Sp`]; }
 fun h$con_e { return `Stack`[`Sp`]; };
 
 fun h$catch a handler {
-  `preamble`;
   `adjSp 3`;
   `Stack`[`Sp` - 2] = h$currentThread.mask;
   `Stack`[`Sp` - 1] = handler;
@@ -313,7 +312,6 @@ fun h$noop_e {
 var !h$noop = h$c0(h$noop_e);
 
 fun h$catch_e {
-  `preamble`;
   `adjSpN 3`;
   return `Stack`[`Sp`];
 }
@@ -405,7 +403,6 @@ fun h$select2_ret {
 
 // throw an exception: unwind the thread's stack until you find a handler
 fun h$throw e async {
-  `preamble`;
   //h$log("throwing exception: " + async);
   //h$dumpStackTop(`Stack`,0,`Sp`);
   var origSp = `Sp`;
@@ -518,7 +515,6 @@ fun h$raiseAsync_frame {
 // add this to the stack if you want the outermost result
 // to always be reduced to whnf, and not an ind
 fun h$reduce {
-  `preamble`;
   if(`isThunk (toJExpr R1)`) {
     return `R1`.f;
   } else {
@@ -768,7 +764,6 @@ fun h$logStack {
 `closureTypes`;
 
 fun h$runio_e {
-  `preamble`;
   `R1` = `R1`.d1;
   `Stack`[++`Sp`] = h$ap_1_0;
   return h$ap_1_0;
