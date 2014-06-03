@@ -390,7 +390,7 @@ branchResult (_:es)
   | otherwise             = ExprInline Nothing
 
 genExpr :: ExprCtx -> StgExpr -> G (JStat, ExprResult)
-genExpr top (StgApp f args) = genApp top False True f args
+genExpr top (StgApp f args) = genApp top f args
 genExpr top (StgLit l) = (,ExprInline Nothing) . assignAllCh ("genExpr StgLit " ++ show top) (ctxTarget top) <$> genLit l
 genExpr top (StgConApp con args) = do
   as <- concatMapM genArg args
@@ -425,9 +425,9 @@ might_be_a_function ty
   | otherwise
   = True
 
-genApp :: ExprCtx -> Bool -> Bool -> Id -> [StgArg] -> G (JStat, ExprResult)
+genApp :: ExprCtx -> Id -> [StgArg] -> G (JStat, ExprResult)
 -- special cases for unpacking C Strings, avoid going through a typed array when possible
-genApp ctx _ _ i [StgLitArg (MachStr bs)]
+genApp ctx i [StgLitArg (MachStr bs)]
     | [top] <- ctxTarget ctx, getUnique i == unpackCStringIdKey = return . (,ExprInline Nothing) . assignj top $
         case decodeModifiedUTF8 bs of
           Just t  -> [je| h$ustra(`t`) |]
@@ -438,11 +438,11 @@ genApp ctx _ _ i [StgLitArg (MachStr bs)]
           Nothing -> [je| h$urstr(`map toInteger (B.unpack bs)`) |]
  -- we could handle unpackNBytes# here, but that's probably not common
  -- enough to warrant a special case
-genApp ctx _ _ i [StgLitArg (MachStr bs), x]
+genApp ctx i [StgLitArg (MachStr bs), x]
     | [top] <- ctxTarget ctx, getUnique i == unpackCStringAppendIdKey, Just d <- decodeModifiedUTF8 bs = do -- fixme breaks assumption in codegen if bs doesn't decode
         a <- genArg x
         return ([j| `top` = h$appendToHsStringA(`d`, `a`); |], ExprInline Nothing)
-genApp top force mstackTop i a
+genApp top i a
     | not (isUnboxedTupleType (idType i)) &&
       (isPrimitiveType (idType i) || isStrictType (idType i)) &&
       not (might_be_a_function (idType i))
