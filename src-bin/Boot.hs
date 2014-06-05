@@ -326,7 +326,7 @@ initSourceTree localTree settings = do
              else echo "ghcjs-boot is not a git repository, not updating"
          else do
            echo "cloning new tree"
-           git ["clone", "http://github.com/ghcjs/ghcjs-boot"]
+           git ["clone", "https://github.com/ghcjs/ghcjs-boot"]
            cd "ghcjs-boot"
            git ["submodule", "update", "--init", "--recursive"]
   forM_ (bootPackages1++bootPackages2) (patchPackage "boot")
