@@ -19,6 +19,7 @@ import           Compiler.Settings
 import           Gen2.StgAst ()
 import           Gen2.Utils
 
+import           Module
 import           DynFlags
 import           StgSyn
 import           DataCon
@@ -357,7 +358,8 @@ data StaticLit = BoolLit   !Bool
 instance ToJExpr StaticArg where
   toJExpr (StaticLitArg l) = toJExpr l
   toJExpr (StaticObjArg t) = ValExpr (JVar (TxtI t))
-  toJExpr (StaticConArg c args) = allocDynamicE def (ValExpr . JVar . TxtI $ c) (map toJExpr args)
+  toJExpr (StaticConArg c args) =
+    allocDynamicE def (ValExpr . JVar . TxtI $ c) (map toJExpr args)
 
 instance ToJExpr StaticLit where
   toJExpr (BoolLit b)   = toJExpr b
@@ -428,13 +430,13 @@ data CgSettings = CgSettings { csInlinePush      :: Bool
                              , csTraceRts        :: Bool
                              , csAssertRts       :: Bool
                              , csTraceForeign    :: Bool
-                             } deriving (Show, Eq, Ord)
+                             }
+
 
 instance Default CgSettings where
   def = CgSettings False False False False False False False False
 
--- fixme, make better configurable
 dfCgSettings :: DynFlags -> CgSettings
-dfCgSettings df = def { csAssertRts = buildingDebug df
-                      , csTraceRts  = "-DGHCJS_TRACE_RTS" `elem` opt_P df
+dfCgSettings df = def { csTraceRts  = "-DGHCJS_TRACE_RTS" `elem` opt_P df
+                      , csAssertRts = buildingDebug df
                       }

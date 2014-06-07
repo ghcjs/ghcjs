@@ -271,7 +271,7 @@ stackApply :: CgSettings
            -> Int         -- ^ number of arguments
            -> JStat
 stackApply s r n = [j| `decl func`;
-                     `JVar func` = `JFunc funArgs body`;
+                     `JVar func` = `JFunc [] body`;
                      `ClosureInfo funcName (CIRegs 0 [PtrV]) funcName layout CIStackFrame noStatic`;
                    |]
   where

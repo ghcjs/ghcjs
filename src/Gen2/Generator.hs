@@ -104,8 +104,9 @@ generate settings df guts s =
   let (uf, s') = sinkPgm m s
       m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
-        (st, g) <- pass df m s'
-        let (p, d) = unzip g
+        (st, g) <- genUnits df m s'
+        let p = map (\lu -> (luSymbols lu, luStat lu)) g
+            d = map (\lu -> (luTopDeps lu, luAllDeps lu)) g
             (st', dbg) = dumpAst st settings df s'
         deps <- genMetaData d
         return . BL.toStrict $
@@ -135,31 +136,55 @@ modulePrefix m n =
   let encMod = zEncodeString . moduleNameString . moduleName $ m
   in  T.pack $ "h$" ++ encMod ++ "_id_" ++ show n
 
-pass :: DynFlags
-     -> Module
-     -> StgPgm
-     -> G ( Object.SymbolTable                         -- object file symbol names table
-          , [(([Text], BL.ByteString), ([Id], [Id]))]
-          )
 
-pass df m ss = go 1 Object.emptySymbolTable ss
+-- | data used to generate one ObjUnit in our object file
+data LinkableUnit = LinkableUnit
+                    { luSymbols  :: [Text]        -- ^ exported symbols as Text
+                    , luStat     :: BL.ByteString -- ^ serialized JS AST
+                    , luTopDeps  :: [Id]
+                    , luAllDeps  :: [Id]          -- ^ identifiers this unit depends on
+                    } deriving (Eq, Ord, Show)
+
+-- | Generate the ingredients for the linkable units for this module
+genUnits :: DynFlags
+         -> Module
+         -> StgPgm
+         -> G (Object.SymbolTable, [LinkableUnit])
+genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
     where
+      go :: Int                 -- ^ the block we're generating (block 1 is the global block for the module)
+         -> Object.SymbolTable  -- ^ the shared symbol table
+         -> StgPgm
+         -> G (Object.SymbolTable, [LinkableUnit])
       go n st (x:xs) = do
-        (st', o, d) <- generateBlock st x n
-        (st'', ys)  <- go (n+1) st' xs
-        return (st'', (o,d):ys)
+        (st', lu) <- generateBlock st x n
+        (st'', lus)  <- go (n+1) st' xs
+        return (st'', lu:lus)
       go _ st []     = return (st, [])
+
+
+      generateGlobalBlock :: (Object.SymbolTable, [LinkableUnit]) ->
+                             G (Object.SymbolTable, [LinkableUnit])
+      generateGlobalBlock (st, lus) = do
+        glbl <- use gsGlobal
+        (st', ss, bs) <- objectEntry m st [] [] []
+                         . O.optimize
+                         . jsSaturate (Just $ modulePrefix m 1)
+                         $ mconcat (reverse glbl)
+        return (st', LinkableUnit ss bs [] [] : lus)
+      -- | Generate the linkable unit for one binding or group of
+      --   mutually recursive bindings
       generateBlock :: Object.SymbolTable
                     -> StgBinding
                     -> Int
-                    -> G (Object.SymbolTable, ([Text], BL.ByteString), ([Id], [Id]))
+                    -> G (Object.SymbolTable, LinkableUnit)
       generateBlock st decl n = do
         tl      <- genToplevel decl
-        extraTl <- use gsToplevelStats
-        ci      <- use gsClosureInfo
-        si      <- use gsStatic
+        extraTl <- use (gsGroup . ggsToplevelStats)
+        ci      <- use (gsGroup . ggsClosureInfo)
+        si      <- use (gsGroup . ggsStatic)
         unf     <- use gsUnfloated
-        resetToplevel
+        resetGroup
         let allDeps = collectIds unf decl
             topDeps = collectTopIds decl
         (st', ss, bs) <- objectEntry m st topDeps ci si
@@ -167,7 +192,7 @@ pass df m ss = go 1 Object.emptySymbolTable ss
                            . jsSaturate (Just $ modulePrefix m n)
                            $ mconcat (reverse extraTl) <> tl
         return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq`
-                    (st', (ss, bs), (topDeps, allDeps))
+          (st', LinkableUnit ss bs topDeps allDeps)
 
 objectEntry :: Module
             -> Object.SymbolTable
@@ -273,7 +298,6 @@ genToplevelDecl :: Id -> StgRhs -> C
 genToplevelDecl i rhs = do
   s1 <- resetSlots (genToplevelConEntry i rhs)
   s2 <- resetSlots (genToplevelRhs i rhs)
-  addInitialized i
   return (s1 <> s2)
 
 genToplevelConEntry :: Id -> StgRhs -> C
@@ -317,7 +341,7 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
   id@(TxtI idt)   <- jsIdI i
   body <- genBody emptyUniqSet i args body upd_flag
   sr <- genStaticRefs srt
-  cs <- use gsCgSettings
+  cs <- use gsSettings
   et <- genEntryType args
   let (static, regs, upd) =
         if et == CIThunk
@@ -325,7 +349,7 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
           else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty)
   emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
   emitStatic idt static
-  return $ decl eid <> assignj eid (JFunc funArgs (upd <> body))
+  return $ decl eid <> assignj eid (JFunc [] (upd <> body))
 
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
@@ -454,7 +478,7 @@ genApp top i a
                 return (a, ExprInline Nothing)
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do
           ii <- enterId
-          cgs <- use gsCgSettings
+          cgs <- use gsSettings
           let e | csInlineEnter cgs = [j| var t = `ii`.f;
                                           var tt = t.t;
                                           `R1` = `ii`;
@@ -469,7 +493,7 @@ genApp top i a
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i))
           = do
              ii <- enterId
-             cgs <- use gsCgSettings
+             cgs <- use gsSettings
              let e | csInlineEnter cgs = [j| var t = `ii`.f;
                                              var tt = t.t;
                                              `R1` = `ii`;
@@ -550,7 +574,7 @@ genEntry ctx i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlo
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
   body <- genBody (ctxEval ctx) i args body upd_flag
-  let f = JFunc funArgs (ll <> upd <> body)
+  let f = JFunc [] (ll <> upd <> body)
   ei <- jsEntryIdI i
   et <- genEntryType args
   sr <- genStaticRefs srt
@@ -580,7 +604,7 @@ genSetConInfo i d srt = do
       fields = dataConRepArgTys d
 
 mkDataEntry :: JExpr
-mkDataEntry = ValExpr $ JFunc funArgs [j| return `Stack`[`Sp`]; |]
+mkDataEntry = ValExpr $ JFunc [] [j| return `Stack`[`Sp`]; |]
 
 genFunInfo :: Text -> [Id] -> JExpr
 genFunInfo name as = ValExpr . JList $ [s, jstr name] ++ map (toJExpr . uTypeVt . idType) as
@@ -591,14 +615,14 @@ argSize :: [Type] -> Int
 argSize = sum . map (varSize . uTypeVt)
 
 genUpdFrame :: UpdateFlag -> C
-genUpdFrame Updatable = updateThunk <$> use gsCgSettings
+genUpdFrame Updatable = updateThunk <$> use gsSettings
 genUpdFrame _         = mempty
 
 -- allocate local closures
 allocCls :: [(Id, StgRhs)] -> C
 allocCls xs = do
    (stat, dyn) <- splitEithers <$> mapM toCl xs
-   cs <- use gsCgSettings
+   cs <- use gsSettings
    return ((mconcat stat) <> allocDynAll cs True dyn)
   where
     -- left = static, right = dynamic
@@ -915,7 +939,7 @@ genArg a@(StgVarArg i) = do
        | otherwise = do
            as <- concat <$> mapM genArg args
            e  <- enterDataCon dc
-           cs <- use gsCgSettings
+           cs <- use gsSettings
            return [allocDynamicE cs e as]
      unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
 
@@ -1097,7 +1121,7 @@ allocCon to con xs
       return (assignj to i)
   | otherwise = do
       e <- enterDataCon con
-      cs <- use gsCgSettings
+      cs <- use gsSettings
       return $ allocDynamic cs False to e xs
 
 allocUnboxedCon :: DataCon -> [JExpr] -> JExpr
@@ -1327,12 +1351,12 @@ parseFFIPattern' callback javascriptCc pat t ret args
     mkApply f
       | Just cb <- callback = do
          (stats, as) <- unzip <$> mapM genFFIArg args
-         cs <- use gsCgSettings
+         cs <- use gsSettings
          return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as++[cb])
       | (ts@(_:_)) <- tgt = do
          (stats, as) <- unzip <$> mapM genFFIArg args
          (statR, (t:ts')) <- return (mempty, ts)
-         cs <- use gsCgSettings
+         cs <- use gsSettings
          return $ traceCall cs as
                 <> mconcat stats
                 <> [j| `t` = `ApplExpr f' (concat as)`; |]
@@ -1340,7 +1364,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
                 <> statR
       | otherwise = do
          (stats, as) <- unzip <$> mapM genFFIArg args
-         cs <- use gsCgSettings
+         cs <- use gsSettings
          return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as)
         where f' = toJExpr (TxtI $ T.pack f)
     copyResult rs = mconcat $ zipWith (\t r -> [j| `r`=`t`;|]) (enumFrom Ret1) rs

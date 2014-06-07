@@ -190,21 +190,27 @@ newtype IdCache = IdCache (M.Map IdKey Ident)
 emptyIdCache :: IdCache
 emptyIdCache = IdCache M.empty
 
--- | the current code generator state
 data GenState = GenState
-  { _gsModule        :: Module         -- ^ the module we're compiling, used for generating names
-  , _gsToplevel      :: Maybe Id       -- ^ the toplevel function group we're generating
-  , _gsToplevelStats :: [JStat]        -- ^ extra toplevel statements that our current function emits
-  , _gsClosureInfo   :: [ClosureInfo]  -- ^ closure information in the current function group
-  , _gsStatic        :: [StaticInfo]   -- ^ static data for the current function group
-  , _gsId            :: Int            -- ^ integer for the id generator
-  , _gsDynFlags      :: DynFlags       -- ^ the DynFlags, used for prettyprinting etc
-  , _gsStack         :: [StackSlot]    -- ^ what's currently on the stack, above h$sp
+  { _gsSettings      :: CgSettings     -- ^ codegen settings, read-only
+  , _gsModule        :: Module         -- ^ current module
+  , _gsDynFlags      :: DynFlags       -- ^ dynamic flags
+  , _gsId            :: Int            -- ^ unique number for the id generator
   , _gsIdents        :: IdCache        -- ^ hash consing for identifiers from a Unique
   , _gsUnfloated     :: UniqFM StgExpr -- ^ unfloated arguments
-  , _gsInitialised   :: IdSet          -- ^ already initialized idents in this module
-  , _gsCgSettings    :: CgSettings     -- ^ settings for the code generator
+  , _gsGroup         :: GenGroupState  -- ^ state for the current binding group
+  , _gsGlobal        :: [JStat]        -- ^ global (per module) statements (gets included when anything else from the module is used)
   }
+
+-- | the state relevant for the current binding group
+data GenGroupState = GenGroupState
+  { _ggsToplevelStats :: [JStat]        -- ^ extra toplevel statements for the binding group
+  , _ggsClosureInfo   :: [ClosureInfo]  -- ^ closure metadata (info tables) for the binding group
+  , _ggsStatic        :: [StaticInfo]   -- ^ static (CAF) data in our binding group
+  , _ggsStack         :: [StackSlot]    -- ^ stack info for the current expression
+  }
+
+instance Default GenGroupState where
+  def = GenGroupState [] [] [] []
 
 type C   = State GenState JStat
 type G a = State GenState a
@@ -213,29 +219,39 @@ data StackSlot = SlotId Id Int
                | SlotUnknown
   deriving (Eq, Ord, Show)
 
+makeLenses ''GenGroupState
 makeLenses ''GenState
 
+-- | emit a global (for the current module) toplevel statement
+emitGlobal :: JStat -> G ()
+emitGlobal s = gsGlobal %= (s:)
+
+-- functions below modify the current binding group state
+
+-- | start with a new binding group
+resetGroup :: G ()
+resetGroup = gsGroup .= def
+
+-- | emit a top-level statement for the current binding group
 emitToplevel :: JStat -> G ()
-emitToplevel s = gsToplevelStats %= (s:)
+emitToplevel s = gsGroup . ggsToplevelStats %= (s:)
 
-resetToplevel :: G ()
-resetToplevel = do
-  gsToplevelStats .= []
-  gsClosureInfo   .= []
-  gsStatic        .= []
-
+-- | add closure info in our binding group. all heap objects must have closure info
 emitClosureInfo :: ClosureInfo -> G ()
-emitClosureInfo ci = gsClosureInfo %= (ci:)
+emitClosureInfo ci = gsGroup . ggsClosureInfo %= (ci:)
 
+-- | emit static data for the binding group
 emitStatic :: Text -> StaticVal -> G ()
-emitStatic ident val = gsStatic %= (StaticInfo ident val:)
+emitStatic ident val = gsGroup . ggsStatic %= (StaticInfo ident val:)
 
 dropSlots :: Int -> G ()
-dropSlots n = gsStack %= drop n
+dropSlots n = gsGroup . ggsStack %= drop n
 
+-- | add knowledge about the stack slots
 addSlots :: [StackSlot] -> G ()
-addSlots xs = gsStack %= (xs++)
+addSlots xs = gsGroup . ggsStack %= (xs++)
 
+-- | run the action with no stack info
 resetSlots :: G a -> G a
 resetSlots m = do
   s <- getSlots
@@ -244,6 +260,7 @@ resetSlots m = do
   setSlots s
   return a
 
+-- | run the action with current stack info, but don't let modifications propagate
 isolateSlots :: G a -> G a
 isolateSlots m = do
   s <- getSlots
@@ -251,16 +268,19 @@ isolateSlots m = do
   setSlots s
   return a
 
+-- | overwrite our stack knowledge
 setSlots :: [StackSlot] -> G ()
-setSlots xs = gsStack .= xs
+setSlots xs = gsGroup . ggsStack .= xs
 
+-- | retrieve our current stack knowledge
 getSlots :: G [StackSlot]
-getSlots = use gsStack
+getSlots = use (gsGroup . ggsStack)
 
+-- | add `n` unknown slots to our stack knowledge
 addUnknownSlots :: Int -> G ()
 addUnknownSlots n = addSlots (replicate n SlotUnknown)
 
--- run the computation with the current stack slots, restore stack slots afterwards
+-- | run the computation with the current stack slots, restore stack slots afterwards
 withStack :: G a -> G a
 withStack m = do
   s <- getSlots
@@ -268,18 +288,12 @@ withStack m = do
   setSlots s
   return r
 
-addInitialized :: Id -> G ()
-addInitialized i = gsInitialised %= flip addOneToUniqSet i
-
-isInitialized :: Id -> G Bool
-isInitialized i = elementOfUniqSet i <$> use gsInitialised
-
 throwSimpleSrcErr :: DynFlags -> SrcSpan -> String -> G a
 throwSimpleSrcErr df span msg = return $! Ex.throw (simpleSrcErr df span msg)
 
 initState :: DynFlags -> Module -> UniqFM StgExpr -> GenState
 initState df m unfloat =
-  GenState m Nothing [] [] [] 1 df [] emptyIdCache unfloat emptyVarSet (dfCgSettings df)
+  GenState (dfCgSettings df) m df 1 emptyIdCache unfloat def []
 
 runGen :: DynFlags -> Module -> UniqFM StgExpr -> G a -> a
 runGen df m unfloat = flip evalState (initState df m unfloat)
@@ -287,10 +301,6 @@ runGen df m unfloat = flip evalState (initState df m unfloat)
 instance Monoid C where
   mappend = liftM2 (<>)
   mempty  = return mempty
-
--- arguments that the trampoline calls our funcs with
-funArgs :: [Ident]
-funArgs = [] -- [StrI "o"] -- [StrI "_heap", StrI "_stack"] -- [] -- [StrI "r", StrI "heap", StrI "stack"]
 
 data Special = Stack
              | Sp
@@ -322,13 +332,16 @@ pushNN = listArray (1,255) $ map (TxtI . T.pack . ("h$pp"++) . show) [(1::Int)..
 pushNN' :: Array Integer JExpr
 pushNN' = fmap (ValExpr . JVar) pushNN
 
--- optimized push that reuses existing values on stack
--- slots are True if the right value is already there
-pushOptimized :: [(JExpr,Bool)] -> C
+{- |  optimized push that reuses existing values on stack
+      automatically chooses an optimized partial push (h$ppN)
+      function when possible.
+ -}
+pushOptimized :: [(JExpr,Bool)] -- ^ contents of the slots, True if same value is already there
+              -> C
 pushOptimized [] = return mempty
 pushOptimized xs = do
   dropSlots l
-  go .  csInlinePush <$> use gsCgSettings
+  go .  csInlinePush <$> use gsSettings
   where
     go True = inlinePush
     go _
@@ -350,7 +363,7 @@ pushOptimized xs = do
 push :: [JExpr] -> C
 push xs = do
   dropSlots (length xs)
-  flip push' xs <$> use gsCgSettings
+  flip push' xs <$> use gsSettings
 
 push' :: CgSettings -> [JExpr] -> JStat
 push' _ [] = mempty
@@ -372,7 +385,7 @@ popSkipUnknown n xs = popSkip n (map (,SlotUnknown) xs)
 pop :: [(JExpr,StackSlot)] -> C
 pop = popSkip 0
 
--- pop the expressions, but ignore the top n elements of the stack
+-- | pop the expressions, but ignore the top n elements of the stack
 popSkip :: Int -> [(JExpr,StackSlot)] -> C
 popSkip 0 [] = mempty
 popSkip n [] = addUnknownSlots n >> return (adjSpN n)
@@ -381,13 +394,15 @@ popSkip n xs = do
   addSlots (map snd xs)
   return (loadSkip n (map fst xs) <> adjSpN (length xs + n))
 
--- pop things, don't upstate stack knowledge
-popSkip' :: Int -> [JExpr] -> JStat
-popSkip' 0 [] = mempty
-popSkip' n [] = adjSpN n
-popSkip' n xs = loadSkip n xs <> adjSpN (length xs + n)
+-- | pop things, don't upstate stack knowledge
+popSkip' :: Int     -- ^ number of slots to skip
+         -> [JExpr] -- ^ assign stack slot values to these
+         -> JStat
+popSkip' 0 []  = mempty
+popSkip' n []  = adjSpN n
+popSkip' n tgt = loadSkip n tgt <> adjSpN (length tgt + n)
 
--- like popSkip, but without modifying sp
+-- | like popSkip, but without modifying the stack pointer
 loadSkip :: Int -> [JExpr] -> JStat
 loadSkip n xs = mconcat items
     where

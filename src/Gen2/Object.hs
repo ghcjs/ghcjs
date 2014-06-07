@@ -39,6 +39,7 @@ module Gen2.Object ( object
                    , readObjectKeys
                    , serializeStat
                    , emptySymbolTable
+                   , isGlobalUnit
                    , SymbolTable
                    , ObjUnit (..)
                    , Deps (..)
@@ -109,6 +110,14 @@ data ExpFun = ExpFun { isIO   :: !Bool
                      , args   :: [JSFFIType]
                      , result :: !JSFFIType
                      } deriving (Eq, Ord, Show)
+
+{- | we use the convention that the first unit (1) is a module-global
+     unit that's always included when something from the module
+     is loaded. everything in a module implicitly depends on the
+     global block. the global unit itself can't have dependencies
+ -}
+isGlobalUnit :: Int -> Bool
+isGlobalUnit n = n == 1
 
 instance NFData ExpFun where
   rnf (ExpFun x as r) = rnf as `seq` ()

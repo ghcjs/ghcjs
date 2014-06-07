@@ -361,7 +361,7 @@ extractDeps :: FilePath
 extractDeps file units = do
   let symbs     = IS.fromList . map (\(_,_,n) -> n) . S.toList $ units
       (p, m, _) = S.elemAt 0 units
-  l <- readObjectFileKeys (\n _ -> n `IS.member` symbs) file
+  l <- readObjectFileKeys (\n _ -> n `IS.member` symbs || isGlobalUnit n) file
   return (p, m, mconcat (map oiStat l), concatMap oiClInfo l, concatMap oiStatic l)
 
 pkgTxt :: Package -> Text
