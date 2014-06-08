@@ -7,6 +7,7 @@
 module Gen2.Generator (generate) where
 
 import           ForeignCall
+import           CostCentre
 import           FastString
 import           TysWiredIn
 import           BasicTypes
@@ -107,8 +108,9 @@ generate :: GhcjsSettings
          -> DynFlags
          -> CgGuts
          -> StgPgm
+         -> CollectedCCs
          -> ByteString -- ^ binary data for the .js_o object file
-generate settings df guts s =
+generate settings df guts s _cCCs =
   let (uf, s') = sinkPgm m s
       m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
