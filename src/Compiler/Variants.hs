@@ -38,9 +38,6 @@ data Variant = Variant
                                -> IO ()
     }
 
-variants :: [Variant]
-variants = [gen2Variant]
-
 gen2Variant :: Variant
 gen2Variant = Variant Gen2.generate Gen2.link
 
