@@ -111,13 +111,13 @@ data ExpFun = ExpFun { isIO   :: !Bool
                      , result :: !JSFFIType
                      } deriving (Eq, Ord, Show)
 
-{- | we use the convention that the first unit (1) is a module-global
+{- | we use the convention that the first unit (0) is a module-global
      unit that's always included when something from the module
      is loaded. everything in a module implicitly depends on the
      global block. the global unit itself can't have dependencies
  -}
 isGlobalUnit :: Int -> Bool
-isGlobalUnit n = n == 1
+isGlobalUnit n = n == 0
 
 instance NFData ExpFun where
   rnf (ExpFun x as r) = rnf as `seq` ()
