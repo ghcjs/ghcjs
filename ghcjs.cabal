@@ -48,6 +48,7 @@ Library
       cpp-options: -DWINDOWS
     Default-Language: Haskell2010
     exposed-modules: Gen2.Generator,
+                     Gen2.Profiling,
                      Gen2.Floater,
                      Gen2.Prim,
                      Gen2.Rts,
