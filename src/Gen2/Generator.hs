@@ -700,9 +700,6 @@ assignAllCh msg xs ys
   | length xs == length ys = mconcat (zipWith assignj xs ys)
   | otherwise              = error ("assignAllCh: lengths do not match: " ++ show (length xs, length ys) ++ "\n    " ++ msg)
 
-assignj :: (ToJExpr a, ToJExpr b) => a -> b -> JStat
-assignj x y = [j| `x` = `y` |]
-
 genRet :: ExprCtx -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
 genRet top e at as l srt = withNewIdent f
   where
