@@ -80,6 +80,7 @@ import           Gen2.ClosureInfo
 import qualified Gen2.Optimizer as O
 import qualified Gen2.Object    as Object
 import           Gen2.Sinker
+import           Gen2.Profiling
 
 import qualified Debug.Trace
 
@@ -110,10 +111,11 @@ generate :: GhcjsSettings
          -> StgPgm
          -> CollectedCCs
          -> ByteString -- ^ binary data for the .js_o object file
-generate settings df guts s _cCCs =
+generate settings df guts s cccs =
   let (uf, s') = sinkPgm m s
       m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
+        initCostCentres cccs
         (st, g) <- genUnits df m s'
         -- (exported symbol names, javascript statements) for each linkable unit
         p <- forM g $ \u -> mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
