@@ -7,6 +7,7 @@
 
 module Gen2.RtsTypes where
 
+import           CostCentre
 import           DynFlags
 import           Encoding
 import           Id
@@ -251,8 +252,8 @@ emitClosureInfo :: ClosureInfo -> G ()
 emitClosureInfo ci = gsGroup . ggsClosureInfo %= (ci:)
 
 -- | emit static data for the binding group
-emitStatic :: Text -> StaticVal -> G ()
-emitStatic ident val = gsGroup . ggsStatic %= (StaticInfo ident val:)
+emitStatic :: Text -> StaticVal -> Maybe Ident -> G ()
+emitStatic ident val cc = gsGroup . ggsStatic %= (StaticInfo ident val cc :)
 
 dropSlots :: Int -> G ()
 dropSlots n = gsGroup . ggsStack %= drop n
