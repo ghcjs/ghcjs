@@ -69,11 +69,6 @@ makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls) =
      (HM.union (fmap (+nss) pss) ss)
      (HM.union (fmap (+nls) pls) ls)
 
--- | collect global objects (data / CAFs). rename them and add them to the table
-collectGlobals :: [StaticInfo]
-               -> State CompactorState ()
-collectGlobals = mapM_ (\(StaticInfo i _) -> renameObj i)
-
 debugShowStat :: (JStat, [ClosureInfo], [StaticInfo]) -> String
 debugShowStat (s, cis, sis) = "closures:\n" ++ unlines (map show cis) ++ "\nstatics:" ++ unlines (map show sis) ++ "\n\n"
 
