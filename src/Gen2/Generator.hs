@@ -665,16 +665,22 @@ allocCls xs = do
    return ((mconcat stat) <> allocDynAll cs True dyn)
   where
     -- left = static, right = dynamic
-    toCl :: (Id, StgRhs) -> G (Either JStat (Ident,JExpr,[JExpr]))
-    toCl (i, StgRhsCon _cc con []) = do
+    toCl :: (Id, StgRhs) -> G (Either JStat (Ident,JExpr,[JExpr],CostCentreStack))
+
+    -- statics
+    toCl (i, StgRhsCon cc con []) = do
       ii <- jsIdI i
       Left <$> (return (decl ii) <> allocCon ii con [])
     toCl (i, StgRhsCon _cc con [a]) | isUnboxableCon con = do
       ii <- jsIdI i
       Left <$> (return (decl ii) <> (allocCon ii con =<< genArg a))
-    toCl (i, StgRhsCon _cc con ar) = Right <$> ((,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar)  -- fixme do we need to handle unboxed?
-    toCl (i, StgRhsClosure _cc _bi live upd_flag _srt _args _body) =
-        Right <$> ((,,) <$> jsIdI i <*> jsEntryId i <*> concatMapM genIds live)
+
+    -- dynamics
+    toCl (i, StgRhsCon cc con ar) =
+      -- fixme do we need to handle unboxed?
+      Right <$> ((,,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar <*> pure cc)
+    toCl (i, StgRhsClosure cc _bi live upd_flag _srt _args _body) =
+      Right <$> ((,,,) <$> jsIdI i <*> jsEntryId i <*> concatMapM genIds live <*> pure cc)
 
 -- fixme CgCase has a reps_compatible check here
 genCase :: ExprCtx -> Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> G (JStat, ExprResult)
