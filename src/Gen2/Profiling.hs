@@ -32,13 +32,12 @@ initCostCentres (local_CCs, _extern_CCs, singleton_CCSs) = do
 emitCostCentreDecl :: CostCentre -> G ()
 emitCostCentreDecl cc = do
     dflags  <- use gsDynFlags
-    curModl <- use gsModule
     let is_caf = isCafCC cc
         label  = costCentreUserName cc
         modl   = Module.moduleNameString $ moduleName $ cc_mod cc
         loc    = showPpr dflags (costCentreSrcSpan cc)
-        var    = TxtI $ T.pack (moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString label)
 
+    var <- ccVar cc
     let js =
           decl var <>
           [j| `var` = h$registerCC(`label`, `modl`, `loc`, `is_caf`); |]
@@ -49,17 +48,26 @@ emitCostCentreStackDecl :: CostCentreStack -> G ()
 emitCostCentreStackDecl ccs = do
     case maybeSingletonCCS ccs of
       Just cc -> do
-        dflags  <- use gsDynFlags
-        curModl <- use gsModule
-        let cc_label  = costCentreUserName cc
-            ccs_label = cc_label ++ "_ccs"
-            var       = TxtI $ T.pack (moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString ccs_label)
-
+        ccs_var <- singletonCCSVar cc
+        cc_var  <- ccVar cc
         let js =
-              decl var <>
-              [j| `var` = h$registerCCS(`JVar $ TxtI $ T.pack cc_label`); |]
+              decl ccs_var <>
+              [j| `ccs_var` = h$registerCCS(`cc_var`); |]
         emitGlobal js
         trace ("emitting: " ++ show (renderJs js)) (return ())
 
       Nothing -> pprPanic "emitCostCentreStackDecl" (ppr ccs)
 
+singletonCCSVar :: CostCentre -> G Ident
+singletonCCSVar cc = do
+    curModl <- use gsModule
+    let cc_label  = costCentreUserName cc
+        ccs_label = cc_label ++ "_ccs"
+    return $ TxtI $ T.pack (moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString ccs_label)
+
+ccVar :: CostCentre -> G Ident
+ccVar cc = do
+    curModl <- use gsModule
+    let is_caf = isCafCC cc
+        label  = costCentreUserName cc
+    return $ TxtI $ T.pack (moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString label)
