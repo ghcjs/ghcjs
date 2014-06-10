@@ -662,7 +662,7 @@ allocCls :: [(Id, StgRhs)] -> C
 allocCls xs = do
    (stat, dyn) <- splitEithers <$> mapM toCl xs
    cs <- use gsSettings
-   return ((mconcat stat) <> allocDynAll cs True dyn)
+   return (mconcat stat) <> allocDynAll cs True dyn
   where
     -- left = static, right = dynamic
     toCl :: (Id, StgRhs) -> G (Either JStat (Ident,JExpr,[JExpr],CostCentreStack))
