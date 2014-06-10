@@ -14,21 +14,29 @@ import qualified Data.Text as T
 import           Compiler.JMacro
 
 import           Gen2.ClosureInfo
+import           Gen2.Profiling
 import           Gen2.RtsTypes
 import           Gen2.Utils
 
 -- allocate multiple, possibly mutually recursive, closures
 
-allocDynAll :: CgSettings -> Bool -> [(Ident,JExpr,[JExpr])] -> JStat
-allocDynAll s haveDecl [(to,entry,free)]
-  | to `notElem` (free ^.. template) = allocDynamic s haveDecl to entry free
-allocDynAll s haveDecl cls = makeObjs <> fillObjs <> checkObjs
+allocDynAll :: CgSettings -> Bool -> [(Ident,JExpr,[JExpr],CostCentreStack)] -> G JStat
+allocDynAll s haveDecl [(to,entry,free,cc)]
+  | to `notElem` (free ^.. template) = do
+      ccs <- ccsVar cc
+      return $ allocDynamic s haveDecl to entry free <> [j| `to`.cc = `ccs` |]
+allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
   where
+    makeObjs :: G JStat
     makeObjs
-      | csInlineAlloc s = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0 } |]) cls
-      | otherwise       = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = h$c(`f`); |]) cls
+      | csInlineAlloc s = mconcat $ map (\(i,f,_,cc) -> do
+          ccs <- ccsVar cc
+          return $ dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0, cc: `ccs` } |]) cls
+      | otherwise       = mconcat $ map (\(i,f,_,cc) -> do
+          ccs <- ccsVar cc
+          return $ dec i <> [j| `i` = h$c(`f`, `ccs`); |]) cls
     fillObjs = mconcat $ map fillObj cls
-    fillObj (i,_,es)
+    fillObj (i,_,es,_)
       | csInlineAlloc s || length es > 24 =
           case es of
             []      -> mempty
@@ -47,7 +55,7 @@ allocDynAll s haveDecl cls = makeObjs <> fillObjs <> checkObjs
     dataFields = map (T.pack . ('d':) . show) [(1::Int)..]
     dec i | haveDecl  = decl i
           | otherwise = mempty
-    checkObjs | csAssertRts s  = mconcat $ map (\(i,_,_) -> [j| h$checkObj(`i`); |]) cls
+    checkObjs | csAssertRts s  = mconcat $ map (\(i,_,_,_) -> [j| h$checkObj(`i`); |]) cls
               | otherwise = mempty
 
 allocDynamic :: CgSettings -> Bool -> Ident -> JExpr -> [JExpr] -> JStat

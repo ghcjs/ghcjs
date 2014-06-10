@@ -1,6 +1,11 @@
 {-# LANGUAGE OverloadedStrings, QuasiQuotes #-}
 
-module Gen2.Profiling (initCostCentres) where
+module Gen2.Profiling
+  ( initCostCentres
+  , CostCentre
+  , CostCentreStack
+  , ccsVar
+  ) where
 
 import           CLabel
 import           CostCentre
@@ -57,6 +62,15 @@ emitCostCentreStackDecl ccs = do
         trace ("emitting: " ++ show (renderJs js)) (return ())
 
       Nothing -> pprPanic "emitCostCentreStackDecl" (ppr ccs)
+
+ccsVar :: CostCentreStack -> G Ident
+ccsVar ccs
+  | noCCSAttached ccs = return $ TxtI "h$CCCS" -- FIXME
+  | isCurrentCCS ccs = return $ TxtI "h$CCCS"
+  | otherwise =
+      case maybeSingletonCCS ccs of
+        Just cc -> singletonCCSVar cc
+        Nothing -> pprPanic "ccsVar" (ppr ccs)
 
 singletonCCSVar :: CostCentre -> G Ident
 singletonCCSVar cc = do
