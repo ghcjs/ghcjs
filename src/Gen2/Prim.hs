@@ -615,9 +615,22 @@ MkApUpd0_Op
 NewBCOOp
 UnpackClosureOp
 GetApStackValOp
-GetCCSOfOp
-GetCurrentCCSOp
 -}
+
+-- stack trace/cost-centre operations
+genPrim _ GetCurrentCCSOp [a, o] [_dummy_arg] = PrimInline [j|
+  var msg = "GetCurrentCCSOp called";
+  console.log(msg);
+  `a` = h$buildCCSPtr(h$CCCS);
+  `o` = 0;
+|]
+genPrim _ GetCCSOfOp [a, o] [obj] = PrimInline [j|
+  var msg = "GetCCSOfOp called";
+  console.log(msg);
+  `a` = h$buildCCSPtr(`obj`.cc);
+  `o` = 0;
+|]
+
 genPrim _ TraceEventOp [] [ed,eo] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
 genPrim _ TraceMarkerOp [] [ed,eo] = PrimInline [j| h$traceMarker(`ed`, `eo`); |]
 
