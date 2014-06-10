@@ -721,8 +721,8 @@ instance Objectable Bool where
                       n -> error ("Objectable get Bool: invalid tag: " ++ show n)
 
 instance Objectable StaticInfo where
-  put (StaticInfo ident val) = put ident >> put val
-  get = StaticInfo <$> get <*> get
+  put (StaticInfo ident val cc) = put ident >> put val >> put cc
+  get = StaticInfo <$> get <*> get <*> get
 
 instance Objectable StaticVal where
   put (StaticFun f)        = tag 1 >> put f

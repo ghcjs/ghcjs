@@ -324,6 +324,7 @@ setObjInfo debug obj t name fields a size regs static
 
 data StaticInfo = StaticInfo { siVar    :: !Text      -- ^ global object
                              , siVal    :: !StaticVal -- ^ static initialization
+                             , siCC     :: !(Maybe Ident)
                              }
   deriving (Eq, Ord, Show, Typeable)
 
@@ -371,7 +372,7 @@ instance ToJExpr StaticLit where
 -- | declare and do first-pass init of a global object (create JS object for heap objects)
 staticDeclStat :: StaticInfo
                -> JStat
-staticDeclStat (StaticInfo si sv) =
+staticDeclStat (StaticInfo si sv _) =
   let si' = TxtI si
       ssv (StaticUnboxed u)       = Just (ssu u)
       ssv (StaticThunk Nothing)   = Nothing
@@ -386,7 +387,7 @@ staticDeclStat (StaticInfo si sv) =
 --   (this is only used with -debug, normal init would go through the static data table)
 staticInitStat :: StaticInfo
                -> JStat
-staticInitStat (StaticInfo i sv)
+staticInitStat (StaticInfo i sv _)
   | StaticData con args  <- sv = [j| h$sti(`TxtI i`,`TxtI con`, `args`); |]
   | StaticFun f          <- sv = [j| h$sti(`TxtI i`, `TxtI f`, []); |]
   | StaticList args mt   <- sv = [j| h$stl(`TxtI i`, `args`, `maybe jnull (toJExpr . TxtI) mt`); |]

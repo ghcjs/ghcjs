@@ -209,7 +209,7 @@ renameStaticInfo cs si = si & staticIdents %~ renameIdent
     renameIdent t = maybe t (\(TxtI t') -> t') (HM.lookup t $ cs ^. nameMap)
 
 staticIdents :: Traversal' StaticInfo Text
-staticIdents f (StaticInfo i v) = StaticInfo <$> f i <*> staticIdentsV f v
+staticIdents f (StaticInfo i v cc) = StaticInfo <$> f i <*> staticIdentsV f v <*> pure cc
 
 staticIdentsV :: Traversal' StaticVal Text
 staticIdentsV f (StaticFun i)          = StaticFun <$> f i
@@ -307,7 +307,7 @@ encodeInfo cs (ClosureInfo var regs name layout typ static)
 encodeStatic :: CompactorState
              -> StaticInfo
              -> [Int]
-encodeStatic cs (StaticInfo to sv)
+encodeStatic cs (StaticInfo to sv _)
     | StaticFun f <- sv                           = [1, entry f]
     | StaticThunk (Just t) <- sv                  = [2, entry t]
     | StaticThunk Nothing <- sv                   = [0]

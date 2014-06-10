@@ -337,11 +337,11 @@ genToplevelRhs i (StgRhsClosure _cc _bi _ _ _ _ body)
   | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey     = genStrThunk i False bs
   | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey = genStrThunk i True bs
 -- general cases:
-genToplevelRhs i (StgRhsCon _cc con args) = do
+genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
-  allocConStatic ii con args
+  allocConStatic ii cc con args
   return mempty
-genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
+genToplevelRhs i (StgRhsClosure cc _bi [] upd_flag srt args body) = do
   eid@(TxtI eidt) <- jsEnIdI i
   id@(TxtI idt)   <- jsIdI i
   body <- genBody emptyUniqSet i args body upd_flag
@@ -353,7 +353,8 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
           then (StaticThunk (Just eidt), CIRegs 0 [PtrV],                updateThunk cs)
           else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty)
   emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
-  emitStatic idt static
+  ccId <- ccsVar cc
+  emitStatic idt static (Just ccId)
   return $ decl eid <> assignj eid (JFunc [] (upd <> body))
 
 loadLiveFun :: [Id] -> C
@@ -552,11 +553,11 @@ pushCont as = do
 genBind :: ExprCtx -> StgBinding -> G (JStat, ExprCtx)
 genBind ctx bndr =
   case bndr of
-    (StgNonRec b r) -> do
+    StgNonRec b r -> do
        assign b r
        j <- allocCls [(b,r)]
        return (j, addEvalRhs ctx [(b,r)])
-    (StgRec bs)     -> do
+    StgRec bs     -> do
        mapM_ (uncurry assign) bs
        j <- allocCls bs
        return (j, addEvalRhs ctx bs)
@@ -1044,7 +1045,7 @@ genStrThunk :: Id -> Bool -> B.ByteString -> C
 genStrThunk i nonAscii str = do
   ii@(TxtI iit) <- jsIdI i
   let d = decl ii
-  emitStatic iit (StaticThunk Nothing)
+  emitStatic iit (StaticThunk Nothing) Nothing
   return $ case decodeModifiedUTF8 str of
              Just t -> d <> if nonAscii then [j| `ii` = h$strt(`T.unpack t`); |]
                                         else [j| `ii` = h$strta(`T.unpack t`); |]
@@ -1149,34 +1150,35 @@ allocUnboxedConStatic _   [a@(StaticLitArg (DoubleLit d))] = a
 allocUnboxedConStatic con _                                =
   error ("allocUnboxedConStatic: not an unboxed constructor: " ++ show con)
 
-allocConStatic :: Ident -> DataCon -> [GenStgArg Id] {- -> Bool -} -> G ()
-allocConStatic (TxtI to) con args -- isRecursive
+allocConStatic :: Ident -> CostCentreStack -> DataCon -> [GenStgArg Id] {- -> Bool -} -> G ()
+allocConStatic (TxtI to) cc con args -- isRecursive
 {-  | Debug.Trace.trace ("allocConStatic: " ++ show to ++ " " ++ show con ++ " " ++ show args) True -} = do
   as <- mapM genStaticArg args
-  allocConStatic' (concat as)
+  cc' <- ccsVar cc
+  allocConStatic' cc' (concat as)
   where
-    allocConStatic' :: [StaticArg] -> G ()
-    allocConStatic' []
+    allocConStatic' :: Ident -> [StaticArg] -> G ()
+    allocConStatic' cc' []
       | isBoolTy (dataConType con) && dataConTag con == 1 =
-           emitStatic to $ StaticUnboxed (StaticUnboxedBool False)
+           emitStatic to (StaticUnboxed $ StaticUnboxedBool False) (Just cc')
       | isBoolTy (dataConType con) && dataConTag con == 2 =
-           emitStatic to $ StaticUnboxed (StaticUnboxedBool True)
+           emitStatic to (StaticUnboxed $ StaticUnboxedBool True) (Just cc')
       | otherwise = do
            (TxtI e) <- enterDataConI con
-           emitStatic to (StaticData e [])
-    allocConStatic' [x]
+           emitStatic to (StaticData e []) (Just cc')
+    allocConStatic' cc' [x]
       | isUnboxableCon con =
         case x of
-          StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i)
-          StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b)
-          StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d)
+          StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i) (Just cc')
+          StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b) (Just cc')
+          StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d) (Just cc')
           _                          -> error $ "allocConStatic: invalid unboxed literal: " ++ show x
-    allocConStatic' xs =
+    allocConStatic' cc' xs =
            if con == consDataCon
-              then emitStatic to =<< allocateStaticList [args !! 0] (args !! 1)
+              then flip (emitStatic to) (Just cc') =<< allocateStaticList [args !! 0] (args !! 1)
               else do
                 (TxtI e) <- enterDataConI con
-                emitStatic to (StaticData e xs)
+                emitStatic to (StaticData e xs) (Just cc')
 
 -- avoid one indirection for global ids
 -- fixme in many cases we can also jump directly to the entry for local?
