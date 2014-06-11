@@ -2,6 +2,7 @@
 
 module Gen2.Profiling
   ( initCostCentres
+  , enterCostCentreFun
   , CostCentre
   , CostCentreStack
   , ccsVar
@@ -12,6 +13,7 @@ import           CostCentre
 import           DynFlags
 import           Encoding
 import           FastString
+import           Id
 import           Module
 import           Outputable           hiding ((<>))
 import           SrcLoc
@@ -86,3 +88,11 @@ ccVar cc = do
     let is_caf = isCafCC cc
         label  = costCentreUserName cc
     return $ TxtI $ T.pack (moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString label)
+
+enterCostCentreFun :: CostCentreStack -> JExpr -> G JStat
+enterCostCentreFun ccs i
+  | isCurrentCCS ccs = do
+      ccs' <- ccsVar ccs
+      return [j| h$enterFunCCS(`ccs'`, `i`.cc); |]
+  | otherwise = return mempty -- top-level function, nothing to do
+

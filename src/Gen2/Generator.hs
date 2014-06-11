@@ -344,7 +344,7 @@ genToplevelRhs i (StgRhsCon cc con args) = do
 genToplevelRhs i (StgRhsClosure cc _bi [] upd_flag srt args body) = do
   eid@(TxtI eidt) <- jsEnIdI i
   id@(TxtI idt)   <- jsIdI i
-  body <- genBody emptyUniqSet i args body upd_flag
+  body <- genBody emptyUniqSet i args body upd_flag cc
   sr <- genStaticRefs srt
   cs <- use gsSettings
   et <- genEntryType args
@@ -375,9 +375,10 @@ loadLiveFun l = do
 dataFields :: Array Int Ident
 dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..1024])
 
-genBody :: UniqSet Id -> Id -> [Id] -> StgExpr -> UpdateFlag -> C
-genBody ev i args e upd = do
-  la     <- loadArgs args
+genBody :: UniqSet Id -> Id -> [Id] -> StgExpr -> UpdateFlag -> CostCentreStack -> C
+genBody ev i args e upd cc = do
+  enterCC <- enterCostCentreFun cc (toJExpr R1)
+  la <- loadArgs args
   -- find the result type after applying the function to the arguments
   let resultSize xxs@(x:xs) t
         | isUnboxedTupleType (idType x) = error "genBody: unboxed tuple argument"
@@ -393,7 +394,9 @@ genBody ev i args e upd = do
                                UbxTupleRep tys -> sum (map typeSize tys)
       ids = take (resultSize args $ idType i) (map toJExpr $ enumFrom R1)
   (e, r) <- genExpr (i, ids, ev) e
-  return $ la <> e <> [j| return `Stack`[`Sp`]; |]
+  let ret = enterCC <> la <> e <> [j| return `Stack`[`Sp`]; |]
+  Debug.Trace.trace ("genBody: " ++ show (renderJs ret)) $ return ret
+  -- return $ enterCC <> la <> e <> [j| return `Stack`[`Sp`]; |]
 
 
 loadArgs :: [Id] -> C
@@ -576,10 +579,10 @@ genBind ctx bndr =
 genEntry :: ExprCtx -> Id -> StgRhs -> G ()
 genEntry _ i (StgRhsCon _cc con args) = return () -- mempty -- error "local data entry"
 
-genEntry ctx i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlots $ do
+genEntry ctx i cl@(StgRhsClosure cc _bi live upd_flag srt args body) = resetSlots $ do
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
-  body <- genBody (ctxEval ctx) i args body upd_flag
+  body <- genBody (ctxEval ctx) i args body upd_flag cc
   let f = JFunc [] (ll <> upd <> body)
   ei <- jsEntryIdI i
   et <- genEntryType args
