@@ -322,9 +322,9 @@ setObjInfo debug obj t name fields a size regs static
       in  skip + (nregs `shiftL` 8)
 
 
-data StaticInfo = StaticInfo { siVar    :: !Text      -- ^ global object
-                             , siVal    :: !StaticVal -- ^ static initialization
-                             , siCC     :: !(Maybe Ident)
+data StaticInfo = StaticInfo { siVar    :: !Text          -- ^ global object
+                             , siVal    :: !StaticVal     -- ^ static initialization
+                             , siCC     :: !(Maybe Ident) -- ^ optional CCS name
                              }
   deriving (Eq, Ord, Show, Typeable)
 
@@ -387,12 +387,16 @@ staticDeclStat (StaticInfo si sv _) =
 --   (this is only used with -debug, normal init would go through the static data table)
 staticInitStat :: StaticInfo
                -> JStat
-staticInitStat (StaticInfo i sv _)
-  | StaticData con args  <- sv = [j| h$sti(`TxtI i`,`TxtI con`, `args`); |]
-  | StaticFun f          <- sv = [j| h$sti(`TxtI i`, `TxtI f`, []); |]
-  | StaticList args mt   <- sv = [j| h$stl(`TxtI i`, `args`, `maybe jnull (toJExpr . TxtI) mt`); |]
-  | StaticThunk (Just f) <- sv = [j| h$stc(`TxtI i`, `TxtI f`); |]
-  | otherwise                  = mempty -- StaticFun / StaticPrim / StaticThunk Nothing don't need any init here
+staticInitStat (StaticInfo i sv cc)
+  | StaticData con args  <- sv = [j| h$sti(`TxtI i`,`TxtI con`, `args`, `ccId`); |]
+  | StaticFun f          <- sv = [j| h$sti(`TxtI i`, `TxtI f`, [], `ccId`); |]
+  | StaticList args mt   <- sv = [j| h$stl(`TxtI i`, `args`, `maybe jnull (toJExpr . TxtI) mt`, `ccId`); |]
+  | StaticThunk (Just f) <- sv = [j| h$stc(`TxtI i`, `TxtI f`, `ccId`); |]
+  | otherwise                  = mempty -- StaticPrim - Nothing don't need any init here
+  where
+    ccId = case cc of
+             Nothing -> TxtI "null"
+             Just ci -> ci
 
 
 
