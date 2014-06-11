@@ -474,7 +474,10 @@ genExpr top (StgLet b e) = do
   (s,r)     <- genExpr top' e
   return (b' <> s, r)
 genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
-genExpr top (StgSCC cc b1 b2 e) = genExpr top e
+genExpr top (StgSCC cc tick push e) = do
+  (stats, result) <- genExpr top e
+  setSCCstats <- setSCC cc tick push
+  return (setSCCstats <> stats, result)
 genExpr top (StgTick m n e) = genExpr top e
 
 getId :: JExpr -> Ident

@@ -3,6 +3,7 @@
 module Gen2.Profiling
   ( initCostCentres
   , enterCostCentreFun
+  , setSCC
   , CostCentre
   , CostCentreStack
   , ccsVar
@@ -95,4 +96,10 @@ enterCostCentreFun ccs i
       ccs' <- ccsVar ccs
       return [j| h$enterFunCCS(`ccs'`, `i`.cc); |]
   | otherwise = return mempty -- top-level function, nothing to do
+
+setSCC :: CostCentre -> Bool -> Bool -> G JStat
+-- FIXME: ignoring push/tick flags for now
+setSCC cc _ _ = do
+    ccI <- ccVar cc
+    return [j| h$CCCS = h$pushCostCentre(h$CCCS, `ccI`); |]
 
