@@ -67,6 +67,7 @@ ccsVar :: CostCentreStack -> G Ident
 ccsVar ccs
   | noCCSAttached ccs = return $ TxtI "h$CCCS" -- FIXME
   | isCurrentCCS ccs = return $ TxtI "h$CCCS"
+  | dontCareCCS == ccs = return $ TxtI "h$CCS_DONT_CARE"
   | otherwise =
       case maybeSingletonCCS ccs of
         Just cc -> singletonCCSVar cc
