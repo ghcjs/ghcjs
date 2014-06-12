@@ -428,9 +428,7 @@ genBody ev i args e upd cc = do
                                UbxTupleRep tys -> sum (map typeSize tys)
       ids = take (resultSize args $ idType i) (map toJExpr $ enumFrom R1)
   (e, r) <- genExpr (i, ids, ev) e
-  let ret = enterCC <> la <> e <> [j| return `Stack`[`Sp`]; |]
-  Debug.Trace.trace ("genBody: " ++ show (renderJs ret)) $ return ret
-  -- return $ enterCC <> la <> e <> [j| return `Stack`[`Sp`]; |]
+  return $ enterCC <> la <> e <> [j| return `Stack`[`Sp`]; |]
 
 
 loadArgs :: [Id] -> C
