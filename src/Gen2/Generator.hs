@@ -641,10 +641,10 @@ allocCls xs = do
     -- statics
     toCl (i, StgRhsCon cc con []) = do
       ii <- jsIdI i
-      Left <$> (return (decl ii) <> allocCon ii con [])
-    toCl (i, StgRhsCon _cc con [a]) | isUnboxableCon con = do
+      Left <$> (return (decl ii) <> allocCon ii con cc [])
+    toCl (i, StgRhsCon cc con [a]) | isUnboxableCon con = do
       ii <- jsIdI i
-      Left <$> (return (decl ii) <> (allocCon ii con =<< genArg a))
+      Left <$> (return (decl ii) <> (allocCon ii con cc =<< genArg a))
 
     -- dynamics
     toCl (i, StgRhsCon cc con ar) =
@@ -748,7 +748,7 @@ loadRetArgs free = popSkipI 1 =<< ids
     where
        ids = mapM (\(i,n,b) -> (!!(n-1)) <$> genIdStackArgI i) free
 
-genAlts :: ExprCtx     -- ^ lhs to assign expression result to
+genAlts :: ExprCtx        -- ^ lhs to assign expression result to
         -> Id             -- ^ id being matched
         -> AltType        -- ^ type
         -> Maybe [JExpr]  -- ^ if known, fields in datacon from earlier expression
@@ -952,7 +952,7 @@ genArg a@(StgVarArg i) = do
            as <- concat <$> mapM genArg args
            e  <- enterDataCon dc
            cs <- use gsSettings
-           return [allocDynamicE cs e as]
+           return [allocDynamicE cs e as [je| null |] ] -- FIXME: ccs
      unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
 
 genStaticArg :: StgArg -> G [StaticArg]
@@ -1120,12 +1120,12 @@ genCon tgt con args
           assignAll (ctxTarget tgt) args
 genCon tgt con args | isUnboxedTupleCon con =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
-genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt = allocCon tgti con args
+genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt = allocCon tgti con currentCCS args
 genCon tgt con args =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
 
-allocCon :: Ident -> DataCon -> [JExpr] -> C
-allocCon to con xs
+allocCon :: Ident -> DataCon -> CostCentreStack -> [JExpr] -> C
+allocCon to con cc xs
   | isBoolTy (dataConType con) || isUnboxableCon con = do
       return [j| `to` = `allocUnboxedCon con xs`; |]
   | null xs = do
@@ -1134,7 +1134,8 @@ allocCon to con xs
   | otherwise = do
       e <- enterDataCon con
       cs <- use gsSettings
-      return $ allocDynamic cs False to e xs
+      ccsId <- ccsVar cc
+      return $ allocDynamic cs False to e xs [je| `ccsId` |]
 
 allocUnboxedCon :: DataCon -> [JExpr] -> JExpr
 allocUnboxedCon con []
