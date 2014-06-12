@@ -26,7 +26,6 @@ import qualified Data.Text            as T
 import           Compiler.JMacro
 import           Compiler.JMacro.Base
 
-import           Gen2.ClosureInfo
 import           Gen2.RtsTypes
 import           Gen2.Utils
 
