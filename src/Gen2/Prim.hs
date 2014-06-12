@@ -619,14 +619,10 @@ GetApStackValOp
 
 -- stack trace/cost-centre operations
 genPrim _ GetCurrentCCSOp [a, o] [_dummy_arg] = PrimInline [j|
-  var msg = "GetCurrentCCSOp called";
-  console.log(msg);
   `a` = h$buildCCSPtr(h$CCCS);
   `o` = 0;
 |]
 genPrim _ GetCCSOfOp [a, o] [obj] = PrimInline [j|
-  var msg = "GetCCSOfOp called";
-  console.log(msg);
   `a` = h$buildCCSPtr(`obj`.cc);
   `o` = 0;
 |]

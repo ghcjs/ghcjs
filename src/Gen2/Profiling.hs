@@ -30,8 +30,6 @@ import           Gen2.ClosureInfo
 import           Gen2.RtsTypes
 import           Gen2.Utils
 
-import           Debug.Trace
-
 initCostCentres :: CollectedCCs -> G ()
 initCostCentres (local_CCs, _extern_CCs, singleton_CCSs) = do
     mapM_ emitCostCentreDecl local_CCs
@@ -50,7 +48,6 @@ emitCostCentreDecl cc = do
           decl var <>
           [j| `var` = h$registerCC(`label`, `modl`, `loc`, `is_caf`); |]
     emitGlobal js
-    trace ("emitting: " ++ show (renderJs js)) (return ())
 
 emitCostCentreStackDecl :: CostCentreStack -> G ()
 emitCostCentreStackDecl ccs = do
@@ -62,7 +59,6 @@ emitCostCentreStackDecl ccs = do
               decl ccs_var <>
               [j| `ccs_var` = h$registerCCS(`cc_var`); |]
         emitGlobal js
-        trace ("emitting: " ++ show (renderJs js)) (return ())
 
       Nothing -> pprPanic "emitCostCentreStackDecl" (ppr ccs)
 
