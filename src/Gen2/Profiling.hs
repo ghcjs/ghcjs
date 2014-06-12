@@ -83,13 +83,14 @@ ccVar cc = do
     curModl <- use gsModule
     let is_caf = isCafCC cc
         label  = costCentreUserName cc
-    return $ TxtI $ T.pack (moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString label)
+    return $ TxtI $ T.pack $ moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString
+      (if isCafCC cc then "CAF_ccs" else label)
 
-enterCostCentreFun :: CostCentreStack -> JExpr -> G JStat
-enterCostCentreFun ccs i
+enterCostCentreFun :: CostCentreStack -> G JStat
+enterCostCentreFun ccs
   | isCurrentCCS ccs = do
       ccs' <- ccsVar ccs
-      return [j| h$enterFunCCS(`ccs'`, `i`.cc); |]
+      return [j| h$enterFunCCS(h$CCCS, `R1`.cc); |]
   | otherwise = return mempty -- top-level function, nothing to do
 
 setSCC :: CostCentre -> Bool -> Bool -> G JStat
