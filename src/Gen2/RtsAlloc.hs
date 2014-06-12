@@ -24,7 +24,7 @@ allocDynAll :: CgSettings -> Bool -> [(Ident,JExpr,[JExpr],CostCentreStack)] -> 
 allocDynAll s haveDecl [(to,entry,free,cc)]
   | to `notElem` (free ^.. template) = do
       ccs <- ccsVar cc
-      return $ allocDynamic s haveDecl to entry free <> [j| `to`.cc = `ccs` |]
+      return $ allocDynamic s haveDecl to entry free [je| `ccs` |] -- <> [j| `to`.cc = `ccs` |]
 allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
   where
     makeObjs :: G JStat
@@ -58,9 +58,9 @@ allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
     checkObjs | csAssertRts s  = mconcat $ map (\(i,_,_,_) -> [j| h$checkObj(`i`); |]) cls
               | otherwise = mempty
 
-allocDynamic :: CgSettings -> Bool -> Ident -> JExpr -> [JExpr] -> JStat
-allocDynamic s haveDecl to entry free =
-  dec to <> [j| `to` = `allocDynamicE s entry free`; |]
+allocDynamic :: CgSettings -> Bool -> Ident -> JExpr -> [JExpr] -> JExpr -> JStat
+allocDynamic s haveDecl to entry free cc =
+  dec to <> [j| `to` = `allocDynamicE s entry free cc`; |]
     where
       dec i | haveDecl  = decl i
             | otherwise = mempty

@@ -358,7 +358,8 @@ instance ToJExpr StaticArg where
   toJExpr (StaticLitArg l) = toJExpr l
   toJExpr (StaticObjArg t) = ValExpr (JVar (TxtI t))
   toJExpr (StaticConArg c args) =
-    allocDynamicE def (ValExpr . JVar . TxtI $ c) (map toJExpr args)
+    -- FIXME: cost-centre stack
+    allocDynamicE def (ValExpr . JVar . TxtI $ c) (map toJExpr args) [je| h$CCS_DONT_CARE |]
 
 instance ToJExpr StaticLit where
   toJExpr (BoolLit b)           = toJExpr b
@@ -400,11 +401,11 @@ staticInitStat (StaticInfo i sv cc)
 
 
 
-allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> JExpr
-allocDynamicE s entry free
+allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> JExpr -> JExpr
+allocDynamicE s entry free cc
   | csInlineAlloc s || length free > 24
-      = [je| { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0 } |]
-  | otherwise = ApplExpr allocFun (toJExpr entry : free)
+      = [je| { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0, cc: `cc` } |]
+  | otherwise = ApplExpr allocFun (toJExpr entry : free ++ [cc])
   where
     allocFun = allocClsA ! length free
     (fillObj1,fillObj2)
