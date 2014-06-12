@@ -411,7 +411,7 @@ dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..
 
 genBody :: UniqSet Id -> Id -> [Id] -> StgExpr -> UpdateFlag -> CostCentreStack -> C
 genBody ev i args e upd cc = do
-  enterCC <- enterCostCentreFun cc
+  enterCC <- (if null args then enterCostCentreThunk else enterCostCentreFun) cc
   la <- loadArgs args
   -- find the result type after applying the function to the arguments
   let resultSize xxs@(x:xs) t
