@@ -43,10 +43,10 @@ resetResultVar r = [j| `r` = null; |]
  -}
 closureConstructors :: CgSettings -> JStat
 closureConstructors s =
-  [j| fun h$c f { `checkC`; return { f: f, d1: null, d2: null, m: 0 }; }
-      fun h$c0 f { `checkC`; return { f: f, d1: null, d2: null, m: 0 }; }
-      fun h$c1 f x1 { `checkC`; return { f: f, d1: x1, d2: null, m: 0 }; }
-      fun h$c2 f x1 x2 { `checkC`; return {f: f, d1: x1, d2: x2, m: 0 }; }
+  [j| fun h$c f cc { `checkC`; return { f: f, d1: null, d2: null, m: 0, cc: cc }; }
+      fun h$c0 f cc { `checkC`; return { f: f, d1: null, d2: null, m: 0, cc: cc }; }
+      fun h$c1 f x1 cc { `checkC`; return { f: f, d1: x1, d2: null, m: 0, cc: cc }; }
+      fun h$c2 f x1 x2 cc { `checkC`; return {f: f, d1: x1, d2: x2, m: 0, cc: cc }; }
     |] <> mconcat (map mkClosureCon [3..24])
        <> mconcat (map mkDataFill [1..24])
   where
@@ -78,15 +78,17 @@ closureConstructors s =
                          }
                        |]
            | otherwise = mempty
+
     mkClosureCon :: Int -> JStat
     mkClosureCon n = let funName = TxtI $ T.pack ("h$c" ++ show n)
-                         vals   = map (TxtI . T.pack . ('x':) . show) [(1::Int)..n]
+                         vals   = map (TxtI . T.pack . ('x':) . show) [(1::Int)..n] ++ [TxtI "cc"]
                          fun    = JFunc (TxtI "f" : vals) funBod
-                         funBod = [j| `checkC`; return { f: f, m: 0, d1: x1, d2: `obj` }; |]
+                         funBod = [j| `checkC`; return { f: f, m: 0, d1: x1, d2: `obj`, cc: cc }; |]
                          obj    = JHash . M.fromList . zip
                                     (map (T.pack . ('d':) . show) [(1::Int)..]) $
                                     (map (toJExpr . TxtI . T.pack . ('x':) . show) [2..n])
                      in decl funName <> [j| `funName` = `fun` |]
+
     mkDataFill :: Int -> JStat
     mkDataFill n = let funName = TxtI $ T.pack ("h$d" ++ show n)
                        ds      = map (T.pack . ('d':) . show) [(1::Int)..n]
