@@ -695,10 +695,9 @@ genCase top bnd e at alts l srt
   | snd (isInlineExpr (ctxEval top) e) = do
       bndi <- genIdsI bnd
       (ej, r) <- genExpr (bnd, map toJExpr bndi, ctxEval top) e
-      when (r == ExprCont) (error "genCase: expression was not inline")
       let d = case r of
-                (ExprInline d0) -> d0
-                _               -> Nothing
+                ExprInline d0 -> d0
+                ExprCont -> error "genCase: expression was not inline"
       (aj, ar) <- genAlts (addEval bnd top) bnd at d alts
       return (mconcat (map decl bndi) <> ej <> aj, ar)
   | otherwise = do
