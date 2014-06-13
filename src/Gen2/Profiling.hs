@@ -8,6 +8,7 @@ module Gen2.Profiling
   , CostCentre
   , CostCentreStack
   , ccsVar
+  , pushCCSRestore
   ) where
 
 import           CLabel
@@ -105,4 +106,13 @@ setSCC cc _tick True = do
     ccI <- ccVar cc
     return [j| h$CCCS = h$pushCostCentre(h$CCCS, `ccI`); |]
 setSCC _cc _tick _push = return mempty
+
+pushCCSRestore :: Ident -> C
+pushCCSRestore ccsId =
+    push [ [je| function {
+                  h$CCCS = `ccsId`;
+                  `adjSpN 1`
+                  return `Stack`[`Sp`];
+                }
+              |] ]
 
