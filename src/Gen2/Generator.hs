@@ -344,18 +344,18 @@ genToplevelRhs i (StgRhsCon cc con args) = do
 genToplevelRhs i (StgRhsClosure cc _bi [] upd_flag srt args body) = do
   eid@(TxtI eidt) <- jsEnIdI i
   id@(TxtI idt)   <- jsIdI i
-  body <- genBody emptyUniqSet i args body upd_flag cc
+  body <- genBody emptyUniqSet i args body
   sr <- genStaticRefs srt
   cs <- use gsSettings
   et <- genEntryType args
-  let (static, regs, upd) =
+  let (static, regs, upd, setcc) =
         if et == CIThunk
-          then (StaticThunk (Just eidt), CIRegs 0 [PtrV],                updateThunk cs)
-          else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty)
+          then (StaticThunk (Just eidt), CIRegs 0 [PtrV],                updateThunk cs, enterCostCentreThunk)
+          else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty,         enterCostCentreFun cc)
   emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
   ccId <- ccsVar cc
   emitStatic idt static (Just ccId)
-  return $ decl eid <> assignj eid (JFunc [] (upd <> body))
+  return $ decl eid <> assignj eid (JFunc [] (upd <> setcc <> body))
 
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
@@ -375,9 +375,8 @@ loadLiveFun l = do
 dataFields :: Array Int Ident
 dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..1024])
 
-genBody :: UniqSet Id -> Id -> [Id] -> StgExpr -> UpdateFlag -> CostCentreStack -> C
-genBody ev i args e upd cc = do
-  enterCC <- (if null args then enterCostCentreThunk else enterCostCentreFun) cc
+genBody :: UniqSet Id -> Id -> [Id] -> StgExpr -> C
+genBody ev i args e = do
   la <- loadArgs args
   -- find the result type after applying the function to the arguments
   let resultSize xxs@(x:xs) t
@@ -394,7 +393,7 @@ genBody ev i args e upd cc = do
                                UbxTupleRep tys -> sum (map typeSize tys)
       ids = take (resultSize args $ idType i) (map toJExpr $ enumFrom R1)
   (e, r) <- genExpr (i, ids, ev) e
-  return $ enterCC <> la <> e <> [j| return `Stack`[`Sp`]; |]
+  return $ la <> e <> [j| return `Stack`[`Sp`]; |]
 
 
 loadArgs :: [Id] -> C
@@ -583,10 +582,13 @@ genEntry _ i (StgRhsCon _cc con args) = return () -- mempty -- error "local data
 genEntry ctx i cl@(StgRhsClosure cc _bi live upd_flag srt args body) = resetSlots $ do
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
-  body <- genBody (ctxEval ctx) i args body upd_flag cc
-  let f = JFunc [] (ll <> upd <> body)
+  body <- genBody (ctxEval ctx) i args body
   ei <- jsEntryIdI i
   et <- genEntryType args
+  let setscc = if et == CIThunk
+                 then enterCostCentreThunk
+                 else enterCostCentreFun cc
+      f = JFunc [] (ll <> upd <> setscc <> body)
   sr <- genStaticRefs srt
   emitClosureInfo (ClosureInfo (itxt ei) (CIRegs 0 $ PtrV : concatMap idVt args) (itxt ei <> " ," <> T.pack (show i))
                      (fixedLayout $ map (uTypeVt . idType) live) et sr)

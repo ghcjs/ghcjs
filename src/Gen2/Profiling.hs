@@ -65,7 +65,7 @@ emitCostCentreStackDecl ccs = do
 
 ccsVar :: CostCentreStack -> G Ident
 ccsVar ccs
-  | noCCSAttached ccs = return $ TxtI "h$CCCS" -- FIXME
+  | noCCSAttached ccs = {- pprPanic "no ccs attached" (ppr ccs) -} return $ TxtI "h$CCCS" -- FIXME
   | isCurrentCCS ccs = return $ TxtI "h$CCCS"
   | dontCareCCS == ccs = return $ TxtI "h$CCS_DONT_CARE"
   | otherwise =
@@ -88,17 +88,15 @@ ccVar cc = do
     return $ TxtI $ T.pack $ moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString
       (if isCafCC cc then "CAF_ccs" else label)
 
-enterCostCentreFun :: CostCentreStack -> G JStat
+enterCostCentreFun :: CostCentreStack -> JStat
 enterCostCentreFun ccs
-  | isCurrentCCS ccs = do
-      ccs' <- ccsVar ccs
-      return [j| h$enterFunCCS(h$CCCS, `R1`.cc); |]
-  | otherwise = return mempty -- top-level function, nothing to do
+  | isCurrentCCS ccs = [j| h$enterFunCCS(h$CCCS, `R1`.cc); |]
+  | otherwise = mempty -- top-level function, nothing to do
 
-enterCostCentreThunk :: CostCentreStack -> G JStat
-enterCostCentreThunk ccs = do
-    ccs' <- ccsVar ccs
-    return [j| h$CCCS = `ccs'`; |]
+enterCostCentreThunk :: JStat
+enterCostCentreThunk =
+    -- FIXME: function call is for debugging purposes, inline it
+    [j| h$enterThunkCCS(`R1`.cc); |]
 
 setSCC :: CostCentre -> Bool -> Bool -> G JStat
 -- FIXME: ignoring tick flags for now
