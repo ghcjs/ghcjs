@@ -514,11 +514,13 @@ updates s =
           updatee.d1 = `R1`.d1;
           updatee.d2 = `R1`.d2;
           updatee.m  = `R1`.m;
+          updatee.cc = h$CCCS;
         } else {
           updatee.f  = h$unbox_e;
           updatee.d1 = `R1`;
           updatee.d2 = null;
           updatee.m  = 0;
+          updatee.cc = h$CCCS; // not sure about this
         }
         `adjSpN 2`;
         `traceRts s $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
