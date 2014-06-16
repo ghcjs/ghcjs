@@ -43,13 +43,21 @@ resetResultVar r = [j| `r` = null; |]
  -}
 closureConstructors :: CgSettings -> JStat
 closureConstructors s =
-  [j| fun h$c f cc { `checkC`; return { f: f, d1: null, d2: null, m: 0, cc: cc }; }
-      fun h$c0 f cc { `checkC`; return { f: f, d1: null, d2: null, m: 0, cc: cc }; }
-      fun h$c1 f x1 cc { `checkC`; return { f: f, d1: x1, d2: null, m: 0, cc: cc }; }
-      fun h$c2 f x1 x2 cc { `checkC`; return {f: f, d1: x1, d2: x2, m: 0, cc: cc }; }
-    |] <> mconcat (map mkClosureCon [3..24])
-       <> mconcat (map mkDataFill [1..24])
+     declClsConstr "h$c"  ["f"] [jsv "f", jnull, jnull, ji 0]
+  <> declClsConstr "h$c0" ["f"] [jsv "f", jnull, jnull, ji 0] -- FIXME: same as h$c, maybe remove one of them?
+  <> declClsConstr "h$c1" ["f", "x1"] [jsv "f", jsv "x1", jnull, ji 0]
+  <> declClsConstr "h$c2" ["f", "x1", "x2"] [jsv "f", jsv "x1", jsv "x2", ji 0]
+  <> mconcat (map mkClosureCon [3..24])
+  <> mconcat (map mkDataFill [1..24])
   where
+    prof = csProf s
+    addCCArg as = map TxtI $ as ++ if prof then ["cc"] else []
+    addCCArg' as = as ++ if prof then [TxtI "cc"] else []
+    addCCField fs = jhFromList $ fs ++ if prof then [("cc", jsv "cc")] else []
+
+    declClsConstr i as fs =
+      i |= jfun (addCCArg as) [j| `checkC`; return `addCCField $ zip ["f", "d1", "d2", "m"] fs`; |]
+
     -- only JSRef can typically contain undefined or null
     -- although it's possible (and legal) to make other Haskell types
     -- to contain JS refs directly
@@ -67,6 +75,7 @@ closureConstructors s =
                          }
                        |]
            | otherwise = mempty
+
     -- h$d is never used for JSRef (since it's only for constructors with
     -- at least three fields, so we always warn here
     checkD | csAssertRts s =
@@ -81,9 +90,9 @@ closureConstructors s =
 
     mkClosureCon :: Int -> JStat
     mkClosureCon n = let funName = TxtI $ T.pack ("h$c" ++ show n)
-                         vals   = map (TxtI . T.pack . ('x':) . show) [(1::Int)..n] ++ [TxtI "cc"]
-                         fun    = JFunc (TxtI "f" : vals) funBod
-                         funBod = [j| `checkC`; return { f: f, m: 0, d1: x1, d2: `obj`, cc: cc }; |]
+                         vals   = TxtI "f" : addCCArg' (map (TxtI . T.pack . ('x':) . show) [(1::Int)..n])
+                         fun    = JFunc vals funBod
+                         funBod = [j| `checkC`; return `addCCField [("f", jsv "f"), ("d1", jsv "x1"), ("d2", toJExpr obj)]`; |]
                          obj    = JHash . M.fromList . zip
                                     (map (T.pack . ('d':) . show) [(1::Int)..]) $
                                     (map (toJExpr . TxtI . T.pack . ('x':) . show) [2..n])

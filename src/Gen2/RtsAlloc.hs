@@ -23,18 +23,20 @@ import           Gen2.Utils
 allocDynAll :: CgSettings -> Bool -> [(Ident,JExpr,[JExpr],CostCentreStack)] -> G JStat
 allocDynAll s haveDecl [(to,entry,free,cc)]
   | to `notElem` (free ^.. template) = do
-      ccs <- ccsVar cc
-      return $ allocDynamic s haveDecl to entry free [je| `ccs` |] -- <> [j| `to`.cc = `ccs` |]
+      ccs <- ccsVarJ cc
+      return $ allocDynamic s haveDecl to entry free ccs
 allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
   where
     makeObjs :: G JStat
     makeObjs
-      | csInlineAlloc s = mconcat $ map (\(i,f,_,cc) -> do
+      | csInlineAlloc s = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
           ccs <- ccsVar cc
-          return $ dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0, cc: `ccs` } |]) cls
-      | otherwise       = mconcat $ map (\(i,f,_,cc) -> do
+          return $ i |= ValExpr (jhFromList $ [("f", f), ("d1", jnull), ("d2", jnull), ("m", ji 0)]
+                                              ++ maybe [] (\(TxtI cid) -> [("cc", jsv cid)]) ccs)
+      | otherwise       = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
           ccs <- ccsVar cc
-          return $ dec i <> [j| `i` = h$c(`f`, `ccs`); |]) cls
+          return $ i |= ("h$c" |^^ ([f] ++ maybe [] (\(TxtI cid) -> [jsv cid]) ccs))
+
     fillObjs = mconcat $ map fillObj cls
     fillObj (i,_,es,_)
       | csInlineAlloc s || length es > 24 =
@@ -58,7 +60,7 @@ allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
     checkObjs | csAssertRts s  = mconcat $ map (\(i,_,_,_) -> [j| h$checkObj(`i`); |]) cls
               | otherwise = mempty
 
-allocDynamic :: CgSettings -> Bool -> Ident -> JExpr -> [JExpr] -> JExpr -> JStat
+allocDynamic :: CgSettings -> Bool -> Ident -> JExpr -> [JExpr] -> Maybe JExpr -> JStat
 allocDynamic s haveDecl to entry free cc =
   dec to <> [j| `to` = `allocDynamicE s entry free cc`; |]
     where

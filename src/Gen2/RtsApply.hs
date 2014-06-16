@@ -548,7 +548,8 @@ mkPap :: CgSettings
       -> JStat
 mkPap s tgt fun n values =
       traceRts s ("making pap with: " ++ show (length values) ++ " items") <>
-      allocDynamic s True tgt (iex entry) (fun:papAr:map toJExpr values') [je| `R1`.cc |]
+      allocDynamic s True tgt (iex entry) (fun:papAr:map toJExpr values')
+        (if csProf s then Just [je| `R1`.cc |] else Nothing)
   where
     papAr = [je| `funOrPapArity fun Nothing` - `length values * 256` - `n` |]
     values' | null values = [jnull]

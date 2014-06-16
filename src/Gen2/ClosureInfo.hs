@@ -8,6 +8,7 @@ import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Default
 import qualified Data.Map as M
+import           Data.Maybe
 import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -359,7 +360,7 @@ instance ToJExpr StaticArg where
   toJExpr (StaticObjArg t) = ValExpr (JVar (TxtI t))
   toJExpr (StaticConArg c args) =
     -- FIXME: cost-centre stack
-    allocDynamicE def (ValExpr . JVar . TxtI $ c) (map toJExpr args) [je| h$CCS_DONT_CARE |]
+    allocDynamicE def (ValExpr . JVar . TxtI $ c) (map toJExpr args) Nothing
 
 instance ToJExpr StaticLit where
   toJExpr (BoolLit b)           = toJExpr b
@@ -401,11 +402,12 @@ staticInitStat (StaticInfo i sv cc)
 
 
 
-allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> JExpr -> JExpr
+allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> Maybe JExpr -> JExpr
 allocDynamicE s entry free cc
-  | csInlineAlloc s || length free > 24
-      = [je| { f: `entry`, d1: `fillObj1`, d2: `fillObj2`, m: 0, cc: `cc` } |]
-  | otherwise = ApplExpr allocFun (toJExpr entry : free ++ [cc])
+  | csInlineAlloc s || length free > 24 =
+      ValExpr . jhFromList $ [("f", entry), ("d1", fillObj1), ("d2", fillObj2), ("m", ji 0)]
+                             ++ maybe [] (\cid -> [("cc", cid)]) cc
+  | otherwise = ApplExpr allocFun (toJExpr entry : free ++ maybeToList cc)
   where
     allocFun = allocClsA ! length free
     (fillObj1,fillObj2)
@@ -426,21 +428,23 @@ allocData = listArray (1, 1024) (map f [(1::Int)..1024])
   where
     f n = toJExpr . TxtI . T.pack $ "h$d" ++ show n
 
-data CgSettings = CgSettings { csInlinePush      :: Bool
-                             , csInlineBlackhole :: Bool
-                             , csInlineLoadRegs  :: Bool
-                             , csInlineEnter     :: Bool
-                             , csInlineAlloc     :: Bool
-                             , csTraceRts        :: Bool
-                             , csAssertRts       :: Bool
-                             , csTraceForeign    :: Bool
-                             }
-
+data CgSettings = CgSettings
+  { csInlinePush      :: Bool
+  , csInlineBlackhole :: Bool
+  , csInlineLoadRegs  :: Bool
+  , csInlineEnter     :: Bool
+  , csInlineAlloc     :: Bool
+  , csTraceRts        :: Bool
+  , csAssertRts       :: Bool
+  , csTraceForeign    :: Bool
+  , csProf            :: Bool
+  }
 
 instance Default CgSettings where
-  def = CgSettings False False False False False False False False
+  def = CgSettings False False False False False False False False False
 
 dfCgSettings :: DynFlags -> CgSettings
 dfCgSettings df = def { csTraceRts  = "-DGHCJS_TRACE_RTS"  `elem` opt_P df
                       , csAssertRts = "-DGHCJS_ASSERT_RTS" `elem` opt_P df
+                      , csProf      = buildingProf df
                       }
