@@ -115,7 +115,7 @@ generate settings df guts s cccs =
   let (uf, s') = sinkPgm m s
       m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
-        initCostCentres cccs
+        ifProfiling' $ initCostCentres cccs
         (st, g) <- genUnits df m s'
         -- (exported symbol names, javascript statements) for each linkable unit
         p <- forM g $ \u -> mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
@@ -388,7 +388,7 @@ genToplevelRhs i (StgRhsClosure cc _bi [] upd_flag srt args body) = do
           else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty,         enterCostCentreFun cc)
   emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
   ccId <- ccsVar cc
-  emitStatic idt static (Just ccId)
+  emitStatic idt static ccId
   return $ decl eid <> assignj eid (JFunc [] (upd <> setcc <> body))
 
 loadLiveFun :: [Id] -> C
@@ -992,7 +992,7 @@ genArg a@(StgVarArg i) = do
            as <- concat <$> mapM genArg args
            e  <- enterDataCon dc
            cs <- use gsSettings
-           return [allocDynamicE cs e as [je| null |] ] -- FIXME: ccs
+           return [allocDynamicE cs e as Nothing] -- FIXME: ccs
      unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
 
 genStaticArg :: StgArg -> G [StaticArg]
@@ -1174,8 +1174,8 @@ allocCon to con cc xs
   | otherwise = do
       e <- enterDataCon con
       cs <- use gsSettings
-      ccsId <- ccsVar cc
-      return $ allocDynamic cs False to e xs [je| `ccsId` |]
+      ccsJ <- ccsVarJ cc
+      return $ allocDynamic cs False to e xs ccsJ
 
 allocUnboxedCon :: DataCon -> [JExpr] -> JExpr
 allocUnboxedCon con []
@@ -1201,28 +1201,28 @@ allocConStatic (TxtI to) cc con args -- isRecursive
   cc' <- ccsVar cc
   allocConStatic' cc' (concat as)
   where
-    allocConStatic' :: Ident -> [StaticArg] -> G ()
+    allocConStatic' :: Maybe Ident -> [StaticArg] -> G ()
     allocConStatic' cc' []
       | isBoolTy (dataConType con) && dataConTag con == 1 =
-           emitStatic to (StaticUnboxed $ StaticUnboxedBool False) (Just cc')
+           emitStatic to (StaticUnboxed $ StaticUnboxedBool False) cc'
       | isBoolTy (dataConType con) && dataConTag con == 2 =
-           emitStatic to (StaticUnboxed $ StaticUnboxedBool True) (Just cc')
+           emitStatic to (StaticUnboxed $ StaticUnboxedBool True) cc'
       | otherwise = do
            (TxtI e) <- enterDataConI con
-           emitStatic to (StaticData e []) (Just cc')
+           emitStatic to (StaticData e []) cc'
     allocConStatic' cc' [x]
       | isUnboxableCon con =
         case x of
-          StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i) (Just cc')
-          StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b) (Just cc')
-          StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d) (Just cc')
+          StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i) cc'
+          StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b) cc'
+          StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d) cc'
           _                          -> error $ "allocConStatic: invalid unboxed literal: " ++ show x
     allocConStatic' cc' xs =
            if con == consDataCon
-              then flip (emitStatic to) (Just cc') =<< allocateStaticList [args !! 0] (args !! 1)
+              then flip (emitStatic to) cc' =<< allocateStaticList [args !! 0] (args !! 1)
               else do
                 (TxtI e) <- enterDataConI con
-                emitStatic to (StaticData e xs) (Just cc')
+                emitStatic to (StaticData e xs) cc'
 
 -- avoid one indirection for global ids
 -- fixme in many cases we can also jump directly to the entry for local?

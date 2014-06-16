@@ -8,7 +8,11 @@ module Gen2.Profiling
   , CostCentre
   , CostCentreStack
   , ccsVar
+  , ccsVarJ
   , pushCCSRestore
+  , ifProfiling
+  , ifProfiling'
+  , profiling
   ) where
 
 import           CLabel
@@ -21,6 +25,7 @@ import           Module
 import           Outputable           hiding ((<>))
 import           SrcLoc
 
+import           Control.Applicative
 import           Control.Lens
 import           Data.Monoid
 import qualified Data.Text            as T
@@ -28,6 +33,7 @@ import qualified Data.Text            as T
 import           Compiler.JMacro
 import           Compiler.JMacro.Base
 
+import           Gen2.ClosureInfo
 import           Gen2.RtsTypes
 import           Gen2.Utils
 
@@ -63,15 +69,18 @@ emitCostCentreStackDecl ccs = do
 
       Nothing -> pprPanic "emitCostCentreStackDecl" (ppr ccs)
 
-ccsVar :: CostCentreStack -> G Ident
+ccsVar :: CostCentreStack -> G (Maybe Ident)
 ccsVar ccs
-  | noCCSAttached ccs = {- pprPanic "no ccs attached" (ppr ccs) -} return $ TxtI "h$CCCS" -- FIXME
-  | isCurrentCCS ccs = return $ TxtI "h$CCCS"
-  | dontCareCCS == ccs = return $ TxtI "h$CCS_DONT_CARE"
+  | noCCSAttached ccs = return Nothing {- pprPanic "no ccs attached" (ppr ccs) -}
+  | isCurrentCCS ccs = return $ Just $ TxtI "h$CCCS"
+  | dontCareCCS == ccs = return $ Just $ TxtI "h$CCS_DONT_CARE"
   | otherwise =
       case maybeSingletonCCS ccs of
-        Just cc -> singletonCCSVar cc
+        Just cc -> Just <$> singletonCCSVar cc
         Nothing -> pprPanic "ccsVar" (ppr ccs)
+
+ccsVarJ :: CostCentreStack -> G (Maybe JExpr)
+ccsVarJ cc = fmap (\v -> [je| `v` |]) <$> ccsVar cc
 
 singletonCCSVar :: CostCentre -> G Ident
 singletonCCSVar cc = do
@@ -113,4 +122,17 @@ pushCCSRestore ccsId =
                   return `Stack`[`Sp`];
                 }
               |] ]
+
+ifProfiling :: Monoid m => m -> G m
+ifProfiling m = do
+    prof <- profiling
+    return $ if prof then m else mempty
+
+ifProfiling' :: G () -> G ()
+ifProfiling' a = do
+    prof <- profiling
+    if prof then a else return ()
+
+profiling :: G Bool
+profiling = csProf <$> use gsSettings
 
