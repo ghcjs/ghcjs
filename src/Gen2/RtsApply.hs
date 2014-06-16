@@ -23,6 +23,7 @@ import           Gen2.RtsAlloc
 import           Gen2.RtsTypes
 import           Gen2.Utils
 import           Gen2.ClosureInfo
+import           Gen2.Profiling
 
 import           Data.Bits
 import           Data.Monoid
@@ -514,13 +515,13 @@ updates s =
           updatee.d1 = `R1`.d1;
           updatee.d2 = `R1`.d2;
           updatee.m  = `R1`.m;
-          updatee.cc = h$CCCS;
+          `profStat s updateCC`
         } else {
           updatee.f  = h$unbox_e;
           updatee.d1 = `R1`;
           updatee.d2 = null;
           updatee.m  = 0;
-          updatee.cc = h$CCCS; // not sure about this
+          `profStat s updateCC` // not sure about this
         }
         `adjSpN 2`;
         `traceRts s $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
@@ -528,6 +529,8 @@ updates s =
       };
       `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]
+  where
+    updateCC = [j| updatee.cc = h$CCCS; |]
 
 {-
   Partial applications. There are two different kinds of partial application:

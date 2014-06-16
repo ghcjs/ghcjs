@@ -13,6 +13,7 @@ module Gen2.Profiling
   , ifProfiling
   , ifProfiling'
   , profiling
+  , profStat
   ) where
 
 import           CLabel
@@ -135,4 +136,7 @@ ifProfiling' a = do
 
 profiling :: G Bool
 profiling = csProf <$> use gsSettings
+
+profStat :: CgSettings -> JStat -> JStat
+profStat s e = if csProf s then e else mempty
 
