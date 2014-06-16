@@ -1165,7 +1165,10 @@ genCon tgt con args
           assignAll (ctxTarget tgt) args
 genCon tgt con args | isUnboxedTupleCon con =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
-genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt = allocCon tgti con currentCCS args
+genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt = do
+  prof <- profiling
+  let ccs = if prof then currentCCS else noCCS
+  allocCon tgti con ccs args
 genCon tgt con args =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
 
@@ -1179,7 +1182,8 @@ allocCon to con cc xs
   | otherwise = do
       e <- enterDataCon con
       cs <- use gsSettings
-      ccsJ <- ccsVarJ cc
+      prof <- profiling
+      ccsJ <- if prof then ccsVarJ cc else return Nothing
       return $ allocDynamic cs False to e xs ccsJ
 
 allocUnboxedCon :: DataCon -> [JExpr] -> JExpr
