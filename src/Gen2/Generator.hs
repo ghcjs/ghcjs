@@ -348,10 +348,14 @@ genToplevelRhs i (StgRhsClosure cc _bi [] upd_flag srt args body) = do
   sr <- genStaticRefs srt
   cs <- use gsSettings
   et <- genEntryType args
-  let (static, regs, upd, setcc) =
+  let (static, regs, upd) =
         if et == CIThunk
-          then (StaticThunk (Just eidt), CIRegs 0 [PtrV],                updateThunk cs, enterCostCentreThunk)
-          else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty,         enterCostCentreFun cc)
+          then (StaticThunk (Just eidt), CIRegs 0 [PtrV],                updateThunk cs)
+          else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty)
+  setcc <- ifProfiling $
+             if et == CIThunk
+               then enterCostCentreThunk
+               else enterCostCentreFun cc
   emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
   ccId <- ccsVar cc
   emitStatic idt static ccId
@@ -439,7 +443,7 @@ genExpr top (StgLet b e) = do
 genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
 genExpr top (StgSCC cc tick push e) = do
   (stats, result) <- genExpr top e
-  setSCCstats <- setSCC cc tick push
+  setSCCstats <- ifProfiling =<< setSCC cc tick push
   return (setSCCstats <> stats, result)
 genExpr top (StgTick m n e) = genExpr top e
 
@@ -585,10 +589,11 @@ genEntry ctx i cl@(StgRhsClosure cc _bi live upd_flag srt args body) = resetSlot
   body <- genBody (ctxEval ctx) i args body
   ei <- jsEntryIdI i
   et <- genEntryType args
-  let setscc = if et == CIThunk
-                 then enterCostCentreThunk
-                 else enterCostCentreFun cc
-      f = JFunc [] (ll <> upd <> setscc <> body)
+  setcc <- ifProfiling $
+             if et == CIThunk
+               then enterCostCentreThunk
+               else enterCostCentreFun cc
+  let f = JFunc [] (ll <> upd <> setcc <> body)
   sr <- genStaticRefs srt
   emitClosureInfo (ClosureInfo (itxt ei) (CIRegs 0 $ PtrV : concatMap idVt args) (itxt ei <> " ," <> T.pack (show i))
                      (fixedLayout $ map (uTypeVt . idType) live) et sr)
@@ -658,22 +663,22 @@ allocCls xs = do
 -- fixme CgCase has a reps_compatible check here
 genCase :: ExprCtx -> Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> G (JStat, ExprResult)
 genCase top bnd e at alts l srt
-  | snd (isInlineExpr (ctxEval top) e) = withNewIdent $ \ccsVar -> do
+  | snd (isInlineExpr (ctxEval top) e) = withNewIdent $ \(TxtI ccsVar) -> do
       bndi <- genIdsI bnd
       (ej, r) <- genExpr (bnd, map toJExpr bndi, ctxEval top) e
       let d = case r of
                 ExprInline d0 -> d0
                 ExprCont -> error "genCase: expression was not inline"
       (aj, ar) <- genAlts (addEval bnd top) bnd at d alts
-      let saveCCS = decl ccsVar <> [j| `ccsVar` = h$CCCS; |]
-          restoreCCS = [j| h$CCCS = `ccsVar`; |]
+      saveCCS <- ifProfiling $ ccsVar |= jsv "h$CCCS"
+      restoreCCS <- ifProfiling [j| h$CCCS = `ccsVar` |]
       return (mconcat (map decl bndi) <> saveCCS <> ej <> restoreCCS <> aj, ar)
-  | otherwise = withNewIdent $ \ccsVar -> do
+  | otherwise = withNewIdent $ \(TxtI ccsVar) -> do
       n       <- length <$> genIdsI bnd
       rj      <- genRet (addEval bnd top) bnd at alts l srt
       (ej, r) <- genExpr (bnd, take n (map toJExpr $ enumFrom R1), ctxEval top) e
-      let saveCCS = decl ccsVar <> [j| `ccsVar` = h$CCCS; |]
-      pushRestoreCCSFrame <- pushCCSRestore ccsVar
+      saveCCS <- ifProfiling $ ccsVar |= jsv "h$CCCS"
+      pushRestoreCCSFrame <- ifProfiling =<< pushCCSRestore (TxtI ccsVar)
       return (rj <> saveCCS <> pushRestoreCCSFrame <> ej, ExprCont)
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
