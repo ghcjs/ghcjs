@@ -110,6 +110,10 @@ infixl 2 |!!
 (|!==) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
 (|!==) a b = [je| `a` !== `b` |]
 
+infix 1 |=
+(|=) :: ToJExpr a => Text -> a -> JStat
+(|=) i b = decls i <> AssignStat (jsv i) (toJExpr b)
+
 showPpr' :: Outputable a => a -> G String
 showPpr' a = do
   df <- _gsDynFlags <$> get

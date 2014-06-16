@@ -62,6 +62,8 @@ decls s = DeclStat (TxtI s)
 assignj :: (ToJExpr a, ToJExpr b) => a -> b -> JStat
 assignj x y = [j| `x` = `y` |]
 
+jfun :: [Ident] -> JStat -> JExpr
+jfun args body = ValExpr $ JFunc args body
 
 
 -- generate an identifier, use it in both statements
