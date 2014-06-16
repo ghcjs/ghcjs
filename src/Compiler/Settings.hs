@@ -100,6 +100,9 @@ newGhcjsEnv = GhcjsEnv <$> newMVar M.empty
 buildingDebug :: DynFlags -> Bool
 buildingDebug dflags = WayDebug `elem` ways dflags
 
+buildingProf :: DynFlags -> Bool
+buildingProf dflags = WayProf `elem` ways dflags
+
 data CompactorState =
   CompactorState { _identSupply   :: [Ident]               -- ^ ident supply for new names
                  , _nameMap       :: !(HashMap Text Ident) -- ^ renaming mapping for internal names
@@ -120,6 +123,4 @@ data Base = Base { baseCompactorState :: CompactorState
                  }
 
 makeLenses ''CompactorState
-
-
 

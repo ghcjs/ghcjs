@@ -82,7 +82,7 @@ renameInternals settings dflags cs0 stats0 = (cs, stats, meta)
     ((stats, meta), cs) = runState renamed cs0
     renamed :: State CompactorState ([JStat], JStat)
     renamed
-      | buildingDebug dflags = do
+      | buildingDebug dflags || buildingProf dflags = do
         cs <- get
         let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs) stats0
             statics      = map (renameStaticInfo cs)  $ concatMap (\(_,_,x) -> x) stats0
