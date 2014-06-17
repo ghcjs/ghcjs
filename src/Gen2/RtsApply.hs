@@ -515,13 +515,13 @@ updates s =
           updatee.d1 = `R1`.d1;
           updatee.d2 = `R1`.d2;
           updatee.m  = `R1`.m;
-          `profStat s updateCC`
+          `profStat s (updateCC updatee)`
         } else {
           updatee.f  = h$unbox_e;
           updatee.d1 = `R1`;
           updatee.d2 = null;
           updatee.m  = 0;
-          `profStat s updateCC` // not sure about this
+          `profStat s (updateCC updatee)` // not sure about this
         }
         `adjSpN 2`;
         `traceRts s $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
@@ -530,7 +530,7 @@ updates s =
       `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]
   where
-    updateCC = [j| updatee.cc = h$CCCS; |]
+    updateCC updatee = [j| `updatee`.cc = h$CCCS; |]
 
 {-
   Partial applications. There are two different kinds of partial application:
