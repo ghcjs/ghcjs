@@ -167,7 +167,7 @@ Debugging GHCJS programs
 TODO add better instructions here
 
   * link your program with `-debug`: `ghcjs -debug -o test test.hs`, this adds debugging information to the generated code
-  * get more informaton from the runtime system by enabling various tracing and logging options. See the code in the shims repository for more info. Examples:
+  * get more information from the runtime system by enabling various tracing and logging options. See the code in the shims repository for more info. Examples:
       * `-DGHCJS_TRACE_SCHEDULER`: messages from the thread scheduler
       * `-DGHCJS_TRACE_CALLS`: print all function calls from the main loop. warning: lots of output. Requires `-debug` for name information
       * `-DGHCJS_TRACE_STACK`: print top of stack for every call in the main loop. warning: even more output
@@ -197,7 +197,7 @@ and run in a modern web browser and interface with DOM and JavaScript
 in the browser.
  * [webkit](https://patch-tag.com/r/hamish/webkit) - Bindings for WebKitGTK+ that provide a low level DOM interface.
  * [webkit-javascriptcore](https://github.com/ghcjs/webkit-javascriptcore) - Low level bindings for JavaScriptCore
- * [jsc](https://github.com/ghcjs/jsc) - Higher level inteface for JavaScriptCore
+ * [jsc](https://github.com/ghcjs/jsc) - Higher level interface for JavaScriptCore
 
 You can use these libraries without GHCJS to build a native version of
 your application (it will use WebKitGTK+ to run without a browser).
