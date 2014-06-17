@@ -92,7 +92,11 @@ closureConstructors s =
     mkClosureCon n = let funName = TxtI $ T.pack ("h$c" ++ show n)
                          vals   = TxtI "f" : addCCArg' (map (TxtI . T.pack . ('x':) . show) [(1::Int)..n])
                          fun    = JFunc vals funBod
-                         funBod = [j| `checkC`; return `addCCField [("f", jsv "f"), ("d1", jsv "x1"), ("d2", toJExpr obj)]`; |]
+                         funBod =
+                           [j| `checkC`;
+                               return `addCCField [("f", jsv "f"), ("d1", jsv "x1"),
+                                                   ("d2", toJExpr obj), ("m", ji 0)]`;
+                             |]
                          obj    = JHash . M.fromList . zip
                                     (map (T.pack . ('d':) . show) [(1::Int)..]) $
                                     (map (toJExpr . TxtI . T.pack . ('x':) . show) [2..n])
