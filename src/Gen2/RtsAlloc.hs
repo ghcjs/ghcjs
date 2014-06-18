@@ -30,12 +30,12 @@ allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
     makeObjs :: G JStat
     makeObjs
       | csInlineAlloc s = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
-          ccs <- ccsVar cc
+          ccs <- costCentreStackLbl cc
           return $ i |= ValExpr (jhFromList $ [("f", f), ("d1", jnull), ("d2", jnull), ("m", ji 0)]
-                                              ++ maybe [] (\(TxtI cid) -> [("cc", jsv cid)]) ccs)
+                                              ++ maybe [] (\cid -> [("cc", jsv $ T.pack cid)]) ccs)
       | otherwise       = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
-          ccs <- ccsVar cc
-          return $ i |= ("h$c" |^^ ([f] ++ maybe [] (\(TxtI cid) -> [jsv cid]) ccs))
+          ccs <- costCentreStackLbl cc
+          return $ i |= ("h$c" |^^ ([f] ++ maybe [] (\cid -> [jsv $ T.pack cid]) ccs))
 
     fillObjs = mconcat $ map fillObj cls
     fillObj (i,_,es,_)

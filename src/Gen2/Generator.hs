@@ -357,7 +357,7 @@ genToplevelRhs i (StgRhsClosure cc _bi [] upd_flag srt args body) = do
                then enterCostCentreThunk
                else enterCostCentreFun cc
   emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
-  ccId <- ccsVar cc
+  ccId <- costCentreStackLbl' cc
   emitStatic idt static ccId
   return $ decl eid <> assignj eid (JFunc [] (upd <> setcc <> body))
 
@@ -1127,8 +1127,8 @@ genSingleLit l = do
 
 genCon :: ExprCtx -> DataCon -> [JExpr] -> C
 genCon tgt con args
-  | isUnboxedTupleCon con && length (ctxTarget tgt) == length args = return $
-          assignAll (ctxTarget tgt) args
+  | isUnboxedTupleCon con && length (ctxTarget tgt) == length args =
+      return $ assignAll (ctxTarget tgt) args
 genCon tgt con args | isUnboxedTupleCon con =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
 genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt = do
@@ -1173,7 +1173,7 @@ allocConStatic :: Ident -> CostCentreStack -> DataCon -> [GenStgArg Id] {- -> Bo
 allocConStatic (TxtI to) cc con args -- isRecursive
 {-  | Debug.Trace.trace ("allocConStatic: " ++ show to ++ " " ++ show con ++ " " ++ show args) True -} = do
   as <- mapM genStaticArg args
-  cc' <- ccsVar cc
+  cc' <- costCentreStackLbl' cc
   allocConStatic' cc' (concat as)
   where
     allocConStatic' :: Maybe Ident -> [StaticArg] -> G ()
