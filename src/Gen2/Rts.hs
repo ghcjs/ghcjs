@@ -15,6 +15,7 @@ import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
 import           Compiler.JMacro
 
 import           Gen2.ClosureInfo
+import           Gen2.Profiling
 import           Gen2.Printer
 import           Gen2.RtsApply
 import           Gen2.RtsTypes
@@ -338,6 +339,7 @@ fun h$ap1_e {
   var d1 = `R1`.d1;
   var d2 = `R1`.d2;
   h$bh();
+  `profStat s enterCostCentreThunk`;
   `R1` = d1;
   `R2` = d2;
   return h$ap_1_1_fast();
@@ -350,6 +352,7 @@ fun h$ap2_e {
   var d2 = `R1`.d2.d1;
   var d3 = `R1`.d2.d2;
   h$bh();
+  `profStat s enterCostCentreThunk`;
   `R1` = d1;
   `R2` = d2;
   `R3` = d3;
@@ -364,6 +367,7 @@ fun h$ap3_e {
   var d3 = `R1`.d2.d2;
   var d4 = `R1`.d2.d3;
   h$bh();
+  `profStat s enterCostCentreThunk`;
   `R1` = d1;
   `R2` = d2;
   `R3` = d3;
@@ -1182,6 +1186,7 @@ fun h$stmResumeRetry_e {
 fun h$lazy_e {
   var x = h$r1.d1();
   h$bh();
+  `profStat s enterCostCentreThunk`;
   h$r1 = x;
   return h$stack[h$sp];
 }
