@@ -80,15 +80,6 @@ setSCC cc _tick True = do
     return [j| h$CCCS = h$pushCostCentre(h$CCCS, `ccI`); |]
 setSCC _cc _tick _push = return mempty
 
-pushCCSRestore :: Ident -> C
-pushCCSRestore ccsId =
-    push [ [je| function {
-                  h$CCCS = `ccsId`;
-                  `adjSpN 1`
-                  return `Stack`[`Sp`];
-                }
-              |] ]
-
 --------------------------------------------------------------------------------
 -- Helpers for generating profiling related things
 
@@ -96,6 +87,11 @@ ifProfiling :: Monoid m => m -> G m
 ifProfiling m = do
     prof <- profiling
     return $ if prof then m else mempty
+
+ifProfilingM :: Monoid m => G m -> G m
+ifProfilingM m = do
+    prof <- profiling
+    if prof then m else return mempty
 
 ifProfiling' :: G () -> G ()
 ifProfiling' a = do
