@@ -673,13 +673,12 @@ genCase top bnd e at alts l srt
       saveCCS <- ifProfiling $ ccsVar |= jsv "h$CCCS"
       restoreCCS <- ifProfiling [j| h$CCCS = `ccsVar` |]
       return (mconcat (map decl bndi) <> saveCCS <> ej <> restoreCCS <> aj, ar)
-  | otherwise = withNewIdent $ \(TxtI ccsVar) -> do
+  | otherwise = do
       n       <- length <$> genIdsI bnd
       rj      <- genRet (addEval bnd top) bnd at alts l srt
       (ej, r) <- genExpr (bnd, take n (map toJExpr $ enumFrom R1), ctxEval top) e
-      saveCCS <- ifProfiling $ ccsVar |= jsv "h$CCCS"
-      pushRestoreCCSFrame <- ifProfiling =<< pushCCSRestore (TxtI ccsVar)
-      return (rj <> saveCCS <> pushRestoreCCSFrame <> ej, ExprCont)
+      saveCCS <- ifProfilingM $ push [jsv "h$CCCS"]
+      return (saveCCS <> rj <> ej, ExprCont)
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
 assignAll xs ys = mconcat (zipWith assignj xs ys)
@@ -698,8 +697,10 @@ genRet top e at as l srt = withNewIdent f
       pushRet <- pushRetArgs free (iex r)
       fun'    <- fun free
       sr      <- genStaticRefs srt
+      prof    <- profiling
       emitClosureInfo (ClosureInfo (itxt r) (CIRegs 0 altRegs) (itxt r)
-                         (fixedLayout $ map (freeType . fst3) free) CIStackFrame sr)
+                         (fixedLayout $ map (freeType . fst3) free ++ if prof then [ObjV] else [])
+                         CIStackFrame sr)
       emitToplevel $
          decl r <> assignj r (ValExpr . JFunc [] $ fun')
       return pushRet
@@ -721,9 +722,10 @@ genRet top e at as l srt = withNewIdent f
               load <- flip assignAll (enumFrom R1) <$> genIdsI e
               return (decs <> load)
       ras  <- loadRetArgs free
+      restoreCCS <- ifProfiling [j| h$CCCS = `Stack`[`Sp`--]; |]
       let top' = (ctxTop top, take (length $ ctxTarget top) (map toJExpr $ enumFrom R1), ctxEval top)
       (alts, altr) <- genAlts top' e at Nothing as
-      return $ l <> ras <> alts <> [j| return `Stack`[`Sp`]; |]
+      return $ l <> ras <> restoreCCS <> alts <> [j| return `Stack`[`Sp`]; |]
 
 -- reorder the things we need to push to reuse existing stack values as much as possible
 -- True if already on the stack at that location
