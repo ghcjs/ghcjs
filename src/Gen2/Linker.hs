@@ -184,13 +184,18 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
 
     lookupFun :: MVar (Map (Package, Text, String) FilePath)
               -> [(Deps,FilePath)]
-              -> String -> Package -> Module -> IO FilePath
+              -> Package -> Module -> IO FilePath
     lookupFun cache objs = {-# SCC "lookupFun" #-} lCached
       where
-        lCached :: String -> Package -> Module -> IO FilePath
-        lCached ext pkg mod = do
+        lCached :: Package -> Module -> IO FilePath
+        lCached pkg mod = do
           c <- takeMVar cache
-          let k = (pkg, mod, ext)
+          let ext :: String
+              ext =
+                if pkgTxt pkg `elem` packageIdToStrings (thisPackage dflags)
+                  then objectSuf dflags
+                  else buildTag dflags ++ "_o"
+              k = (pkg, mod, ext)
           case M.lookup k c of
             Just p -> putMVar cache c >> return p
             Nothing -> do
@@ -325,7 +330,7 @@ modFuns :: Deps -> [Fun]
 modFuns (Deps p m e a d) = map fst (M.toList d)
 
 -- | get all dependencies for a given set of roots
-getDeps :: (String -> Package -> Module -> IO FilePath)
+getDeps :: (Package -> Module -> IO FilePath)
         -> Set LinkableUnit -- Fun -- ^ don't link these symbols
         -> Set Fun -- ^ start here
         -> IO (Set LinkableUnit)
@@ -340,7 +345,7 @@ getDeps lookup base fun = go' S.empty M.empty [] $
     go result deps lls@((lpkg,lmod,n):ls) =
       let key = (lpkg, lmod)
       in  case M.lookup (lpkg,lmod) deps of
-            Nothing -> lookup "js_o" lpkg lmod >>= readDepsFile >>=
+            Nothing -> lookup lpkg lmod >>= readDepsFile >>=
                          \d -> go result (M.insert key d deps) lls
             Just (Deps _ _ _ a _) -> go' result deps ls (S.toList $ a ! n)
 
@@ -353,7 +358,7 @@ getDeps lookup base fun = go' S.empty M.empty [] $
     go' result deps open ffs@(f:fs) =
         let key = (funPackage f, funModule f)
         in  case M.lookup key deps of
-            Nothing -> lookup "js_o" (funPackage f) (funModule f) >>= readDepsFile >>=
+            Nothing -> lookup (funPackage f) (funModule f) >>= readDepsFile >>=
                            \d -> go' result (M.insert key d deps) open ffs
             Just (Deps p m e a d) ->
                let lu = maybe err (p,m,) (M.lookup f d)
@@ -366,18 +371,18 @@ getDeps lookup base fun = go' S.empty M.empty [] $
                     else go' (S.insert lu result) deps (lu:open) fs
 
 -- | get all modules used by the roots and deps
-getDepsSources :: (String -> Package -> Module -> IO FilePath)
+getDepsSources :: (Package -> Module -> IO FilePath)
                -> Set LinkableUnit -- Fun
                -> Set Fun
                -> IO (Set LinkableUnit, [(FilePath, Set LinkableUnit)])
 getDepsSources lookup base roots = do
   allDeps <- getDeps lookup base roots
   allPaths <- mapM (\x@(pkg,mod,_) ->
-    (,S.singleton x) <$> lookup "js_o" pkg mod) (S.toList allDeps)
+    (,S.singleton x) <$> lookup pkg mod) (S.toList allDeps)
   return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
 
 -- | collect dependencies for a set of roots
-collectDeps :: (String -> Package -> Module -> IO FilePath)
+collectDeps :: (Package -> Module -> IO FilePath)
             -> Set LinkableUnit -- Fun -- ^ do not include these
             -> Set Fun -- ^ roots
             -> IO (Set LinkableUnit, [(Package, Module, JStat, [ClosureInfo], [StaticInfo])])
