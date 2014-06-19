@@ -112,8 +112,8 @@ costCentreLbl cc = do
     df      <- use gsDynFlags
     curModl <- use gsModule
     let lbl = show $ runSDoc (ppr cc) (initSDocContext df $ mkCodeStyle CStyle)
-    return $ moduleNameColons (moduleName curModl) ++ "_" ++ zEncodeString
-      (if isCafCC cc then "CAF_ccs" else lbl)
+    return . zEncodeString $
+      moduleNameColons (moduleName curModl) ++ "_" ++ if isCafCC cc then "CAF_ccs" else lbl
 
 costCentreLbl' :: CostCentre -> G Ident
 costCentreLbl' cc = TxtI . T.pack <$> costCentreLbl cc
@@ -136,7 +136,7 @@ singletonCCSLbl cc = do
     curModl <- use gsModule
     ccLbl   <- costCentreLbl cc
     let ccsLbl = ccLbl ++ "_ccs"
-    return $ moduleNameColons (moduleName curModl) <> "_" <> zEncodeString ccsLbl
+    return . zEncodeString $ moduleNameColons (moduleName curModl) <> "_" <> ccsLbl
 
 singletonCCSLbl' :: CostCentre -> G Ident
 singletonCCSLbl' cc = TxtI . T.pack <$> singletonCCSLbl cc
