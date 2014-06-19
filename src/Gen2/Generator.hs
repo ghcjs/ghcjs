@@ -962,7 +962,8 @@ loadParams from args use = do
 genPrimOp :: ExprCtx -> PrimOp -> [StgArg] -> Type -> G (JStat, ExprResult)
 genPrimOp top op args t = do
   as <- concatMapM genArg args
-  return $ case genPrim t op (map toJExpr $ ctxTarget top) as of
+  df <- use gsDynFlags
+  return $ case genPrim df t op (map toJExpr $ ctxTarget top) as of
              PrimInline s -> (s, ExprInline Nothing)
              PRPrimCall s -> (s, ExprCont)
 
