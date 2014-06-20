@@ -42,8 +42,9 @@ import           Gen2.Utils
 -- Initialization
 
 initCostCentres :: CollectedCCs -> G ()
-initCostCentres (local_CCs, _extern_CCs, singleton_CCSs) = do
+initCostCentres (local_CCs, extern_CCs, singleton_CCSs) = do
     mapM_ emitCostCentreDecl local_CCs
+    mapM_ emitCostCentreDecl extern_CCs
     mapM_ emitCostCentreStackDecl singleton_CCSs
 
 emitCostCentreDecl :: CostCentre -> G ()
