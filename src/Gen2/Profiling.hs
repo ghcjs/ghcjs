@@ -1,8 +1,19 @@
 {-# LANGUAGE OverloadedStrings, QuasiQuotes #-}
 
 module Gen2.Profiling
-  ( module Gen2.Profiling
-  , module CostCentre
+  ( module CostCentre
+  , initCostCentres
+  , costCentreLbl
+  , costCentreStackLbl
+  , ccsVarJ
+  , ifProfiling
+  , ifProfiling'
+  , ifProfilingM
+  , profiling
+  , profStat
+  , setSCC
+  , enterCostCentreFun
+  , enterCostCentreThunk
   ) where
 
 import           CLabel
@@ -38,7 +49,7 @@ initCostCentres (local_CCs, _extern_CCs, singleton_CCSs) = do
 emitCostCentreDecl :: CostCentre -> G ()
 emitCostCentreDecl cc = do
     dflags <- use gsDynFlags
-    ccsLbl <- costCentreLbl' cc
+    ccsLbl <- costCentreLbl cc
     let is_caf = isCafCC cc
         label  = costCentreUserName cc
         modl   = Module.moduleNameString $ moduleName $ cc_mod cc
@@ -52,8 +63,8 @@ emitCostCentreStackDecl :: CostCentreStack -> G ()
 emitCostCentreStackDecl ccs = do
     case maybeSingletonCCS ccs of
       Just cc -> do
-        ccsLbl <- singletonCCSLbl' cc
-        ccLbl  <- costCentreLbl' cc
+        ccsLbl <- singletonCCSLbl cc
+        ccLbl  <- costCentreLbl cc
         let js =
               decl ccsLbl <>
               [j| `ccsLbl` = h$registerCCS(`ccLbl`); |]
@@ -76,7 +87,7 @@ enterCostCentreThunk =
 setSCC :: CostCentre -> Bool -> Bool -> G JStat
 -- FIXME: ignoring tick flags for now
 setSCC cc _tick True = do
-    ccI <- costCentreLbl' cc
+    ccI <- costCentreLbl cc
     return [j| h$CCCS = h$pushCostCentre(h$CCCS, `ccI`); |]
 setSCC _cc _tick _push = return mempty
 
@@ -107,40 +118,40 @@ profStat s e = if csProf s then e else mempty
 --------------------------------------------------------------------------------
 -- Generating cost-centre and cost-centre stack variables
 
-costCentreLbl :: CostCentre -> G String
-costCentreLbl cc = do
+costCentreLbl' :: CostCentre -> G String
+costCentreLbl' cc = do
     df      <- use gsDynFlags
     curModl <- use gsModule
     let lbl = show $ runSDoc (ppr cc) (initSDocContext df $ mkCodeStyle CStyle)
     return . zEncodeString $
       moduleNameColons (moduleName curModl) ++ "_" ++ if isCafCC cc then "CAF_ccs" else lbl
 
-costCentreLbl' :: CostCentre -> G Ident
-costCentreLbl' cc = TxtI . T.pack <$> costCentreLbl cc
+costCentreLbl :: CostCentre -> G Ident
+costCentreLbl cc = TxtI . T.pack <$> costCentreLbl' cc
 
-costCentreStackLbl :: CostCentreStack -> G (Maybe String)
-costCentreStackLbl ccs
+costCentreStackLbl' :: CostCentreStack -> G (Maybe String)
+costCentreStackLbl' ccs
   | noCCSAttached ccs  = return Nothing -- pprPanic "no ccs attached" (ppr ccs)
   | isCurrentCCS ccs   = return $ Just "h$CCCS"
   | dontCareCCS == ccs = return $ Just "h$CCS_DONT_CARE"
   | otherwise          =
       case maybeSingletonCCS ccs of
-        Just cc -> Just <$> singletonCCSLbl cc
+        Just cc -> Just <$> singletonCCSLbl' cc
         Nothing -> pprPanic "ccsVar" (ppr ccs)
 
-costCentreStackLbl' :: CostCentreStack -> G (Maybe Ident)
-costCentreStackLbl' ccs = fmap (TxtI . T.pack) <$> costCentreStackLbl ccs
+costCentreStackLbl :: CostCentreStack -> G (Maybe Ident)
+costCentreStackLbl ccs = fmap (TxtI . T.pack) <$> costCentreStackLbl' ccs
 
-singletonCCSLbl :: CostCentre -> G String
-singletonCCSLbl cc = do
+singletonCCSLbl' :: CostCentre -> G String
+singletonCCSLbl' cc = do
     curModl <- use gsModule
-    ccLbl   <- costCentreLbl cc
+    ccLbl   <- costCentreLbl' cc
     let ccsLbl = ccLbl ++ "_ccs"
     return . zEncodeString $ moduleNameColons (moduleName curModl) <> "_" <> ccsLbl
 
-singletonCCSLbl' :: CostCentre -> G Ident
-singletonCCSLbl' cc = TxtI . T.pack <$> singletonCCSLbl cc
+singletonCCSLbl :: CostCentre -> G Ident
+singletonCCSLbl cc = TxtI . T.pack <$> singletonCCSLbl' cc
 
 ccsVarJ :: CostCentreStack -> G (Maybe JExpr)
-ccsVarJ ccs = fmap (ValExpr . JVar) <$> costCentreStackLbl' ccs
+ccsVarJ ccs = fmap (ValExpr . JVar) <$> costCentreStackLbl ccs
 
