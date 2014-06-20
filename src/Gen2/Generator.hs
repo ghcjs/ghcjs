@@ -477,7 +477,7 @@ genExpr top (StgLet b e) = do
 genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
 genExpr top (StgSCC cc tick push e) = do
   (stats, result) <- genExpr top e
-  setSCCstats <- ifProfiling =<< setSCC cc tick push
+  setSCCstats <- ifProfilingM $ setSCC cc tick push
   return (setSCCstats <> stats, result)
 genExpr top (StgTick m n e) = genExpr top e
 
