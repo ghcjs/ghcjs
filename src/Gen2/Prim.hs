@@ -625,10 +625,15 @@ genPrim d _ GetCurrentCCSOp [a, o] [_dummy_arg] =
   let ptr = if buildingProf d then [je| h$buildCCSPtr(h$CCCS) |]
                               else jnull
   in PrimInline [j| `a` = `ptr`; `o` = 0; |]
-genPrim d _ GetCCSOfOp [a, o] [obj] =
-  let ptr = if buildingProf d then [je| h$buildCCSPtr(`obj`.cc) |]
-                              else jnull
-  in PrimInline [j| `a` = `ptr`; `o` = 0; |]
+genPrim d _ GetCCSOfOp [a, o] [obj]
+  | buildingProf d =
+      PrimInline [j| if (typeof(`obj`) === "object") {
+                       `a` = h$buildCCSPtr(`obj`.cc); `o` = 0;
+                     } else {
+                       `a` = null; `o` = 0;
+                     }
+                   |]
+  | otherwise = PrimInline [j| `a` = null; `o` = 0; |]
 
 genPrim _ _ TraceEventOp [] [ed,eo] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
 genPrim _ _ TraceMarkerOp [] [ed,eo] = PrimInline [j| h$traceMarker(`ed`, `eo`); |]
