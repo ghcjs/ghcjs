@@ -722,7 +722,7 @@ genRet top e at as l srt = withNewIdent f
               load <- flip assignAll (enumFrom R1) <$> genIdsI e
               return (decs <> load)
       ras  <- loadRetArgs free
-      restoreCCS <- ifProfiling [j| h$CCCS = `Stack`[`Sp`--]; |]
+      restoreCCS <- ifProfilingM $ popUnknown [jvar "h$CCCS"]
       let top' = (ctxTop top, take (length $ ctxTarget top) (map toJExpr $ enumFrom R1), ctxEval top)
       (alts, altr) <- genAlts top' e at Nothing as
       return $ l <> ras <> restoreCCS <> alts <> [j| return `Stack`[`Sp`]; |]
