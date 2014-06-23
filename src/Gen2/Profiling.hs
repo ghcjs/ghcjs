@@ -57,7 +57,7 @@ emitCostCentreDecl cc = do
         loc    = showPpr dflags (costCentreSrcSpan cc)
         js     =
           decl ccsLbl <>
-          [j| `ccsLbl` = h$registerCC(`label`, `modl`, `loc`, `is_caf`); |]
+          [j| `ccsLbl` = new h$CC(`label`, `modl`, `loc`, `is_caf`); |]
     emitGlobal js
 
 emitCostCentreStackDecl :: CostCentreStack -> G ()
@@ -68,7 +68,7 @@ emitCostCentreStackDecl ccs = do
         ccLbl  <- costCentreLbl cc
         let js =
               decl ccsLbl <>
-              [j| `ccsLbl` = h$registerCCS(`ccLbl`); |]
+              [j| `ccsLbl` = new h$CCS(null, `ccLbl`); |]
         emitGlobal js
       Nothing -> pprPanic "emitCostCentreStackDecl" (ppr ccs)
 
