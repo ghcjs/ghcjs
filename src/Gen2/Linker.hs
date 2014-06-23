@@ -5,7 +5,7 @@
              TemplateHaskell #-}
 {- |
   GHCJS linker, collects dependencies from
-    the object files (.js_o), which contain linkable 
+    the object files (.js_o, js_p_o), which contain linkable
     units with dependency information
 -}
 
