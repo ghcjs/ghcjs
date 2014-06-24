@@ -91,26 +91,25 @@ collectShims :: DynFlags
              -> GhcjsSettings
              -> FilePath                                    -- ^ the base path
              -> [(Text, Version)]                           -- ^ packages being linked
-             -> IO ((Text, [FilePath]), (Text, [FilePath])) -- ^ collected shims, to be included (before, after) rts
+             -> IO ([FilePath], [FilePath])                 -- ^ files to load (before, after) rts
 collectShims dflags settings base pkgs = do
   files <- mapM (collectShim base) pkgs
   let files' = map (base </>) (concat files)
       (beforeRts, afterRts) = splitFiles files'
   beforeRts' <- mapM canonicalizePath beforeRts
-  afterRts' <- mapM canonicalizePath afterRts
-  (,) <$> combineShims beforeRts' <*> combineShims afterRts'
+  afterRts'  <- mapM canonicalizePath afterRts
+  return (uniq beforeRts', uniq afterRts')
     where
       splitFiles files = (before, map init after)
         where
           (after, before) = L.partition ("@" `L.isSuffixOf`) files
-      combineShims files = ((,files).T.unlines) <$> mapM (tryReadShimFile dflags settings) (uniq files)
       uniq xs = let go (x:xs) s
                       | x `S.notMember` s = x : go xs (S.insert x s)
                       | otherwise         = go xs s
                     go [] _ = []
                 in go xs mempty
 
-tryReadShimFile :: DynFlags -> GhcjsSettings -> FilePath -> IO Text
+tryReadShimFile :: DynFlags -> GhcjsSettings -> FilePath -> IO B.ByteString
 tryReadShimFile dflags ghcjsSettings file = do
   exists <- doesFileExist file
   if not exists
@@ -123,7 +122,7 @@ tryReadShimFile dflags ghcjsSettings file = do
           dflags1 = dflags { settings = s1 }
       outfile <- SysTools.newTempName dflags "jspp"
       Utils.doCpp dflags1 True file outfile
-      T.readFile outfile
+      B.readFile outfile
 
 collectShim :: FilePath -> (Pkg, Version) -> IO [FilePath]
 collectShim base (pkgName, pkgVer) = do

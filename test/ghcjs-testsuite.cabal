@@ -1,0 +1,41 @@
+Name:           ghcjs-testsuite
+Version:        0.1.0
+Description:    Haskell to JavaScript compiler - test suite, standalone executable
+License:        MIT
+License-file:   LICENSE
+Author:         Luite Stegeman
+Copyright:      Luite Stegeman
+Maintainer:     Luite Stegeman <stegeman@gmail.com>
+Stability:      Experimental
+Build-Type:     Simple
+Cabal-Version:  >= 1.10
+
+-- our test suite, requires JavaScript environments to run the tests:
+--   - node.js              http://nodejs.org
+--   - SpiderMonkey jsshell http://download.cdn.mozilla.net/pub/firefox/nightly/latest-mozilla-central/
+executable ghcjs-testsuite
+    cpp-options: -DSTANDALONE
+    Default-Language: Haskell2010
+    hs-source-dirs:   .
+    ghc-options:      -threaded -O
+    main-is:          TestRunner.hs
+    build-depends:    base                 >= 4 && < 5,
+                      process,
+                      test-framework       >= 0.8,
+                      test-framework-hunit >= 0.3,
+                      HUnit                >= 1.2 && < 1.3,
+                      system-filepath      >= 0.4 && < 0.5,
+                      system-fileio        >= 0.3 && < 0.4,
+                      text,
+                      transformers,
+                      random,
+                      time,
+                      bytestring,
+                      deepseq,
+                      shelly               >= 1.5 &&  < 1.6,
+                      data-default         >= 0.5 &&  < 0.6,
+                      yaml                 >= 0.8 &&  < 0.9,
+                      unordered-containers,
+                      optparse-applicative >= 0.9 &&  < 0.10,
+                      directory
+

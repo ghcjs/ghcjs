@@ -231,7 +231,10 @@ data ObjUnit = ObjUnit { oiSymbols :: [Text]         -- toplevel symbols (stored
                        , oiStat    :: JStat          -- the code
                        }
 
-object :: Deps -> [ObjUnit] -> ByteString
+-- | build an object file
+object :: Deps        -- ^ the dependencies
+       -> [ObjUnit]   -- ^ units, the first unit is the module-global one
+       -> ByteString  -- ^ serialized object
 object ds units = object' symbs ds xs
   where
     (xs, symbs) = go emptySymbolTable units
@@ -251,7 +254,10 @@ serializeStat st ci si s =
       bs' = B.toStrict bs
   in  (st', B.fromChunks [bs'])
 
-object' :: SymbolTable -> Deps -> [([Text],ByteString)] -> ByteString
+object' :: SymbolTable           -- ^ final symbol table
+        -> Deps                  -- ^ dependencies
+        -> [([Text],ByteString)] -- ^ serialized units and their exported symbols, the first unit is module-global
+        -> ByteString
 object' st0 deps0 os = rnf deps0 `seq` (hdr <> symbs <> deps1 <> idx <> mconcat (map snd os))
   where
     hdr          = putHeader (Header (bl symbs) (bl deps1) (bl idx))

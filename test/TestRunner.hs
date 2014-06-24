@@ -7,11 +7,13 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Concurrent.MVar
 import           Control.Concurrent
-import           Data.Char (isLower, toLower, isDigit)
+import           Data.Char (isLower, toLower, isDigit, isSpace)
 import           Data.IORef
+import qualified Data.HashMap.Strict as HM
 import           Data.List (partition, isPrefixOf)
 import           Data.Maybe
 import           Data.Monoid
+import           Data.Traversable (sequenceA)
 import qualified Data.ByteString as B
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -22,13 +24,14 @@ import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Filesystem (removeTree, isFile, getWorkingDirectory, createDirectory, copyFile)
 import           Filesystem.Path ( replaceExtension, basename, directory, extension, addExtension
                                  , filename, addExtensions, dropExtensions)
-import           Filesystem.Path.CurrentOS (encodeString, decodeString)
+import           Filesystem.Path.CurrentOS (fromText, toText, encodeString)
 import           Prelude hiding (FilePath)
 import qualified Prelude
 import           Shelly
+import           System.Directory (doesFileExist, getCurrentDirectory, findExecutable)
 import           System.Environment (getArgs, getEnv)
-import           System.Exit (ExitCode(..), exitFailure, exitSuccess)
-import           System.IO (hClose, hFlush, hPutStr, hGetContents, Handle)
+import           System.Exit
+import           System.IO hiding (FilePath)
 import           System.IO.Error
 import           System.Process ( createProcess, proc, CreateProcess(..), StdStream(..)
                                 , terminateProcess, waitForProcess, readProcessWithExitCode
@@ -39,120 +42,152 @@ import           Test.Framework.Providers.HUnit (testCase)
 import           Test.HUnit.Base (assertBool, assertFailure, assertEqual, Assertion)
 import           Test.HUnit.Lang (HUnitFailure(..))
 import qualified Data.Yaml as Yaml
-import           Data.Yaml (FromJSON(..), Value(..), (.:?), (.!=))
+import           Data.Yaml (FromJSON(..), Value(..), (.:), (.:?), (.!=))
 import           Data.Default
 import           Foreign.C.Error (ePIPE, Errno(..))
 import           Control.DeepSeq
 import           GHC.IO.Exception(IOErrorType(..), IOException(..))
 import qualified Control.Exception as C
 import           Text.Read (readMaybe)
+import           Options.Applicative
+import           Options.Applicative.Types
+import           Options.Applicative.Internal
+import           Options.Applicative.Help hiding ((</>))
 
 default (Text)
 
-main = do
-  checkBooted
-  log <- newIORef []
-  main' log `C.catch` \(e::ExitCode) -> do
-    errs <- readIORef log
-    when (e /= ExitSuccess && not (null errs)) $ do
-      putStrLn "\nFailed tests:"
-      mapM_ putStrLn (reverse errs)
-    C.throwIO e
+-- | path containing the test cases and data files
+getTestDir :: FilePath -> IO FilePath
+#ifdef STANDALONE
+getTestDir ghcjs = do
+  (ec, libDir, _) <- readProcessWithExitCode (encodeString ghcjs) ["--print-libdir"] ""
+  when (ec /= ExitSuccess) (error "could not determine GHCJS installation directory")
+  let testDir = fromString (trim libDir) </> "test"
+  e <- doesFileExist (encodeString $ testDir </> "tests.yaml")
+  when (not e) (error $ "test suite not found in " ++ toStringIgnore testDir ++ ", GHCJS might have been installed without tests")
+  return testDir
+#else
+getTestDir _ = do
+  testDir <- (</> "test") . fromString <$> getCurrentDirectory
+  e <- doesFileExist (encodeString $ testDir </> "tests.yaml")
+  when (not e) (error $ "test suite not found in " ++ toStringIgnore testDir)
+  return testDir
+#endif
 
-checkBooted :: IO ()
-checkBooted = check `C.catch` \(e::C.SomeException) -> do
-    putStrLn ("Error running GHCJS, skipping tests:\n" ++ show e)
+main :: IO ()
+main = shellyE . silently . withTmpDir $ liftIO . setupTests
+
+setupTests :: FilePath -> IO ()
+setupTests tmpDir = do
+  args <- getArgs
+  (testArgs, leftoverArgs) <-
+    case runP (runParser AllowOpts optParser args) (prefs idm) of
+      (Left err, _ctx)    -> error ("error parsing arguments: " ++ show err)
+      (Right (a,l), _ctx) -> return (a,l)
+  when (taHelp testArgs) $ do
+    defaultMainWithArgs [] ["--help"] `C.catch` \(e::ExitCode) -> return ()
+    print $ helpText (parserHelp (prefs idm) optParser)
     exitSuccess
+  let ghcjs      = fromString (taWithGhcjs testArgs)
+      ghcjsPkg   = fromString (taWithGhcjsPkg testArgs)
+      runhaskell = fromString (taWithRunhaskell testArgs)
+  checkBooted ghcjs
+  testDir       <- maybe (getTestDir ghcjs) (return . fromString) (taWithTests testArgs)
+  nodePgm       <- checkProgram "node" (taWithNode testArgs)         ["--help"]
+  smPgm         <- checkProgram "js"   (taWithSpiderMonkey testArgs) ["--help"]
+  -- fixme use command line options instead
+  onlyOptEnv    <- getEnvOpt "GHCJS_TEST_ONLYOPT"
+  onlyUnoptEnv  <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
+  log           <- newIORef []
+  (symbs, base) <- prepareBaseBundle testDir ghcjs
+  let specFile  = testDir </> if taBenchmark testArgs then "benchmarks.yaml" else "tests.yaml"
+      symbsFile = tmpDir </> "base.symbs"
+      disUnopt  = onlyOptEnv || taBenchmark testArgs
+      disOpt    = onlyUnoptEnv
+      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv log testDir symbsFile base
+                              ghcjs runhaskell nodePgm smPgm
+  es <- doesFileExist (encodeString specFile)
+  when (not es) (error $ "test suite not found in " ++ toStringIgnore testDir)
+  ts <- B.readFile (encodeString specFile) >>=
+          \x -> case Yaml.decodeEither x of
+                       Left err -> error ("error in test spec file: " ++ toStringIgnore specFile ++ "\n" ++ err)
+                       Right t  -> return t
+  groups <- forM (tsuiGroups ts) $ \(dir, name) ->
+    testGroup name <$> allTestsIn opts testDir dir
+  checkRequiredPackages (fromString $ taWithGhcjsPkg testArgs) (tsuiRequiredPackages ts)
+  B.writeFile (encodeString symbsFile) symbs
+  when (disUnopt && disOpt) (putStrLn "nothing to do, optimized and unoptimized disabled")
+  putStrLn ("running tests in " <> toStringIgnore testDir)
+  defaultMainWithArgs groups leftoverArgs `C.catch` \(e::ExitCode) -> do
+    errs <- readIORef log
+    when (e /= ExitSuccess && not (null errs))
+            (putStrLn "\nFailed tests:" >> mapM_ putStrLn (reverse errs) >> putStrLn "")
+    when (e /= ExitSuccess) (C.throwIO e)
+
+checkBooted :: FilePath -> IO ()
+checkBooted ghcjs = check `C.catch` \(e::C.SomeException) -> cantRun e
   where
+    cantRun e = do
+#ifdef STANDALONE
+      putStrLn ("Error running GHCJS: " ++ show e)
+      exitFailure
+#else
+      putStrLn ("Error running GHCJS, skipping tests:\n" ++ show e)
+      exitSuccess
+#endif
     check = do
-      (ec, _, _) <- readProcessWithExitCode "ghcjs" ["-c", "x.hs"] ""
+      (ec, _, _) <- readProcessWithExitCode (toStringIgnore ghcjs) ["-c", "x.hs"] ""
       case ec of
         (ExitFailure 87) -> do
           putStrLn "GHCJS is not booted, skipping tests"
           exitSuccess
         _ -> return ()
 
-main' log = do
-  args <- getArgs
-  let (args', bench) = partition (/="--benchmark") args
-  checkRequiredPackages
-  (baseSymbs, baseJs) <- prepareBaseBundle
-  onlyOpt <- getEnvOpt "GHCJS_TEST_ONLYOPT"
-  onlyUnopt <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
-  shellyE . silently . withTmpDir $ \symbsDir -> do
-    let symbsFile = symbsDir </> "base.symbs"
-    liftIO $ do
-      B.writeFile (encodeString symbsFile) baseSymbs
-      if not (null bench)
-        then (\bs -> defaultMainWithArgs bs args') =<< benchmarks log symbsFile baseJs
-        else do
-          if onlyOpt && onlyUnopt
-            then putStrLn "warning: nothing to do, optimized and unoptimized disabled"
-            else defaultMain =<< tests onlyOpt onlyUnopt log symbsFile baseJs
-
+-- find programs at the start so we don't try to run a nonexistent program over and over again
 -- temporary workaround, process-1.2.0.0 leaks when trying to run a nonexistent program
-checkPrograms :: IO (Bool, Bool)
-checkPrograms = do
-  let haveProg p as = either (\(e::C.SomeException) -> False) (const True) <$>
+checkProgram :: FilePath -> Maybe String -> [String] -> IO (Maybe FilePath)
+checkProgram defName userName testArgs = do
+  let testProg p as = either (\(e::C.SomeException) -> False) (const True) <$>
                         C.try (readProcessWithExitCode' "/" p as "")
-  tNode         <- haveProg "node" ["--help"]
-  tSpiderMonkey <- haveProg "js" ["--help"]
-  return (tNode, tSpiderMonkey)
+  findExecutable (fromMaybe (encodeString defName) userName) >>= \case
+    Nothing | Just n <- userName -> error ("could not find program " ++ toStringIgnore defName ++ " at " ++ n)
+    Nothing                      -> return Nothing
+    Just p -> do
+      testProg p testArgs >>= \case
+        True  -> return (Just $ fromString p)
+        False -> return Nothing
 
-benchmarks log baseSymbs baseJs = do
-  (n,s) <- checkPrograms
-  nofib <- allTestsIn (benchmark log baseSymbs baseJs n s) "test/nofib"
-  return [ testGroup "Benchmarks from nofib" nofib
-         ]
+data TestArgs = TestArgs { taHelp             :: Bool
+                         , taWithGhcjs        :: String
+                         , taWithGhcjsPkg     :: String
+                         , taWithRunhaskell   :: String
+                         , taWithNode         :: Maybe String
+                         , taWithSpiderMonkey :: Maybe String
+                         , taWithTests        :: Maybe String
+                         , taBenchmark        :: Bool
+                         } deriving Show
 
-tests onlyOpt onlyUnopt log baseSymbs baseJs = do
-  (n,s) <- checkPrograms
-  let test = TestOpts onlyOpt onlyUnopt log baseSymbs baseJs n s
-  fay     <- allTestsIn test "test/fay"
-  ghc     <- allTestsIn test "test/ghc"
-  arith   <- allTestsIn test "test/arith"
-  integer <- allTestsIn test "test/integer"
-  pkg     <- allTestsIn test "test/pkg"
-  conc    <- allTestsIn test "test/conc"
-  ffi     <- allTestsIn test "test/ffi"
-  return [ testGroup "Tests from the Fay testsuite" fay
-         , testGroup "Tests from the GHC testsuite" ghc
-         , testGroup "Arithmetic" arith
-         , testGroup "Integer" integer
-         , testGroup "Concurrency" conc
-         , testGroup "JavaScript interaction through FFI" ffi
-         , testGroup "Tests imported from packages" pkg
-         ]
-
--- warn if any of these are not installed
-requiredPackages :: [Text]
-requiredPackages = [ "ghc-prim"
-                   , "integer-gmp"
-                   , "base"
-                   , "containers"
-                   , "array"
-                   , "deepseq"
-                   , "template-haskell"
-                   , "random"
-                   , "syb"
-                   , "transformers"
-                   , "text"
-                   , "parallel"
-                   , "ghcjs-base"
-                   , "QuickCheck"
-                   , "old-time"
-                   , "vector"
-                   , "stm"
-                   ]
+optParser :: Parser TestArgs
+optParser = TestArgs <$> switch (long "help" <> help "show help message")
+                     <*> strOption (long "with-ghcjs"      <> metavar "PROGRAM" <> value "ghcjs"      <> help "ghcjs program to use")
+                     <*> strOption (long "with-ghcjs-pkg"  <> metavar "PROGRAM" <> value "ghcjs-pkg"  <> help "ghcjs-pkg program to use")
+                     <*> strOption (long "with-runhaskell" <> metavar "PROGRAM" <> value "runhaskell" <> help "runhaskell program to use")
+                     <*> (optional . strOption) (long "with-node" <> metavar "PROGRAM" <> help "node.js program to use")
+                     <*> (optional . strOption) (long "with-spidermonkey" <> metavar "PROGRAM" <> help "SpiderMonkey jsshell program to use")
+                     <*> (optional . strOption) (long "with-tests" <> metavar "LOCATION" <> help "location of the test cases")
+                     <*> switch (long "benchmark" <> help "run benchmarks instead of regression tests")
 
 -- settings for the test suite
-data TestOpts = TestOpts { disableUnopt     :: Bool
-                         , disableOpt       :: Bool
-                         , failedTests      :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
-                         , baseSymbs        :: FilePath
-                         , baseJs           :: B.ByteString
-                         , haveNode         :: Bool
-                         , haveSpiderMonkey :: Bool
+data TestOpts = TestOpts { disableUnopt        :: Bool
+                         , disableOpt          :: Bool
+                         , failedTests         :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
+                         , testsuiteLocation   :: FilePath
+                         , baseSymbs           :: FilePath
+                         , baseJs              :: B.ByteString
+                         , ghcjsProgram        :: FilePath
+                         , runhaskellProgram   :: FilePath
+                         , nodeProgram         :: Maybe FilePath
+                         , spiderMonkeyProgram :: Maybe FilePath
                          }
 benchmark = TestOpts True False
 
@@ -181,6 +216,19 @@ instance FromJSON TestSettings where
 
   parseJSON _ = mempty
 
+-- testsuite description
+data TestSuite =
+  TestSuite { tsuiGroups           :: [(FilePath, String)]
+            , tsuiRequiredPackages :: [Text]
+            }
+
+instance FromJSON TestSuite where
+  parseJSON (Object o) = TestSuite <$> (groups =<< o .: "groups") <*> o .: "requiredPackages"
+    where
+      groups (Object o) = sequenceA $ map (\(k,v) -> (,) <$> pure (fromText k) <*> parseJSON v) (HM.toList o)
+      groups _          = mempty
+  parseJSON _          = mempty
+
 testCaseLog :: TestOpts -> TestName -> Assertion -> Test
 testCaseLog opts name assertion = testCase name assertion'
   where
@@ -200,8 +248,9 @@ testCaseLog opts name assertion = testCase name assertion'
    - that start with a lowercase letter
 -}
 -- allTestsIn :: FilePath -> IO [Test]
-allTestsIn testOpts path = shelly $
-  map (stdioTest testOpts) <$> findWhen (return . isTestFile) path
+allTestsIn testOpts testDir groupDir = shelly $ do
+  cd testDir
+  map (stdioTest testOpts) <$> findWhen (return . isTestFile) groupDir
   where
     testFirstChar c = isLower c || isDigit c
     isTestFile file =
@@ -244,7 +293,7 @@ stdioTest testOpts file = testCaseLog testOpts (encodeString file) (stdioAsserti
 stdioAssertion :: TestOpts -> FilePath -> Assertion
 stdioAssertion testOpts file = do
   putStrLn ("running test: " ++ encodeString file)
-  mexpected <- stdioExpected file
+  mexpected <- stdioExpected testOpts file
   case mexpected of
     Nothing -> putStrLn "test disabled"
     Just (expected, t) -> do
@@ -262,19 +311,19 @@ padTo n xs | l < n     = xs ++ replicate (n-l) ' '
            | otherwise = xs
   where l = length xs
 
-stdioExpected :: FilePath -> IO (Maybe (StdioResult, Maybe Integer))
-stdioExpected file = do
-  settings <- settingsFor file
+stdioExpected :: TestOpts -> FilePath -> IO (Maybe (StdioResult, Maybe Integer))
+stdioExpected testOpts file = do
+  settings <- settingsFor testOpts file
   if tsDisabled settings
     then return Nothing
     else do
-      xs@[mex,mout,merr] <- mapM (readFilesIfExists.(map (replaceExtension file)))
+      xs@[mex,mout,merr] <- mapM (readFilesIfExists.(map (replaceExtension (testsuiteLocation testOpts </> file))))
              [["exit"], ["stdout", "out"], ["stderr","err"]]
       if any isJust xs
         then return . Just $ (StdioResult (fromMaybe ExitSuccess $ readExitCode =<< mex)
                                (fromMaybe "" mout) (fromMaybe "" merr), Nothing)
         else do
-          mr <- runhaskellResult settings file
+          mr <- runhaskellResult testOpts settings file
           case mr of
             Nothing    -> assertFailure "cannot run `runhaskell'" >> return undefined
             Just (r,t) -> return (Just (r, Just t))
@@ -295,9 +344,9 @@ readFilesIfExists (x:xs) = do
     else readFilesIfExists xs
 
 -- test settings
-settingsFor :: FilePath -> IO TestSettings
-settingsFor file = do
-  e <- isFile settingsFile
+settingsFor :: TestOpts -> FilePath -> IO TestSettings
+settingsFor opts file = do
+  e <- isFile (testsuiteLocation opts </> settingsFile)
   case e of
     False -> return def
     True -> do
@@ -310,19 +359,21 @@ settingsFor file = do
       putStrLn $ "error in test settings: " ++ settingsFile'
       putStrLn "running test with default settings"
       return def
-    settingsFile = replaceExtension file "settings"
+    settingsFile  = replaceExtension file "settings"
     settingsFile' = encodeString settingsFile
 
-runhaskellResult :: TestSettings -> FilePath -> IO (Maybe (StdioResult, Integer))
-runhaskellResult settings file = do
-    cd <- getWorkingDirectory
+runhaskellResult :: TestOpts
+                 -> TestSettings
+                 -> FilePath
+                 -> IO (Maybe (StdioResult, Integer))
+runhaskellResult testOpts settings file = do
     let args = tsArguments settings
-    r <- runProcess (cd </> directory file) "runhaskell" ([ includeOpt file, "-w"
-                                                         , encodeString $ filename file] ++ args) ""
+    r <- runProcess (testsuiteLocation testOpts </> directory file) (runhaskellProgram testOpts)
+             ([ includeOpt testOpts file, "-w", encodeString $ filename file] ++ args) ""
     return r
 
-includeOpt :: FilePath -> String
-includeOpt fp = "-i" <> encodeString (directory fp)
+includeOpt :: TestOpts -> FilePath -> String
+includeOpt opts fp = "-i" <> encodeString (testsuiteLocation opts </> directory fp)
 
 extraJsFiles :: FilePath -> IO [String]
 extraJsFiles file =
@@ -333,7 +384,7 @@ extraJsFiles file =
 
 runGhcjsResult :: TestOpts -> FilePath -> IO [((StdioResult, Integer), String)]
 runGhcjsResult opts file = do
-  settings <- settingsFor file
+  settings <- settingsFor opts file
   if tsDisabled settings
     then return []
     else do
@@ -351,9 +402,9 @@ runGhcjsResult opts file = do
             outputExe'  = outputExe <.> "jsexe"
             outputBuild = cd </> output </> "build"
             outputRun   = outputExe' </> ("all.js"::FilePath)
-            input  = encodeString file
+            input  = encodeString (testsuiteLocation opts </> file)
             desc = ", optimization: " ++ show optimize
-            inc = includeOpt file
+            inc = includeOpt opts file
             opt = if optimize then ["-O2"] else []
             compileOpts = [ inc
                           , "--no-rts", "--no-stats", "-o", encodeString outputExe
@@ -363,15 +414,15 @@ runGhcjsResult opts file = do
                           , input
                           ] ++ opt ++ extraFiles
             args = tsArguments settings
-            runTestPgm name pgm disabled havePgm
-              | not (disabled settings) && (havePgm opts) =
+            runTestPgm name disabled getPgm
+              | Just p <- getPgm opts, not (disabled settings) =
                   fmap (,name ++ desc) <$>
-                      runProcess outputExe' pgm (encodeString outputRun:args) ""
+                      runProcess outputExe' p (encodeString outputRun:args) ""
               | otherwise = return Nothing
         C.bracket (createDirectory False output)
                   (\_ -> removeTree output) $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
           createDirectory False outputBuild
-          e <- liftIO $ runProcess cd "ghcjs" compileOpts ""
+          e <- liftIO $ runProcess cd (ghcjsProgram opts) compileOpts ""
           case e of
             Nothing    -> assertFailure "cannot find ghcjs"
             Just (r,_) -> do
@@ -380,15 +431,15 @@ runGhcjsResult opts file = do
           -- copy data files for test
           forM_ (tsCopyFiles settings) $ \cfile ->
             let cfile' = fromText (T.pack cfile)
-            in  copyFile (directory file </> cfile') (outputExe' </> cfile')
+            in  copyFile (testsuiteLocation opts </> directory file </> cfile') (outputExe' </> cfile')
           -- combine files with base bundle from incremental link
           [out, lib, lib1] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
                                 ["out.js", "lib.js", "lib1.js"]
           let runMain = "\nh$main(h$mainZCMainzimain);\n"
           B.writeFile (encodeString outputRun) (baseJs opts <> lib <> lib1 <> out <> runMain)
-          -- run with node.js
-          nodeResult <- runTestPgm "node"         "node" tsDisableNode         haveNode
-          smResult   <- runTestPgm "SpiderMonkey" "js"   tsDisableSpiderMonkey haveSpiderMonkey
+          -- run with node.js and SpiderMonkey
+          nodeResult <- runTestPgm "node"         tsDisableNode         nodeProgram
+          smResult   <- runTestPgm "SpiderMonkey" tsDisableSpiderMonkey spiderMonkeyProgram
           return $ catMaybes [nodeResult, smResult]
 
 
@@ -396,7 +447,7 @@ outputPath :: IO FilePath
 outputPath = do
   t <- (show :: Integer -> String) . round . (*1000) . utcTimeToPOSIXSeconds <$> getCurrentTime
   rnd <- show <$> randomRIO (1000000::Int,9999999)
-  return . decodeString $ "ghcjs_test_" ++ t ++ "_" ++ rnd
+  return . fromString $ "ghcjs_test_" ++ t ++ "_" ++ rnd
 
 -- | returns Nothing if the program cannot be run
 runProcess :: MonadIO m => FilePath -> FilePath -> [String] -> String -> m (Maybe (StdioResult, Integer))
@@ -520,20 +571,19 @@ readExitCode = fmap convert . readMaybe . T.unpack
     convert 0 = ExitSuccess
     convert n = ExitFailure n
 
-checkRequiredPackages :: IO ()
-checkRequiredPackages = shelly . silently $ do
+checkRequiredPackages :: FilePath -> [Text] -> IO ()
+checkRequiredPackages ghcjsPkg requiredPackages = shelly . silently $ do
   installedPackages <- T.words <$> run "ghcjs-pkg" ["list", "--simple-output"]
   forM_ requiredPackages $ \pkg -> do
     when (not $ any ((pkg <> "-") `T.isPrefixOf`) installedPackages) $ do
       echo ("warning: package `" <> pkg <> "' is required by the test suite but is not installed")
---      liftIO exitFailure
 
-prepareBaseBundle :: IO (B.ByteString, B.ByteString)
-prepareBaseBundle = shellyE . silently . sub . withTmpDir $ \tmp -> do
-  cp "test/TestLinkBase.hs" tmp
-  cp "test/TestLinkMain.hs" tmp
+prepareBaseBundle :: FilePath -> FilePath -> IO (B.ByteString, B.ByteString)
+prepareBaseBundle testDir ghcjs = shellyE . silently . sub . withTmpDir $ \tmp -> do
+  cp (testDir </> "TestLinkBase.hs") tmp
+  cp (testDir </> "TestLinkMain.hs") tmp
   cd tmp
-  run_ "ghcjs" ["--generate-base=TestLinkBase", "-o", "base", "TestLinkMain.hs"]
+  run_ ghcjs ["--generate-base=TestLinkBase", "-o", "base", "TestLinkMain.hs"]
   cd "base.jsexe"
   [symbs, js, lib, lib1, rts] <- mapM readBinary
     ["out.base.symbs", "out.base.js", "lib.base.js", "lib1.base.js", "rts.js"]
@@ -546,6 +596,9 @@ getEnvMay xs = fmap Just (getEnv xs)
 getEnvOpt :: MonadIO m => String -> m Bool
 getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)
 
+trim :: String -> String
+trim = let f = dropWhile isSpace . reverse in f . f
+
 shellyE :: Sh a -> IO a
 shellyE m = do
   r <- newIORef (Left undefined)
@@ -554,3 +607,9 @@ shellyE m = do
   readIORef r >>= \case
                      Left e  -> C.throw e
                      Right a -> return a
+
+toStringIgnore :: FilePath -> String
+toStringIgnore = T.unpack . either id id . toText
+
+fromString :: String -> FilePath
+fromString = fromText . T.pack

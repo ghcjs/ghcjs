@@ -1,1 +1,1 @@
-test/fay/recDecl.hs:14:6-18: Missing field in record construction Main.i
+fay/recDecl.hs:14:6-18: Missing field in record construction Main.i

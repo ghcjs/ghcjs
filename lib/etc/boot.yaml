@@ -1,0 +1,162 @@
+#########################################################################################
+#
+# the locations that ghcjs-boot gets installation files from
+#
+# if multiple locations are listed for a source,
+# they will be tried in order, until one succeeds
+#
+# locations may refer to urls (only http is supported) or local files
+#
+# ghcjs-boot does some substitution:
+#   {version}   - GHCJS version
+#   {datadir}   - location where Cabal has installed the data-files for the GHCJS package
+#   {{ENV_VAR}} - value of environment variable
+#
+#########################################################################################
+
+# the packages that ghcjs-boot builds
+#
+# package names are relative to the root of the ghcjs-boot source, can also
+# be plain package names (installed from a repository) or urls
+#   (see sources configuration below)
+
+packages:
+
+  # special packages installed between stages:
+
+  ghcjs-prim: ./ghcjs/ghcjs-prim
+  cabal:      ./extra/cabal/Cabal
+
+
+  # pretend to have these packages installed during stage 1,
+  # GHCJS calls GHC for anything that depends on them
+  # (these must be installed in the GHC installation used for booting)
+
+  stage1PretendToHave:
+    - Cabal
+
+  # in stage 1a, we cannot do linking yet
+  
+  stage1a:
+    - ./boot/ghc-prim
+    - ./boot/integer-gmp
+    - ./boot/base
+
+  # after stage 1a, ghcjs-boot installs ghcjs-prim and
+  # continues with stage 1b
+
+  stage1b:
+    - ./boot/deepseq
+    - ./boot/containers
+    - ./boot/directory
+    - ./boot/template-haskell
+    - ./boot/array
+    - ./boot/pretty
+    - ./boot/time
+    - ./boot/process
+    - IfWindows: ./boot/Win32
+    - IfUnix:    ./boot/unix
+    # add more packages here when required for a full boot
+    # - IfFull:
+
+  # after stage 1b, ghcjs-boot removes the pretend-to-have packages
+  #
+  # when we're doing a quick boot, this completes the boot process
+  #   (which means that GHCJS does not have a Cabal library installed
+  #   , so packages with a custom build type don't work)
+  #
+  # for a full boot, ghcjs-boot installs the Cabal library and then
+  # builds the stage2 packages
+
+  stage2:
+    - ./extra/hashable
+    - ./ghcjs/ghcjs-base
+
+
+# configuration for source locations (libraries and rts) for booting
+#
+# if multiple locations are listed for a source,
+# they will be tried in order, until one succeeds
+
+sources:
+
+  # source locations for a release build
+  # (can be tar archives, plain directories or http urls)
+
+  shims:
+    - "{datadir}/lib/shims"
+    - "{datadir}/lib/cache/shims.tar"
+
+  boot:
+    - "{datadir}/lib/ghcjs-boot"
+    - "{datadir}/lib/cache/boot.tar"
+
+  test:
+    - "{datadir}/test"
+    - "{datadir}/lib/cache/test.tar"
+
+  # used in both development and release builds
+  doc:   "{datadir}/doc"
+  etc:   "{datadir}/lib/etc"
+
+  # git repositories for the rts and boot libraries
+  # these are only used for development builds
+
+  shims-dev:             https://github.com/ghcjs/shims
+  shims-dev-branch:      master
+
+  ghcjs-boot-dev:        https://github.com/ghcjs/ghcjs-boot
+  ghcjs-boot-dev-branch: master
+
+
+  # build tools for Windows (http url, local tar archive or directory)
+
+  # a big archive of build tools
+  buildtools-windows:
+   - http://hdiff.luite.com/ghcjs/buildtools/ghcjs-buildtools-windows-{version}.tar.xz
+   - http://www.ghcjs.org/buildtools/ghcjs-buildtools-windows-{version}.tar.xz
+   - http://hdiff.luite.com/ghcjs/buildtools/ghcjs-buildtools-windows.tar.xz
+   - http://www.ghcjs.org/buildtools/ghcjs-buildtools-windows.tar.xz
+
+  # small boot archive to decompress the big Windows buildtools file
+  buildtools-boot-windows:
+   - http://hdiff.luite.com/ghcjs/buildtools/ghcjs-buildtools-boot-windows-{version}.tar
+   - http://www.ghcjs.org/ghcjs/buildtools/ghcjs-buildtools-boot-windows-{version}.tar
+   - http://hdiff.luite.com/ghcjs/buildtools/ghcjs-buildtools-boot-windows.tar
+   - http://www.ghcjs.org/ghcjs/buildtools/ghcjs-buildtools-boot-windows.tar
+
+# Program configuration. You can override some program locations on the command line with ghcjs-boot
+#
+# use a list to prepend arguments to a program, for example:
+#     ghcjs:
+#       {{HOME}}/.cabal/bin/ghcjs-{version}:
+#         - "-B{{HOME}}/haskell/ghcjs/lib"
+#
+
+programs:
+
+  # GHCJS programs
+  #
+  # customize their wrapper scripts to change the installation destination
+
+  ghcjs:         ghcjs
+  ghcjs-pkg:     ghcjs-pkg
+  ghcjs-haddock: ghcjs-haddock
+
+  # third party programs
+
+  cabal:      cabal
+  ghc:        ghc
+  ghc-pkg:    ghc-pkg
+  bash:       bash
+  make:       make
+  patch:      patch
+  cpp:        cpp
+  alex:       alex
+  happy:      happy
+  git:        git
+  autoreconf: autoreconf
+
+  # ghcjs-boot has a built-in unpacker for uncompressed tar, this is only used for tar.gz, tar.bz2, tar.xz
+  tar:        tar
+

@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE CPP, ScopedTypeVariables, MultiWayIf, TupleSections #-}
 {-
   The GHCJS-specific parts of the frontend (ghcjs program)
 
@@ -7,11 +7,11 @@
 
 module Compiler.GhcjsProgram where
 
-import           GHC
+import           GHC hiding (setSessionDynFlags)
+import           GhcMonad
 import           DynFlags
 import           PackageConfig
 import           UniqFM
-import           Packages
 import           PrimOp
 import           PrelInfo
 import           IfaceEnv
@@ -26,6 +26,7 @@ import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
 
+import qualified Data.ByteString as B
 import           Data.IORef
 import           Data.List (isSuffixOf, isPrefixOf, partition,)
 import qualified Data.List as L
@@ -35,6 +36,7 @@ import           Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy.IO as TL
+import           Data.Time.Clock
 
 import           Distribution.System (buildOS, OS(..))
 import           Distribution.Verbosity (deafening, intToVerbosity)
@@ -68,6 +70,8 @@ import qualified Gen2.RtsTypes    as Gen2
 -- workaround for platform dependence bugs
 import           Rules (mkRuleBase)
 import qualified Gen2.GHC.PrelRules
+
+import           Gen2.GHC.Packages
 
 {- |
   Check if we're building a Cabal Setup script, in which case automatically
@@ -131,7 +135,7 @@ getGhcjsSettings args =
                                 <*> pure False
                                 <*> pure False
                                 <*> pure Nothing
-                                <*> pure Nothing
+                                <*> pure NoBase
 
 optParser' :: ParserInfo GhcjsSettings
 optParser' = info (helper <*> optParser) fullDesc
@@ -148,7 +152,7 @@ optParser = GhcjsSettings
             <*> switch ( long "no-rts" )
             <*> switch ( long "no-stats" )
             <*> optStr ( long "generate-base" )
-            <*> optStr ( long "use-base" )
+            <*> (maybe NoBase BaseFile <$> optStr ( long "use-base" ))
 
 optStr :: Mod OptionFields (Maybe String) -> Parser (Maybe String)
 optStr m = nullOption $ value Nothing <> reader (pure . str)  <> m
@@ -187,23 +191,28 @@ fixNameCache = do
       isPrimOp _        = False
 
 
-checkIsBooted :: IO ()
-checkIsBooted = do
-  base <- getGlobalPackageBase
-  let settingsFile = base </> "settings"
-  e <- doesFileExist settingsFile
+checkIsBooted :: Maybe String -> IO ()
+checkIsBooted mbMinusB = do
+  base <- mkLibDir mbMinusB
+  let bootFile = base </> "ghcjs_boot.completed"
+  e <- doesFileExist bootFile
   when (not e) $ do
-    hPutStrLn stderr $ "cannot find `" ++ settingsFile ++ "'\n" ++
-                       "please install the GHCJS core libraries. See README for details\n" ++
-                       "(running `ghcjs-boot --init' might fix this)"
+    hPutStrLn stderr $ "cannot find `" ++ bootFile ++ "'\n\n" ++
+#ifdef WINDOWS
+                       "please install the GHCJS boot libraries or edit the `.options' file to point to the correct library location\n" ++
+#else
+                       "please install the GHCJS boot libraries or edit the `ghcjs' wrapper script to point to the correct library location\n" ++
+#endif
+                       "See README for details\n" ++
+                       "(running `ghcjs-boot' might fix this)\n"
     exitWith (ExitFailure 87)
 
 -- | when booting GHCJS, we pretend to have the Cabal lib installed
 --   call GHC to compile our Setup.hs
 bootstrapFallback :: IO ()
 bootstrapFallback = do
-    ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_FALLBACK_GHC"
-    getArgs >>= rawSystem ghc >>= exitWith -- run without GHCJS package args
+    ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_WITH_GHC"
+    getFullArguments >>= rawSystem ghc . filter (not . ("-B" `isPrefixOf`)) >>= exitWith -- run without GHCJS package args
 
 installExecutable :: DynFlags -> GhcjsSettings -> [String] -> IO ()
 installExecutable dflags settings srcs = do
@@ -227,20 +236,6 @@ installExecutable dflags settings srcs = do
             hPutStrLn stderr "Usage: ghcjs --install-executable <from> -o <to>"
             exitFailure
 
--- we might generate .hi files for a different bitness than native GHC,
--- make sure we can show then
-printIface :: [String] -> IO ()
-printIface ["--show-iface", iface] = do
-     (argsS, _) <- parseStaticFlags $ map noLoc []
-     runGhcSession Nothing $ do
-       sdflags <- getSessionDynFlags
-       base <- liftIO ghcjsDataDir
-       jsEnv <- liftIO newGhcjsEnv
-       setSessionDynFlags $ setGhcjsPlatform mempty jsEnv [] base sdflags
-       env <- getSession
-       liftIO $ showIface env iface
-printIface _                       = putStrLn "usage: ghcjs --show-iface hifile"
-
 {-
   Generate lib.js and lib1.js for the latest version of all installed
   packages
@@ -254,28 +249,27 @@ generateLib settings = do
   liftIO $ do
     (dflags2, _) <- initPackages dflags1
     let pkgs =  map sourcePackageId . eltsUFM . pkgIdMap . pkgState $ dflags2
-    base <- (</> "shims") <$> getGlobalPackageBase
-    let convertPkg p = let PackageName n = pkgName p
+        base = getDataDir (getLibDir dflags2) </> "shims"
+        convertPkg p = let PackageName n = pkgName p
                            v = map fromIntegral (versionBranch $ pkgVersion p)
                        in (T.pack n, v)
         pkgs' = M.toList $ M.fromListWith max (map convertPkg pkgs)
-    ((before, _), (after, _)) <- Gen2.collectShims dflags2 settings base pkgs'
-    T.writeFile "lib.js" before
-    T.writeFile "lib1.js" after
+    (beforeFiles, afterFiles) <- Gen2.collectShims dflags2 settings base pkgs'
+    B.writeFile "lib.js"  . mconcat =<< mapM B.readFile beforeFiles
+    B.writeFile "lib1.js" . mconcat =<< mapM B.readFile afterFiles
     putStrLn "generated lib.js and lib1.js for:"
     mapM_ (\(p,v) -> putStrLn $ "    " ++ T.unpack p ++
       if null v then "" else ("-" ++ L.intercalate "." (map show v))) pkgs'
 
+{-
 -- | Sets up GHCJS package databases, requires a call to initPackages
 addPkgConf :: DynFlags -> IO DynFlags
 addPkgConf df = do
-  db1 <- getGlobalPackageDB
-  db2 <- getUserPackageDB
-  let replaceConf GlobalPkgConf = PkgConfFile db1
-      replaceConf UserPkgConf   = PkgConfFile db2
+  dbu <- getUserPackageDB
+  let replaceConf UserPkgConf   = PkgConfFile dbu
       replaceConf x             = x
   return $ df { extraPkgConfs = map replaceConf . extraPkgConfs df }
-
+-}
 
 setGhcjsSuffixes :: Bool     -- oneshot option, -c
                  -> DynFlags
@@ -342,9 +336,9 @@ runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
                 -> GhcjsSettings
                 -> Ghc b           -- ^ Action to perform
                 -> IO b
-runGhcjsSession mbMinusB settings m = runGhcSession mbMinusB $ do
-    base <- liftIO ghcjsDataDir
+runGhcjsSession mbMinusB settings m = runGhc mbMinusB $ do
     dflags <- getSessionDynFlags
+    let base = getLibDir dflags
     jsEnv <- liftIO newGhcjsEnv
     _ <- setSessionDynFlags
          $ setGhcjsPlatform settings jsEnv [] base
@@ -353,8 +347,67 @@ runGhcjsSession mbMinusB settings m = runGhcSession mbMinusB $ do
     fixNameCache
     m
 
-runGhcSession :: Maybe FilePath -> Ghc b -> IO b
-runGhcSession mbMinusB a = do
-    libDir <- getGlobalPackageBase
-    runGhc (mbMinusB `mplus` Just libDir) a
+
+setSessionDynFlags :: GhcMonad m => DynFlags -> m [PackageId]
+setSessionDynFlags dflags = do
+  (dflags', preload) <- liftIO $ initPackages dflags -- this is Gen2.GHC.Packages.initPackages
+  modifySession $ \h -> h{ hsc_dflags = dflags'
+                         , hsc_IC = (hsc_IC h){ ic_dflags = dflags' } }
+  invalidateModSummaryCache
+  return preload
+
+invalidateModSummaryCache :: GhcMonad m => m ()
+invalidateModSummaryCache =
+  modifySession $ \h -> h { hsc_mod_graph = map inval (hsc_mod_graph h) }
+ where
+  inval ms = ms { ms_hs_date = addUTCTime (-1) (ms_hs_date ms) }
+
+{-|
+  get the command line arguments for GHCJS by adding the ones specified in the
+  ghcjs.exe.options file on Windows, since we cannot run wrapper scripts there
+
+  also handles some location information queries for Setup.hs and ghcjs-boot,
+  that would otherwise fail due to missing boot libraries or a wrapper interfering
+ -}
+getWrappedArgs :: IO ([String], Bool, Bool)
+getWrappedArgs = do
+  booting  <- getEnvOpt "GHCJS_BOOTING"        -- do not check that we're booted
+  booting1 <- getEnvOpt "GHCJS_BOOTING_STAGE1" -- enable GHC fallback
+  as <- getArgs
+  if | "--ghcjs-setup-print"   `elem` as -> printBootInfo as >> exitSuccess
+     | "--ghcjs-booting-print" `elem` as -> getFullArguments >>= printBootInfo >> exitSuccess
+     | otherwise                         -> do
+        fas <- getFullArguments
+        when (isNothing  $ getArgsTopDir fas) (error noTopDirErrorMsg)
+        return (fas, booting, booting1)
+
+printBootInfo :: [String] -> IO ()
+printBootInfo v
+  | "--print-topdir"         `elem` v = putStrLn t
+  | "--print-libdir"         `elem` v = putStrLn t
+  | "--print-global-db"      `elem` v = putStrLn (getGlobalPackageDB t)
+  | "--print-user-db"        `elem` v = putStrLn =<< getUserPackageDB
+  | "--print-default-libdir" `elem` v = putStrLn =<< getDefaultLibDir
+  | "--print-default-topdir" `elem` v = putStrLn =<< getDefaultTopDir
+  | "--numeric-ghc-version"  `elem` v = putStrLn getGhcCompilerVersion
+  | otherwise                         = error "no --ghcjs-setup-print or --ghcjs-booting-print options found"
+  where
+    t = fromMaybe (error noTopDirErrorMsg) (getArgsTopDir v)
+
+noTopDirErrorMsg :: String
+noTopDirErrorMsg = "Cannot determine library directory.\n\nGHCJS requires a -B argument to specify the library directory. " ++
+#ifdef WINDOWS
+                   "On Windows, GHCJS reads the `ghcjs.exe.options' and `ghcjs-[version].exe.options' files from the " ++
+                   "program directory for extra command line arguments."
+#else
+                   "Usually this argument is provided added by a shell script wrapper. Verify that you are not accidentally " ++
+                   "invoking the executable directly."
+#endif
+
+getArgsTopDir :: [String] -> Maybe String
+getArgsTopDir xs
+  | null minusB_args = Nothing
+  | otherwise        = Just (drop 2 $ last minusB_args)
+  where
+    minusB_args = filter ("-B" `isPrefixOf`) xs
 

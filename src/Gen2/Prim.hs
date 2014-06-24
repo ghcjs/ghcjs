@@ -621,7 +621,7 @@ GetCurrentCCSOp
 genPrim _ TraceEventOp [] [ed,eo] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
 genPrim _ TraceMarkerOp [] [ed,eo] = PrimInline [j| h$traceMarker(`ed`, `eo`); |]
 
-genPrim _ op rs as = PrimInline [j| throw `"unhandled primop: "++show op++" "++show (length rs, length as)`; |]
+genPrim _ op rs as = PrimInline [j| throw `"unhandled primop: " ++ show op ++ " " ++ show (length rs, length as)`; |]
 {-
 genPrim _ op rs as = PrimInline [j| log(`"warning, unhandled primop: "++show op++" "++show (length rs, length as)`);
   `f`;

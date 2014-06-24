@@ -43,6 +43,7 @@ import Maybes hiding ( Succeeded )
 import           Control.Monad
 
 import           Data.List ( isPrefixOf, sort )
+import qualified Data.Set as S
 
 import           System.Directory
 import           System.FilePath
@@ -80,7 +81,7 @@ ghcjsLinkJsBinary :: GhcjsSettings
                   -> [PackageId]
                   -> IO ()
 ghcjsLinkJsBinary settings jsFiles dflags objs dep_pkgs =
-  void $ variantLink gen2Variant dflags settings exe [] deps objs jsFiles isRoot
+  void $ variantLink gen2Variant dflags settings exe [] deps objs jsFiles isRoot S.empty
     where
       isRoot _ = True
       deps     = map (\pkg -> (pkg, packageLibPaths pkg)) dep_pkgs

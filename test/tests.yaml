@@ -1,0 +1,39 @@
+# this file describes the test group locations with their name
+# 
+# every group (directory) is scanned for Haskell (.hs or .lhs)
+# files that start with a lower case letter (Uppercase means
+# that it's a module used by some test).
+#
+# every test has its own settings file (testname.settings)
+# and expected output and exit code (testname.out, testname.err, testname.exit)
+#
+# if none of the .out, .err and .exit files are present, the
+# test case is run against 'runhaskell', expecting the same result
+
+groups:
+  fay:     Tests from the Fay testsuite
+  ghc:     Tests from the GHC testsuite
+  arith:   Arithmetic
+  integer: Integer
+  conc:    Concurrency
+  ffi:     JavaScript interaction through FFI
+  pkg:     Tests imported from packages
+
+requiredPackages:
+  - ghc-prim
+  - integer-gmp
+  - base
+  - containers
+  - array
+  - deepseq
+  - template-haskell
+  - random
+  - syb
+  - transformers
+  - test
+  - parallel
+  - ghcjs-base
+  - QuickCheck
+  - old-time
+  - vector
+  - stm

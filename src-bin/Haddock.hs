@@ -1,8 +1,13 @@
 {-# Language CPP #-}
 
-{- | Haddock wrapper for GHCJS
+{-
+  Haddock wrapper for GHCJS
  -}
+
 module Main where
+
+import Data.List (partition, isPrefixOf)
+import Data.Maybe
 
 import System.Environment
 import System.Exit
@@ -19,18 +24,19 @@ pathSep = ":"
 #endif
 
 main = do
-  args <- getArgs
+  args0 <- getFullArguments -- adds wrapper arguments for Windows
+  let (minusB, args) = partition ("-B" `isPrefixOf`) $ args0
+      mbMinusB       = listToMaybe . reverse $ minusB
   case args of
     ["--ghc-version"] -> putStrLn getCompilerVersion
     xs                -> do
-      baseDir <- getGlobalPackageBase
-      libDir  <- getGlobalPackageInst
+      libDir  <- mkTopDir mbMinusB
       env     <- getEnvironment
+      userDB  <- getUserPackageDB
       let extraArgs = "-B" : libDir : []
-          pkgConf d = d </> "package.conf.d"
-          ghcjsPkgPath  = pkgConf baseDir ++ pathSep ++ pkgConf libDir
-          pkgPath   = maybe ghcjsPkgPath (\x -> x ++ pathSep ++ ghcjsPkgPath) (lookup "GHC_PACKAGE_PATH" env)
-          runEnv    = ("GHC_PACKAGE_PATH", pkgPath) : filter ((/="GHC_PACKAGE_PATH").fst) env
+          ghcjsPkgPath  = getGlobalPackageDB libDir ++ pathSep ++ userDB
+          pkgPath   = maybe ghcjsPkgPath (\x -> x ++ pathSep ++ ghcjsPkgPath) (lookup "GHCJS_PACKAGE_PATH" env)
+          runEnv    = ("GHCJS_PACKAGE_PATH", pkgPath) : filter ((/="GHCJS_PACKAGE_PATH").fst) env
       exitWith =<< waitForProcess =<< runProcess ("haddock") (extraArgs ++ xs)
                                         Nothing (Just runEnv) Nothing Nothing Nothing
 

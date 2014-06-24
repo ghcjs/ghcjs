@@ -2,8 +2,9 @@
 % (c) The University of Glasgow, 2006
 %
 \begin{code}
+{-# LANGUAGE CPP #-}
 -- | Package manipulation
-module Packages (
+module Gen2.GHC.Packages (
         module PackageConfig,
 
         -- * The PackageConfigMap
@@ -65,6 +66,11 @@ import qualified Data.Map as Map
 import qualified FiniteMap as Map
 import qualified Data.Set as Set
 
+import Packages (PackageState(..))
+import qualified Paths_ghcjs  as Paths
+import           System.Info  (arch, os)
+import qualified Data.Version as Version
+
 -- ---------------------------------------------------------------------------
 -- The Package state
 
@@ -106,7 +112,7 @@ import qualified Data.Set as Set
 --      If it isn't, we refer to _imp__B_f_closure
 -- When compiling A, we record in B's Module value whether it's
 -- in a different DLL, by setting the DLL flag.
-
+{-
 data PackageState = PackageState {
   pkgIdMap              :: PackageConfigMap, -- PackageId   -> PackageConfig
         -- The exposed flags are adjusted according to -package and
@@ -125,7 +131,7 @@ data PackageState = PackageState {
 
   installedPackageIdMap :: InstalledPackageIdMap
   }
-
+-}
 -- | A PackageConfigMap maps a 'PackageId' to a 'PackageConfig'
 type PackageConfigMap = UniqFM PackageConfig
 
@@ -186,7 +192,7 @@ readPackageConfigs :: DynFlags -> IO [PackageConfig]
 readPackageConfigs dflags = do
   let system_conf_refs = [UserPkgConf, GlobalPkgConf]
 
-  e_pkg_path <- tryIO (getEnv "GHC_PACKAGE_PATH")
+  e_pkg_path <- tryIO (getEnv "GHCJS_PACKAGE_PATH")
   let base_conf_refs = case e_pkg_path of
         Left _ -> system_conf_refs
         Right path
@@ -209,8 +215,8 @@ readPackageConfigs dflags = do
 resolvePackageConfig :: DynFlags -> PkgConfRef -> IO (Maybe FilePath)
 resolvePackageConfig dflags GlobalPkgConf = return $ Just (systemPackageConfig dflags)
 resolvePackageConfig _ UserPkgConf = handleIO (\_ -> return Nothing) $ do
-  appdir <- getAppUserDataDirectory "ghc"
-  let dir = appdir </> (TARGET_ARCH ++ '-':TARGET_OS ++ '-':cProjectVersion)
+  appdir <- getAppUserDataDirectory "ghcjs"
+  let dir = appdir </> (arch ++ '-': os ++ '-':Version.showVersion Paths.version ++ '-':cProjectVersion)
       pkgconf = dir </> "package.conf.d"
   exist <- doesDirectoryExist pkgconf
   return $ if exist then Just pkgconf else Nothing

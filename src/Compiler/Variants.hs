@@ -5,6 +5,7 @@
 module Compiler.Variants where
 
 import           Data.ByteString       (ByteString)
+import           Data.Set              (Set)
 
 import           Compiler.Settings
 
@@ -31,6 +32,7 @@ data Variant = Variant
                                -> [FilePath]                -- ^ object files
                                -> [FilePath]                -- ^ extra JavaScript files
                                -> (Gen2.Fun -> Bool)        -- ^ function to use as roots
+                               -> Set Gen2.Fun              -- ^ extra roots
                                -> IO ()
     }
 

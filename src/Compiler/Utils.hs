@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, CPP #-}
+{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings #-}
 
 #include <ghcplatform.h>
 
@@ -13,6 +13,7 @@ module Compiler.Utils
     , exeFileName
     , mkGhcjsSuf
     , mkGhcjsOutput
+    , substPatterns
       -- * Source code and JS related utilities
     , ghcjsSrcSpan
     , isJsFile
@@ -32,7 +33,7 @@ import           GHC
 import           Platform
 import           HscTypes
 import           Bag
-import           Outputable
+import           Outputable        hiding ((<>))
 import           ErrUtils          (mkPlainErrMsg)
 import           Packages          (getPackageIncludePath)
 import           Config            (cProjectVersionInt)
@@ -44,7 +45,10 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 
 import           Data.Char
-import           Data.List         (isPrefixOf)
+import           Data.List         (isPrefixOf, foldl')
+import           Data.Monoid
+import           Data.Text         (Text)
+import qualified Data.Text         as T
 
 import           System.Directory  (doesFileExist, copyFile)
 import           System.Environment
@@ -190,3 +194,20 @@ simpleSrcErr df span msg = mkSrcErr (unitBag errMsg)
   where
     errMsg = mkPlainErrMsg df span (text msg)
 
+-- | replace {abc} and {{abc}} patterns (case sensitive), {abc} replaced first
+--   unknown {{abc}} patterns are replaced by the empty string
+substPatterns :: [(Text,Text)] -- ^ replace {abc}   -> def
+              -> [(Text,Text)] -- ^ replace {{abc}} -> def
+              -> Text          -- ^ input
+              -> Text          -- ^ result
+substPatterns single double = unmatched
+                            . f substDouble double
+                            . f substSingle single
+  where
+    f g xs z = foldl' (flip g) z xs
+    substSingle (var, val) = T.replace ("{"<>var<>"}") val
+    substDouble (var, val) = T.replace ("{{"<>var<>"}}") val
+    unmatched l | T.null b || T.null d = l
+                | otherwise            = a <> unmatched d
+          where (a,b) = T.breakOn "{{" l
+                (c,d) = T.breakOn "}}" b

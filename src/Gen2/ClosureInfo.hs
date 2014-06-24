@@ -14,7 +14,6 @@ import qualified Data.Text as T
 import           Data.Typeable (Typeable)
 
 import           Compiler.JMacro
-import           Compiler.Settings
 
 import           Gen2.StgAst ()
 import           Gen2.Utils
@@ -298,7 +297,6 @@ setObjInfoL debug obj rs (CILayoutUnknown size) t n a =
 setObjInfoL debug obj rs (CILayoutFixed size layout) t n a =
   setObjInfo debug obj t n xs a size rs
     where
-      tag  = toJExpr size
       xs   = toTypeList layout
 
 toTypeList :: [VarType] -> [Int]
@@ -362,13 +360,13 @@ instance ToJExpr StaticArg where
     allocDynamicE def (ValExpr . JVar . TxtI $ c) (map toJExpr args)
 
 instance ToJExpr StaticLit where
-  toJExpr (BoolLit b)   = toJExpr b
-  toJExpr (IntLit i)    = toJExpr i
-  toJExpr NullLit       = jnull
-  toJExpr (DoubleLit d) = toJExpr (unSaneDouble d)
-  toJExpr (StringLit t) = [je| h$str(`t`) |]                           -- fixme this duplicates the string!
-  toJExpr (BinLit b)    = [je| h$rstr(`map toInteger (B.unpack b)`) |] -- fixme this duplicates the string
-  toJExpr (LabelLit isFun lbl) = [je| `JVar (TxtI lbl)` |]
+  toJExpr (BoolLit b)           = toJExpr b
+  toJExpr (IntLit i)            = toJExpr i
+  toJExpr NullLit               = jnull
+  toJExpr (DoubleLit d)         = toJExpr (unSaneDouble d)
+  toJExpr (StringLit t)         = [je| h$str(`t`) |]                           -- fixme this duplicates the string!
+  toJExpr (BinLit b)            = [je| h$rstr(`map toInteger (B.unpack b)`) |] -- fixme this duplicates the string
+  toJExpr (LabelLit _isFun lbl) = [je| `JVar (TxtI lbl)` |]
 
 -- | declare and do first-pass init of a global object (create JS object for heap objects)
 staticDeclStat :: StaticInfo
@@ -437,6 +435,6 @@ instance Default CgSettings where
   def = CgSettings False False False False False False False False
 
 dfCgSettings :: DynFlags -> CgSettings
-dfCgSettings df = def { csTraceRts  = "-DGHCJS_TRACE_RTS" `elem` opt_P df
-                      , csAssertRts = buildingDebug df
+dfCgSettings df = def { csTraceRts  = "-DGHCJS_TRACE_RTS"  `elem` opt_P df
+                      , csAssertRts = "-DGHCJS_ASSERT_RTS" `elem` opt_P df
                       }

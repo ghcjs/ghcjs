@@ -1,2 +1,2 @@
-user error (Pattern match failure in do expression at test/pkg/base/genericNegative001.hs:5:2-6)
+user error (Pattern match failure in do expression at pkg/base/genericNegative001.hs:5:2-6)
 

@@ -51,27 +51,14 @@ import           Gen2.ClosureInfo
 import qualified Gen2.Object    as Object
 import qualified Gen2.Optimizer as Optimizer
 
-data CompactorState =
-  CompactorState { _identSupply   :: [Ident]               -- ^ ident supply for new names
-                 , _nameMap       :: !(HashMap Text Ident) -- ^ renaming mapping for internal names
-                 , _entries       :: !(HashMap Text Int)   -- ^ entry functions (these get listed in the metadata init array)
-                 , _numEntries    :: !Int
-                 , _statics       :: !(HashMap Text Int)   -- ^ mapping of global closure -> index in current block, for static initialisation
-                 , _numStatics    :: !Int                  -- ^ number of static entries
-                 , _labels        :: !(HashMap Text Int)   -- ^ non-Haskell JS labels
-                 , _numLabels     :: !Int                  -- ^ number of labels
-                 , _parentEntries :: !(HashMap Text Int)   -- ^ entry functions we're not linking, offset where parent gets [0..n], grantparent [n+1..k] etc
-                 , _parentStatics :: !(HashMap Text Int)   -- ^ objects we're not linking in base bundle
-                 , _parentLabels  :: !(HashMap Text Int)   -- ^ non-Haskell JS labels in parent
-                 } deriving (Show)
-
-makeLenses ''CompactorState
-
 renamedVars :: [Ident]
 renamedVars = map (\(TxtI xs) -> TxtI ("h$$"<>xs)) Optimizer.newLocals
 
 emptyCompactorState :: CompactorState
 emptyCompactorState = CompactorState renamedVars HM.empty HM.empty 0 HM.empty 0 HM.empty 0 HM.empty HM.empty HM.empty
+
+emptyBase :: Base
+emptyBase = Base emptyCompactorState [] S.empty
 
 -- | make a base state from a CompactorState: empty the current symbols sets, move everything to
 --   the parent
@@ -414,12 +401,11 @@ encodeDouble (SaneDouble d)
 encodeMax :: Integer
 encodeMax = 737189
 
-{-
-  Base files contain a list of functions already linked from
-  elsewhere. They also keep track of linked packages and the
-  data required for link-time optimization
+{- |
+  The Base data structure contains the information we need
+  to do incremental linking against a base bundle.
 
-  base format:
+  base file format:
   GHCJSBASE
   [renamer state]
   [linkedPackages]
@@ -428,19 +414,9 @@ encodeMax = 737189
   [symbols]
  -}
 
-data Base = Base { baseCompactorState :: CompactorState
-                 , basePkgs           :: [Text]
-                 , baseUnits          :: Set (Object.Package, Text, Int)
-                 }
-
-emptyBase :: Base
-emptyBase = Base emptyCompactorState [] S.empty
-
-renderBase :: CompactorState                         -- ^ compactor state
-           -> [Text]                                 -- ^ packages linked
-           -> Set (Object.Package, Text, Int)        -- ^ linkable units contained in base
+renderBase :: Base                                   -- ^ base metadata
            -> BL.ByteString                          -- ^ rendered result
-renderBase cs packages funs = DB.runPut $ do
+renderBase (Base cs packages funs) = DB.runPut $ do
   DB.putByteString "GHCJSBASE"
   putCs cs
   putList DB.put packages
@@ -472,9 +448,8 @@ renderBase cs packages funs = DB.runPut $ do
     -- fixme group things first
     putFun (p,m,s) = pi (pkgsM M.! p) >> pi (modsM M.! m) >> DB.put s
 
-loadBase :: Maybe FilePath -> IO Base
-loadBase Nothing = return emptyBase
-loadBase (Just file) = DB.runGet getBase <$> BL.readFile file
+loadBase :: FilePath -> IO Base
+loadBase file = DB.runGet getBase <$> BL.readFile file
   where
     gi :: DB.Get Int
     gi = fromIntegral <$> DB.getWord32le

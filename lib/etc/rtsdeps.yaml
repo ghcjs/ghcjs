@@ -1,0 +1,26 @@
+# symbols that the RTS depends on, these are always linked, even if the program
+# does not directly refer to them
+
+base:
+  GHC.Conc.Sync:          reportError
+  Control.Exception.Base: nonTermination
+  GHC.Exception:          SomeException
+  GHC.TopHandler:         runMainIO
+  GHC.Base:               $fMonadIO
+ghc-prim:
+  GHC.Types:
+    - ":"
+    - "[]"
+ghcjs-prim:
+  GHCJS.Prim:
+    - JSRef
+    - JSException
+    - $fTypeableJSException
+    - $fShowJSException
+    - $fExceptionJSException
+    - $fTypeableJSException
+    - $fShowJSException
+  GHCJS.Prim.Internal:
+    - wouldBlock
+    - blockedIndefinitelyOnMVar
+    - blockedIndefinitlyOnSTM

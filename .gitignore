@@ -1,19 +1,6 @@
-/base-*
-/ghc-*
 /dist
-/examples/main/*.hi
-/examples/main/*.o
-/examples/main/*.c
-/examples/main/*.h
-/examples/main/*.js
-/package.lkshf
-/*.lkshf
-/.shelly/
 /vendor/
 /GNUmakefile
-/ghc.mk
-*.gen2.js
-*.gen2.ji
 *.js_hi
 *.hi
 *.o
@@ -22,3 +9,7 @@
 *_stub.h
 .fuse_hidden*
 *~
+\#*
+.#*
+/lib/cache/*.tar
+/lib/cache/build

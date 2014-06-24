@@ -6,7 +6,7 @@ module GHCJS
     , module Compiler.Program
     ) where
 
-import GHC
+import GHC hiding (setSessionDynFlags)
 import Compiler.GhcjsProgram
 import Compiler.Program
 

@@ -1,0 +1,11 @@
+#
+# on Windows, we cannot reliably run wrapper scripts. Therefore we run the executable
+# directly and have it read this file for extra arguments to prepend on the command line.
+# It has to be in the same path as the executable and have the same name, with the
+# .options extension appended.
+#
+# Every non-empty line not starting with a hash is treated as one argument
+# the Setup program does the same variable substitution as it does with the wrapper scripts
+#
+-B{topdir}
+

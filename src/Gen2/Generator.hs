@@ -149,7 +149,7 @@ data LinkableUnit = LinkableUnit
 genUnits :: DynFlags
          -> Module
          -> StgPgm
-         -> G (Object.SymbolTable, [LinkableUnit])
+         -> G (Object.SymbolTable, [LinkableUnit]) -- ^ the final symbol table and the linkable units
 genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
     where
       go :: Int                 -- ^ the block we're generating (block 1 is the global block for the module)
@@ -163,8 +163,8 @@ genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
       go _ st []     = return (st, [])
 
 
-      generateGlobalBlock :: (Object.SymbolTable, [LinkableUnit]) ->
-                             G (Object.SymbolTable, [LinkableUnit])
+      generateGlobalBlock :: (Object.SymbolTable, [LinkableUnit])
+                          -> G (Object.SymbolTable, [LinkableUnit])
       generateGlobalBlock (st, lus) = do
         glbl <- use gsGlobal
         (st', ss, bs) <- objectEntry m st [] [] []
@@ -172,6 +172,7 @@ genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
                          . jsSaturate (Just $ modulePrefix m 1)
                          $ mconcat (reverse glbl)
         return (st', LinkableUnit ss bs [] [] : lus)
+
       -- | Generate the linkable unit for one binding or group of
       --   mutually recursive bindings
       generateBlock :: Object.SymbolTable
@@ -563,7 +564,7 @@ genBind ctx bndr =
      addEvalRhs c ((b,r):xs)
        | (StgRhsCon{}) <- r                         = addEvalRhs (addEval b c) xs
        | (StgRhsClosure _ _ _ ReEntrant _ _ _) <- r = addEvalRhs (addEval b c) xs
-       | otherwise = addEvalRhs c xs
+       | otherwise                                  = addEvalRhs c xs
 
 
 -- generate the entry function for a local closure

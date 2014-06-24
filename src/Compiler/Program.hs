@@ -90,11 +90,10 @@ main = do
    hSetBuffering stderr LineBuffering
    Ghcjs.ghcjsErrorHandler defaultFatalMessager defaultFlushOut $ do
     -- 1. extract the -B flag from the args
-    argv0 <- getArgs
+    (argv0, booting, booting_stage1) <- Ghcjs.getWrappedArgs
 
     -- fall back to native GHC if we're booting (we can't build Setup.hs with GHCJS yet)
-    booting <- Ghcjs.getEnvOpt "GHCJS_BOOTING"
-    when (booting && any ("Cabal-" `isPrefixOf`) argv0) Ghcjs.bootstrapFallback
+    when (booting_stage1 && any ("Cabal-" `isPrefixOf`) argv0) Ghcjs.bootstrapFallback
 
     let (minusB_args, argv1) = partition ("-B" `isPrefixOf`) argv0
         mbMinusB | null minusB_args = Nothing
@@ -126,25 +125,22 @@ main = do
                    ShowNumGhcVersion       -> putStrLn cProjectVersion
                    ShowOptions             -> showOptions
          Right postStartupMode -> do
-          when (not booting) Ghcjs.checkIsBooted
+          when (not booting) (Ghcjs.checkIsBooted mbMinusB)
             -- start our GHC session
 
-          let runPostStartup native = Ghcjs.runGhcSession mbMinusB $ do
+          let runPostStartup native = GHC.runGhc mbMinusB $ do
 
                dflags0 <- GHC.getSessionDynFlags
+               dflags1 <- return dflags0 -- Ghcjs.addPkgConf dflags0 -- Use the GHCJS user package DB
 
-               dflags1 <- if isJust mbMinusB
-                            then return dflags0
-                            else liftIO (Ghcjs.addPkgConf dflags0)
-
-               dataDir <- liftIO Ghcjs.ghcjsDataDir
-               let settings0 = (settings dflags1)
-                     { sGhcUsagePath  = dataDir ++ "/doc/ghcjs-usage.txt"
-                     , sGhciUsagePath = dataDir ++ "/doc/ghci-usage.txt"
+               let dataDir = Ghcjs.getLibDir dflags1
+                   settings0 = (settings dflags1)
+                     { sGhcUsagePath  = dataDir </> "doc" </> "ghcjs-usage.txt"
+                     , sGhciUsagePath = dataDir </> "doc" </> "ghci-usage.txt"
                      }
                    dflags = dflags1 { settings = settings0 }
 
-               GHC.setSessionDynFlags dflags
+               Ghcjs.setSessionDynFlags dflags
 
                case postStartupMode of
                 Left preLoadMode -> do
@@ -245,7 +241,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
                                                              }
                     _ -> dflags4
 
-  baseDir  <- liftIO Ghcjs.ghcjsDataDir
+  let baseDir = Ghcjs.getLibDir dflags4a
   dflags4b <- if native
                 then return (Ghcjs.setNativePlatform ghcjsSettings baseDir dflags4a)
                 else do
@@ -259,7 +255,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
                                    ++ ldInputs dflags4b }
 
   -- we've finished manipulating the DynFlags, update the session
-  _ <- GHC.setSessionDynFlags dflags5
+  _ <- Ghcjs.setSessionDynFlags dflags5
   dflags6 <- GHC.getSessionDynFlags
   hsc_env <- GHC.getSession
 
@@ -761,7 +757,7 @@ doMake srcs  = do
     dflags <- GHC.getSessionDynFlags
     let dflags' = dflags { ldInputs = map (FileOption "") o_files
                                       ++ ldInputs dflags }
-    _ <- GHC.setSessionDynFlags dflags'
+    _ <- Ghcjs.setSessionDynFlags dflags'
 
     targets <- mapM (uncurry GHC.guessTarget) hs_srcs
     GHC.setTargets targets

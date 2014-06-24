@@ -1,167 +1,368 @@
-{-# LANGUAGE CPP, ExtendedDefaultRules, OverloadedStrings, ScopedTypeVariables #-}
+{- |
+    The ghcjs-boot program installs the libraries and runtime system for GHCJS
+
+    There are two types of installation:
+
+    - release (default):
+        install ghcjs-boot and shims from the tar cache archives included
+        in the package
+
+    - development:
+        install ghcjs-boot and shims from their git repository
+
+    You can customize the boot configuration in boot.yaml and override some
+    of the options on the command line.
+
+    If you want to install to a different directory, set the ghcjs and ghcjs-pkg
+    programs to wrapper scripts that pass the correct -B flag to the executable
+    (see lib/etc/ghcjs.sh and lib/etc/ghcjs-pkg.sh in the GHCJS data dir)
+ -}
+
+{-# LANGUAGE CPP, ExtendedDefaultRules, OverloadedStrings, ScopedTypeVariables,
+             TemplateHaskell, LambdaCase, FlexibleInstances, DeriveDataTypeable,
+             GeneralizedNewtypeDeriving, NoMonomorphismRestriction, FlexibleContexts,
+             ImpredicativeTypes
+  #-}
 module Main where
 
-import Compiler.GhcjsProgram (printVersion)
-import Compiler.Info
-import Prelude hiding (FilePath)
-import Shelly
-import qualified GHC.Paths as Paths
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Monoid
-import Data.Maybe
-import Data.Char
-import Control.Applicative
-import Control.Monad
-import Options.Applicative
-import qualified Control.Exception as Ex
-import System.Exit (exitSuccess, exitFailure)
-import Filesystem.Path hiding ((<.>), (</>), null)
+import           Prelude                         hiding (FilePath, forM_, elem, mapM_, any, concat, concatMap)
 
-import qualified Data.ByteString.Lazy as BL
-import Network.HTTP (simpleHTTP, getRequest)
-import Network.HTTP.Base (Response(..), Request(..), RequestMethod(..), mkRequest)
-import Network.Stream (Result, ConnError(..))
-import Network.URI (parseURI)
-import qualified Codec.Compression.GZip as GZip
-import qualified Codec.Compression.BZip as BZip
-import qualified Codec.Archive.Tar as Tar
+import qualified Distribution.Simple.Utils       as Cabal
+
+import qualified Codec.Archive.Tar               as Tar
+import qualified Codec.Archive.Tar.Entry         as Tar
+
+import           Control.Applicative
+import qualified Control.Exception               as Ex
+import           Control.Lens                    hiding ((<.>))
+import           Control.Monad                   (void, when, unless, mplus, join)
+import           Control.Monad.Reader            (MonadReader, ReaderT(..), MonadIO, ask, local, lift, liftIO)
+
+import qualified Data.ByteString                 as B
+import qualified Data.ByteString.Lazy            as BL
+import           Data.Char
+import           Data.Data
+import           Data.Data.Lens
+import           Data.Foldable
+import qualified Data.HashMap.Strict             as HM
+import           Data.List                       (intercalate, transpose)
+import           Data.Maybe
+import           Data.Monoid
+import           Data.Text                       (Text)
+import qualified Data.Text                       as T
+import qualified Data.Text.Encoding              as T
+import qualified Data.Text.IO                    as T
+import           Data.Time.Clock
+import           Data.Typeable
+import qualified Data.Vector                     as V
+import           Data.Yaml                       ((.:))
+import qualified Data.Yaml                       as Yaml
+
+import           Filesystem                      (getWorkingDirectory, getModified, getSize)
+import           Filesystem.Path                 hiding ((<.>), (</>), null, concat)
+
+import qualified Network.Browser                 as Br
+import           Network.HTTP                    (mkRequest, RequestMethod(..), Response(..))
+import           Network.URI                     (parseURI, URI(..))
+
+import           Options.Applicative             hiding (info, (&))
+import qualified Options.Applicative             as O
+
+import           System.Directory                (findExecutable)
+import           System.Environment              (getEnvironment)
+import           System.Environment.Executable   (getExecutablePath)
+import           System.Exit                     (exitSuccess, exitFailure, ExitCode(..))
+import qualified System.FilePath
+import           System.PosixCompat.Files        (setFileMode)
+import           System.Process                  (readProcessWithExitCode)
+
+import           Shelly                          ((<.>),{-(</>),-} fromText)
+import qualified Shelly                          as Sh
+
+import           Text.Read                       (readEither)
+
+--
+import           Compiler.GhcjsProgram           (printVersion)
+import qualified Compiler.Info                   as Info
+import           Compiler.Utils                  as Utils
 
 default (Text)
 
-main = do
-    settings <- adjustDefaultSettings <$> execParser optParser'
-    when (showVersion settings) (printVersion >> exitSuccess)
-    r <- (shelly $ actions settings `catchany_sh` (return . Just))
-    maybe exitSuccess Ex.throwIO r
-  where
-    actions :: BootSettings -> Sh (Maybe Ex.SomeException)
-    actions s = verbosely . tracing False $ do
-      checkBuildTools s
-      e <- test_f ("data" </> "primops.txt.pp")
-      if initTree s
-        then initSourceTree e s
-        else when (not e) $ do
-          cdBase
-          e' <- test_d "ghcjs-boot"
-          if e' then cd "ghcjs-boot"
-                else do
-                  p <- pwd
-                  errorExit ("cannot find `" <> toTextIgnore (p </> "ghcjs-boot") <> "'\n" <>
-                             "perhaps you need to run `ghcjs-boot --init' or run from\n" <>
-                             "a directory with an initialized `ghcjs-boot' repository")
-      initPackageDB
-      dir <- pwd
-      echo ("booting from: " <> toTextIgnore dir)
-      pjs <- test_f ("data" </> "primops-js.txt")
-      when (not pjs) (errorExit $ "Cannot find `data/primops-js.txt': the source tree appears to have\n" <>
-                                  "not been initialized. Run `ghcjs-boot --init' first." )
-      installRts s
-      base <- liftIO getGlobalPackageBase
-      setenv "CFLAGS" $ "-I" <> toTextIgnore (base </> "lib" </> "include")
-      installFakes
-      installBootPackages s
-      checkShims
-      if quick s then do
-                   installGhcjsPackages s
-                   removeFakes
-                 else do
-                   installExtraPackages s -- this removes the fake Cabal
-                   installGhcjsPackages s
-      return Nothing
-
-data BootSettings = BootSettings { initTree  :: Bool      -- ^ initialize the source tree
-                                 , showVersion :: Bool    -- ^ show the version and exit
-                                 , preBuilt  :: Bool      -- ^ download prebuilt archive if available
-                                 , quick     :: Bool      -- ^ skip Cabal and ghcjs-base
-                                 , jobs      :: Int       -- ^ number of parallel jobs
-                                 , debug     :: Bool      -- ^ build debug version of the libraries
-                                 , verbose   :: Bool
-                                 , iconvInclude :: Maybe Text -- ^ directory containing iconv.h
-                                 , iconvLib     :: Maybe Text -- ^ directory containing iconv library
-                                 , gmpInclude   :: Maybe Text -- ^ directory containing gmp.h
-                                 , gmpLib       :: Maybe Text -- ^ directory containing gmp library
-                                 , gmpFramework :: Bool       -- ^ with-gmp-framework-preferred
-                                 , gmpInTree    :: Bool       -- ^ force using the in-tree GMP
-                                 , withCabal    :: Text -- ^ name of cabal executable, should be in PATH
-                                 , withCompiler :: Text -- ^ name of ghcjs compiler, should be in PATH
-                                 } deriving (Ord, Eq)
-
-adjustDefaultSettings :: BootSettings -> BootSettings
+isWindows :: Bool
 #ifdef WINDOWS
-adjustDefaultSettings s
-  | isNothing (gmpInclude s) && isNothing (gmpLib s) = s { gmpInTree = True }
-  | otherwise                                        = s
+isWindows = True
 #else
-adjustDefaultSettings = id
+isWindows = False
 #endif
 
-#ifdef WINDOWS
--- small 'boot' archive with tools (wget, xz and tar)
--- for getting the big archive more quickly
-buildToolsBootURI :: String
-buildToolsBootURI = "http://hdiff.luite.com/ghcjs/ghcjs-buildtools-boot-windows-" ++ getCompilerVersion ++ ".tar.gz"
+newtype Verbosity = Verbosity Int deriving (Eq, Ord, Data, Typeable)
+trace = Verbosity 3
+info  = Verbosity 2
+warn  = Verbosity 1
+err   = Verbosity 0
 
-buildToolsURI :: String
-buildToolsURI = "http://hdiff.luite.com/ghcjs/ghcjs-buildtools-windows-" ++ getCompilerVersion ++ ".tar.xz"
+data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove existing tree first
+                                 , _bsShowVersion  :: Bool       -- ^ show the version and exit
+                                 , _bsQuick        :: Bool       -- ^ don't install the Cabal library and stage2 packages
+                                 , _bsDev          :: Bool       -- ^ do a development boot
+                                 , _bsJobs         :: Maybe Int  -- ^ number of parallel jobs
+                                 , _bsDebug        :: Bool       -- ^ build debug version of the libraries (GHCJS records the STG in the object files for easier inspection)
+                                 , _bsVerbosity    :: Verbosity  -- ^ verbosity level 0..3, 2 is default
+                                 , _bsIconvInclude :: Maybe Text -- ^ directory containing iconv.h
+                                 , _bsIconvLib     :: Maybe Text -- ^ directory containing iconv library
+                                 , _bsGmpInclude   :: Maybe Text -- ^ directory containing gmp.h
+                                 , _bsGmpLib       :: Maybe Text -- ^ directory containing gmp library
+                                 , _bsGmpFramework :: Bool       -- ^ with-gmp-framework-preferred
+                                 , _bsGmpInTree    :: Bool       -- ^ force using the in-tree GMP
+                                 , _bsWithCabal    :: Maybe Text -- ^ location of cabal (cabal-install) executable, must have GHCJS support
+                                 , _bsWithGhcjs    :: Maybe Text -- ^ location of GHCJS compiler
+                                 , _bsWithGhcjsPkg :: Maybe Text -- ^ location of ghcjs-pkg program
+                                 , _bsWithGhc      :: Maybe Text -- ^ location of GHC compiler (must have a GHCJS-compatible Cabal library installed. ghcjs-boot copies some files from this compiler)
+                                 , _bsWithDataDir  :: Maybe Text -- ^ override data dir
+                                 , _bsWithConfig   :: Maybe Text -- ^ installation source configuration (default: lib/etc/boot-sources.yaml in data dir)
+                                 } deriving (Ord, Eq, Data, Typeable)
 
-buildToolsBootFile :: FilePath
-buildToolsBootFile = fromString ("ghcjs-buildtools-boot-windows-" ++ getCompilerVersion) <.> "tar" <.> "gz"
+{- | locations to get installation files from
 
-buildToolsFile :: FilePath
-buildToolsFile = fromString ("ghcjs-buildtools-windows-" ++getCompilerVersion) <.> "tar" <.> "xz"
+     files may have multiple locations, they're tried in order until one succeeds
 
-checkBuildTools :: BootSettings -> Sh ()
-checkBuildTools s = do
-  mw <- sub $ do
-    cdBase
-    base <- absPath =<< pwd
-    mw <- canonicalize (base </> ".." </> "mingw")
-    mingwInstalled <- test_d mw
-    when (not mingwInstalled) $ do
-      echo "copying MingW installation"
-      cp_r (Paths.libdir </> ".." </> "mingw") (base </> "..")
-    return mw
-  bt <- sub $ do
-    cdBase
+     locations are typically read from boot-sources.yaml, customize the defaults
+     in lib/etc/boot-sources.yaml in the installed data dir, or use
+     the --sources or --datadir options
+ -}
+data BootSources = BootSources { _bsrcShims                 :: [Text]
+                               , _bsrcBoot                  :: [Text]
+                               , _bsrcTest                  :: [Text]
+                               , _bsrcEtc                   :: [Text]
+                               , _bsrcDoc                   :: [Text]
+                               , _bsrcShimsDev              :: [Text]
+                               , _bsrcShimsDevBranch        :: Text
+                               , _bsrcBootDev               :: [Text]
+                               , _bsrcBootDevBranch         :: Text
+                               , _bsrcBuildtoolsWindows     :: [Text]
+                               , _bsrcBuildtoolsBootWindows :: [Text]
+                               } deriving (Data, Typeable)
+
+{- | Stage configuration file: packages to install in each stage
+
+     see boot.yaml for more information
+ -}
+data BootStages = BootStages { _bstStage1a   :: Stage
+                             , _bstStage1b   :: Stage
+                             , _bstStage2    :: Stage
+                             , _bstPretend   :: [Package] -- ^ packages we pretend to have in stage one, but actually hand off to GHC
+                             , _bstCabal     :: Package   -- ^ installed between 1b and 2, only when doing a full boot
+                             , _bstGhcjsPrim :: Package   -- ^ installed between 1a and 1b
+                             } deriving (Data, Typeable)
+
+type Stage   = [CondPackage]
+type Package = Text          -- ^ just the package name, can be a directory name
+                             --   (starting with ./ relative to the ghcjs-boot root),
+                             --   a url or a plain package name
+
+data PlatformCond = Windows | Unix  deriving (Eq, Ord, Enum, Data, Typeable)
+data BootTypeCond = Full    | Quick deriving (Eq, Ord, Enum, Data, Typeable)
+
+data CondPackage = CondPackage { _cpPlatform :: Maybe PlatformCond
+                               , _cpBootType :: Maybe BootTypeCond
+                               , _cpPackage  :: Package
+                               } deriving (Data, Typeable)
+
+data BootLocations = BootLocations { _blGhcjsTopDir :: FilePath -- ^ install to here
+                                   , _blGhcjsLibDir :: FilePath
+                                   , _blGhcLibDir   :: FilePath -- ^ copy GHC files from here
+                                   , _blGlobalDB    :: FilePath -- ^ global package database
+                                   , _blUserDB      :: FilePath -- ^ user package database
+                                   } deriving (Data, Typeable)
+
+data Program a = Program { _pgmName    :: Text           -- ^ program name for messages
+                         , _pgmSearch  :: Text           -- ^ name searched for when configuring the program (from command line or config file)
+                         , _pgmVersion :: Maybe Text     -- ^ version if known
+                         , _pgmLoc     :: Maybe FilePath -- ^ absolute path to the program
+                         , _pgmArgs    :: [Text]         -- ^ extra arguments to pass to the program
+                         } deriving (Data, Typeable)
+
+data Required = Required deriving (Data, Typeable)
+data Optional = Optional deriving (Data, Typeable)
+
+class MaybeRequired a where isRequired :: a -> Bool
+instance MaybeRequired (Program Optional) where isRequired = const False
+instance MaybeRequired (Program Required) where isRequired = const True
+
+-- | configured programs, fail early if any of the required programs is missing
+data BootPrograms = BootPrograms { _bpGhcjs      :: Program Required
+                                 , _bpGhcjsPkg   :: Program Required
+                                 , _bpGhc        :: Program Required
+                                 , _bpGhcPkg     :: Program Required
+                                 , _bpCabal      :: Program Required
+                                 , _bpGit        :: Program Optional
+                                 , _bpAlex       :: Program Optional
+                                 , _bpHappy      :: Program Optional
+                                 , _bpPatch      :: Program Optional
+                                 , _bpTar        :: Program Optional
+                                 , _bpCpp        :: Program Optional
+                                 , _bpBash       :: Program Optional
+                                 , _bpAutoreconf :: Program Optional
+                                 , _bpMake       :: Program Optional
+                                 } deriving (Data, Typeable)
+
+data BootEnv = BootEnv { _beSettings  :: BootSettings
+                       , _beSources   :: BootSources
+                       , _beLocations :: BootLocations
+                       , _bePrograms  :: BootPrograms
+                       , _beStages    :: BootStages
+                       }
+
+data BootConfigFile = BootConfigFile BootStages BootSources BootPrograms
+  deriving (Data, Typeable)
+
+makeLenses ''Program
+makeLenses ''CondPackage
+makeLenses ''BootSettings
+makeLenses ''BootSources
+makeLenses ''BootLocations
+makeLenses ''BootPrograms
+makeLenses ''BootStages
+makeLenses ''BootEnv
+
+resolveConds :: Bool -> [CondPackage] -> [Package]
+resolveConds quick stage =
+  let excluded cp = cp ^. cpPlatform == Just (if isWindows then Unix else Windows) ||
+                    cp ^. cpBootType == Just (if quick     then Full else Quick)
+  in  map (view cpPackage) (filter (not . excluded) stage)
+
+-- | all packages that can be built on this host
+resolveCondsHost :: [CondPackage] -> [Package]
+resolveCondsHost stage =
+  let excluded cp = cp ^. cpPlatform == Just (if isWindows then Unix else Windows)
+  in  map (view cpPackage) (filter (not . excluded) stage)
+
+-- | all packages from all stages that can be built on this machine
+allPackages :: B [Package]
+allPackages = p <$> view beStages
+  where
+    p s = [s ^. bstGhcjsPrim, s ^. bstCabal] ++
+          resolveCondsHost ((s ^. bstStage1a) ++ (s ^. bstStage1b) ++ (s ^. bstStage2))
+
+main :: IO ()
+main = do
+    settings <- adjustDefaultSettings <$> execParser optParser'
+    when (settings ^. bsShowVersion) (printVersion >> exitSuccess)
+    env <- initBootEnv settings
+    printBootEnvSummary env
+    r <- Sh.shelly $ runReaderT ((actions >> pure Nothing) `catchAny` (pure . Just)) env
+    maybe exitSuccess Ex.throwIO r
+  where
+    actions :: B ()
+    actions = verbosely . tracing False $ do
+      whenM (view (beSettings . bsClean)) cleanTree
+      removeCompleted
+      mapM_ addCheckpoint ["ghcjs-boot checkpoints file", "init"]
+      installBuildTools
+      view (beSettings . bsDev) >>= cond installDevelopmentTree installReleaseTree
+      initPackageDB
+      installRts
+      installEtc
+      installDocs
+      installTests
+      base <- view (beLocations . blGhcjsLibDir)
+      setenv "CFLAGS" $ "-I" <> toTextI (base </> "include")
+      installFakes
+      installStage1
+      removeFakes
+      unlessM (view $ beSettings . bsQuick) installStage2
+      addCompleted
+
+cleanTree :: B ()
+cleanTree = do
+  topDir <- view (beLocations . blGhcjsTopDir)
+  msg info ("cleaning installation tree " <> toTextI topDir)
+  hasCheckpoint "init" >>= cond (rm_rf topDir)
+    (failWith ("directory to clean might not be a GHCJS installation directory: " <> toTextI topDir <> ", not cleaning"))
+
+instance Yaml.FromJSON BootSources where
+  parseJSON (Yaml.Object v) = BootSources
+    <$> v ..: "shims" <*> v ..: "boot" <*> v ..: "test"
+    <*> v ..: "etc"   <*> v ..: "doc"
+    <*> v ..: "shims-dev"              <*> v  .: "shims-dev-branch"
+    <*> v ..: "ghcjs-boot-dev"         <*> v  .: "ghcjs-boot-dev-branch"
+    <*> v ..: "buildtools-windows"     <*> v ..: "buildtools-boot-windows"
+    where
+      o ..: p     = (nonempty =<< o .: p) <|> ((:[]) <$> o .: p)
+      nonempty xs = if null xs then mempty else return xs
+  parseJSON _ = mempty
+
+instance Yaml.FromJSON BootPrograms where
+  parseJSON (Yaml.Object v) = BootPrograms
+    <$> v ..: "ghcjs" <*> v ..: "ghcjs-pkg" <*> v ..: "ghc"  <*> v ..: "ghc-pkg"
+    <*> v ..: "cabal" <*> v ..: "git"       <*> v ..: "alex"
+    <*> v ..: "happy" <*> v ..: "patch"     <*> v ..: "tar"
+    <*> v ..: "cpp"   <*> v ..: "bash"      <*> v ..: "autoreconf"
+    <*> v ..: "make"
+    where
+      o ..: p = ((\t -> Program p t Nothing Nothing []) <$> o .: p) <|> (withArgs p =<< o .: p)
+      withArgs :: Text -> Yaml.Value -> Yaml.Parser (Program a)
+      withArgs p (Yaml.Object o) | [(k,v)] <- HM.toList o = Program p k Nothing Nothing <$> Yaml.parseJSON v
+      withArgs _ _                                        = mempty
+  parseJSON _ = mempty
+
+instance Yaml.FromJSON BootStages where
+  parseJSON (Yaml.Object v) = BootStages
+    <$> v ..: "stage1a"             <*> v ..: "stage1b" <*> v ..: "stage2"
+    <*> v .:: "stage1PretendToHave" <*> v  .: "cabal"   <*> v  .: "ghcjs-prim"
+    where
+      o .:: p = ((:[])<$>o.:p) <|> o.:p
+      o ..: p = pkgs Nothing Nothing =<< o .: p
+      pkgs plc btc (Yaml.Object o) | [(k,v)] <- HM.toList o = matchCond plc btc k v
+      pkgs plc btc (Yaml.String t)                          = pure [CondPackage plc btc t]
+      pkgs plc btc (Yaml.Array v)                           = concat <$> mapM (pkgs plc btc) (V.toList v)
+      pkgs _   _   _                                        = mempty
+      matchCond plc btc k v
+        | k == "IfWindows" && plc /= Just Unix    = pkgs (Just Windows) btc          v
+        | k == "IfUnix"    && plc /= Just Windows = pkgs (Just Unix)    btc          v
+        | k == "IfQuick"   && btc /= Just Full    = pkgs plc            (Just Quick) v
+        | k == "IfFull"    && btc /= Just Quick   = pkgs plc            (Just Full)  v
+        | otherwise                               = mempty
+  parseJSON _ = mempty
+
+instance Yaml.FromJSON BootConfigFile where
+  parseJSON (Yaml.Object v) = BootConfigFile
+    <$> v .: "packages" <*> v .: "sources" <*> v .: "programs"
+  parseJSON _ = mempty
+
+adjustDefaultSettings :: BootSettings -> BootSettings
+adjustDefaultSettings s
+  | isWindows && isNothing (s ^. bsGmpInclude) && isNothing (s ^. bsGmpLib) = s & bsGmpInTree .~ True
+  | otherwise                                                               = s
+
+{-
+  We install some build tools automatically if we're on Windows
+ -}
+installBuildTools :: B ()
+installBuildTools
+  | not isWindows = return ()
+  | otherwise = checkpoint' "buildtools" "buildtools already installed" $ do
+  mw <- subTop $ do
+    checkpoint' "mingw" "MingW installation already copied" $ do
+      msg info "MingW installation not found, copying from GHC"
+      flip cp_r ".." <^> beLocations . blGhcLibDir . to (</> (".." </> "mingw"))
+    canonicalize . (</> (".." </> "mingw")) =<< absPath =<< pwd
+  bt <- subTop $ do
     p <- absPath =<< pwd
     let bt = p </> "buildtools"
     toolsExist <- test_d "buildtools"
-    when (not toolsExist) $ do
-      if not (initTree s)
-        then do
-          echo "buildtools required for ghcjs-boot not installed"
-          echo "`ghcjs-boot --init` will automatically install them"
-          liftIO exitFailure
-        else do
-          toolsArchiveExists <- test_f buildToolsFile
-          toolsBootDirExists <- test_d "buildtools-boot"
-          when (not toolsArchiveExists || not toolsBootDirExists) $ do
-            unless toolsBootDirExists $ do
-              toolsBootArchiveExists <- test_f buildToolsBootFile
-              unless toolsBootArchiveExists $ do
-                echo "fetching extra buildtools"
-                res <- liftIO $ simpleHTTP (getBsRequest buildToolsBootURI)
-                case res of
-                  Left err -> do
-                    echo $ "could not download " <> T.pack buildToolsBootURI
-                    echo $ "error: " <> T.pack (show err)
-                    echo $ "you can manually get the file and place it in: " <> toTextIgnore p
-                    liftIO exitFailure
-                  Right response -> writeBinary buildToolsBootFile (rspBody response)
-              unpackTarGz "." buildToolsBootFile
-              prependPath [p </> "buildtools-boot" </> "bin"]
-            wget [T.pack buildToolsURI]
-          prependPath [p </> "buildtools-boot" </> "bin"]
-          echo "extracting buildtools"
-          tar ["-xJvf", toTextIgnore buildToolsFile]
+    unlessM (test_d "buildtools") $ do
+      unlessM (test_d "buildtools-boot") $
+        install' "Windows buildtools bootstrap archive" "buildtools-boot" <^> beSources . bsrcBuildtoolsBootWindows
+      prependPathEnv [p </> "buildtools-boot" </> "bin"]
+      install' "Windows buildtools" "buildtools" <^> beSources . bsrcBuildtoolsBootWindows
     return bt
-  prependPath [ mw </> "bin"
-              , bt </> "bin"
-              , bt </> "msys" </> "1.0" </> "bin"
-              , bt </> "git" </> "bin"
-              ]
-  setenv "MINGW_HOME" (toTextIgnore mw)
+  prependPathEnv [ mw </> "bin"
+                 , bt </> "bin"
+                 , bt </> "msys" </> "1.0" </> "bin"
+                 , bt </> "git" </> "bin"
+                 ]
+  setenv "MINGW_HOME" (toTextI mw)
   setenv "PERL5LIB" (msysPath $ bt </> "share" </> "autoconf")
   mkdir_p (bt </> "etc")
   writefile (bt </> "msys" </> "1.0" </> "etc" </> "fstab") $ T.unlines
@@ -169,66 +370,57 @@ checkBuildTools s = do
     , escapePath (bt </> "msys" </> "1.0" </> "bin") <> " /bin"
     ]
 
-prependPath :: [FilePath] -> Sh ()
-prependPath xs = do
+prependPathEnv :: [FilePath] -> B ()
+prependPathEnv xs = do
   path1 <- get_env "Path"
   path2 <- get_env "PATH"
   let path = maybe "" (";"<>) (path1 <> path2)
-      newPath = T.intercalate ";" (map toTextIgnore xs) <> path
+      newPath = T.intercalate ";" (map toTextI xs) <> path
   setenv "Path" newPath
   setenv "PATH" newPath
 
--- convert C:\x\y to /c/x/y
+-- convert C:\x\y to /c/x/y (only on Windows)
 msysPath :: FilePath -> Text
-msysPath p = let p' = toTextIgnore p
-                 backToForward '\\' = '/'
-                 backToForward x    = x
-             in "/" <> T.map backToForward (T.filter (/=':') p')
+msysPath p
+  | isWindows = let p' = toTextI p
+                    backToForward '\\' = '/'
+                    backToForward x    = x
+                in "/" <> T.map backToForward (T.filter (/=':') p')
+  | otherwise = toTextI p
 
 escapePath :: FilePath -> Text
-escapePath p = let p' = toTextIgnore p
+escapePath p = let p' = toTextI p
                    escape ' ' = "\\ "
                    escape c   = T.singleton c
                in  T.concatMap escape p'
-#else
-checkBuildTools :: BootSettings -> Sh ()
-checkBuildTools _ = return ()
-
-msysPath :: FilePath -> Text
-msysPath = toTextIgnore
-#endif
 
 optParser' :: ParserInfo BootSettings
-optParser' = info (helper <*> optParser) ( fullDesc <>
-                  header "GHCJS booter, build base libraries for the compiler" <>
-                  progDesc description
-                  )
+optParser' = O.info (helper <*> optParser)
+                    (fullDesc <>
+                       header "GHCJS booter, build base libraries for the compiler" <>
+                       progDesc description
+                    )
 
 description :: String
 description = unlines
-  [ "ghcjs-boot builds the base libraries for GHCJS."
-  , "If `ghcjs-boot' is run in a directory containing the `ghcjs-boot' [1] repository,"
-  , "the sources from the current directory are used. Otherwise, `ghcjs-boot'"
-  , "makes a global copy in `~/.ghcjs'"
-  , ""
-  , "[1] https://github.com/ghcjs/ghcjs-boot"
+  [ "ghcjs-boot builds an initial set of libraries for GHCJS."
   ]
 
 optParser :: Parser BootSettings
 optParser = BootSettings
-            <$> switch ( long "init"      <> short 'i' <>
-                  help "initialize the boot tree for first time build (or update an existing one)" )
+            <$> switch ( long "clean"      <> short 'c' <>
+                  help "clean the installation directory first" )
             <*> switch ( long "version" <>
-                  help "show the ghcjs-boot version")
-            <*> switch ( long "preBuilt"  <> short 'p' <>
-                  help "download prebuilt libraries for compiler (might not be available)" )
+                  help "show the ghcjs-boot version" )
             <*> switch ( long "quick"     <> short 'q' <>
                   help "quick boot (no Cabal or ghcjs-base, but enough to compile basic tests)" )
-            <*> option ( long "jobs"   <> short 'j' <> metavar "JOBS" <> value 1 <>
+            <*> switch ( long "dev"       <> short 'd' <>
+                  help "fetch development sources (requires more build tools)" )
+            <*> (optional . option) ( long "jobs"   <> short 'j' <> metavar "JOBS" <>
                   help "number of jobs to run in parallel" )
             <*> switch ( long "debug"   <> short 'd' <>
                   help "build debug libraries with extra checks" )
-            <*> switch ( long "verbose"   <> short 'v' <>
+            <*> (fmap Verbosity . option) ( long "verbosity"   <> short 'v' <> value 2 <>
                   help "verbose output" )
             <*> (optional . fmap T.pack . strOption) ( long "with-iconv-includes" <> metavar "DIR" <>
                   help "directory containing iconv.h" )
@@ -242,113 +434,100 @@ optParser = BootSettings
                   help "on OSX, prefer the GMP framework to the gmp lib" )
             <*> switch ( long "with-intree-gmp" <>
                   help "force using the in-tree GMP" )
-            <*> (fmap T.pack . strOption) ( long "with-cabal" <> metavar "PROGRAM" <> value "cabal" <>
+            <*> (optional . fmap T.pack . strOption) ( long "with-cabal" <> metavar "PROGRAM" <> value "cabal" <>
                   help "cabal program to use" )
-            <*> (fmap T.pack . strOption) ( long "with-compiler" <> metavar "PROGRAM" <> value "ghcjs" <>
+            <*> (optional . fmap T.pack . strOption) ( long "with-ghcjs" <> metavar "PROGRAM" <> value "ghcjs" <>
                   help "ghcjs program to use" )
+            <*> (optional . fmap T.pack . strOption ) (  long "with-ghcjs-pkg" <> metavar "PROGRAM" <> value "ghcjs-pkg" <>
+                  help "ghcjs-pkg program to use" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-ghc" <> metavar "PROGRAM" <> value "ghc" <>
+                  help "ghc program to use" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-datadir" <> metavar "DIR" <>
+                  help "data directory with libraries and configuration files" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-sources" <> metavar "DIR" <>
+                  help "installation source configuration file (default: boot-sources.yaml in datadir)" )
 
-initPackageDB :: Sh ()
+initPackageDB :: B ()
 initPackageDB = do
-  echo "creating package databases"
-  base <- liftIO getGlobalPackageBase
-  inst <- liftIO getGlobalPackageInst
-  rm_rf . fromString =<< liftIO getGlobalPackageDB
-  rm_rf . fromString =<< liftIO getUserPackageDB
-  mkdir_p (fromString base)
-  mkdir_p (fromString inst)
-  ghcjs_pkg' ["init", T.pack base <> "/package.conf.d"] `catchany_sh` const (return ())
-  ghcjs_pkg' ["init", T.pack inst <> "/package.conf.d"] `catchany_sh` const (return ())
+  msg info "creating package databases"
+  forM_ [blGlobalDB, blUserDB] $ \db -> do
+    db' <- view (beLocations . db)
+    rm_rf db' >> mkdir_p db'
+    ghcjs_pkg_ ["init", toTextI db'] `catchAny_` return ()
+  ghcjs_pkg_ ["recache", "--global"]
+  ghcjs_pkg_ ["recache", "--user"]
 
--- | these need to be installed in the boot setting:
---   fake Cabal package registered, GHCJS_BOOTING environment variable set
-bootPackages1 :: [String]
-bootPackages1 = [ "ghc-prim"
-                , "integer-gmp"
-                , "base"
-                ]
+bootDescr :: Text
+bootDescr = "boot libraries"
 
-bootPackages2 :: [String]
-bootPackages2 = [ "deepseq"
-                , "containers"
-                , "directory"
-                , "template-haskell"
-                , "array"
-                , "pretty"
-                , "time"
---                , "process"
-#ifdef WINDOWS
-                , "Win32"
-#else
-                , "unix"
-#endif
-                ]
+shimsDescr :: Text
+shimsDescr = "shims, runtime system and support libraries"
 
--- | We need to pretend that these are installed while building bootPackages
---   GHCJS itself will call GHC when any of these are used
---   these are removed again after booting
-fakePackages :: [String]
-fakePackages = [ "Cabal"
-               ]
+installDevelopmentTree :: B ()
+installDevelopmentTree = subTop $ do
+  p <- pwd
+  msgD info $ "preparing development boot tree"
+  checkpoint' "ghcjs-boot-git" "ghcjs-boot repository already cloned and prepared" $ do
+    testGit "ghcjs-boot" >>= \case
+      Just False -> failWith "ghcjs-boot already exists and is not a git repository"
+      Just True  -> do
+        msg info "ghcjs-boot repository already exists but checkpoint not reached, cleaning first, then cloning"
+        rm_rf "ghcjs-boot"
+        initGhcjsBoot
+      Nothing    -> do
+        msgD info "cloning ghcjs-boot git repository"
+        initGhcjsBoot
+  checkpoint' "shims-git" "shims repository already cloned" $ do
+    testGit "shims" >>= \case
+      Just False -> failWith "shims already exists and is not a git repository"
+      Just True  -> do
+        msgD info "shims repository already exists but checkpoint not reached, cleaning first, then cloning"
+        rm_rf "shims"
+        cloneGit shimsDescr "shims" bsrcShimsDevBranch bsrcShimsDev
+      Nothing    -> do
+        msgD info "cloning shims git repository"
+        cloneGit shimsDescr "shims" bsrcShimsDevBranch bsrcShimsDev
+  where
+    initGhcjsBoot = sub $ do
+      cloneGit bootDescr "ghcjs-boot"  bsrcBootDevBranch bsrcBootDev
+      cd "ghcjs-boot"
+      git ["submodule", "update", "--init", "--recursive"]
+      mapM_ patchPackage =<< allPackages
+      preparePrimops
+      buildGenPrim
+      cleanGmp
+    testGit d = cond (Just<$>test_d (d</>".git")) (pure Nothing) =<< test_d d
+    cloneGit descr repoName branch srcs = do
+      msgD info ("cloning git repository for " <> descr)
+      cloneGitSrcs descr <^> beSources . srcs
+      branch' <- view (beSources . branch)
+      (sub $ cd repoName >> git ["checkout", branch'])
+    cloneGitSrcs d [] = failWith ("could not clone " <> d <> ", no available sources")
+    cloneGitSrcs d (x:xs) = git ["clone", x] `catchAny_`
+      (msgD warn "clone failed, trying next source" >> cloneGitSrcs d xs)
 
--- | the GHCJS base libraries to install, except ghcjs-prim which is
---   installed earlier
-ghcjsPackages :: [String]
-ghcjsPackages = [ "ghcjs-base"
-                ]
-
--- | reduced set of packages for quick boot
-ghcjsQuickPackages = [ ]
-
-initSourceTree :: Bool -> BootSettings -> Sh ()
-initSourceTree localTree settings = do
-  if localTree
-    then do
-      p <- pwd
-      echo $ "preparing local boot tree ( " <> toTextIgnore p <> " )"
-      echo "boot tree in current dir: not git pulling automatically"
-      isGit <- test_d ".git"
-      when isGit $ do
-        git ["submodule", "update", "--init", "--recursive"]
-        git ["submodule", "foreach", "git", "reset", "--hard"]
-    else do
-      cdBase
-      p <- pwd
-      echo $ "preparing global boot tree ( " <> toTextIgnore (p </> "ghcjs-boot") <> " )"
-      e <- test_d "ghcjs-boot"
-      if e then do
-           cd "ghcjs-boot"
-           isGit <- test_d ".git"
-           if isGit
-             then do
-               echo "updating existing tree"
-               git ["submodule", "foreach", "git", "reset", "--hard"]
-               git ["pull", "--recurse-submodules"]
-             else echo "ghcjs-boot is not a git repository, not updating"
-         else do
-           echo "cloning new tree"
-           git ["clone", "https://github.com/ghcjs/ghcjs-boot"]
-           cd "ghcjs-boot"
-           git ["submodule", "update", "--init", "--recursive"]
-  forM_ (bootPackages1++bootPackages2) (patchPackage "boot")
-  extraPackages <- ls "extra"
-  forM_ extraPackages $ \p -> do
-                           isDir <- test_d p
-                           rp <- relativeTo "extra" p
-                           when isDir (patchPackage "extra" (toString rp))
-  preparePrimops
-  buildGenPrim
-  cleanGmp
+installReleaseTree :: B ()
+installReleaseTree = subTop $ do
+  msgD info "preparing release boot tree"
+  checkpoint' "ghcjs-boot-release" "ghcjs-boot tree already installed" $ do
+    whenM (test_d "ghcjs-boot") (msgD warn "existing ghcjs-boot tree found from incomplete installation")
+    install' bootDescr "ghcjs-boot" <^> beSources . bsrcBoot
+    preparePrimops
+    buildGenPrim
+  checkpoint' "shims-release" "shims tree already installed" $ do
+    whenM (test_d "shims") (msgD warn "existing shims tree found from incomplete installation")
+    install' shimsDescr "shims" <^> beSources . bsrcShims
 
 -- | preprocess primops.txt.pp, one version for the JS platform
 --   one for native
-preparePrimops :: Sh ()
-preparePrimops = sub $ do
-  echo "preparing primops"
-  cd "data"
+preparePrimops :: B ()
+preparePrimops = subTop' ("ghcjs-boot" </> "data") . checkpoint' "primops" "primops already prepared" $ do
+  msg info "preparing primops"
   mkdir_p "native"
-  cp (Paths.libdir </> "include" </> "MachDeps.h") "native"
-  cp (Paths.libdir </> "include" </> "ghcautoconf.h") "native"
-  cp (Paths.libdir </> "include" </> "ghcplatform.h") ("native" </> "ghc_boot_platform.h")
+  ghcLibDir <- view (beLocations . blGhcLibDir)
+  cp (ghcLibDir </> "include" </> "MachDeps.h") "native"
+  cp (ghcLibDir </> "include" </> "ghcautoconf.h") "native"
+  cp (ghcLibDir </> "include" </> "ghcplatform.h") ("native" </> "ghc_boot_platform.h")
   silently $ do
     primopsJs <- cpp ["-P", "-Ijs", "primops.txt.pp"]
     writefile "primops-js.txt" primopsJs
@@ -356,112 +535,108 @@ preparePrimops = sub $ do
     writefile "primops-native.txt" primopsNative
 
 -- | build the genprimopcode tool, this requires alex and happy
-buildGenPrim :: Sh ()
-buildGenPrim = sub $ do
-  cd ("utils" </> "genprimopcode")
-  e <- test_f "genprimopcode"
-  when (not e) $ do
-    alex  ["Lexer.x"]
-    happy ["Parser.y"]
+buildGenPrim :: B ()
+buildGenPrim = subTop' ("ghcjs-boot" </> "utils" </> "genprimopcode") $ do
+  make "genprimopcode" [] $ do
+    make "Lexer.hs"  ["Lexer.x"]  (alex ["Lexer.x"])
+    make "Parser.hs" ["Parser.y"] (happy ["Parser.y"])
     ghc   ["-o", "genprimopcode", "-O", "Main.hs", "+RTS", "-K128M"]
 
-cleanGmp :: Sh ()
-cleanGmp = sub $ do
-  cd ("boot" </> "integer-gmp")
+-- fixme this hardcodes the location of integer-gmp
+integerGmp :: FilePath
+integerGmp = "ghcjs-boot" </> "boot" </> "integer-gmp"
+
+cleanGmp :: B ()
+cleanGmp = subTop' integerGmp $ do
   rm_rf ("gmp" </> "intree")
   rm_f ("mkGmpDerivedConstants" </> exe "mkGmpDerivedConstants")
   rm_f "GmpDerivedConstants.h"
 
-prepareGmp :: BootSettings -> Sh ()
-prepareGmp settings = sub $ do
-  cd ("boot" </> "integer-gmp")
+prepareGmp :: B ()
+prepareGmp = subTop' integerGmp . checkpoint' "gmp" "in-tree gmp already prepared" $ do
   intreeInstalled <- test_f ("gmp" </> "intree" </> "include" </> "gmp.h")
-  when (gmpInTree settings && not intreeInstalled) $ do
-      sub $ do
-        cd "gmp"
-        lsFilter "." isGmpSubDir rm_rf
-        echo "unpacking in-tree GMP"
-        lsFilter "tarball" (return . isTarball) (unpackTarBz2 ".")
-        d <- pwd
-        ad <- absPath d
-        lsFilter "." isGmpSubDir $ \dir -> do
-          -- patch has already been applied
-          cd dir
-          adir <- absPath dir
-          echo ("building GMP in dir: " <> toTextIgnore adir)
-          configure ["--prefix=" <> msysPath (ad </> "intree")]
-          make []
-          make ["install"]
-  constantsGenerated <- test_f "GmpGeneratedConstants.h"
-  when (not constantsGenerated) $ do
-    if gmpInTree settings
-	  then do
-        ad <- absPath =<< pwd
-        buildGmpConstants (gmpInclude settings `mplus`
-	      Just (toTextIgnore (ad </> "gmp" </> "intree" </> "include")))
-      else
-        buildGmpConstants (gmpInclude settings)
+  gmpInTree <- view (beSettings . bsGmpInTree)
+  sub $ when (gmpInTree && not intreeInstalled) $ do
+    cd "gmp"
+    lsFilter "." isGmpSubDir rm_rf
+    msg info "unpacking in-tree GMP"
+    lsFilter "tarball" (return . isTarball) (installArchive "in-tree libgmp" ".")
+    d <- pwd
+    ad <- absPath d
+    lsFilter "." isGmpSubDir $ \dir -> do
+      -- patch has already been applied
+      cd dir
+      adir <- absPath dir
+      msgD info "building GMP"
+      configure ["--prefix=" <> msysPath (ad </> "intree")]
+      runMake []
+      runMake ["install"]
+  make "GmpGeneratedConstants.h" [] $ do
+    gmpIncl <- view (beSettings . bsGmpInclude)
+    p <- absPath =<< pwd
+    buildGmpConstants (gmpIncl `mplus` bj gmpInTree (toTextI $ p </> "gmp" </> "intree" </> "include"))
     where
-      lsFilter :: FilePath -> (FilePath -> Sh Bool) -> (FilePath -> Sh ()) -> Sh ()
+      lsFilter :: FilePath -> (FilePath -> B Bool) -> (FilePath -> B ()) -> B ()
       lsFilter dir p a = ls dir >>= mapM_ (\x -> p x >>= flip when (a x))
-      isTarball file = ".tar.bz2" `T.isSuffixOf` toTextIgnore file
-      isGmpSubDir dir = (("gmp-" `T.isPrefixOf`) . toTextIgnore) <$> relativeTo "." dir
+      isTarball file = any (`T.isSuffixOf` toTextI file) [".tar", ".tar.bz2"]
+      isGmpSubDir dir = (("gmp-" `T.isPrefixOf`) . toTextI) <$> relativeTo "." dir
 
-buildGmpConstants :: Maybe Text -> Sh ()
-buildGmpConstants includeDir = sub $ do
-  echo "generating GMP derived constants"
+buildGmpConstants :: Maybe Text -> B ()
+buildGmpConstants includeDir = subTop' integerGmp $ do
+  msg info "generating GMP derived constants"
   cd "mkGmpDerivedConstants"
   ghc $ maybe [] (\d -> ["-I" <> d]) includeDir ++
     ["-fforce-recomp", "-no-hs-main", "-o", "mkGmpDerivedConstants", "mkGmpDerivedConstants.c"]
   p <- pwd
-  constants <- run (p </> "mkGmpDerivedConstants") []
+  constants <- run (Program "" "" Nothing (Just $ p </> "mkGmpDerivedConstants") []) []
   writefile "GmpDerivedConstants.h" constants
 
-patchPackage :: FilePath -> String -> Sh ()
-patchPackage base pkg = sub $ do
-  let p = "patches" </> fromString pkg <.> "patch"
-  e <- test_f p
-  when e $ do
-    echo $ "applying patch: " <> toTextIgnore p
-    readfile p >>= setStdin
-    cd (base </> fromString pkg)
-    ignoreExcep $ patch ["-p1", "-N"]
+patchPackage :: Package -> B ()
+patchPackage pkg
+  | Just pkg' <- T.stripPrefix "./" (T.strip pkg) =
+      let pkgName = last (T.splitOn "/" pkg')
+          p       = "patches" </> fromText pkgName <.> "patch"
+          applyPatch = do
+            msg info ("applying patch: " <> toTextI p)
+            readfile p >>= setStdin
+            cd (fromText pkg')
+            patch ["-p1", "-N"]
+      in  sub $ cond applyPatch (msg info $ "no patch for package " <> pkgName <> " found") =<< test_f p
+  | otherwise = return ()
 
-installRts :: BootSettings -> Sh ()
-installRts settings = do
-  echo "installing RTS"
-  dest <- liftIO getGlobalPackageDB
-  base <- liftIO getGlobalPackageBase
-  let lib       = base </> "lib"
-      inc       = lib  </> "include"
-      incNative = lib  </> "include_native"
-      rtsLib    = lib  </> "rts-1.0"
-  rtsConf <- readfile (Paths.libdir </> "package.conf.d" </> "builtin_rts.conf")
-  writefile (dest </> "builtin_rts.conf") $
-                 fixRtsConf (toTextIgnore inc) (toTextIgnore rtsLib) rtsConf
-  ghcjs_pkg' ["recache", "--global"]
-  mkdir_p lib
-  mkdir_p inc
-  sub $ cd (Paths.libdir </> "include") >> cp_r "." incNative
-  sub $ cd (Paths.libdir </> "rts-1.0") >> cp_r "." rtsLib
+installRts :: B ()
+installRts = subTop' "ghcjs-boot" $ do
+  msg info "installing RTS"
+  globalDB <- view (beLocations . blGlobalDB)
+  ghcLib   <- view (beLocations . blGhcLibDir)
+  ghcjsLib <- view (beLocations . blGhcjsLibDir)
+  ghcjsTop <- view (beLocations . blGhcjsTopDir)
+  let inc       = ghcjsLib </> "include"
+      incNative = ghcjsLib </> "include_native"
+      rtsLib    = ghcjsLib </> "rts-1.0"
+  rtsConf <- readfile (ghcLib </> "package.conf.d" </> "builtin_rts.conf")
+  writefile (globalDB </> "builtin_rts.conf") (fixRtsConf (toTextI inc) (toTextI rtsLib) rtsConf)
+  ghcjs_pkg_ ["recache", "--global", "--no-user-package-db"]
+  forM_ [ghcjsLib, inc, incNative] mkdir_p
+  sub $ cd (ghcLib </> "include") >> cp_r "." incNative
+  sub $ cd (ghcLib </> "rts-1.0") >> cp_r "." rtsLib
   -- fixme this
   -- sub $ cd ("data" </> "include")       >> cp_r "." inc
   sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
-  cp (Paths.libdir </> "settings")          (lib </> "settings")
-  cp (Paths.libdir </> "platformConstants") (lib </> "platformConstants")
-  cp (Paths.libdir </> "settings")          (base </> "settings")
-  cp (Paths.libdir </> "platformConstants") (base </> "platformConstants")
-  cp (Paths.libdir </> exe "unlit")         (base </> exe "unlit")
+  cp (ghcLib </> "settings")          (ghcjsLib </> "settings")
+  cp (ghcLib </> "platformConstants") (ghcjsLib </> "platformConstants")
+  -- cp (ghcLib </> "settings")          (base </> "settings")
+  -- cp (ghcLib </> "platformConstants") (base </> "platformConstants")
+  let unlitDest = ghcjsLib </> exe "unlit"
+  cp (ghcLib </> exe "unlit") unlitDest
+  liftIO . Cabal.setFileExecutable . toStringI =<< absPath unlitDest
   -- required for integer-gmp
-  prepareGmp settings
+  prepareGmp
   cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
-#ifdef WINDOWS
-  cp (Paths.libdir </> exe "touchy") (base </> exe "touchy")
-#endif
-  echo "RTS prepared"
+  when isWindows $ cp (ghcLib </> exe "touchy") (ghcjsLib </> exe "touchy")
+  msg info "RTS prepared"
 
-
-installPlatformIncludes :: FilePath -> FilePath -> Sh ()
+installPlatformIncludes :: FilePath -> FilePath -> B ()
 installPlatformIncludes inc incNative = do
   pw <- pwd
   cp_r "." inc
@@ -478,127 +653,82 @@ installPlatformIncludes inc incNative = do
       let pathParts = length (splitDirectories file)
           included  = iterate (".." </>) ("include_native" </> file) !! pathParts
       in T.unlines [ "#ifndef ghcjs_HOST_OS"
-                   , "#include \"" <> toTextIgnore included <> "\""
+                   , "#include \"" <> toTextI included <> "\""
                    , "#endif"
                    ]
 
 exe :: FilePath -> FilePath
-#ifdef WINDOWS
-exe p = p <.> "exe"
-#else
-exe p = p
-#endif
+exe = bool isWindows (<.>"exe") id
 
-cabalFlags :: Bool -- ^ pass -j argument to GHC instead of cabal?
-           -> BootSettings
-           -> [Text]
-cabalFlags parGhc s = v ++ j ++ d ++ str
-  where
-#ifdef WINDOWS
-    -- workaround for Cabal bug?
-    str = ["--disable-executable-stripping", "--disable-library-stripping"]
-#else
-    str = []
-#endif
-    v = if verbose s then ["-v"] else []
-    j = if jobs s /= 1 then [if parGhc then jGhc else jCabal] else []
-    d = if debug s then ["--ghcjs-options=--debug"] else []
-    jGhc   = T.pack $ "--ghcjs-options=-j" ++ show (jobs s)
-    jCabal = T.pack $ "-j" ++ show (jobs s)
+installEtc :: B ()
+installEtc = checkpoint' "additional configuration files" "etc" $
+  install' "additional configuration files" <$^> beLocations . blGhcjsLibDir <<*^> beSources . bsrcEtc
 
-installBootPackages :: BootSettings -> Sh ()
-installBootPackages s = sub $ do
-  echo "installing boot packages"
-  cd "boot"
-  p <- pwd
-  forM_ (bootPackages1++bootPackages2) (preparePackage s)
-  when (not $ null bootPackages1) $ do
-    (cabalBoot s $ ["install", "--ghcjs", "--solver=topdown", "--ghcjs-option=-XMagicHash"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages1)
-    when (gmpInTree s) installInTreeGmp
-  sub (cd ".." >> installGhcjsPrim s)
-  when (not $ null bootPackages2) $
-    (cabalBoot s $ ["install", "--ghcjs", "--solver=topdown"] ++ configureOpts p ++ cabalFlags True s ++ map (T.pack.("./"++)) bootPackages2)
-    where
-      configureOpts p = map ("--configure-option=" <>) $ catMaybes
-            [ fmap ("--with-iconv-includes="  <>) (iconvInclude s)
-            , fmap ("--with-iconv-libraries=" <>) (iconvLib s)
-            , fmap ("--with-gmp-includes="   <>) (gmpInclude s <> inTreePath p "include")
-            , fmap ("--with-gmp-libraries="  <>) (gmpLib s {- <> inTreePath p "lib" -})
-            , if gmpFramework s then Just "--with-gmp-framework-preferred" else Nothing
-            , if gmpInTree s then Just "--with-intree-gmp" else Nothing
-            ]
-      inTreePath p sub | gmpInTree s = Just (toTextIgnore (p' </> sub))
-                       | otherwise   = Nothing
-            where
-              p' = p </> "integer-gmp" </> "gmp" </> "intree"
+installDocs :: B ()
+installDocs = checkpoint' "documentation" "doc" $
+  install' "documentation" <$^> beLocations . blGhcjsLibDir . to (</>"doc") <<*^> beSources . bsrcDoc
 
-      -- urk, this is probably not how it's supposed to be done
-      installInTreeGmp = do
-        p <- absPath =<< pwd
-        let gmpLib = p </> "integer-gmp" </> "gmp" </> "intree" </> "lib" </> "libgmp.a"
-        libPath <- ghcjs_pkg ["field", "integer-gmp", "library-dirs", "--simple-output"]
-        libPath' <- canonic (fromText $ T.strip libPath)
-        cp gmpLib libPath'
-        descr <- T.lines <$> ghcjs_pkg ["describe", "integer-gmp"]
-        let updateLine line | "extra-libraries:" `T.isPrefixOf` line = line <> " gmp"
-                            | otherwise                              = line
-        setStdin (T.unlines $ map updateLine descr)
-        ghcjs_pkg' ["update", "-", "--user"]
+installTests :: B ()
+installTests = unlessM (hasCheckpoint "tests") $ do
+    msg info "installing test suite"
+    (install False "test suite" <$^> beLocations . blGhcjsLibDir . to (</>"test") <<*^> beSources . bsrcTest) >>=
+      cond (addCheckpoint "tests") (msg warn "test suite could not be installed, continuing without")
 
--- | extra packages are not hardcoded but live in two files:
---     extra/extra0  -- installed before Cabal (list Cabal dependencies here)
---     extra/extra1  -- installed after Cabal
--- remember that you can install cabal packages from a url, but only
--- local packages (starting with ./) are 'prepared'
-installExtraPackages :: BootSettings -> Sh ()
-installExtraPackages s = sub $ do
-  echo "installing Cabal and extra packages"
-  cd "extra"
-  installExtra (cabalBoot s) =<< readExtra "extra0"
-  sub (cd ("cabal" </> "Cabal") >> cabalClean s)
-  cabal s $ ["install", "--ghcjs", "./cabal/Cabal", "--only-dependencies"]
+installStage2 :: B ()
+installStage2 = subTop' "ghcjs-boot" $ do
+  msg info "installing Cabal library"
   removeFakes
-  cabal s $ ["install", "--ghcjs", "./cabal/Cabal"] ++ cabalFlags False s
-  installExtra (cabal s) =<< readExtra "extra1"
+  cabalPkg <- view (beStages . bstCabal)
+  preparePackage cabalPkg
+  cabalInstall [cabalPkg]
+  msg info "installing stage 2 packages"
+  stage2 <- stagePackages bstStage2
+  forM_ stage2 preparePackage
+  cabalInstall stage2
+
+installGhcjsPrim :: B ()
+installGhcjsPrim = do
+  msg info "installing ghcjs-prim"
+  prim <- view (beStages . bstGhcjsPrim)
+  preparePackage prim
+  cabalStage1 [prim]
+
+installStage1 :: B ()
+installStage1 = subTop' "ghcjs-boot" $ do
+  installStage "1a" =<< stagePackages bstStage1a
+  whenM (view $ beSettings . bsGmpInTree) installInTreeGmp
+  installGhcjsPrim
+  installStage "1b" =<< stagePackages bstStage1b
     where
-      ignored x = T.null x || "#" `T.isPrefixOf` x
-      readExtra file =
-        filter (not . ignored) . map T.strip . T.lines <$> readfile file
-      installExtra c pkgs = do
-        forM_ pkgs $ \pkg -> when ("./" `T.isPrefixOf` pkg) $
-          preparePackage s $ T.unpack (T.drop 2 pkg)
-        when (not $ null pkgs)
-          (c $ ["install", "--ghcjs"] ++ cabalFlags False s ++ pkgs)
+      installStage name s = do
+        msg info ("installing stage " <> name)
+        forM_ s preparePackage >> cabalStage1 s
 
-installGhcjsPrim :: BootSettings -> Sh ()
-installGhcjsPrim s = sub $ do
-  echo "installing ghcjs-prim"
-  let pkgs = ["ghcjs-prim"]
-  cd "ghcjs"
-  forM_ pkgs (preparePackage s)
-  when (not $ null pkgs)
-    (cabalBoot s $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) pkgs)
+-- fixme: urk, this is probably not how it's supposed to be done
+installInTreeGmp :: B ()
+installInTreeGmp = subTop' integerGmp $ do
+  p <- absPath =<< pwd
+  let gmpLib = p </> "gmp" </> "intree" </> "lib" </> "libgmp.a"
+  libPath <- ghcjs_pkg ["field", "integer-gmp", "library-dirs", "--simple-output", "--no-user-package-db"]
+  libPath' <- canonic (fromText $ T.strip libPath)
+  msg info $ "installing in-tree gmp: " <> toTextI gmpLib <> " -> " <> toTextI libPath'
+  cp gmpLib libPath'
+  descr <- T.lines <$> ghcjs_pkg ["describe", "integer-gmp", "--no-user-package-db"]
+  let updateLine line | "extra-libraries:" `T.isPrefixOf` line = line <> " gmp"
+                      | otherwise                              = line
+  setStdin (T.unlines $ map updateLine descr)
+  ghcjs_pkg_ ["update", "-", "--global", "--no-user-package-db"]
 
-installGhcjsPackages :: BootSettings -> Sh ()
-installGhcjsPackages s = sub $ do
-  echo "installing GHCJS-specific base libraries"
-  let pkgs = if quick s then ghcjsQuickPackages else ghcjsPackages
-      c    = if quick s then cabalBoot s else cabal s
-  cd "ghcjs"
-  forM_ pkgs (preparePackage s)
-  when (not $ null pkgs)
-    (c $ ["install", "--ghcjs"] ++ cabalFlags False s ++ map (T.pack.("./"++)) pkgs)
-
-preparePackage :: BootSettings -> String -> Sh ()
-preparePackage s pkg = sub $ do
-  cd (fromString pkg)
-  conf   <- test_f "configure"
-  confac <- test_f "configure.ac"
-  when (confac && (not conf || initTree s)) $ do
-    echo ("generating configure script for " <> T.pack pkg)
-    autoreconf []
-  rm_rf "dist"
---  cabalClean s
+preparePackage :: Package -> B ()
+preparePackage pkg
+  | "./" `T.isPrefixOf` pkg = sub $ do
+    msg trace ("preparing package " <> pkg)
+    cd (fromText pkg)
+    whenM (test_f "configure.ac") $
+      make "configure" ["configure.ac"]
+        (msg info ("generating configure script for " <> pkg) >> autoreconf [])
+    rm_rf "dist" -- should we do cabalClean instead?
+  | otherwise = return ()
 
 fixRtsConf :: Text -> Text -> Text -> Text
 fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
@@ -610,24 +740,24 @@ fixRtsConf incl lib conf = T.unlines . map fixLine . T.lines $ conf
 
 -- | register fake, empty packages to be able to build packages
 --   that depend on Cabal
-installFakes :: Sh ()
+installFakes :: B ()
 installFakes = silently $ do
-  base <- T.pack <$> liftIO getGlobalPackageBase
-  db   <- T.pack <$> liftIO getGlobalPackageDB
   installed <- T.words <$> ghc_pkg ["list", "--simple-output"]
   dumped <- T.lines <$> ghc_pkg ["dump"]
-  let fakes = map T.pack fakePackages
+  fakes <- view (beStages . bstPretend)
   forM_ fakes $ \pkg ->
     case reverse (filter ((pkg<>"-") `T.isPrefixOf`) installed) of
-      [] -> error (T.unpack $ "required package " <> pkg <> " not found in host GHC")
+      [] -> failWith ("required package " <> pkg <> " not found in host GHC")
       (x:_) -> do
         let version = T.drop 1 (T.dropWhile (/='-') x)
         case findPkgId dumped pkg version of
-          Nothing -> error (T.unpack $ "cannot find package id of " <> pkg <> "-" <> version)
+          Nothing -> failWith ("cannot find package id of " <> pkg <> "-" <> version)
           Just pkgId -> do
-            let conf = fakeConf base base pkg version pkgId
-            writefile (db </> (pkgId <.> "conf")) conf
-  ghcjs_pkg' ["recache", "--global"]
+            globalDB <- view (beLocations . blGlobalDB)
+            libDir   <- view (beLocations . blGhcjsLibDir)
+            let conf = fakeConf libDir libDir pkg version pkgId
+            writefile (globalDB </> fromText pkgId <.> "conf") conf
+  ghcjs_pkg_ ["recache", "--global", "--no-user-package-db"]
 
 findPkgId:: [Text] -> Text -> Text -> Maybe Text
 findPkgId dump pkg version =
@@ -636,116 +766,684 @@ findPkgId dump pkg version =
       pkgVer = pkg <> "-" <> version <> "-"
       ids = map (T.dropWhile isSpace . T.drop 3) $ filter ("id:" `T.isPrefixOf`) dump
 
-fakeConf :: Text -> Text -> Text -> Text -> Text -> Text
+fakeConf :: FilePath -> FilePath -> Text -> Text -> Text -> Text
 fakeConf incl lib name version pkgId = T.unlines
             [ "name:           " <> name
             , "version:        " <> version
             , "id:             " <> pkgId
             , "license:        BSD3"
             , "maintainer:     stegeman@gmail.com"
-            , "import-dirs:    " <> incl
-            , "include-dirs:   " <> incl
-            , "library-dirs:   " <> lib
+            , "import-dirs:    " <> toTextI incl
+            , "include-dirs:   " <> toTextI incl
+            , "library-dirs:   " <> toTextI lib
             , "exposed:        False"
             ]
 
 -- | remove the fakes after we're done with them
-removeFakes :: Sh ()
+removeFakes :: B ()
 removeFakes = do
-  let fakes = map (T.pack . (++"-")) fakePackages
-  pkgs <- T.words <$> ghcjs_pkg ["list", "--simple-output"]
+  fakes <- map (<>"-") <$> view (beStages . bstPretend)
+  pkgs <- T.words <$> ghcjs_pkg ["list", "--simple-output", "--no-user-package-db"]
   forM_ pkgs $ \p -> when (any (`T.isPrefixOf` p) fakes)
-    (echo ("unregistering " <> p) >> ghcjs_pkg' ["unregister", p])
+    (msg info ("unregistering " <> p) >> ghcjs_pkg_ ["unregister", p, "--no-user-package-db"])
 
-checkShims :: Sh ()
-checkShims = sub $ do
-  cdBase
-  e <- test_f ("shims" </> "base" <.> "yaml")
-  if e then sub $ do
-              echo "shims repository already exists, be sure to keep it updated"
-       else sub $ do
-              echo "The shims repository is missing, fetching"
-              git ["clone", "https://github.com/ghcjs/shims.git"]
+-- | subshell in path relative to top installation dir
+subTop' :: FilePath -> B a -> B a
+subTop' p a = subTop (cd p >> a)
 
-getBsRequest :: String -> Request BL.ByteString
-getBsRequest urlString =
-  case parseURI urlString of
-    Nothing -> error ("getBsRequest: Not a valid URL - " ++ urlString)
-    Just u  -> mkRequest GET u
+subTop :: B a -> B a
+subTop a = sub (view (beLocations . blGhcjsTopDir) >>= cd >> a)
 
-writeBinary :: FilePath -> BL.ByteString -> Sh ()
+writeBinary :: FilePath -> BL.ByteString -> B ()
 writeBinary file bs = do
+  msgD info ("writing file " <> toTextI file)
   file' <- absPath file
-  liftIO $ BL.writeFile (toString file') bs
+  liftIO $ BL.writeFile (toStringI file') bs
 
-unpackTarGz :: FilePath -> FilePath -> Sh ()
-unpackTarGz dest tarFile =
-  unpackCompressedTar dest tarFile GZip.decompress
-
-unpackTarBz2 :: FilePath -> FilePath -> Sh ()
-unpackTarBz2 dest tarFile =
-  unpackCompressedTar dest tarFile BZip.decompress
-
-unpackCompressedTar :: FilePath -> FilePath -> (BL.ByteString -> BL.ByteString) -> Sh ()
-unpackCompressedTar dest tarFile decompress = do
-  dest' <- absPath dest
-  bs    <- BL.fromStrict <$> readBinary tarFile
-  liftIO (Tar.unpack (toString dest') . Tar.read . decompress $ bs)
-
-git          = run_ "git"
-alex         = run_ "alex"
-happy        = run_ "happy"
-ghc          = run_ "ghc"
-ghc_pkg      = run  "ghc-pkg"
-ghcjs_pkg    = run  "ghcjs-pkg"
-ghcjs_pkg'   = run_  "ghcjs-pkg"
-patch        = run_ "patch"
-cpp       xs = run  "cpp" xs
-
-cabal, cabalBoot :: BootSettings -> [Text] -> Sh ()
-cabalBoot s xs = sub (setenv "GHCJS_BOOTING" "1" >> cabal s xs)
-cabal     s xs = run_ prog args
+-- | unpack a tar file (does not support compression)
+--   only supports files, does not try to emulate symlinks
+unpackTar :: Bool     -- ^ strip the first directory component?
+          -> FilePath -- ^ destination to unpack to
+          -> FilePath -- ^ the tar file
+          -> B ()
+unpackTar stripFirst dest tarFile = do
+  mkdir_p dest
+  entries <- Tar.read . BL.fromStrict <$> readBinary tarFile
+  void $ Tar.foldEntries (\e -> (>>=checkExtract e)) (return Nothing) (\e -> failWith $ "error unpacking tar: " <> showT e) entries
     where
-    prog = fromText $ withCabal s
-    args = xs ++ ["--with-compiler", withCompiler s]
+      dropComps = if stripFirst then 1 else 0
+      failSec e msg = failWith $ "tar security check, " <> msg <> ": " <> T.pack (Tar.entryPath e)
+      checkExtract e Nothing
+        | (p:_) <- System.FilePath.splitDirectories (Tar.entryPath e)
+                                        = checkExtract e (Just p)
+        | otherwise                     = failSec e "no path"
+      checkExtract e je@(Just expected)
+        | System.FilePath.isAbsolute ep = failSec e "absolute path"
+        | any (=="..") epd              = failSec e "'..' in path"
+        | listToMaybe epd /= je         = failSec e ("tar bomb, expected path component: " <> T.pack expected)
+        | otherwise                     = do
+            view (beSettings . bsVerbosity) >>= \v ->
+              -- this gets chatty, reduce verbosity for file writes / directory creates here unless we're at trace level
+              (if v < trace then quieter warn else id)
+                (extractEntry e $ dest </> fromString (System.FilePath.joinPath (drop (if stripFirst then 1 else 0) epd)))
+            return je
+        where ep  = Tar.entryPath e
+              epd = System.FilePath.splitDirectories ep
+      extractEntry e tgt
+        | Tar.NormalFile bs size <- Tar.entryContent e = do
+            mkdir_p (directory tgt)
+            writeBinary tgt bs
+            setPermissions (Tar.entryPermissions e) tgt
+        | Tar.Directory <- Tar.entryContent e = do
+            mkdir_p tgt
+            setPermissions (Tar.entryPermissions e) tgt
+        | otherwise =
+            msg warn ("ignoring unexpected entry type in tar. only normal files and directories (no links) are supported:\n    " <> toTextI tgt)
+      setPermissions mode tgt = do
+        absTgt <- absPath tgt
+        msgD trace ("setting permissions of " <> toTextI tgt <> " to " <> showT mode)
+        liftIO (setFileMode (toStringI absTgt) mode)
 
-cabalClean :: BootSettings -> Sh ()
-cabalClean s = run_ prog ["clean"]
-    where prog = fromText $ withCabal s
+git          = runE_ bpGit
+alex         = runE_ bpAlex
+happy        = runE_ bpHappy
+ghc          = runE_ bpGhc
+ghc_pkg      = runE  bpGhcPkg
+ghcjs_pkg    = runE  bpGhcjsPkg
+ghcjs_pkg_   = runE_ bpGhcjsPkg
+patch        = runE_ bpPatch
+cpp          = runE  bpCpp
+tar          = runE_ bpTar
+cabal        = runE_ bpCabal
+
+runE  g a = view (bePrograms . g) >>= flip run  a
+runE_ g a = view (bePrograms . g) >>= flip run_ a
+
+cabal, cabalStage1 :: [Text] -> B ()
+-- | stage 1 cabal install: boot mode, hand off to GHC if GHCJS cannot yet compile it
+cabalStage1 pkgs = sub $ do
+  ghc <- requirePgmLoc =<< view (bePrograms . bpGhc)
+  s   <- view beSettings
+  p   <- pwd
+  setenv "GHCJS_BOOTING" "1"
+  setenv "GHCJS_BOOTING_STAGE1" "1"
+  setenv "GHCJS_WITH_GHC" (toTextI ghc)
+  let configureOpts = catMaybes [("--with-iconv-includes="  <>)<$>s^.bsIconvInclude
+                                ,("--with-iconv-libraries=" <>)<$>s^.bsIconvLib
+                                ,("--with-gmp-includes="    <>)<$>(s^.bsGmpInclude<>inTreePath p "include")
+                                ,("--with-gmp-libraries=  " <>)<$>s^.bsGmpLib
+                                ]
+      -- fixme this hardcodes the location of integer-gmp
+      inTreePath p sub =
+        bj (s^.bsGmpInTree) (toTextI (p </> "boot" </> "integer-gmp" </> "gmp" </> "intree"  </> sub))
+      gmpOpts = catMaybes [bj (s^.bsGmpFramework) "--with-gmp-framework-preferred"
+                          ,bj (s^.bsGmpInTree)    "--with-intree-gmp"
+                          ]
+  flags <- cabalInstallFlags
+  cabal $ "install" : pkgs ++
+          [ "--solver=topdown"           -- the modular solver refuses to install stage1 packages
+          , "--ghcjs-option=-XMagicHash" -- fixme this should be fixed in the package
+          ] ++ map ("--configure-option="<>) configureOpts ++ gmpOpts ++ flags
+
+-- | regular cabal install for GHCJS
+cabalInstall [] = do
+  msg info "cabal-install: no packages, nothing to do"
+  return ()
+cabalInstall pkgs = do
+  flags <- cabalInstallFlags
+  setenv "GHCJS_BOOTING" "1"
+  cabal ("install" : pkgs ++ flags)
+
+cabalInstallFlags :: B [Text]
+cabalInstallFlags = do
+  debug    <- view (beSettings . bsDebug)
+  v        <- view (beSettings . bsVerbosity)
+  j        <- view (beSettings . bsJobs)
+  ghcjs    <- view (bePrograms . bpGhcjs)
+  ghcjsPkg <- view (bePrograms . bpGhcjsPkg)
+  instDir  <- view (beLocations . blGhcjsTopDir)
+  return $ [ "--global"
+           , "--ghcjs"
+           , "--one-shot"
+           , "--builddir",      "dist"
+           , "--with-compiler", ghcjs ^. pgmLocText
+           , "--with-hc-pkg",   ghcjsPkg ^. pgmLocText
+           , "--prefix",        toTextI instDir
+           , "--libdir",        toTextI (instDir </> "lib")
+           , "--libexecdir",    toTextI (instDir </> "bin")
+           , "--datadir",       toTextI (instDir </> "share")
+           , "--docdir",        toTextI (instDir </> "doc")
+           , "--htmldir",       toTextI (instDir </> "doc" </> "html")
+           , "--haddockdir",    toTextI (instDir </> "doc" </> "haddock")
+           , "--sysconfdir",    toTextI (instDir </> "etc")
+           ] ++
+           -- workaround for Cabal bug?
+           bool isWindows ["--disable-executable-stripping", "--disable-library-stripping"] [] ++
+           catMaybes [ (("-j"<>) . showT) <$> j
+                     , bj debug "--ghcjs-options=-debug"
+                     , bj (v > info) "-v"
+                     ]
 
 #ifdef WINDOWS
-bash cmd xs = run_ "bash" ["-c", T.unwords (map escapeArg (cmd:xs))]
+bash pgm xs = view (bePrograms . bpBash) >>= \b -> run_ b ["-c", T.unwords args]
   where
+    args = map escapeArg $ (pgm ^. pgmLoc . to toTextI) : (pgm ^. pgmArgs ++ xs)
     -- might not escape everything, be careful
     escapeArg = T.concatMap escapeChar
     escapeChar ' '  = "\\ "
     escapeChar '\\' = "\\\\"
     escapeChar x    = T.singleton x
 
-configure  = bash "./configure"
-autoreconf = bash "autoreconf"
-make       = bash "make"
-wget       = run_ "wget"
-tar        = run_ "tar"
+configure  = bash (Program "configure" "./configure" Nothing (Just "./configure") [])
+autoreconf = bash bpAutoreconf
+runMake    = bash bpMake
 #else
-configure  = run_ "./configure"
-autoreconf = run_ "autoreconf"
-make       = run_ "make"
+configure  = run_ (Program "configure" "./configure" Nothing (Just "./configure") [])
+autoreconf = runE_ bpAutoreconf
+runMake    = runE_ bpMake
 #endif
 
-ignoreExcep a = a `catchany_sh` (\e -> echo $ "ignored exception: " <> T.pack (show e))
+ignoreExcep a = a `catchAny` (\e -> msg info $ "ignored exception: " <> showT e)
 
-cdBase :: Sh ()
-cdBase = do
-  base <- fromString <$> liftIO getGlobalPackageBase
-  mkdir_p base
-  cd base
+stagePackages :: Getter BootStages Stage -> B [Package]
+stagePackages l = do
+  quick    <- view (beSettings . bsQuick)
+  condPkgs <- view (beStages . l)
+  return (resolveConds quick condPkgs)
 
-cdBoot :: Sh ()
-cdBoot = cdBase >> cd "ghcjs-boot"
+whenM :: Monad m => m Bool -> m () -> m ()
+whenM c m = c >>= flip when m
+
+unlessM :: Monad m => m Bool -> m () -> m ()
+unlessM c m = c >>= flip unless m
+
+make :: FilePath   -- ^ target, build this file if not exists
+     -> [FilePath] -- ^ also build if any of these is newer than the target (ignored if they don't exist)
+     -> B ()       -- ^ action to run for building
+     -> B ()
+make tgt deps m = mtime tgt >>= \case
+  Nothing -> m
+  Just tm -> whenM (any (>=tm) . catMaybes <$> mapM mtime deps) m
+
+failWith :: MonadIO m => Text -> m a
+failWith err = liftIO (T.putStrLn ("fatal: " <> err) >> exitFailure)
+
+mtime :: FilePath -> B (Maybe UTCTime)
+mtime p = do
+  p' <- absPath p
+  fmap Just (liftIO $ getModified p') `catchAny_` return Nothing
+
+filesize :: FilePath -> B Integer
+filesize file = do
+  absFile <- absPath file
+  liftIO (getSize absFile)
+
+install' :: Text -> FilePath -> [Text] -> B ()
+install' descr dest srcs = void (install True descr dest srcs)
+
+-- | install some files, from multiple sources with fallback
+install :: Bool     -- ^ install is required, exit with a panic if it didn't succeed
+        -> Text     -- ^ description, for progress output
+        -> FilePath -- ^ destination
+        -> [Text]   -- ^ sources, can be tar files, directories, tar.gz / tar.xz works with external tools
+        -> B Bool   -- ^ whether installation was succesful
+install req descr dest []
+  | req       = failWith ("cannot install " <> descr <> " to " <> toTextI dest <> " , no more sources")
+  | otherwise = return False
+install req descr dest (s:ss)
+  | "http://" `T.isPrefixOf` s = withTmpDir $
+      \t -> let file = t </> fromText (last $ T.split (=='/') s)
+            in  fetch descr file s >>= cond
+                  (install req descr dest (toTextI file:ss))
+                  (msg warn ("could not fetch " <> s <> ", trying next source") >> install req descr dest ss)
+  | otherwise = do
+        let s' = fromText s
+        d <- test_d s'
+        if d then do
+               msg info ("installing " <> descr <> ", copying directory: " <> s <> " -> " <> toTextI dest)
+               mkdir_p dest >> ls s' >>= mapM_ (\file -> cp_r (s' </> filename file) (dest </> filename file))
+               return True
+             else do
+               f <- test_f s'
+               if f then do
+                      size <- filesize s'
+                      if size == 0
+                         then do
+                           isDev <- view (beSettings . bsDev)
+                           if isDev
+                               then msg info ("source " <> s <> " for " <> descr <> " is empty, trying next")
+                               else msg warn ("archive file " <> s <> " for " <> descr <> " is empty. you might be missing the required cache archives for a release build")
+                           install req descr dest ss
+                         else installArchive descr dest s' >> return True
+                    else do
+                         msg trace ("source " <> s <> " for " <> descr <> " does not exist, trying next")
+                         install req descr dest ss
+
+-- | install files from an archive
+installArchive :: Text
+               -> FilePath
+               -> FilePath
+               -> B ()
+installArchive descr dest src
+  | suff ".tar"     = do
+      msg info ("installing " <> descr <> " unpacking tar (internal) " <> s <> " -> " <> d)
+      unpackTar True dest src
+  | suff ".tar.gz"  = m "tar.gz"  >> untar "-xzf"
+  | suff ".tar.bz2" = m "tar.bz2" >> untar "-xjf"
+  | suff ".tar.xz"  = m "tar.xz"  >> untar "-xJf"
+  | otherwise       = failWith ("unknown archive type installing " <> descr <> ": " <> s)
+  where
+    m e    = msg info ("installing " <> descr <> " unpacking " <> e <> " " <> s <> " -> " <> d)
+    suff e = e `T.isSuffixOf` s
+    d      = toTextI dest
+    s      = toTextI src
+    untar o = sub (absPath src >>= \as -> mkdir_p dest >> cd dest >> tar [o, toTextI as, "--strip-components=1"])
+
+-- | download a file over HTTP
+fetch :: Text     -- ^ description
+      -> FilePath -- ^ target
+      -> Text     -- ^ url to download
+      -> B Bool   -- ^ True if the file was downloaded succesfully
+fetch descr dest url
+  | Just u <- parseURI (T.unpack url) = do
+      msg info ("installing " <> descr <> ", downloading " <> url <> " -> " <> toTextI dest)
+      liftIO (download u) >>= \case
+        Nothing -> return False
+        Just r | (2,_,_) <- rspCode r -> do
+                 msg info ("finished downloading, status " <> (T.pack . show . rspCode $ r) <> " writing file")
+                 writeBinary dest (BL.fromStrict $ rspBody r)
+                 return True
+             | otherwise -> do
+                 msg info ("file not downloaded, status " <> (T.pack . show . rspCode $ r))
+                 return False
+  | otherwise = return False
+  where
+    download :: URI -> IO (Maybe (Response B.ByteString))
+    download u =
+      (Just . snd <$> (Br.browse $ Br.setAllowRedirects True >> Br.request (mkRequest GET u)))
+        `Ex.catch` \(Ex.SomeException _) -> return Nothing
+
+-- | initialize our boot environment by reading the configuration files, finding all programs
+initBootEnv :: BootSettings -> IO BootEnv
+initBootEnv bs = do
+  dataDir <- bootDataDir bs
+  env     <- (traverse . both %~ T.pack) <$> getEnvironment
+  -- substitute some values in our config files
+  let subst = [ ("datadir", toTextI dataDir)
+              , ("version", T.pack Info.getCompilerVersion)
+              ]
+      substituteConfig c = c & template %~ substText
+                             & template . iso toTextI fromText %~ substText
+      substText = Utils.substPatterns subst env
+  BootConfigFile stgs srcs pgms1 <- substituteConfig <$> readBootConfigFile bs
+  pgms2 <- configureBootPrograms bs srcs pgms1
+  locs  <- configureBootLocations bs pgms2
+  return (BootEnv bs srcs locs pgms2 stgs)
+
+-- | configure the locations
+configureBootLocations :: BootSettings
+                       -> BootPrograms
+                       -> IO BootLocations
+configureBootLocations bs pgms = do
+  ghcLibDir    <- fromText . T.strip <$> run' bs (pgms ^. bpGhc)   ["--print-libdir"]
+  ghcjsLibDir  <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-libdir"]
+  ghcjsTopDir  <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-topdir"]
+  globalDB     <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-global-db"]
+  userDB       <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-user-db"]
+  return $ BootLocations ghcjsTopDir ghcjsLibDir ghcLibDir globalDB userDB
+
+-- | build the program configuration and do some sanity checks
+configureBootPrograms :: BootSettings    -- ^ command line settings
+                      -> BootSources
+                      -> BootPrograms    -- ^ default programs from config file
+                      -> IO BootPrograms -- ^ configured programs
+configureBootPrograms bs srcs pgms0 = do
+  -- first replace all defaults with the overrides from the command line
+  let r l   = maybe id (pgmSearch .~) (bs ^. l)
+      tpo   = template :: Traversal' BootPrograms (Program Optional)
+      tpr   = template :: Traversal' BootPrograms (Program Required)
+      pgms1 = pgms0 & bpGhcjs    %~ r bsWithGhcjs
+                    & bpGhcjsPkg %~ r bsWithGhcjsPkg
+                    & bpGhc      %~ r bsWithGhc
+                    & bpCabal    %~ r bsWithCabal
+  -- resolve all programs
+  pgms2 <- mapMOf tpo (resolveProgram bs) =<< mapMOf tpr (resolveProgram bs) pgms1
+  traverseOf_ tpr (reportProgramLocation bs) pgms2
+  traverseOf_ tpo (reportProgramLocation bs) pgms2
+  pgms3 <- checkProgramVersions bs pgms2
+  checkCabalSupport bs pgms3
+  return pgms3
+
+-- | resolves program
+resolveProgram :: MaybeRequired (Program a) => BootSettings -> Program a -> IO (Program a)
+resolveProgram bs pgm@(Program name search v _ args) = findExecutable (T.unpack search) >>= \case
+      Just p'                  -> return (Program name search v (Just $ fromString p') args)
+      Nothing | isRequired pgm -> failWith ("program " <> name <> " is required but could not be found at " <> search)
+              | otherwise      -> return (Program name search v Nothing args)
+
+-- | report location of a configured program
+reportProgramLocation :: BootSettings -> Program a -> IO ()
+reportProgramLocation bs p
+  | Just l <- p ^. pgmLoc = msg' bs info ("program " <> p ^. pgmName <> " found at " <> toTextI l)
+  | otherwise             = msg' bs info ("program " <> p ^. pgmName <> " NOT found, searched for" <> p ^. pgmSearch)
+
+-- | check that the GHC, ghcjs and ghcjs-pkg we're using are the correct version
+checkProgramVersions :: BootSettings -> BootPrograms -> IO BootPrograms
+checkProgramVersions bs pgms =
+  foldrM verifyVersion pgms
+    [ (bpGhcjs,    "--numeric-version",       Just Info.getCompilerVersion,    True)
+    , (bpGhcjs,    "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
+    , (bpGhc,      "--numeric-version",       Just Info.getGhcCompilerVersion, True)
+    , (bpGhcjsPkg, "--numeric-ghcjs-version", Nothing,                         True)
+    , (bpGhcjsPkg, "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
+    , (bpCabal,    "--numeric-version",       Nothing,                         True)
+    ]
+  where
+    verifyVersion :: (Lens' BootPrograms (Program a), Text, Maybe String, Bool) -> BootPrograms -> IO BootPrograms
+    verifyVersion (l, arg :: Text, expected :: Maybe String, update :: Bool) ps = do
+      res <- T.strip <$> run' bs (ps ^. l) [arg]
+      case expected of
+        Nothing -> return ()
+        Just exp -> when (res /= T.pack exp) $
+          failWith ("version mismatch for program " <> ps ^. l . pgmName <> " at " <> ps ^. l . pgmLocText
+                      <> ", expected " <> T.pack exp <> " but got " <> res)
+      return $ (if update then (l . pgmVersion .~ Just res) else id) ps
+
+-- | check that cabal-install supports GHCJS and that our boot-GHC has a Cabal library that supports GHCJS
+checkCabalSupport :: BootSettings -> BootPrograms -> IO ()
+checkCabalSupport bs pgms = do
+  cbl <- run' bs (pgms ^. bpCabal) ["install", "--help"]
+  when (not $ "--ghcjs" `T.isInfixOf` cbl) $
+    failWith ("cabal-install program " <> pgms ^. bpCabal . pgmLocText <> " does not support GHCJS")
+  g <- run' bs (pgms ^. bpGhc) ["-e", "Text.Read.readEither \"GHCJS\" :: Either String Distribution.Simple.CompilerFlavor"]
+  when (T.strip g /= "Right GHCJS") $
+    failWith ("GHC program " <> pgms ^. bpGhc . pgmLocText <> " does not have a Cabal library that supports GHCJS")
+
+-- | read the boot configuration yaml file
+readBootConfigFile :: BootSettings -> IO BootConfigFile
+readBootConfigFile bs = do
+  bf <- bootConfigFile bs
+  msgD' bs trace ("reading file " <> toTextI bf)
+  b <- B.readFile (toStringI bf)
+  case Yaml.decodeEither b of
+    Left err  -> failWith ("error parsing boot configuration file " <> toTextI bf <> "\n" <> T.pack err)
+    Right bss -> return bss
+
+printBootEnvSummary :: BootEnv -> IO ()
+printBootEnvSummary be = do
+  section "Boot libraries installation for GHCJS" $ do
+    bootLoc  <- getExecutablePath
+    bootMod  <- getModified (fromString bootLoc)
+    bootConf <- bootConfigFile (be ^. beSettings)
+    ghcjsMod <- maybe (return "<unknown>") (fmap show . getModified) (be ^. bePrograms . bpGhcjs . pgmLoc)
+    curDir   <- getWorkingDirectory
+    p ["ghcjs-boot will install the libraries and runtime system for GHCJS"]
+    h "boot program"
+    t "rl" [["ghcjs-boot program version", Info.getCompilerVersion]
+           ,["file location", bootLoc]
+           ,["last modified", show bootMod],[]
+           ,["using configuration file", toStringI bootConf]
+           ,["current directory", toStringI curDir]
+           ]
+    h "boot configuration"
+    t "rl" [["installation directory", path $ beLocations . blGhcjsTopDir]
+           ,["global package DB", path $ beLocations . blGlobalDB]
+           ,["user package DB", path $ beLocations . blUserDB],[]
+           ,["GHCJS version", ver "<unknown>" bpGhcjs]
+           ,["program location", loc bpGhcjs]
+           ,["library path", path $ beLocations . blGhcjsLibDir]
+           ,["last modified", ghcjsMod],[]
+           ,["GHC version", ver "<unknown>" bpGhc]
+           ,["location", loc bpGhc]
+           ,["library path", path $ beLocations . blGhcLibDir],[]
+           ,["cabal-install version", ver "<unknown>" bpCabal]
+           ,["location", loc bpCabal],[]
+           ,["ghcjs-pkg version", ver "<unknown>" bpGhcjsPkg]
+           ,["location", loc bpGhcjsPkg],[]
+           ,["quick boot", y isQuick]
+           ,["clean tree first", be ^. beSettings . bsClean . to y]
+           ,["development boot", y isDev]
+           ]
+    h "packages"
+    p ["stage 1a"] >> l (stg bstStage1a)
+    p ["ghcjs-prim:  " ++ be ^. beStages . bstGhcjsPrim . to str]
+    p ["stage 1b"] >> l (stg bstStage1b)
+    when (not isQuick) $ do
+        p ["Cabal:  " ++ be ^. beStages . bstCabal . to str]
+        p ["stage 2"] >> l (stg bstStage2)
+  section "Configured programs" $ do
+    t "hlll" $ ["program", "version", "location"] :
+      be ^.. bePrograms . (template :: Traversal' BootPrograms (Program Required)) . to pgm ++
+      be ^.. bePrograms . (template :: Traversal' BootPrograms (Program Optional)) . to pgm
+  section "Installation sources" $ do
+    t "rl" $ concatMap (\(t,l) -> [t,""] : be ^.. beSources . l . traverse . to (\x->["",str x]) ++ [["",""]])
+      [("shims (runtime system)", bsrcShims), ("boot libraries", bsrcBoot), ("test suite", bsrcTest), ("configuration files", bsrcEtc), ("documentation", bsrcDoc)] ++
+      [["bootstrap GHC library path",""],["", path $ beLocations . blGhcLibDir]]
+    when isWindows $ do
+      h "Windows development tools"
+      t "rl" $ ["development tools",""] : be ^.. beSources . bsrcBuildtoolsWindows     . traverse . to (\x->["",str x]) ++
+               ["bootstrap package",""] : be ^.. beSources . bsrcBuildtoolsBootWindows . traverse . to (\x->["",str x])
+    when (isDev) $ do
+      h "development source repositories"
+      p ["shims (" ++ be ^. beSources . bsrcShimsDevBranch . to str ++ ")"]
+      l (be ^.. beSources . bsrcShimsDev . traverse . to str)
+      p ["ghcjs-boot (" ++ be ^. beSources . bsrcBootDevBranch . to str ++ ")"]
+      l (be ^.. beSources . bsrcBootDev . traverse . to str)
+  where
+    stg s       = be ^.. beStages . s . to (resolveConds isQuick) . traverse . to str
+    isDev       = be ^. beSettings . bsDev
+    isQuick     = be ^. beSettings . bsQuick
+    h xs        = b >> mapM_ (putStrLn . indent 2) [xs, replicate (length xs) '-'] >> b
+    p xs        = mapM_ (putStrLn . indent 3) xs >> b
+    l xs        = mapM_ (putStrLn . indent 3 . ("- "++)) xs >> b
+    t :: String -> [[String]] -> IO ()
+    t aln xxs   = let colWidths = map (foldl' (\m xs -> max m (length xs)) 0) (transpose xxs)
+                      (colAlign,hdr) = case aln of
+                        ('h':a) -> (a, True)
+                        a       -> (a, False)
+                      colSep    = replicate 3 ' '
+                      cell w a xs = let pad = sp (w - length xs) in if a == 'r' then pad ++ xs else xs ++ pad
+                      cols xs   = sp 3 ++ intercalate (sp 3) xs
+                      row xs    = cols (zipWith3 cell colWidths colAlign xs)
+                  in case (xxs, hdr) of
+                      (x:ys, True) -> putStrLn (row x) >> putStrLn (cols $ map sp colWidths) >> mapM_ (putStrLn . row) ys >> b
+                      _            -> mapM_ (putStrLn . row) xxs
+    b           = putStrLn ""
+    sp n        = replicate n ' '
+    indent n xs = sp n ++ xs
+    sep         = putStrLn (replicate 75 '=')
+    y b         = if b then "Yes" else "No"
+    section :: String -> IO () -> IO ()
+    section t a = b >> b >> sep >> b >> p [t] >> sep >> b >> a >> b
+    ver d l     = be ^. bePrograms . l . pgmVersion . to (maybe d T.unpack)
+    loc l       = be ^. bePrograms . l . pgmLocString
+    path l      = be ^. l . to toStringI
+    str         = T.unpack
+    pgm x       = [x ^. pgmName . to str, maybe "-" T.unpack (x ^. pgmVersion) , x ^. pgmLocString]
+
+-- | boot.yaml
+bootConfigFile :: BootSettings -> IO FilePath
+bootConfigFile bs
+  | Just bsf <- bs ^. bsWithConfig = return (fromText bsf)
+  | otherwise                      = (</> ("lib" </> "etc" </> "boot" <.> "yaml")) <$> bootDataDir bs
+
+bootDataDir :: BootSettings -> IO FilePath
+bootDataDir bs
+  | Just dd <- bs ^. bsWithDataDir = return (fromText dd)
+  | otherwise                      = fromString <$> Info.ghcjsBootDefaultDataDir
+
+-- | our boot monad, we wrap around shelly but with a config environment
+--   shelly commands are wrapped with logging
+type B = ReaderT BootEnv Sh.Sh
+--  deriving (Functor, Applicative, Monad, MonadIO, MonadReader BootEnv)
+
+runB :: BootEnv -> B a -> Sh.Sh a
+runB e b = runReaderT b e
+
+msg' :: BootSettings -> Verbosity -> Text -> IO ()
+msg' bs v t = when (bs ^. bsVerbosity >= v) (T.putStrLn t)
+
+msg :: Verbosity -> Text -> B ()
+msg v t =
+  view beSettings >>= \s -> when (s ^. bsVerbosity >= v) $ lift (Sh.echo t)
+
+-- | log a message printing the current directory
+msgD :: Verbosity -> Text -> B ()
+msgD v t = pwd >>= \p -> msg v (toTextI p <> "$ " <> t)
+
+msgD' :: BootSettings -> Verbosity -> Text -> IO ()
+msgD' bs v t = getWorkingDirectory >>= \p -> msg' bs v (toTextI p <> "$ " <> t)
+
+(</>) :: FilePath -> FilePath -> FilePath
+(</>) = (Sh.</>)
+
+{-
+  lifted versions of the shelly operations we need. everything that
+  makes externally visible changes is logged at the info (-v2)
+  verbosity level.
+
+  internal changes and file reads are logged at trace (-v3) level.
+ -}
+ls             = lift . Sh.ls
+mkdir p        = msgD info ("mkdir "   <> toTextI p) >> lift (Sh.mkdir p)
+mkdir_p p      = msgD info ("mkdir_p " <> toTextI p) >> lift (Sh.mkdir_p p)
+cp f t         = msgD info ("cp "      <> toTextI f <> " -> " <> toTextI t) >> lift (Sh.cp f t)
+cp_r f t       = msgD info ("cp_r "    <> toTextI f <> " -> " <> toTextI t) >> lift (Sh.cp_r f t)
+rm_f p         = msgD info ("rm_f "    <> toTextI p) >> lift (Sh.rm_f p)
+rm_rf p        = msgD info ("rm_rf "   <> toTextI p) >> lift (Sh.rm_rf p)
+cd p           = msgD trace ("cd "     <> toTextI p) >> lift (Sh.cd p)
+sub            = liftE  Sh.sub
+test_d         = lift . Sh.test_d
+test_f         = lift . Sh.test_f
+test_s         = lift . Sh.test_s
+run p xs       = msgD info (traceRun p xs) >> requirePgmLoc p >>= \loc -> lift (Sh.run  loc (p ^. pgmArgs ++ xs))
+run_ p xs      = msgD info (traceRun p xs) >> requirePgmLoc p >>= \loc -> lift (Sh.run_ loc (p ^. pgmArgs ++ xs))
+readBinary p   = msgD trace ("reading " <> toTextI p) >> lift (Sh.readBinary p)
+canonic        = lift . Sh.canonic
+absPath        = lift . Sh.absPath
+pwd            = lift   Sh.pwd
+silently       = liftE  Sh.silently
+verbosely      = liftE  Sh.verbosely
+tracing b      = liftE  (Sh.tracing b)
+findWhen f p   = ask >>= \e -> lift (Sh.findWhen (runB e . f) p)
+errorExit      = lift . Sh.errorExit
+writefile p t  = msgD info  ("writing " <> toTextI p) >> lift (Sh.writefile p t)
+appendfile p t = msgD info ("appending " <> toTextI p) >> lift (Sh.appendfile p t)
+readfile p     = msgD trace ("reading " <> toTextI p) >> lift (Sh.readfile p)
+withTmpDir     = liftE2 Sh.withTmpDir
+catchAny a h   = ask >>= \e -> lift (Sh.catchany_sh (runReaderT a e) (\ex -> runReaderT (h ex) e))
+catchAny_ a h  = catchAny a (\_ -> h)
+setenv e v     = lift (Sh.setenv e v)
+get_env        = lift . Sh.get_env
+setStdin       = lift . Sh.setStdin
+canonicalize   = lift . Sh.canonicalize
+relativeTo e   = lift . (Sh.relativeTo e)
+
+liftE :: (Sh.Sh a -> Sh.Sh a) -> B a -> B a
+liftE s m = ask >>= \e -> lift (s $ runB e m)
+
+liftE2 :: ((a -> Sh.Sh b) -> Sh.Sh b) -> (a -> B b) -> B b
+liftE2 s f = ask >>= \e -> lift (s $ runB e . f)
+
+traceRun :: Program a -> [Text] -> Text
+traceRun p xs = "[" <> p ^. pgmName <> "]: " <> p ^. pgmLocText <> " " <> T.intercalate " " (map (showT . T.unpack) xs)
+
+-- | add a checkpoint to the file
+addCheckpoint :: Text -> B ()
+addCheckpoint name = unlessM (hasCheckpoint name) $ do
+  mkdir_p =<< view (beLocations . blGhcjsTopDir)
+  flip appendfile (name <> "\n") =<< checkpointFile
+
+-- | check whether we have passed a checkpoint. this reads the
+--   whole checkpoints file so use sparingly
+hasCheckpoint :: Text -> B Bool
+hasCheckpoint name =
+  (((name `elem`) . T.lines) <$> (readfile =<< checkpointFile)) `catchAny_` return False
+
+-- | perform the action if the checkpoint does not exist,
+--   add the checkpoint when the action completes without exceptions
+checkpoint :: Text -> B () -> B ()
+checkpoint name m = unlessM (hasCheckpoint name) (m <* addCheckpoint name)
+
+checkpoint' name txt m = hasCheckpoint name >>= cond (msg info txt) (m <* addCheckpoint name)
+
+checkpointFile :: B FilePath
+checkpointFile =
+  absPath . (</> ("ghcjs_boot" <.> "charlie")) =<< view (beLocations . blGhcjsTopDir)
+
+addCompleted :: B ()
+addCompleted = do
+  t <- cond "quick" "full" <$^> beSettings . bsQuick
+  f <- completedFile
+  writefile f t
+
+removeCompleted :: B ()
+removeCompleted = rm_f =<< completedFile
+
+completedFile :: B FilePath
+completedFile =
+  absPath . (</> ("ghcjs_boot" <.> "completed")) =<< view (beLocations . blGhcjsTopDir)
+
+requirePgmLoc :: Program a -> B FilePath
+requirePgmLoc p
+  | Just loc <- p ^. pgmLoc = return loc
+  | otherwise = do
+        -- search in original path, where we configured the programs. the shelly path might be local
+        path <- fromMaybe "" <$> liftIO (Utils.getEnvMay "PATH")
+        failWith $ "program " <> p ^. pgmName <> " is required but was not found\n" <>
+                   "  name searched for (from boot.yaml or command line): " <> p ^. pgmSearch <> "\n" <>
+                   "  searched in PATH:\n" <> T.pack path
+
+run' :: BootSettings -> Program a -> [Text] -> IO Text
+run' bs p xs = do
+  msgD' bs info (traceRun p xs)
+  (e, out, _err) <- readProcessWithExitCode (p ^. pgmLocString) (map T.unpack xs) ""
+  when (e /= ExitSuccess) (failWith $ "program " <> p ^. pgmLocText <> " returned a nonzero exit code")
+  return (T.pack out)
+
+-- | reduces verbosity of the action to the specified level
+quieter :: Verbosity -> B a -> B a
+quieter v = local $ over (beSettings . bsVerbosity) (min v)
+
+toTextI :: FilePath -> Text
+toTextI = Sh.toTextIgnore
 
 fromString :: String -> FilePath
 fromString = fromText . T.pack
 
-toString :: FilePath -> String
-toString = T.unpack . toTextIgnore
+toStringI :: FilePath -> String
+toStringI = T.unpack . toTextI
+
+pgmLocText :: Getter (Program a) Text
+pgmLocText = pgmLoc . to (maybe "<not found>" toTextI)
+
+pgmLocString :: Getter (Program a) String
+pgmLocString = pgmLocText . to T.unpack
+
+showT :: Show a => a -> Text
+showT = T.pack . show
+
+bool :: Bool -> a -> a -> a
+bool b t f = if b then t else f
+
+cond :: a -> a -> Bool -> a
+cond t f b = bool b t f
+
+bj :: Bool -> a -> Maybe a
+bj b v = if b then (Just v) else Nothing
+
+infixl 2 <^>
+(<^>) :: MonadReader s m => (a -> m b) -> Getting a s a -> m b
+(<^>) m l = m =<< view l
+
+infixl 3 <*^>
+(<*^>) :: (Applicative m, MonadReader s m) => (m (a -> b)) -> Getting a s a -> m b
+(<*^>) f l = f <*> view l
+
+infixl 3 <<*^>
+(<<*^>) :: (Applicative m, MonadReader s m) => (m (a -> m b)) -> Getting a s a -> m b
+(<<*^>) f l = join (f <*> view l)
+
+infixl 4 <$^>
+(<$^>) :: (Functor m, MonadReader s m) => (a -> b) -> Getting a s a -> m b
+(<$^>) f l = f <$> view l

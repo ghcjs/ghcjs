@@ -92,7 +92,7 @@ import qualified Compiler.Info as Info
 
 main :: IO ()
 main = do
-  args <- getArgs
+  args <- Info.getFullArguments -- for extra args on Windows, see Compiler.Info
 
   case getOpt Permute (flags ++ deprecFlags) args of
         (cli,_,[]) | FlagHelp `elem` cli -> do
@@ -104,6 +104,8 @@ main = do
            bye ("GHCJS package manager version " ++ Info.getCompilerVersion ++ "\n")
         (cli,_,[]) | FlagNumericGhcVersion `elem` cli ->
            bye (Info.getGhcCompilerVersion ++ "\n")
+        (cli,_,[]) | FlagNumericGhcjsVersion `elem` cli ->
+          bye (Info.getCompilerVersion ++ "\n")
         (cli,nonopts,[]) ->
            case getVerbosity Normal cli of
            Right v -> runit v cli nonopts
@@ -122,6 +124,7 @@ data Flag
   | FlagGhcVersion
   | FlagNumericGhcVersion
   | FlagGhcjsVersion
+  | FlagNumericGhcjsVersion
   | FlagConfig FilePath
   | FlagGlobalConfig FilePath
   | FlagForce
@@ -173,6 +176,8 @@ flags = [
         "output numeric GHC version information and exit",
   Option [] ["ghcjs-version"] (NoArg FlagGhcjsVersion)
         "output GHCJS version information and exit",
+  Option [] ["numeric-ghcjs-version"] (NoArg FlagNumericGhcjsVersion)
+        "output numeric GHCJS version information and exit",
   Option [] ["simple-output"] (NoArg FlagSimpleOutput)
         "print output in easy-to-parse format for some commands",
   Option [] ["names-only"] (NoArg FlagNamesOnly)
@@ -509,7 +514,7 @@ getPkgDatabases verbosity modify use_cache expand_vars my_flags = do
   let err_msg = "missing --global-package-db option, location of global package database unknown\n"
   global_conf <-
      case [ f | FlagGlobalConfig f <- my_flags ] of
-        [] -> Info.getGlobalPackageDB
+        [] -> die err_msg
         fs -> return (last fs)
 
   -- The value of the $topdir variable used in some package descriptions
@@ -522,7 +527,7 @@ getPkgDatabases verbosity modify use_cache expand_vars my_flags = do
 
   mb_user_conf <-
      if no_user_db then return Nothing
-                   else Info.getUserPackageDB >>= \u -> return (Just (u, True))
+                   else (\x -> Just (x,True)) `fmap` Info.getUserPackageDB
 
   -- If the user database doesn't exist, and this command isn't a
   -- "modify" command, then we won't attempt to create or use it.
