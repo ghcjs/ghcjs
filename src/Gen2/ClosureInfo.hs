@@ -446,5 +446,6 @@ instance Default CgSettings where
 dfCgSettings :: DynFlags -> CgSettings
 dfCgSettings df = def { csTraceRts  = "-DGHCJS_TRACE_RTS"  `elem` opt_P df
                       , csAssertRts = "-DGHCJS_ASSERT_RTS" `elem` opt_P df
-                      , csProf      = buildingProf df
+                      , csProf      = WayProf `elem` ways df
+                                      -- FIXME: this part is inlined from Settings.hs to avoid circular imports
                       }
