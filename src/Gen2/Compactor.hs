@@ -89,7 +89,7 @@ renameInternals settings dflags cs0 stats0 = (cs, stats, meta)
             infos        = map (renameClosureInfo cs) $ concatMap (\(_,x,_) -> x) stats0
             -- render metadata as individual statements
             meta = mconcat (map staticDeclStat statics) <>
-                   mconcat (map staticInitStat statics) <>
+                   mconcat (map (staticInitStat $ buildingProf dflags) statics) <>
                    mconcat (map (closureInfoStat True) infos)
         return (renamedStats, meta)
       | otherwise = do
