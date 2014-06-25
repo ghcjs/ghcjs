@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TupleSections #-}
+{-# LANGUAGE CPP, OverloadedStrings, TupleSections #-}
 module Compiler.GhcjsHooks where
 
 import           CorePrep             (corePrepPgm)
@@ -149,10 +149,18 @@ runGhcjsPhase _ _ (RealPhase ph) input dflags
   | Just next <- lookup ph skipPhases = do
     output <- phaseOutputFilename next
     liftIO (copyFile input output)
+#if MIN_VERSION_ghc(7,8,3)
+    case ph of As _ -> (liftIO $ doFakeNative dflags (dropExtension output)); _ -> return ()
+#else
     when (ph == As) (liftIO $ doFakeNative dflags (dropExtension output))
+#endif
     return (RealPhase next, output)
   where
+#if MIN_VERSION_ghc(7,8,3)
+    skipPhases = [ (CmmCpp, Cmm), (Cmm, As False), (Cmm, As True), (As False, StopLn), (As True, StopLn) ]
+#else
     skipPhases = [ (CmmCpp, Cmm), (Cmm, As), (As, StopLn) ]
+#endif
 
 -- otherwise use default
 runGhcjsPhase _ _ p input dflags = runPhase p input dflags
