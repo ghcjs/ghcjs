@@ -620,16 +620,16 @@ installRts = subTop' "ghcjs-boot" $ do
   forM_ [ghcjsLib, inc, incNative] mkdir_p
   sub $ cd (ghcLib </> "include") >> cp_r "." incNative
   sub $ cd (ghcLib </> "rts-1.0") >> cp_r "." rtsLib
-  -- fixme this
-  -- sub $ cd ("data" </> "include")       >> cp_r "." inc
   sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
   cp (ghcLib </> "settings")          (ghcjsLib </> "settings")
   cp (ghcLib </> "platformConstants") (ghcjsLib </> "platformConstants")
-  -- cp (ghcLib </> "settings")          (base </> "settings")
-  -- cp (ghcLib </> "platformConstants") (base </> "platformConstants")
   let unlitDest = ghcjsLib </> exe "unlit"
   cp (ghcLib </> exe "unlit") unlitDest
   liftIO . Cabal.setFileExecutable . toStringI =<< absPath unlitDest
+  when (not isWindows) $ do
+    let runSh = ghcjsLib </> "run" <.> "sh"
+    writefile runSh "#!/bin/sh\nCOMMAND=$1\nshift\n\"$COMMAND\" \"$@\"\n"
+    liftIO . Cabal.setFileExecutable . toStringI =<< absPath runSh
   -- required for integer-gmp
   prepareGmp
   cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
@@ -921,6 +921,7 @@ cabalInstallFlags = do
            , "--haddockdir",    toTextI (instDir </> "doc" </> "haddock")
            , "--sysconfdir",    toTextI (instDir </> "etc")
            ] ++
+           bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++
            -- workaround for Cabal bug?
            bool isWindows ["--disable-executable-stripping", "--disable-library-stripping"] [] ++
            catMaybes [ (("-j"<>) . showT) <$> j
