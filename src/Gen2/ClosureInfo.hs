@@ -387,20 +387,19 @@ staticDeclStat (StaticInfo si sv _) =
 
 -- | initialize a global object. all global objects have to be declared (staticInfoDecl) first
 --   (this is only used with -debug, normal init would go through the static data table)
-staticInitStat :: StaticInfo
+staticInitStat :: Bool         -- ^ profiling enabled
+               -> StaticInfo
                -> JStat
-staticInitStat (StaticInfo i sv cc)
-  | StaticData con args  <- sv = [j| h$sti(`TxtI i`,`TxtI con`, `args`, `ccId`); |]
-  | StaticFun f          <- sv = [j| h$sti(`TxtI i`, `TxtI f`, [], `ccId`); |]
-  | StaticList args mt   <- sv = [j| h$stl(`TxtI i`, `args`, `maybe jnull (toJExpr . TxtI) mt`, `ccId`); |]
-  | StaticThunk (Just f) <- sv = [j| h$stc(`TxtI i`, `TxtI f`, `ccId`); |]
-  | otherwise                  = mempty -- StaticPrim - Nothing don't need any init here
+staticInitStat prof (StaticInfo i sv cc) =
+  case sv of
+    StaticData con args  -> ApplStat (jvar "h$sti") $ [jvar i, jvar con, toJExpr args] ++ ccArg
+    StaticFun f          -> ApplStat (jvar "h$sti") $ [jvar i, jvar f, [je| [] |]] ++ ccArg
+    StaticList args mt   ->
+      ApplStat (jvar "h$stl") $ [jvar i, toJExpr args, toJExpr $ maybe jnull (toJExpr . TxtI) mt] ++ ccArg
+    StaticThunk (Just f) -> ApplStat (jvar "h$stc") $ [jvar i, jvar f] ++ ccArg
+    _                    -> mempty
   where
-    ccId = case cc of
-             Nothing -> TxtI "null"
-             Just ci -> ci
-
-
+    ccArg = maybeToList (fmap toJExpr cc)
 
 allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> Maybe JExpr -> JExpr
 allocDynamicE s entry free cc
