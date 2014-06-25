@@ -371,7 +371,7 @@ settingsFor opts file = do
       putStrLn "running test with default settings"
       return def
     settingsFile  = replaceExtension file "settings"
-    settingsFile' = encodeString settingsFile
+    settingsFile' = encodeString (testsuiteLocation opts </> settingsFile)
 
 runhaskellResult :: TestOpts
                  -> TestSettings
