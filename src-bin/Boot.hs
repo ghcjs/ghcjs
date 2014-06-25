@@ -107,6 +107,7 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsDev          :: Bool       -- ^ do a development boot
                                  , _bsJobs         :: Maybe Int  -- ^ number of parallel jobs
                                  , _bsDebug        :: Bool       -- ^ build debug version of the libraries (GHCJS records the STG in the object files for easier inspection)
+                                 , _bsProf         :: Bool       -- ^ build profiling version of the libraries
                                  , _bsVerbosity    :: Verbosity  -- ^ verbosity level 0..3, 2 is default
                                  , _bsIconvInclude :: Maybe Text -- ^ directory containing iconv.h
                                  , _bsIconvLib     :: Maybe Text -- ^ directory containing iconv library
@@ -422,6 +423,8 @@ optParser = BootSettings
                   help "number of jobs to run in parallel" )
             <*> switch ( long "debug"   <> short 'd' <>
                   help "build debug libraries with extra checks" )
+            <*> fmap not (switch ( long "no-prof" <>
+                  help "don't generate profiling version of the libraries" ))
             <*> (fmap Verbosity . option) ( long "verbosity"   <> short 'v' <> value 2 <>
                   help "verbose output" )
             <*> (optional . fmap T.pack . strOption) ( long "with-iconv-includes" <> metavar "DIR" <>
@@ -932,6 +935,7 @@ cabalInstallFlags = do
   ghcjs    <- view (bePrograms . bpGhcjs)
   ghcjsPkg <- view (bePrograms . bpGhcjsPkg)
   instDir  <- view (beLocations . blGhcjsTopDir)
+  prof     <- view (beSettings . bsProf)
   return $ [ "--global"
            , "--ghcjs"
            , "--one-shot"
@@ -954,6 +958,7 @@ cabalInstallFlags = do
            catMaybes [ (("-j"<>) . showT) <$> j
                      , bj debug "--ghcjs-options=-debug"
                      , bj (v > info) "-v"
+                     , bj prof "--enable-library-profiling"
                      ]
 
 #ifdef WINDOWS
