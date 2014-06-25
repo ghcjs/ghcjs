@@ -418,11 +418,12 @@ runGhcjsResult opts file = do
             inc = includeOpt opts file
             opt = if optimize then ["-O2"] else []
             extraCompArgs = tsCompArguments settings
+            prof = tsProf settings
             compileOpts = [ inc
                           , "--no-rts", "--no-stats", "-o", encodeString outputExe
                           , "-odir", encodeString outputBuild
                           , "-hidir", encodeString outputBuild
-                          , "--use-base=" ++ encodeString (baseSymbs opts)
+                          , "--use-base=" ++ encodeString ((if prof then profBaseSymbs else baseSymbs) opts)
                           , input
                           ] ++ opt ++ extraCompArgs ++ extraFiles
             args = tsArguments settings
@@ -449,7 +450,7 @@ runGhcjsResult opts file = do
                                 ["out.js", "lib.js", "lib1.js"]
           let runMain = "\nh$main(h$mainZCMainzimain);\n"
           B.writeFile (encodeString outputRun) $
-            (if tsProf settings then profBaseJs else baseJs) opts <> lib <> lib1 <> out <> runMain
+            (if prof then profBaseJs else baseJs) opts <> lib <> lib1 <> out <> runMain
           -- run with node.js and SpiderMonkey
           nodeResult <- runTestPgm "node"         tsDisableNode         nodeProgram
           smResult   <- runTestPgm "SpiderMonkey" tsDisableSpiderMonkey spiderMonkeyProgram
