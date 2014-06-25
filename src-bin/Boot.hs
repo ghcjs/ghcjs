@@ -727,7 +727,7 @@ preparePackage pkg
     whenM (test_f "configure.ac") $
       make "configure" ["configure.ac"]
         (msg info ("generating configure script for " <> pkg) >> autoreconf [])
-    rm_rf "dist" -- should we do cabalClean instead?
+    rm_rf "dist"
   | otherwise = return ()
 
 fixRtsConf :: Text -> Text -> Text -> Text
@@ -820,7 +820,8 @@ unpackTar stripFirst dest tarFile = do
       checkExtract e je@(Just expected)
         | System.FilePath.isAbsolute ep = failSec e "absolute path"
         | any (=="..") epd              = failSec e "'..' in path"
-        | listToMaybe epd /= je         = failSec e ("tar bomb, expected path component: " <> T.pack expected)
+        | listToMaybe epd /= je && isSupportedEntry (Tar.entryContent e)
+                                        = failSec e ("tar bomb, expected path component: " <> T.pack expected)
         | otherwise                     = do
             view (beSettings . bsVerbosity) >>= \v ->
               -- this gets chatty, reduce verbosity for file writes / directory creates here unless we're at trace level
@@ -829,6 +830,9 @@ unpackTar stripFirst dest tarFile = do
             return je
         where ep  = Tar.entryPath e
               epd = System.FilePath.splitDirectories ep
+      isSupportedEntry (Tar.NormalFile{}) = True
+      isSupportedEntry (Tar.Directory{})  = True
+      isSupportedEntry _                  = False
       extractEntry e tgt
         | Tar.NormalFile bs size <- Tar.entryContent e = do
             mkdir_p (directory tgt)
@@ -963,7 +967,7 @@ make :: FilePath   -- ^ target, build this file if not exists
      -> B ()
 make tgt deps m = mtime tgt >>= \case
   Nothing -> m
-  Just tm -> whenM (any (>=tm) . catMaybes <$> mapM mtime deps) m
+  Just tm -> whenM (any (>tm) . catMaybes <$> mapM mtime deps) m
 
 failWith :: MonadIO m => Text -> m a
 failWith err = liftIO (T.putStrLn ("fatal: " <> err) >> exitFailure)
@@ -1155,9 +1159,8 @@ checkCabalSupport bs pgms = do
   cbl <- run' bs (pgms ^. bpCabal) ["install", "--help"]
   when (not $ "--ghcjs" `T.isInfixOf` cbl) $
     failWith ("cabal-install program " <> pgms ^. bpCabal . pgmLocText <> " does not support GHCJS")
-  g <- run' bs (pgms ^. bpGhc) ["-e", "Text.Read.readEither \"GHCJS\" :: Either String Distribution.Simple.CompilerFlavor"]
-  when (T.strip g /= "Right GHCJS") $
-    failWith ("GHC program " <> pgms ^. bpGhc . pgmLocText <> " does not have a Cabal library that supports GHCJS")
+  void (run' bs (pgms ^. bpGhc) ["-e", "either error id (Text.Read.readEither \"GHCJS\" :: Either String Distribution.Simple.CompilerFlavor)"]) `Ex.catch`
+    \(Ex.SomeException _) -> failWith ("GHC program " <> pgms ^. bpGhc . pgmLocText <> " does not have a Cabal library that supports GHCJS")
 
 -- | read the boot configuration yaml file
 readBootConfigFile :: BootSettings -> IO BootConfigFile
@@ -1275,7 +1278,6 @@ bootDataDir bs
 -- | our boot monad, we wrap around shelly but with a config environment
 --   shelly commands are wrapped with logging
 type B = ReaderT BootEnv Sh.Sh
---  deriving (Functor, Applicative, Monad, MonadIO, MonadReader BootEnv)
 
 runB :: BootEnv -> B a -> Sh.Sh a
 runB e b = runReaderT b e

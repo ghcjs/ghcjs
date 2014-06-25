@@ -1,15 +1,8 @@
-Google Summer of Code
----------------------
-
-Haskell.org is participating in [Google Summer of Code](https://www.google-melange.com/gsoc/homepage/google/gsoc2014) again this year. If you're looking for a fun project to work on over the summer and want to learn something about Haskell compilation, a GHCJS-related project might just be the ticket for you. We've compiled a list of ideas to get you started:
-
-[GHCJS Google Summer of Code project ideas](https://github.com/ghcjs/ghcjs/wiki/GHCJS-Google-Summer-of-Code-project-ideas)
 
 Haskell to JavaScript compiler
 ==============================
 
-GHCJS is a Haskell to JavaScript compiler that uses the GHC API. Our first official release is planned
-to coincide with the release of GHC 7.8.1. 
+GHCJS is a Haskell to JavaScript compiler that uses the GHC API.
 
 GHCJS supports many modern Haskell features, including:
 
@@ -28,15 +21,7 @@ And some JavaScript-specific features:
 Installation
 ============
 
-### Note:
-
-    The GHCJS command line options are still in flux. Make sure that you have the
-    latest Cabal patch installed when you update GHCJS. You need both an updated
-    `cabal-install` executable and `Cabal` library. Rerun `ghcjs-boot --init` to get the
-    latest updates for the libraries. If you get `Not in scope: data constructor ‘GHCJS’`,
-    you need to update your `Cabal` library.
-
-First install GHC 7.8 release candidate 2 or later and check with `ghc --version` that it's the
+First install GHC 7.8.2 or later and check with `ghc --version` that it's the
 compiler in your `PATH`. Next, make sure that you have all the prerequisites for your platform:
 
 #### Linux / OS X
@@ -55,8 +40,7 @@ compiler in your `PATH`. Next, make sure that you have all the prerequisites for
 
 Run the following script to install an updated `Cabal` and `cabal-install` with GHCJS
 support. Note that this will overwrite the `cabal` executable in your cabal executable
-installation path (typically `~/.cabal/bin`), you might want to backup your current version or
-append a custom program suffix with a `cabal` option such as `--program-suffix=-js`.
+installation path (typically `~/.cabal/bin`), you might want to backup your current version.
 
 ```bash
 #!/bin/sh
@@ -82,19 +66,13 @@ Now install `GHCJS` itself:
     $ git clone https://github.com/ghcjs/ghcjs.git
     $ cabal install ./ghcjs
 
-Check that you have the correct version of `GHCJS` in your PATH:
-
-    $ ghcjs --version
-    The Glorious Glasgow Haskell Compilation System for JavaScript, version 0.1.0 (GHC 7.8.1)
-    $ ghcjs-boot --version
-    The Glorious Glasgow Haskell Compilation System for JavaScript, version 0.1.0 (GHC 7.8.1)
-
 Build the base libraries for `GHCJS`:
 
-    $ ghcjs-boot --init
-    or
-    $ ghcjs-boot --init --with-cabal cabal-js # if you used --program-suffix=-js earlier
+    if you used the Git repository to install:
+    $ ghcjs-boot --dev
 
+    if you are using a package from hackage that includes the libraries:
+    $ ghcjs-boot
 
 Usage
 =====
