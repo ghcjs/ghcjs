@@ -1168,10 +1168,8 @@ genCon tgt con args
       return $ assignAll (ctxTarget tgt) args
 genCon tgt con args | isUnboxedTupleCon con =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
-genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt = do
-  prof <- profiling
-  let ccs = if prof then currentCCS else noCCS
-  allocCon tgti con ccs args
+genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt =
+  allocCon tgti con currentCCS args
 genCon tgt con args =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
 
