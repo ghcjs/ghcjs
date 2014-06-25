@@ -67,7 +67,7 @@ import           Gen2.Rts                 (rtsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
 
-type LinkableUnit = (Package, Module, Int) -- | module and the index of the block in the object file
+type LinkableUnit = (Package, Module, Int) -- ^ module and the index of the block in the object file
 type Module       = Text
 
 -- number of bytes linked per module

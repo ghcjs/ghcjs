@@ -322,8 +322,8 @@ setObjInfo debug obj t name fields a size regs static
       in  skip + (nregs `shiftL` 8)
 
 
-data StaticInfo = StaticInfo { siVar    :: !Text      -- | global object
-                             , siVal    :: !StaticVal -- | static initialization
+data StaticInfo = StaticInfo { siVar    :: !Text      -- ^ global object
+                             , siVal    :: !StaticVal -- ^ static initialization
                              }
   deriving (Eq, Ord, Show, Typeable)
 
@@ -350,7 +350,7 @@ data StaticLit = BoolLit   !Bool
                | DoubleLit !SaneDouble -- should we actually use double here?
                | StringLit !Text
                | BinLit    !ByteString
-               | LabelLit  !Bool !Text -- | is function pointer, label (also used for string / binary init)
+               | LabelLit  !Bool !Text -- ^ is function pointer, label (also used for string / binary init)
   deriving (Eq, Ord, Show, Typeable)
 
 instance ToJExpr StaticArg where

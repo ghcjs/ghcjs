@@ -26,13 +26,13 @@ data Variant = Variant
                                -> ByteString
     , variantLink              :: DynFlags
                                -> GhcjsSettings
-                               -> FilePath                  -- ^ output directory
-                               -> [FilePath]                -- ^ include paths for home package
-                               -> [(PackageId, [FilePath])] -- ^ library dirs for dependencies
-                               -> [FilePath]                -- ^ object files
-                               -> [FilePath]                -- ^ extra JavaScript files
-                               -> (Gen2.Fun -> Bool)        -- ^ function to use as roots
-                               -> Set Gen2.Fun              -- ^ extra roots
+                               -> FilePath                  -- output directory
+                               -> [FilePath]                -- include paths for home package
+                               -> [(PackageId, [FilePath])] -- library dirs for dependencies
+                               -> [FilePath]                -- object files
+                               -> [FilePath]                -- extra JavaScript files
+                               -> (Gen2.Fun -> Bool)        -- function to use as roots
+                               -> Set Gen2.Fun              -- extra roots
                                -> IO ()
     }
 

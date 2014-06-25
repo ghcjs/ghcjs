@@ -342,9 +342,11 @@ linkBinary' staticLink dflags o_files dep_packages = do
     -- by the RTS.  We can't therefore use the ordinary way opts for these.
     let
         debug_opts | WayDebug `elem` ways dflags = [
--- #if defined(HAVE_LIBBFD)
---                        "-lbfd", "-liberty"
--- #endif
+{-
+#if defined(HAVE_LIBBFD)
+                          "-lbfd", "-liberty"
+#endif
+-}
                          ]
                    | otherwise            = []
 
