@@ -446,8 +446,8 @@ optParser = BootSettings
                   help "ghc program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-datadir" <> metavar "DIR" <>
                   help "data directory with libraries and configuration files" )
-            <*> (optional . fmap T.pack . strOption) ( long "with-sources" <> metavar "DIR" <>
-                  help "installation source configuration file (default: boot-sources.yaml in datadir)" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-config" <> metavar "FILE" <>
+                  help "boot configuration file (default: boot.yaml in datadir)" )
 
 initPackageDB :: B ()
 initPackageDB = do
