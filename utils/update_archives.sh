@@ -101,6 +101,10 @@ else
     exit 1
 fi
 
+git update-index --assume-unchanged lib/cache/boot.tar
+git update-index --assume-unchanged lib/cache/shims.tar
+git update-index --assume-unchanged lib/cache/test.tar
+
 STATUS=`git status --porcelain`
 if [ ${#STATUS} -gt 0 ]
 then
