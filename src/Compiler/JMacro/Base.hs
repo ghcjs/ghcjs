@@ -177,7 +177,7 @@ data JOp =
       | LeOp            -- <=
       | AddOp           -- +
       | SubOp           -- -
-      | MulOp           -- *
+      | MulOp           -- "*"
       | DivOp           -- /
       | ModOp           -- %
       | LeftShiftOp     -- <<

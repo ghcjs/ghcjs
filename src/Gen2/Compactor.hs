@@ -292,7 +292,7 @@ encodeInfo cs (ClosureInfo var regs name layout typ static)
   | (CIFun arity regs0) <- typ = [1, arity, encodeRegs regs] ++ ls
   | (CICon tag)         <- typ = [2, tag] ++ ls
   | CIStackFrame        <- typ = [3, encodeRegs regs] ++ ls
--- | (CIPap ar)         <- typ = [4, ar] ++ ls  -- these should only appear during runtime
+-- (CIPap ar)         <- typ = [4, ar] ++ ls  -- these should only appear during runtime
   | otherwise                  = error ("encodeInfo, unexpected closure type: " ++ show typ)
   where
     ls         = encodeLayout layout ++ encodeSrt static

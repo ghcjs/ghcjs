@@ -1203,9 +1203,9 @@ jumpToFast as afterLoad = do
 
 
 -- find a specialized application path if there is one
-selectApply :: Bool     ->    -- ^ true for fast apply, false for stack apply
-               ([StgArg], [JExpr]) ->    -- ^ arguments
-               G (JExpr,Bool) -- ^ the function to call, true if specialized path
+selectApply :: Bool           -- ^ true for fast apply, false for stack apply
+            -> ([StgArg], [JExpr])       -- ^ arguments
+            -> G (JExpr,Bool) -- ^ the function to call, true if specialized path
 selectApply fast (args, as) = do
   case specApply fast (length args) (length as) of
     Just e  -> return (e, True)
