@@ -11,6 +11,7 @@ GHCJS supports many modern Haskell features, including:
  * Weak references, CAF deallocation, StableName, StablePtr
  * Unboxed arrays, emulated pointers
  * Integer support through [JSBN](http://www-cs-students.stanford.edu/~tjw/jsbn/), 32 and 64 bit signed and unsigned arithmetic (`Word64`, `Int32` etc.)
+ * Cost-centres, stack traces
  * Cabal support, GHCJS has its own package database
 
 And some JavaScript-specific features:
@@ -174,6 +175,7 @@ TODO add better instructions here
       * `-DGHCJS_TRACE_WEAK`: output related to weak references
       * `-DGHCJS_TRACE_STM`: output for software transactional memory
       * `-DGHCJS_TRACE_GC`: output garbage collector (heap scanner) related messages
+      * `-DGHCJS_TRACE_PROF`: output profiling related messages
   * see the utility programs in `utils` in the ghcjs repository for tools for inspecting object files, quickly bisecting
      bugs in the optimizer etc.
 
