@@ -25,7 +25,8 @@ packages:
   # special packages installed between stages:
 
   ghcjs-prim: ./ghcjs/ghcjs-prim
-  cabal:      ./extra/cabal/Cabal
+
+  cabal:      ./boot/cabal/Cabal
 
 
   # pretend to have these packages installed during stage 1,
@@ -36,27 +37,31 @@ packages:
     - Cabal
 
   # in stage 1a, we cannot do linking yet
-  
+
   stage1a:
+    - ./boot/base
     - ./boot/ghc-prim
     - ./boot/integer-gmp
-    - ./boot/base
 
   # after stage 1a, ghcjs-boot installs ghcjs-prim and
   # continues with stage 1b
 
   stage1b:
-    - ./boot/deepseq
-    - ./boot/containers
-    - ./boot/directory
-    - ./boot/template-haskell
     - ./boot/array
+    - ./boot/bytestring
+    - ./boot/containers
+    - ./boot/deepseq
+    - ./boot/directory
+    - ./boot/filepath
+    - ./boot/old-locale
     - ./boot/pretty
-    - ./boot/time
     - ./boot/process
-    - IfWindows: ./boot/Win32
+    - ./boot/template-haskell
+    - ./boot/time
     - IfUnix:    ./boot/unix
+    - IfWindows: ./boot/Win32
     # add more packages here when required for a full boot
+    # (all remaining Cabal dependencies need to be here)
     # - IfFull:
 
   # after stage 1b, ghcjs-boot removes the pretend-to-have packages
@@ -69,9 +74,25 @@ packages:
   # builds the stage2 packages
 
   stage2:
-    - ./extra/hashable
+    - ./boot/async
+    - ./boot/aeson
+    - ./boot/attoparsec
+    - ./boot/case-insensitive
+    - ./boot/dlist
+    - ./boot/extensible-exceptions
+    - ./boot/hashable
+    - ./boot/mtl
+    - ./boot/old-time
+    - ./boot/parallel
+    - ./boot/primitive
+    - ./boot/scientific
+    - ./boot/stm
+    - ./boot/syb
+    - ./boot/text
+    - ./boot/transformers
+    - ./boot/unordered-containers
+    - ./boot/vector
     - ./ghcjs/ghcjs-base
-
 
 # configuration for source locations (libraries and rts) for booting
 #

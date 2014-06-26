@@ -32,6 +32,7 @@ source-repository head
 
 -- only build the library and ghcjs executable
 flag compiler-only
+  description: only build the library and ghcjs executable
   default:            False
 
 -- Don't rename the executables to include the version number in the filename
@@ -39,6 +40,7 @@ flag compiler-only
 -- scripts to pass the correct library paths to the programs. See Setup.hs and
 -- the template files in /lib/etc for more information.
 flag no-wrapper-install
+  description: don't install wrapper scripts and add version numbers to the executable names
   default:            False
 
 Library

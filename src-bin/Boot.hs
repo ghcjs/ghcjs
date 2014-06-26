@@ -25,7 +25,7 @@
   #-}
 module Main where
 
-import           Prelude                         hiding (FilePath, forM_, elem, mapM_, any, concat, concatMap)
+import           Prelude                         hiding (FilePath, forM_, elem, mapM_, any, all, concat, concatMap)
 
 import qualified Distribution.Simple.Utils       as Cabal
 
@@ -69,7 +69,7 @@ import           Options.Applicative             hiding (info, (&))
 import qualified Options.Applicative             as O
 
 import           System.Directory                (findExecutable)
-import           System.Environment              (getEnvironment)
+import           System.Environment              (getEnvironment, getArgs)
 import           System.Environment.Executable   (getExecutablePath)
 import           System.Exit                     (exitSuccess, exitFailure, ExitCode(..))
 import qualified System.FilePath
@@ -246,6 +246,8 @@ allPackages = p <$> view beStages
 
 main :: IO ()
 main = do
+    -- temporary warning
+    whenM ((==["--init"]) <$> getArgs) (putStrLn "ghcjs-boot has been updated. see README.\nUse `ghcjs-boot --dev' for a development build (if you installed GHCJS from a Git repo) or `ghcjs-boot' for a release build" >> exitFailure)
     settings <- adjustDefaultSettings <$> execParser optParser'
     when (settings ^. bsShowVersion) (printVersion >> exitSuccess)
     env <- initBootEnv settings
@@ -491,7 +493,7 @@ installDevelopmentTree = subTop $ do
     initGhcjsBoot = sub $ do
       cloneGit bootDescr "ghcjs-boot"  bsrcBootDevBranch bsrcBootDev
       cd "ghcjs-boot"
-      git ["submodule", "update", "--init", "--recursive"]
+      git_ ["submodule", "update", "--init", "--recursive"]
       mapM_ patchPackage =<< allPackages
       preparePrimops
       buildGenPrim
@@ -501,9 +503,9 @@ installDevelopmentTree = subTop $ do
       msgD info ("cloning git repository for " <> descr)
       cloneGitSrcs descr <^> beSources . srcs
       branch' <- view (beSources . branch)
-      (sub $ cd repoName >> git ["checkout", branch'])
+      (sub $ cd repoName >> git_ ["checkout", branch'])
     cloneGitSrcs d [] = failWith ("could not clone " <> d <> ", no available sources")
-    cloneGitSrcs d (x:xs) = git ["clone", x] `catchAny_`
+    cloneGitSrcs d (x:xs) = git_ ["clone", x] `catchAny_`
       (msgD warn "clone failed, trying next source" >> cloneGitSrcs d xs)
 
 installReleaseTree :: B ()
@@ -538,9 +540,9 @@ preparePrimops = subTop' ("ghcjs-boot" </> "data") . checkpoint' "primops" "prim
 buildGenPrim :: B ()
 buildGenPrim = subTop' ("ghcjs-boot" </> "utils" </> "genprimopcode") $ do
   make "genprimopcode" [] $ do
-    make "Lexer.hs"  ["Lexer.x"]  (alex ["Lexer.x"])
-    make "Parser.hs" ["Parser.y"] (happy ["Parser.y"])
-    ghc   ["-o", "genprimopcode", "-O", "Main.hs", "+RTS", "-K128M"]
+    make "Lexer.hs"  ["Lexer.x"]  (alex_ ["Lexer.x"])
+    make "Parser.hs" ["Parser.y"] (happy_ ["Parser.y"])
+    ghc_   ["-o", "genprimopcode", "-O", "Main.hs", "+RTS", "-K128M"]
 
 -- fixme this hardcodes the location of integer-gmp
 integerGmp :: FilePath
@@ -568,9 +570,9 @@ prepareGmp = subTop' integerGmp . checkpoint' "gmp" "in-tree gmp already prepare
       cd dir
       adir <- absPath dir
       msgD info "building GMP"
-      configure ["--prefix=" <> msysPath (ad </> "intree")]
-      runMake []
-      runMake ["install"]
+      configure_ ["--prefix=" <> msysPath (ad </> "intree")]
+      runMake_ []
+      runMake_ ["install"]
   make "GmpGeneratedConstants.h" [] $ do
     gmpIncl <- view (beSettings . bsGmpInclude)
     p <- absPath =<< pwd
@@ -585,7 +587,7 @@ buildGmpConstants :: Maybe Text -> B ()
 buildGmpConstants includeDir = subTop' integerGmp $ do
   msg info "generating GMP derived constants"
   cd "mkGmpDerivedConstants"
-  ghc $ maybe [] (\d -> ["-I" <> d]) includeDir ++
+  ghc_ $ maybe [] (\d -> ["-I" <> d]) includeDir ++
     ["-fforce-recomp", "-no-hs-main", "-o", "mkGmpDerivedConstants", "mkGmpDerivedConstants.c"]
   p <- pwd
   constants <- run (Program "" "" Nothing (Just $ p </> "mkGmpDerivedConstants") []) []
@@ -600,7 +602,7 @@ patchPackage pkg
             msg info ("applying patch: " <> toTextI p)
             readfile p >>= setStdin
             cd (fromText pkg')
-            patch ["-p1", "-N"]
+            patch_ ["-p1", "-N"]
       in  sub $ cond applyPatch (msg info $ "no patch for package " <> pkgName <> " found") =<< test_f p
   | otherwise = return ()
 
@@ -726,7 +728,7 @@ preparePackage pkg
     cd (fromText pkg)
     whenM (test_f "configure.ac") $
       make "configure" ["configure.ac"]
-        (msg info ("generating configure script for " <> pkg) >> autoreconf [])
+        (msg info ("generating configure script for " <> pkg) >> autoreconf_ [])
     rm_rf "dist"
   | otherwise = return ()
 
@@ -848,22 +850,23 @@ unpackTar stripFirst dest tarFile = do
         msgD trace ("setting permissions of " <> toTextI tgt <> " to " <> showT mode)
         liftIO (setFileMode (toStringI absTgt) mode)
 
-git          = runE_ bpGit
-alex         = runE_ bpAlex
-happy        = runE_ bpHappy
-ghc          = runE_ bpGhc
+git_         = runE_ bpGit
+alex_        = runE_ bpAlex
+happy_       = runE_ bpHappy
+ghc_         = runE_ bpGhc
 ghc_pkg      = runE  bpGhcPkg
 ghcjs_pkg    = runE  bpGhcjsPkg
 ghcjs_pkg_   = runE_ bpGhcjsPkg
-patch        = runE_ bpPatch
+patch_       = runE_ bpPatch
 cpp          = runE  bpCpp
-tar          = runE_ bpTar
-cabal        = runE_ bpCabal
+tar_         = runE_ bpTar
+cabal        = runE  bpCabal
+cabal_       = runE_ bpCabal
 
 runE  g a = view (bePrograms . g) >>= flip run  a
 runE_ g a = view (bePrograms . g) >>= flip run_ a
 
-cabal, cabalStage1 :: [Text] -> B ()
+cabalStage1 :: [Text] -> B ()
 -- | stage 1 cabal install: boot mode, hand off to GHC if GHCJS cannot yet compile it
 cabalStage1 pkgs = sub $ do
   ghc <- requirePgmLoc =<< view (bePrograms . bpGhc)
@@ -884,10 +887,11 @@ cabalStage1 pkgs = sub $ do
                           ,bj (s^.bsGmpInTree)    "--with-intree-gmp"
                           ]
   flags <- cabalInstallFlags
-  cabal $ "install" : pkgs ++
-          [ "--solver=topdown"           -- the modular solver refuses to install stage1 packages
-          , "--ghcjs-option=-XMagicHash" -- fixme this should be fixed in the package
-          ] ++ map ("--configure-option="<>) configureOpts ++ gmpOpts ++ flags
+  let args = "install" : pkgs ++
+             [ "--solver=topdown" -- the modular solver refuses to install stage1 packages
+             ] ++ map ("--configure-option="<>) configureOpts ++ gmpOpts ++ flags
+  checkInstallPlan pkgs args
+  cabal_ args
 
 -- | regular cabal install for GHCJS
 cabalInstall [] = do
@@ -896,7 +900,29 @@ cabalInstall [] = do
 cabalInstall pkgs = do
   flags <- cabalInstallFlags
   setenv "GHCJS_BOOTING" "1"
-  cabal ("install" : pkgs ++ flags)
+  let args = ("install" : pkgs ++ flags)
+  checkInstallPlan pkgs args
+  cabal_ args
+
+-- check that Cabal is only going to install the packages we specified
+-- uses somewhat fragile parsing of --dry-run output, find a better way
+checkInstallPlan :: [Package] -> [Text] -> B ()
+checkInstallPlan pkgs opts = do
+  plan <- cabal (opts ++ ["-v2", "--dry-run"])
+  when (hasReinstalls plan || hasUnexpectedInstalls plan || hasNewVersion plan) (err plan)
+  where
+    hasReinstalls = T.isInfixOf "(reinstall)"   -- reject reinstalls
+    hasNewVersion = T.isInfixOf "(new version)" -- only allow one version of each package during boot
+    hasUnexpectedInstalls plan =
+      let ls = filter ("(new package)" `T.isInfixOf`) (T.lines plan)
+      in  length ls /= length pkgs || not (all isExpected ls)
+    isExpected l
+      | (w:_) <- T.words l, ps@(_:_) <- T.splitOn "-" w =
+          any (T.intercalate "-" (init ps) `T.isInfixOf`) pkgs
+      | otherwise = False
+    err plan = failWith $ "unacceptable install plan, expecting exactly the following list of packages to be installed,\n" <>
+                          "without reinstalls and only one version of each package in the database:\n\n" <>
+                          T.unlines (map ("  - " <>) pkgs) <> "\nbut got:\n\n" <> plan
 
 cabalInstallFlags :: B [Text]
 cabalInstallFlags = do
@@ -909,6 +935,7 @@ cabalInstallFlags = do
   return $ [ "--global"
            , "--ghcjs"
            , "--one-shot"
+           , "--avoid-reinstalls"
            , "--builddir",      "dist"
            , "--with-compiler", ghcjs ^. pgmLocText
            , "--with-hc-pkg",   ghcjsPkg ^. pgmLocText
@@ -930,7 +957,7 @@ cabalInstallFlags = do
                      ]
 
 #ifdef WINDOWS
-bash pgm xs = view (bePrograms . bpBash) >>= \b -> run_ b ["-c", T.unwords args]
+bash_ pgm xs = view (bePrograms . bpBash) >>= \b -> run_ b ["-c", T.unwords args]
   where
     args = map escapeArg $ (pgm ^. pgmLoc . to toTextI) : (pgm ^. pgmArgs ++ xs)
     -- might not escape everything, be careful
@@ -939,13 +966,13 @@ bash pgm xs = view (bePrograms . bpBash) >>= \b -> run_ b ["-c", T.unwords args]
     escapeChar '\\' = "\\\\"
     escapeChar x    = T.singleton x
 
-configure  = bash (Program "configure" "./configure" Nothing (Just "./configure") [])
-autoreconf = bash bpAutoreconf
-runMake    = bash bpMake
+configure_  = bash_ (Program "configure" "./configure" Nothing (Just "./configure") [])
+autoreconf_ = bash_ bpAutoreconf
+runMake_    = bash_ bpMake
 #else
-configure  = run_ (Program "configure" "./configure" Nothing (Just "./configure") [])
-autoreconf = runE_ bpAutoreconf
-runMake    = runE_ bpMake
+configure_  = run_ (Program "configure" "./configure" Nothing (Just "./configure") [])
+autoreconf_ = runE_ bpAutoreconf
+runMake_    = runE_ bpMake
 #endif
 
 ignoreExcep a = a `catchAny` (\e -> msg info $ "ignored exception: " <> showT e)
@@ -1017,7 +1044,11 @@ install req descr dest (s:ss)
                            isDev <- view (beSettings . bsDev)
                            if isDev
                                then msg info ("source " <> s <> " for " <> descr <> " is empty, trying next")
-                               else msg warn ("archive file " <> s <> " for " <> descr <> " is empty. you might be missing the required cache archives for a release build")
+                               else msg warn $ T.unlines
+                                      [ "Archive file " <> s <> " for " <> descr <> " is empty."
+                                      , "You might be missing the required cache archives for doing a release build."
+                                      , "Use `ghcjs-boot --dev' if you installed GHCJS from a Git repository."
+                                      ]
                            install req descr dest ss
                          else installArchive descr dest s' >> return True
                     else do
@@ -1042,7 +1073,7 @@ installArchive descr dest src
     suff e = e `T.isSuffixOf` s
     d      = toTextI dest
     s      = toTextI src
-    untar o = sub (absPath src >>= \as -> mkdir_p dest >> cd dest >> tar [o, toTextI as, "--strip-components=1"])
+    untar o = sub (absPath src >>= \as -> mkdir_p dest >> cd dest >> tar_ [o, toTextI as, "--strip-components=1"])
 
 -- | download a file over HTTP
 fetch :: Text     -- ^ description
