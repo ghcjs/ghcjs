@@ -81,9 +81,7 @@ enterCostCentreFun ccs
   | otherwise = mempty -- top-level function, nothing to do
 
 enterCostCentreThunk :: JStat
-enterCostCentreThunk =
-    -- FIXME: function call is for debugging purposes, inline it
-    [j| h$enterThunkCCS(`R1`.cc); |]
+enterCostCentreThunk = [j| h$enterThunkCCS(`R1`.cc); |]
 
 setSCC :: CostCentre -> Bool -> Bool -> G JStat
 -- FIXME: ignoring tick flags for now
