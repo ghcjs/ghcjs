@@ -319,15 +319,11 @@ instance Monoid C where
 
 data Special = Stack
              | Sp
-             | HTrue
-             | HFalse
      deriving (Show, Eq)
 
 instance ToJExpr Special where
   toJExpr Stack  = [je| h$stack |]
   toJExpr Sp     = [je| h$sp    |]
-  toJExpr HTrue  = [je| true    |]
-  toJExpr HFalse = [je| false   |]
 
 adjSp :: Int -> JStat
 adjSp e = [j| h$sp = h$sp + `e`; |]
@@ -595,8 +591,8 @@ jsVar v = ValExpr . JVar . TxtI . T.pack $ v
 
 jsId :: Id -> G JExpr
 jsId i
---  | i == trueDataConId  = return $ toJExpr HTrue
---  | i == falseDataConId = return $ toJExpr HFalse
+--  | i == trueDataConId  = return $ toJExpr True
+--  | i == falseDataConId = return $ toJExpr False
   | otherwise = ValExpr . JVar <$> jsIdIdent i Nothing IdPlain
 
 -- entry id
