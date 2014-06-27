@@ -7,7 +7,7 @@ import           Data.List             (isPrefixOf, isSuffixOf)
 import           Data.Maybe            (maybe, listToMaybe)
 import           Data.Version          (showVersion)
 
-import           Distribution.PackageDescription
+import           Distribution.PackageDescription hiding (Flag)
 import           Distribution.Simple
 import           Distribution.Simple.LocalBuildInfo
 import           Distribution.Simple.Setup
@@ -45,7 +45,7 @@ ghcjsPostCopy args flags descr lbi
         return () -- User has opted to skip wrapper script installation. Let's hope they know what they're doing.
                   -- Executables will keep their original names, e.g. ghcjs.bin, ghcjs-pkg.bin
   | otherwise = do
-        wrapperEnv <- getWrapperEnv verbosity descr installDirs exes
+        wrapperEnv <- getWrapperEnv verbosity descr (copyDest flags) installDirs exes
         mapM_ (copyWrapper verbosity wrapperEnv descr installDirs) exes
     where
       exes        = executables descr
@@ -67,16 +67,20 @@ verSuff env = weVersion env ++ "-" ++ weGhcVersion env
 requiresWrapper :: String -> Bool
 requiresWrapper exe = ".bin" `isSuffixOf` exe
 
-getWrapperEnv :: Verbosity -> PackageDescription -> InstallDirs FilePath -> [Executable] -> IO WrapperEnv
-getWrapperEnv v descr installDirs exes
+getWrapperEnv :: Verbosity -> PackageDescription -> Flag CopyDest -> InstallDirs FilePath -> [Executable] -> IO WrapperEnv
+getWrapperEnv v descr copyDest' installDirs exes
   | [Executable name _ bi] <- filter ((=="ghcjs.bin").exeName) exes =
      let ghcjsVal xs =
            trim <$> rawSystemStdout v (bindir installDirs </> "ghcjs.bin") ["--ghcjs-setup-print", xs]
-     in  WrapperEnv <$> ghcjsVal"--print-default-topdir"
-                    <*> pure (bindir installDirs)
+     in  WrapperEnv <$> ghcjsVal "--print-default-topdir"
+                    <*> pure (dropPrefix copyDest' $ bindir installDirs)
                     <*> pure (showVersion . pkgVersion . package $ descr)
                     <*> ghcjsVal "--numeric-ghc-version"
   | otherwise = error "cannot find ghcjs.bin executable in package"
+
+dropPrefix (Flag (CopyTo pre)) s | isPrefixOf pre s = drop (length pre) s
+dropPrefix (Flag (CopyTo pre)) s = error $ "dropPrefix - " ++ show pre ++ " not a prefix of " ++ show s
+dropPrefix _ s = s
 
 {- |
      on Windows we can't run shell scripts, so we don't install wrappers
