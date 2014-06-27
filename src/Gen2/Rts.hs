@@ -1192,4 +1192,12 @@ fun h$lazy_e {
 }
 `ClosureInfo "h$lazy_e" (CIRegs 0 [PtrV]) "generic lazy value" (CILayoutFixed 0 []) CIThunk noStatic`;
 
+// TODO: generate this only when profiling is enabled
+fun h$setCcs_e {
+  h$CCCS = `Stack`[`Sp`-1]; // TODO: maybe use popUnknown?
+  `adjSpN 2`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo "h$setCcs_e" (CIRegs 0 []) "set cost centre stack" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
+
 |]
