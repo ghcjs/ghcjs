@@ -30,7 +30,7 @@ requiredPackages:
   - random
   - syb
   - transformers
-  - test
+  - text
   - parallel
   - ghcjs-base
   - QuickCheck
