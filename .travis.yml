@@ -21,7 +21,7 @@ install:
     - cabal install --enable-executable-dynamic --enable-tests --enable-benchmarks
     - ghcjs --version
     - ghcjs-boot --version
-    - ghcjs-boot --init
+    - ghcjs-boot --dev
     - cabal install -j2 --ghcjs stm random syb transformers text parallel QuickCheck old-time vector
     - ghcjs-pkg list
 
