@@ -69,11 +69,6 @@ makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls) =
      (HM.union (fmap (+nss) pss) ss)
      (HM.union (fmap (+nls) pls) ls)
 
--- | collect global objects (data / CAFs). rename them and add them to the table
-collectGlobals :: [StaticInfo]
-               -> State CompactorState ()
-collectGlobals = mapM_ (\(StaticInfo i _) -> renameObj i)
-
 debugShowStat :: (JStat, [ClosureInfo], [StaticInfo]) -> String
 debugShowStat (s, cis, sis) = "closures:\n" ++ unlines (map show cis) ++ "\nstatics:" ++ unlines (map show sis) ++ "\n\n"
 
@@ -87,14 +82,14 @@ renameInternals settings dflags cs0 stats0 = (cs, stats, meta)
     ((stats, meta), cs) = runState renamed cs0
     renamed :: State CompactorState ([JStat], JStat)
     renamed
-      | buildingDebug dflags = do
+      | buildingDebug dflags || buildingProf dflags = do
         cs <- get
         let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs) stats0
             statics      = map (renameStaticInfo cs)  $ concatMap (\(_,_,x) -> x) stats0
             infos        = map (renameClosureInfo cs) $ concatMap (\(_,x,_) -> x) stats0
             -- render metadata as individual statements
             meta = mconcat (map staticDeclStat statics) <>
-                   mconcat (map staticInitStat statics) <>
+                   mconcat (map (staticInitStat $ buildingProf dflags) statics) <>
                    mconcat (map (closureInfoStat True) infos)
         return (renamedStats, meta)
       | otherwise = do
@@ -214,7 +209,7 @@ renameStaticInfo cs si = si & staticIdents %~ renameIdent
     renameIdent t = maybe t (\(TxtI t') -> t') (HM.lookup t $ cs ^. nameMap)
 
 staticIdents :: Traversal' StaticInfo Text
-staticIdents f (StaticInfo i v) = StaticInfo <$> f i <*> staticIdentsV f v
+staticIdents f (StaticInfo i v cc) = StaticInfo <$> f i <*> staticIdentsV f v <*> pure cc
 
 staticIdentsV :: Traversal' StaticVal Text
 staticIdentsV f (StaticFun i)          = StaticFun <$> f i
@@ -312,7 +307,7 @@ encodeInfo cs (ClosureInfo var regs name layout typ static)
 encodeStatic :: CompactorState
              -> StaticInfo
              -> [Int]
-encodeStatic cs (StaticInfo to sv)
+encodeStatic cs (StaticInfo to sv _)
     | StaticFun f <- sv                           = [1, entry f]
     | StaticThunk (Just t) <- sv                  = [2, entry t]
     | StaticThunk Nothing <- sv                   = [0]

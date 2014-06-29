@@ -15,6 +15,7 @@ import           Text.PrettyPrint.Leijen.Text     hiding (pretty, (<>))
 import           Compiler.JMacro
 
 import           Gen2.ClosureInfo
+import           Gen2.Profiling
 import           Gen2.Printer
 import           Gen2.RtsApply
 import           Gen2.RtsTypes
@@ -43,13 +44,21 @@ resetResultVar r = [j| `r` = null; |]
  -}
 closureConstructors :: CgSettings -> JStat
 closureConstructors s =
-  [j| fun h$c f { `checkC`; return { f: f, d1: null, d2: null, m: 0 }; }
-      fun h$c0 f { `checkC`; return { f: f, d1: null, d2: null, m: 0 }; }
-      fun h$c1 f x1 { `checkC`; return { f: f, d1: x1, d2: null, m: 0 }; }
-      fun h$c2 f x1 x2 { `checkC`; return {f: f, d1: x1, d2: x2, m: 0 }; }
-    |] <> mconcat (map mkClosureCon [3..24])
-       <> mconcat (map mkDataFill [1..24])
+     declClsConstr "h$c"  ["f"] [jsv "f", jnull, jnull, ji 0]
+  <> declClsConstr "h$c0" ["f"] [jsv "f", jnull, jnull, ji 0] -- FIXME: same as h$c, maybe remove one of them?
+  <> declClsConstr "h$c1" ["f", "x1"] [jsv "f", jsv "x1", jnull, ji 0]
+  <> declClsConstr "h$c2" ["f", "x1", "x2"] [jsv "f", jsv "x1", jsv "x2", ji 0]
+  <> mconcat (map mkClosureCon [3..24])
+  <> mconcat (map mkDataFill [1..24])
   where
+    prof = csProf s
+    addCCArg as = map TxtI $ as ++ if prof then ["cc"] else []
+    addCCArg' as = as ++ if prof then [TxtI "cc"] else []
+    addCCField fs = jhFromList $ fs ++ if prof then [("cc", jsv "cc")] else []
+
+    declClsConstr i as fs =
+      i |= jfun (addCCArg as) [j| `checkC`; return `addCCField $ zip ["f", "d1", "d2", "m"] fs`; |]
+
     -- only JSRef can typically contain undefined or null
     -- although it's possible (and legal) to make other Haskell types
     -- to contain JS refs directly
@@ -67,6 +76,7 @@ closureConstructors s =
                          }
                        |]
            | otherwise = mempty
+
     -- h$d is never used for JSRef (since it's only for constructors with
     -- at least three fields, so we always warn here
     checkD | csAssertRts s =
@@ -78,15 +88,21 @@ closureConstructors s =
                          }
                        |]
            | otherwise = mempty
+
     mkClosureCon :: Int -> JStat
     mkClosureCon n = let funName = TxtI $ T.pack ("h$c" ++ show n)
-                         vals   = map (TxtI . T.pack . ('x':) . show) [(1::Int)..n]
-                         fun    = JFunc (TxtI "f" : vals) funBod
-                         funBod = [j| `checkC`; return { f: f, m: 0, d1: x1, d2: `obj` }; |]
+                         vals   = TxtI "f" : addCCArg' (map (TxtI . T.pack . ('x':) . show) [(1::Int)..n])
+                         fun    = JFunc vals funBod
+                         funBod =
+                           [j| `checkC`;
+                               return `addCCField [("f", jsv "f"), ("d1", jsv "x1"),
+                                                   ("d2", toJExpr obj), ("m", ji 0)]`;
+                             |]
                          obj    = JHash . M.fromList . zip
                                     (map (T.pack . ('d':) . show) [(1::Int)..]) $
                                     (map (toJExpr . TxtI . T.pack . ('x':) . show) [2..n])
                      in decl funName <> [j| `funName` = `fun` |]
+
     mkDataFill :: Int -> JStat
     mkDataFill n = let funName = TxtI $ T.pack ("h$d" ++ show n)
                        ds      = map (T.pack . ('d':) . show) [(1::Int)..n]
@@ -323,6 +339,7 @@ fun h$ap1_e {
   var d1 = `R1`.d1;
   var d2 = `R1`.d2;
   h$bh();
+  `profStat s enterCostCentreThunk`;
   `R1` = d1;
   `R2` = d2;
   return h$ap_1_1_fast();
@@ -335,6 +352,7 @@ fun h$ap2_e {
   var d2 = `R1`.d2.d1;
   var d3 = `R1`.d2.d2;
   h$bh();
+  `profStat s enterCostCentreThunk`;
   `R1` = d1;
   `R2` = d2;
   `R3` = d3;
@@ -349,6 +367,7 @@ fun h$ap3_e {
   var d3 = `R1`.d2.d2;
   var d4 = `R1`.d2.d3;
   h$bh();
+  `profStat s enterCostCentreThunk`;
   `R1` = d1;
   `R2` = d2;
   `R3` = d3;
@@ -1167,9 +1186,18 @@ fun h$stmResumeRetry_e {
 fun h$lazy_e {
   var x = h$r1.d1();
   h$bh();
+  `profStat s enterCostCentreThunk`;
   h$r1 = x;
   return h$stack[h$sp];
 }
 `ClosureInfo "h$lazy_e" (CIRegs 0 [PtrV]) "generic lazy value" (CILayoutFixed 0 []) CIThunk noStatic`;
+
+// TODO: generate this only when profiling is enabled
+fun h$setCcs_e {
+  h$CCCS = `Stack`[`Sp`-1]; // TODO: maybe use popUnknown?
+  `adjSpN 2`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo "h$setCcs_e" (CIRegs 0 []) "set cost centre stack" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
 
 |]

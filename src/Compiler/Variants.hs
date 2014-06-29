@@ -13,6 +13,7 @@ import qualified Gen2.Generator        as Gen2
 import qualified Gen2.Linker           as Gen2
 import qualified Gen2.Object           as Gen2
 
+import           CostCentre            (CollectedCCs)
 import           DynFlags              (DynFlags)
 import           HscTypes              (CgGuts)
 import           Module                (Module (..), PackageId)
@@ -23,6 +24,7 @@ data Variant = Variant
                                -> DynFlags
                                -> CgGuts
                                -> StgPgm
+                               -> CollectedCCs
                                -> ByteString
     , variantLink              :: DynFlags
                                -> GhcjsSettings
@@ -35,9 +37,6 @@ data Variant = Variant
                                -> Set Gen2.Fun              -- extra roots
                                -> IO ()
     }
-
-variants :: [Variant]
-variants = [gen2Variant]
 
 gen2Variant :: Variant
 gen2Variant = Variant Gen2.generate Gen2.link

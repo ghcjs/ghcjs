@@ -55,6 +55,7 @@ import           System.Environment
 import           System.FilePath
 
 import           Gen2.Utils
+import           Compiler.Settings
 
 touchFile :: DynFlags -> FilePath -> IO ()
 touchFile df file = do
@@ -146,11 +147,16 @@ doCpp dflags raw input_fn output_fn = do
         -- remember, in code we *compile*, the HOST is the same our TARGET,
         -- and BUILD is the same as our HOST.
 
+    -- profiling related definitions
+    let prof_defs =
+          if buildingProf dflags then ["-DGHCJS_PROF"] else []
+
     backend_defs <- getBackendDefs dflags
 
     cpp_prog       (   map SysTools.Option verbFlags
                     ++ map SysTools.Option include_paths
                     ++ map SysTools.Option hsSourceCppOpts
+                    ++ map SysTools.Option prof_defs
                     ++ map SysTools.Option target_defs
                     ++ map SysTools.Option backend_defs
                     ++ map SysTools.Option hscpp_opts

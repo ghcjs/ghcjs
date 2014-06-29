@@ -23,6 +23,7 @@ import           Gen2.RtsAlloc
 import           Gen2.RtsTypes
 import           Gen2.Utils
 import           Gen2.ClosureInfo
+import           Gen2.Profiling
 
 import           Data.Bits
 import           Data.Monoid
@@ -514,11 +515,13 @@ updates s =
           updatee.d1 = `R1`.d1;
           updatee.d2 = `R1`.d2;
           updatee.m  = `R1`.m;
+          `profStat s (updateCC updatee)`
         } else {
           updatee.f  = h$unbox_e;
           updatee.d1 = `R1`;
           updatee.d2 = null;
           updatee.m  = 0;
+          `profStat s (updateCC updatee)` // not sure about this
         }
         `adjSpN 2`;
         `traceRts s $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
@@ -526,6 +529,8 @@ updates s =
       };
       `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]
+  where
+    updateCC updatee = [j| `updatee`.cc = h$CCCS; |]
 
 {-
   Partial applications. There are two different kinds of partial application:
@@ -547,6 +552,7 @@ mkPap :: CgSettings
 mkPap s tgt fun n values =
       traceRts s ("making pap with: " ++ show (length values) ++ " items") <>
       allocDynamic s True tgt (iex entry) (fun:papAr:map toJExpr values')
+        (if csProf s then Just [je| `R1`.cc |] else Nothing)
   where
     papAr = [je| `funOrPapArity fun Nothing` - `length values * 256` - `n` |]
     values' | null values = [jnull]

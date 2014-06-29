@@ -59,6 +59,11 @@ decl' i e = decl i `mappend` AssignStat (ValExpr (JVar i)) e
 decls :: Text -> JStat
 decls s = DeclStat (TxtI s)
 
+assignj :: (ToJExpr a, ToJExpr b) => a -> b -> JStat
+assignj x y = [j| `x` = `y` |]
+
+jfun :: [Ident] -> JStat -> JExpr
+jfun args body = ValExpr $ JFunc args body
 
 
 -- generate an identifier, use it in both statements

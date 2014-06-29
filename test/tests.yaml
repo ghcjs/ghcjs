@@ -11,13 +11,14 @@
 # test case is run against 'runhaskell', expecting the same result
 
 groups:
-  fay:     Tests from the Fay testsuite
-  ghc:     Tests from the GHC testsuite
-  arith:   Arithmetic
-  integer: Integer
-  conc:    Concurrency
-  ffi:     JavaScript interaction through FFI
-  pkg:     Tests imported from packages
+  fay:         Tests from the Fay testsuite
+  ghc:         Tests from the GHC testsuite
+  arith:       Arithmetic
+  integer:     Integer
+  conc:        Concurrency
+  ffi:         JavaScript interaction through FFI
+  pkg:         Tests imported from packages
+  profiling:   Profiling tests (cost-centres, stack traces, etc.)
 
 requiredPackages:
   - ghc-prim

@@ -7,6 +7,7 @@
 module Gen2.Generator (generate) where
 
 import           ForeignCall
+import           CostCentre
 import           FastString
 import           TysWiredIn
 import           BasicTypes
@@ -79,6 +80,7 @@ import           Gen2.ClosureInfo
 import qualified Gen2.Optimizer as O
 import qualified Gen2.Object    as Object
 import           Gen2.Sinker
+import           Gen2.Profiling
 
 import qualified Debug.Trace
 
@@ -99,11 +101,13 @@ generate :: GhcjsSettings
          -> DynFlags
          -> CgGuts
          -> StgPgm
+         -> CollectedCCs
          -> ByteString -- ^ binary data for the .js_o object file
-generate settings df guts s =
+generate settings df guts s cccs =
   let (uf, s') = sinkPgm m s
       m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
+        ifProfiling' $ initCostCentres cccs
         (st, g) <- genUnits df m s'
         let p = map (\lu -> (luSymbols lu, luStat lu)) g
             d = map (\lu -> (luTopDeps lu, luAllDeps lu)) g
@@ -333,14 +337,14 @@ genToplevelRhs i (StgRhsClosure _cc _bi _ _ _ _ body)
   | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey     = genStrThunk i False bs
   | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey = genStrThunk i True bs
 -- general cases:
-genToplevelRhs i (StgRhsCon _cc con args) = do
+genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
-  allocConStatic ii con args
+  allocConStatic ii cc con args
   return mempty
-genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
+genToplevelRhs i (StgRhsClosure cc _bi [] upd_flag srt args body) = do
   eid@(TxtI eidt) <- jsEnIdI i
   id@(TxtI idt)   <- jsIdI i
-  body <- genBody emptyUniqSet i args body upd_flag
+  body <- genBody emptyUniqSet i args body
   sr <- genStaticRefs srt
   cs <- use gsSettings
   et <- genEntryType args
@@ -348,9 +352,14 @@ genToplevelRhs i (StgRhsClosure _cc _bi [] upd_flag srt args body) = do
         if et == CIThunk
           then (StaticThunk (Just eidt), CIRegs 0 [PtrV],                updateThunk cs)
           else (StaticFun eidt,          CIRegs 1 (concatMap idVt args), mempty)
+  setcc <- ifProfiling $
+             if et == CIThunk
+               then enterCostCentreThunk
+               else enterCostCentreFun cc
   emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
-  emitStatic idt static
-  return $ decl eid <> assignj eid (JFunc [] (upd <> body))
+  ccId <- costCentreStackLbl cc
+  emitStatic idt static ccId
+  return $ decl eid <> assignj eid (JFunc [] (upd <> setcc <> body))
 
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
@@ -370,9 +379,9 @@ loadLiveFun l = do
 dataFields :: Array Int Ident
 dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..1024])
 
-genBody :: UniqSet Id -> Id -> [Id] -> StgExpr -> UpdateFlag -> C
-genBody ev i args e upd = do
-  la     <- loadArgs args
+genBody :: UniqSet Id -> Id -> [Id] -> StgExpr -> C
+genBody ev i args e = do
+  la <- loadArgs args
   -- find the result type after applying the function to the arguments
   let resultSize xxs@(x:xs) t
         | isUnboxedTupleType (idType x) = error "genBody: unboxed tuple argument"
@@ -432,7 +441,10 @@ genExpr top (StgLet b e) = do
   (s,r)     <- genExpr top' e
   return (b' <> s, r)
 genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
-genExpr top (StgSCC cc b1 b2 e) = genExpr top e
+genExpr top (StgSCC cc tick push e) = do
+  (stats, result) <- genExpr top e
+  setSCCstats <- ifProfilingM $ setSCC cc tick push
+  return (setSCCstats <> stats, result)
 genExpr top (StgTick m n e) = genExpr top e
 
 getId :: JExpr -> Ident
@@ -548,11 +560,11 @@ pushCont as = do
 genBind :: ExprCtx -> StgBinding -> G (JStat, ExprCtx)
 genBind ctx bndr =
   case bndr of
-    (StgNonRec b r) -> do
+    StgNonRec b r -> do
        assign b r
        j <- allocCls [(b,r)]
        return (j, addEvalRhs ctx [(b,r)])
-    (StgRec bs)     -> do
+    StgRec bs     -> do
        mapM_ (uncurry assign) bs
        j <- allocCls bs
        return (j, addEvalRhs ctx bs)
@@ -571,13 +583,17 @@ genBind ctx bndr =
 genEntry :: ExprCtx -> Id -> StgRhs -> G ()
 genEntry _ i (StgRhsCon _cc con args) = return () -- mempty -- error "local data entry"
 
-genEntry ctx i cl@(StgRhsClosure _cc _bi live upd_flag srt args body) = resetSlots $ do
+genEntry ctx i cl@(StgRhsClosure cc _bi live upd_flag srt args body) = resetSlots $ do
   ll <- loadLiveFun live
   upd <- genUpdFrame upd_flag
-  body <- genBody (ctxEval ctx) i args body upd_flag
-  let f = JFunc [] (ll <> upd <> body)
+  body <- genBody (ctxEval ctx) i args body
   ei <- jsEntryIdI i
   et <- genEntryType args
+  setcc <- ifProfiling $
+             if et == CIThunk
+               then enterCostCentreThunk
+               else enterCostCentreFun cc
+  let f = JFunc [] (ll <> upd <> setcc <> body)
   sr <- genStaticRefs srt
   emitClosureInfo (ClosureInfo (itxt ei) (CIRegs 0 $ PtrV : concatMap idVt args) (itxt ei <> " ," <> T.pack (show i))
                      (fixedLayout $ map (uTypeVt . idType) live) et sr)
@@ -624,37 +640,45 @@ allocCls :: [(Id, StgRhs)] -> C
 allocCls xs = do
    (stat, dyn) <- splitEithers <$> mapM toCl xs
    cs <- use gsSettings
-   return ((mconcat stat) <> allocDynAll cs True dyn)
+   return (mconcat stat) <> allocDynAll cs True dyn
   where
     -- left = static, right = dynamic
-    toCl :: (Id, StgRhs) -> G (Either JStat (Ident,JExpr,[JExpr]))
-    toCl (i, StgRhsCon _cc con []) = do
+    toCl :: (Id, StgRhs) -> G (Either JStat (Ident,JExpr,[JExpr],CostCentreStack))
+
+    -- statics
+    toCl (i, StgRhsCon cc con []) = do
       ii <- jsIdI i
-      Left <$> (return (decl ii) <> allocCon ii con [])
-    toCl (i, StgRhsCon _cc con [a]) | isUnboxableCon con = do
+      Left <$> (return (decl ii) <> allocCon ii con cc [])
+    toCl (i, StgRhsCon cc con [a]) | isUnboxableCon con = do
       ii <- jsIdI i
-      Left <$> (return (decl ii) <> (allocCon ii con =<< genArg a))
-    toCl (i, StgRhsCon _cc con ar) = Right <$> ((,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar)  -- fixme do we need to handle unboxed?
-    toCl (i, StgRhsClosure _cc _bi live upd_flag _srt _args _body) =
-        Right <$> ((,,) <$> jsIdI i <*> jsEntryId i <*> concatMapM genIds live)
+      Left <$> (return (decl ii) <> (allocCon ii con cc =<< genArg a))
+
+    -- dynamics
+    toCl (i, StgRhsCon cc con ar) =
+      -- fixme do we need to handle unboxed?
+      Right <$> ((,,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar <*> pure cc)
+    toCl (i, StgRhsClosure cc _bi live upd_flag _srt _args _body) =
+      Right <$> ((,,,) <$> jsIdI i <*> jsEntryId i <*> concatMapM genIds live <*> pure cc)
 
 -- fixme CgCase has a reps_compatible check here
 genCase :: ExprCtx -> Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> G (JStat, ExprResult)
 genCase top bnd e at alts l srt
-  | snd (isInlineExpr (ctxEval top) e) = do
+  | snd (isInlineExpr (ctxEval top) e) = withNewIdent $ \(TxtI ccsVar) -> do
       bndi <- genIdsI bnd
       (ej, r) <- genExpr (bnd, map toJExpr bndi, ctxEval top) e
-      when (r == ExprCont) (error "genCase: expression was not inline")
       let d = case r of
-                (ExprInline d0) -> d0
-                _               -> Nothing
+                ExprInline d0 -> d0
+                ExprCont -> error "genCase: expression was not inline"
       (aj, ar) <- genAlts (addEval bnd top) bnd at d alts
-      return (mconcat (map decl bndi) <> ej <> aj, ar)
+      saveCCS <- ifProfiling $ ccsVar |= jsv "h$CCCS"
+      restoreCCS <- ifProfiling [j| h$CCCS = `jsv ccsVar` |]
+      return (mconcat (map decl bndi) <> saveCCS <> ej <> restoreCCS <> aj, ar)
   | otherwise = do
       n       <- length <$> genIdsI bnd
       rj      <- genRet (addEval bnd top) bnd at alts l srt
       (ej, r) <- genExpr (bnd, take n (map toJExpr $ enumFrom R1), ctxEval top) e
-      return (rj <> ej, ExprCont)
+      saveCCS <- ifProfilingM $ push [jsv "h$CCCS"]
+      return (saveCCS <> rj <> ej, ExprCont)
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
 assignAll xs ys = mconcat (zipWith assignj xs ys)
@@ -663,9 +687,6 @@ assignAllCh :: (ToJExpr a, ToJExpr b) => String -> [a] -> [b] -> JStat
 assignAllCh msg xs ys
   | length xs == length ys = mconcat (zipWith assignj xs ys)
   | otherwise              = error ("assignAllCh: lengths do not match: " ++ show (length xs, length ys) ++ "\n    " ++ msg)
-
-assignj :: (ToJExpr a, ToJExpr b) => a -> b -> JStat
-assignj x y = [j| `x` = `y` |]
 
 genRet :: ExprCtx -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
 genRet top e at as l srt = withNewIdent f
@@ -676,8 +697,10 @@ genRet top e at as l srt = withNewIdent f
       pushRet <- pushRetArgs free (iex r)
       fun'    <- fun free
       sr      <- genStaticRefs srt
+      prof    <- profiling
       emitClosureInfo (ClosureInfo (itxt r) (CIRegs 0 altRegs) (itxt r)
-                         (fixedLayout $ map (freeType . fst3) free) CIStackFrame sr)
+                         (fixedLayout $ map (freeType . fst3) free ++ if prof then [ObjV] else [])
+                         CIStackFrame sr)
       emitToplevel $
          decl r <> assignj r (ValExpr . JFunc [] $ fun')
       return pushRet
@@ -699,9 +722,10 @@ genRet top e at as l srt = withNewIdent f
               load <- flip assignAll (enumFrom R1) <$> genIdsI e
               return (decs <> load)
       ras  <- loadRetArgs free
+      restoreCCS <- ifProfilingM $ popUnknown [jvar "h$CCCS"]
       let top' = (ctxTop top, take (length $ ctxTarget top) (map toJExpr $ enumFrom R1), ctxEval top)
       (alts, altr) <- genAlts top' e at Nothing as
-      return $ l <> ras <> alts <> [j| return `Stack`[`Sp`]; |]
+      return $ l <> ras <> restoreCCS <> alts <> [j| return `Stack`[`Sp`]; |]
 
 -- reorder the things we need to push to reuse existing stack values as much as possible
 -- True if already on the stack at that location
@@ -737,7 +761,7 @@ loadRetArgs free = popSkipI 1 =<< ids
     where
        ids = mapM (\(i,n,b) -> (!!(n-1)) <$> genIdStackArgI i) free
 
-genAlts :: ExprCtx     -- ^ lhs to assign expression result to
+genAlts :: ExprCtx        -- ^ lhs to assign expression result to
         -> Id             -- ^ id being matched
         -> AltType        -- ^ type
         -> Maybe [JExpr]  -- ^ if known, fields in datacon from earlier expression
@@ -904,7 +928,8 @@ loadParams from args use = do
 genPrimOp :: ExprCtx -> PrimOp -> [StgArg] -> Type -> G (JStat, ExprResult)
 genPrimOp top op args t = do
   as <- concatMapM genArg args
-  return $ case genPrim t op (map toJExpr $ ctxTarget top) as of
+  df <- use gsDynFlags
+  return $ case genPrim df t op (map toJExpr $ ctxTarget top) as of
              PrimInline s -> (s, ExprInline Nothing)
              PRPrimCall s -> (s, ExprCont)
 
@@ -941,7 +966,7 @@ genArg a@(StgVarArg i) = do
            as <- concat <$> mapM genArg args
            e  <- enterDataCon dc
            cs <- use gsSettings
-           return [allocDynamicE cs e as]
+           return [allocDynamicE cs e as Nothing] -- FIXME: ccs
      unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
 
 genStaticArg :: StgArg -> G [StaticArg]
@@ -1037,7 +1062,7 @@ genStrThunk :: Id -> Bool -> B.ByteString -> C
 genStrThunk i nonAscii str = do
   ii@(TxtI iit) <- jsIdI i
   let d = decl ii
-  emitStatic iit (StaticThunk Nothing)
+  emitStatic iit (StaticThunk Nothing) Nothing
   return $ case decodeModifiedUTF8 str of
              Just t -> d <> if nonAscii then [j| `ii` = h$strt(`T.unpack t`); |]
                                         else [j| `ii` = h$strta(`T.unpack t`); |]
@@ -1105,16 +1130,17 @@ genSingleLit l = do
 
 genCon :: ExprCtx -> DataCon -> [JExpr] -> C
 genCon tgt con args
-  | isUnboxedTupleCon con && length (ctxTarget tgt) == length args = return $
-          assignAll (ctxTarget tgt) args
+  | isUnboxedTupleCon con && length (ctxTarget tgt) == length args =
+      return $ assignAll (ctxTarget tgt) args
 genCon tgt con args | isUnboxedTupleCon con =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
-genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt = allocCon tgti con args
+genCon tgt con args | [ValExpr (JVar tgti)] <- ctxTarget tgt =
+  allocCon tgti con currentCCS args
 genCon tgt con args =
   error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt, length args))
 
-allocCon :: Ident -> DataCon -> [JExpr] -> C
-allocCon to con xs
+allocCon :: Ident -> DataCon -> CostCentreStack -> [JExpr] -> C
+allocCon to con cc xs
   | isBoolTy (dataConType con) || isUnboxableCon con = do
       return [j| `to` = `allocUnboxedCon con xs`; |]
   | null xs = do
@@ -1123,7 +1149,9 @@ allocCon to con xs
   | otherwise = do
       e <- enterDataCon con
       cs <- use gsSettings
-      return $ allocDynamic cs False to e xs
+      prof <- profiling
+      ccsJ <- if prof then ccsVarJ cc else return Nothing
+      return $ allocDynamic cs False to e xs ccsJ
 
 allocUnboxedCon :: DataCon -> [JExpr] -> JExpr
 allocUnboxedCon con []
@@ -1142,34 +1170,35 @@ allocUnboxedConStatic _   [a@(StaticLitArg (DoubleLit d))] = a
 allocUnboxedConStatic con _                                =
   error ("allocUnboxedConStatic: not an unboxed constructor: " ++ show con)
 
-allocConStatic :: Ident -> DataCon -> [GenStgArg Id] {- -> Bool -} -> G ()
-allocConStatic (TxtI to) con args -- isRecursive
+allocConStatic :: Ident -> CostCentreStack -> DataCon -> [GenStgArg Id] {- -> Bool -} -> G ()
+allocConStatic (TxtI to) cc con args -- isRecursive
 {-  | Debug.Trace.trace ("allocConStatic: " ++ show to ++ " " ++ show con ++ " " ++ show args) True -} = do
   as <- mapM genStaticArg args
-  allocConStatic' (concat as)
+  cc' <- costCentreStackLbl cc
+  allocConStatic' cc' (concat as)
   where
-    allocConStatic' :: [StaticArg] -> G ()
-    allocConStatic' []
+    allocConStatic' :: Maybe Ident -> [StaticArg] -> G ()
+    allocConStatic' cc' []
       | isBoolTy (dataConType con) && dataConTag con == 1 =
-           emitStatic to $ StaticUnboxed (StaticUnboxedBool False)
+           emitStatic to (StaticUnboxed $ StaticUnboxedBool False) cc'
       | isBoolTy (dataConType con) && dataConTag con == 2 =
-           emitStatic to $ StaticUnboxed (StaticUnboxedBool True)
+           emitStatic to (StaticUnboxed $ StaticUnboxedBool True) cc'
       | otherwise = do
            (TxtI e) <- enterDataConI con
-           emitStatic to (StaticData e [])
-    allocConStatic' [x]
+           emitStatic to (StaticData e []) cc'
+    allocConStatic' cc' [x]
       | isUnboxableCon con =
         case x of
-          StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i)
-          StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b)
-          StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d)
+          StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i) cc'
+          StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b) cc'
+          StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d) cc'
           _                          -> error $ "allocConStatic: invalid unboxed literal: " ++ show x
-    allocConStatic' xs =
+    allocConStatic' cc' xs =
            if con == consDataCon
-              then emitStatic to =<< allocateStaticList [args !! 0] (args !! 1)
+              then flip (emitStatic to) cc' =<< allocateStaticList [args !! 0] (args !! 1)
               else do
                 (TxtI e) <- enterDataConI con
-                emitStatic to (StaticData e xs)
+                emitStatic to (StaticData e xs) cc'
 
 -- avoid one indirection for global ids
 -- fixme in many cases we can also jump directly to the entry for local?

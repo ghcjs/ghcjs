@@ -99,12 +99,16 @@ setupTests tmpDir = do
   onlyOptEnv    <- getEnvOpt "GHCJS_TEST_ONLYOPT"
   onlyUnoptEnv  <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
   log           <- newIORef []
-  (symbs, base) <- prepareBaseBundle testDir ghcjs
+  (symbs, base) <- prepareBaseBundle testDir ghcjs []
+  (profSymbs, profBase) <- prepareBaseBundle testDir ghcjs ["-prof"]
   let specFile  = testDir </> if taBenchmark testArgs then "benchmarks.yaml" else "tests.yaml"
       symbsFile = tmpDir </> "base.symbs"
+      profSymbsFile = tmpDir </> "base.p_symbs"
       disUnopt  = onlyOptEnv || taBenchmark testArgs
       disOpt    = onlyUnoptEnv
-      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv log testDir symbsFile base
+      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv log testDir
+                              symbsFile base
+                              profSymbsFile profBase
                               ghcjs runhaskell nodePgm smPgm
   es <- doesFileExist (encodeString specFile)
   when (not es) (error $ "test suite not found in " ++ toStringIgnore testDir)
@@ -116,6 +120,7 @@ setupTests tmpDir = do
     testGroup name <$> allTestsIn opts testDir dir
   checkRequiredPackages (fromString $ taWithGhcjsPkg testArgs) (tsuiRequiredPackages ts)
   B.writeFile (encodeString symbsFile) symbs
+  B.writeFile (encodeString profSymbsFile) profSymbs
   when (disUnopt && disOpt) (putStrLn "nothing to do, optimized and unoptimized disabled")
   putStrLn ("running tests in " <> toStringIgnore testDir)
   defaultMainWithArgs groups leftoverArgs `C.catch` \(e::ExitCode) -> do
@@ -184,6 +189,8 @@ data TestOpts = TestOpts { disableUnopt        :: Bool
                          , testsuiteLocation   :: FilePath
                          , baseSymbs           :: FilePath
                          , baseJs              :: B.ByteString
+                         , profBaseSymbs       :: FilePath
+                         , profBaseJs          :: B.ByteString
                          , ghcjsProgram        :: FilePath
                          , runhaskellProgram   :: FilePath
                          , nodeProgram         :: Maybe FilePath
@@ -198,12 +205,14 @@ data TestSettings =
                , tsDisableOpt          :: Bool
                , tsDisableUnopt        :: Bool
                , tsDisabled            :: Bool
-               , tsArguments           :: [String] -- ^ command line arguments
+               , tsProf                :: Bool     -- ^ use profiling bundle
+               , tsCompArguments       :: [String] -- ^ command line arguments to pass to compiler
+               , tsArguments           :: [String] -- ^ command line arguments to pass to interpreter(node, js)
                , tsCopyFiles           :: [String] -- ^ copy these files to the dir where the test is run
                } deriving (Eq, Show)
 
 instance Default TestSettings where
-  def = TestSettings False False False False False [] []
+  def = TestSettings False False False False False False [] [] []
 
 instance FromJSON TestSettings where
   parseJSON (Object o) = TestSettings <$> o .:? "disableNode"         .!= False
@@ -211,6 +220,8 @@ instance FromJSON TestSettings where
                                       <*> o .:? "disableOpt"          .!= False
                                       <*> o .:? "disableUnopt"        .!= False
                                       <*> o .:? "disabled"            .!= False
+                                      <*> o .:? "prof"                .!= False
+                                      <*> o .:? "compArguments"       .!= []
                                       <*> o .:? "arguments"           .!= []
                                       <*> o .:? "copyFiles"           .!= []
 
@@ -247,7 +258,7 @@ testCaseLog opts name assertion = testCase name assertion'
    - .hs or .lhs files
    - that start with a lowercase letter
 -}
--- allTestsIn :: FilePath -> IO [Test]
+allTestsIn :: MonadIO m => TestOpts -> FilePath -> FilePath -> m [Test]
 allTestsIn testOpts testDir groupDir = shelly $ do
   cd testDir
   map (stdioTest testOpts) <$> findWhen (return . isTestFile) groupDir
@@ -360,7 +371,7 @@ settingsFor opts file = do
       putStrLn "running test with default settings"
       return def
     settingsFile  = replaceExtension file "settings"
-    settingsFile' = encodeString settingsFile
+    settingsFile' = encodeString (testsuiteLocation opts </> settingsFile)
 
 runhaskellResult :: TestOpts
                  -> TestSettings
@@ -406,13 +417,15 @@ runGhcjsResult opts file = do
             desc = ", optimization: " ++ show optimize
             inc = includeOpt opts file
             opt = if optimize then ["-O2"] else []
+            extraCompArgs = tsCompArguments settings
+            prof = tsProf settings
             compileOpts = [ inc
                           , "--no-rts", "--no-stats", "-o", encodeString outputExe
                           , "-odir", encodeString outputBuild
                           , "-hidir", encodeString outputBuild
-                          , "--use-base=" ++ encodeString (baseSymbs opts)
+                          , "--use-base=" ++ encodeString ((if prof then profBaseSymbs else baseSymbs) opts)
                           , input
-                          ] ++ opt ++ extraFiles
+                          ] ++ opt ++ extraCompArgs ++ extraFiles
             args = tsArguments settings
             runTestPgm name disabled getPgm
               | Just p <- getPgm opts, not (disabled settings) =
@@ -436,7 +449,8 @@ runGhcjsResult opts file = do
           [out, lib, lib1] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
                                 ["out.js", "lib.js", "lib1.js"]
           let runMain = "\nh$main(h$mainZCMainzimain);\n"
-          B.writeFile (encodeString outputRun) (baseJs opts <> lib <> lib1 <> out <> runMain)
+          B.writeFile (encodeString outputRun) $
+            (if prof then profBaseJs else baseJs) opts <> lib <> lib1 <> out <> runMain
           -- run with node.js and SpiderMonkey
           nodeResult <- runTestPgm "node"         tsDisableNode         nodeProgram
           smResult   <- runTestPgm "SpiderMonkey" tsDisableSpiderMonkey spiderMonkeyProgram
@@ -578,12 +592,12 @@ checkRequiredPackages ghcjsPkg requiredPackages = shelly . silently $ do
     when (not $ any ((pkg <> "-") `T.isPrefixOf`) installedPackages) $ do
       echo ("warning: package `" <> pkg <> "' is required by the test suite but is not installed")
 
-prepareBaseBundle :: FilePath -> FilePath -> IO (B.ByteString, B.ByteString)
-prepareBaseBundle testDir ghcjs = shellyE . silently . sub . withTmpDir $ \tmp -> do
+prepareBaseBundle :: FilePath -> FilePath -> [Text] -> IO (B.ByteString, B.ByteString)
+prepareBaseBundle testDir ghcjs extraArgs = shellyE . silently . sub . withTmpDir $ \tmp -> do
   cp (testDir </> "TestLinkBase.hs") tmp
   cp (testDir </> "TestLinkMain.hs") tmp
   cd tmp
-  run_ ghcjs ["--generate-base=TestLinkBase", "-o", "base", "TestLinkMain.hs"]
+  run_ ghcjs $ ["--generate-base=TestLinkBase", "-o", "base", "TestLinkMain.hs"] ++ extraArgs
   cd "base.jsexe"
   [symbs, js, lib, lib1, rts] <- mapM readBinary
     ["out.base.symbs", "out.base.js", "lib.base.js", "lib1.base.js", "rts.js"]

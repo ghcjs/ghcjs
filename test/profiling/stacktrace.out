@@ -1,0 +1,19 @@
+["Main.CAF (<entire-module>)","Main.main (stacktrace.hs:(29,1)-(37,36))"]
+["MAIN.DONT_CARE (<built-in>)"]
+["MAIN.DONT_CARE (<built-in>)"]
+["MAIN.DONT_CARE (<built-in>)"]
+["Main.CAF (<entire-module>)","Main.main (stacktrace.hs:(29,1)-(37,36))"]
+["Main.CAF (<entire-module>)","Main.main (stacktrace.hs:(29,1)-(37,36))","Main.someF (stacktrace.hs:19:1-35)","Main.replicateM (stacktrace.hs:22:1-41)"]
+["MAIN.DONT_CARE (<built-in>)"]
+stacktrace: --- a
+Stack trace:
+  Main.errorM.\ (stacktrace.hs:13:22-54)
+  Main.errorM (stacktrace.hs:13:1-54)
+  Main.foo.\.\ (stacktrace.hs:27:23-30)
+  Main.foo.\ (stacktrace.hs:27:16-33)
+  Main.foo (stacktrace.hs:27:1-36)
+  Main.bar (stacktrace.hs:24:1-20)
+  Main.runM.(...) (stacktrace.hs:16:20-31)
+  Main.runM (stacktrace.hs:16:1-36)
+  Main.main (stacktrace.hs:(29,1)-(37,36))
+  Main.CAF (<entire-module>)

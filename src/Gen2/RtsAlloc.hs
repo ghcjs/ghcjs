@@ -14,21 +14,31 @@ import qualified Data.Text as T
 import           Compiler.JMacro
 
 import           Gen2.ClosureInfo
+import           Gen2.Profiling
 import           Gen2.RtsTypes
 import           Gen2.Utils
 
 -- allocate multiple, possibly mutually recursive, closures
 
-allocDynAll :: CgSettings -> Bool -> [(Ident,JExpr,[JExpr])] -> JStat
-allocDynAll s haveDecl [(to,entry,free)]
-  | to `notElem` (free ^.. template) = allocDynamic s haveDecl to entry free
-allocDynAll s haveDecl cls = makeObjs <> fillObjs <> checkObjs
+allocDynAll :: CgSettings -> Bool -> [(Ident,JExpr,[JExpr],CostCentreStack)] -> G JStat
+allocDynAll s haveDecl [(to,entry,free,cc)]
+  | to `notElem` (free ^.. template) = do
+      ccs <- ccsVarJ cc
+      return $ allocDynamic s haveDecl to entry free ccs
+allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
   where
+    makeObjs :: G JStat
     makeObjs
-      | csInlineAlloc s = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = { f: `f`, d1: null, d2: null, m: 0 } |]) cls
-      | otherwise       = mconcat $ map (\(i,f,_) -> dec i <> [j| `i` = h$c(`f`); |]) cls
+      | csInlineAlloc s = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
+          ccs <- costCentreStackLbl cc
+          return $ i |= ValExpr (jhFromList $ [("f", f), ("d1", jnull), ("d2", jnull), ("m", ji 0)]
+                                              ++ maybe [] (\(TxtI cid) -> [("cc", jsv cid)]) ccs)
+      | otherwise       = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
+          ccs <- costCentreStackLbl cc
+          return $ i |= ("h$c" |^^ ([f] ++ maybe [] (\(TxtI cid) -> [jsv cid]) ccs))
+
     fillObjs = mconcat $ map fillObj cls
-    fillObj (i,_,es)
+    fillObj (i,_,es,_)
       | csInlineAlloc s || length es > 24 =
           case es of
             []      -> mempty
@@ -47,12 +57,12 @@ allocDynAll s haveDecl cls = makeObjs <> fillObjs <> checkObjs
     dataFields = map (T.pack . ('d':) . show) [(1::Int)..]
     dec i | haveDecl  = decl i
           | otherwise = mempty
-    checkObjs | csAssertRts s  = mconcat $ map (\(i,_,_) -> [j| h$checkObj(`i`); |]) cls
+    checkObjs | csAssertRts s  = mconcat $ map (\(i,_,_,_) -> [j| h$checkObj(`i`); |]) cls
               | otherwise = mempty
 
-allocDynamic :: CgSettings -> Bool -> Ident -> JExpr -> [JExpr] -> JStat
-allocDynamic s haveDecl to entry free =
-  dec to <> [j| `to` = `allocDynamicE s entry free`; |]
+allocDynamic :: CgSettings -> Bool -> Ident -> JExpr -> [JExpr] -> Maybe JExpr -> JStat
+allocDynamic s haveDecl to entry free cc =
+  dec to <> [j| `to` = `allocDynamicE s entry free cc`; |]
     where
       dec i | haveDecl  = decl i
             | otherwise = mempty

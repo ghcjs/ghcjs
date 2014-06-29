@@ -11,6 +11,7 @@ GHCJS supports many modern Haskell features, including:
  * Weak references, CAF deallocation, StableName, StablePtr
  * Unboxed arrays, emulated pointers
  * Integer support through [JSBN](http://www-cs-students.stanford.edu/~tjw/jsbn/), 32 and 64 bit signed and unsigned arithmetic (`Word64`, `Int32` etc.)
+ * Cost-centres, stack traces
  * Cabal support, GHCJS has its own package database
 
 And some JavaScript-specific features:
@@ -167,13 +168,14 @@ Debugging GHCJS programs
 TODO add better instructions here
 
   * link your program with `-debug`: `ghcjs -debug -o test test.hs`, this adds debugging information to the generated code
-  * get more informaton from the runtime system by enabling various tracing and logging options. See the code in the shims repository for more info. Examples:
+  * get more information from the runtime system by enabling various tracing and logging options. See the code in the shims repository for more info. Examples:
       * `-DGHCJS_TRACE_SCHEDULER`: messages from the thread scheduler
       * `-DGHCJS_TRACE_CALLS`: print all function calls from the main loop. warning: lots of output. Requires `-debug` for name information
       * `-DGHCJS_TRACE_STACK`: print top of stack for every call in the main loop. warning: even more output
       * `-DGHCJS_TRACE_WEAK`: output related to weak references
       * `-DGHCJS_TRACE_STM`: output for software transactional memory
       * `-DGHCJS_TRACE_GC`: output garbage collector (heap scanner) related messages
+      * `-DGHCJS_TRACE_PROF`: output profiling related messages
   * see the utility programs in `utils` in the ghcjs repository for tools for inspecting object files, quickly bisecting
      bugs in the optimizer etc.
 
@@ -197,7 +199,7 @@ and run in a modern web browser and interface with DOM and JavaScript
 in the browser.
  * [webkit](https://patch-tag.com/r/hamish/webkit) - Bindings for WebKitGTK+ that provide a low level DOM interface.
  * [webkit-javascriptcore](https://github.com/ghcjs/webkit-javascriptcore) - Low level bindings for JavaScriptCore
- * [jsc](https://github.com/ghcjs/jsc) - Higher level inteface for JavaScriptCore
+ * [jsc](https://github.com/ghcjs/jsc) - Higher level interface for JavaScriptCore
 
 You can use these libraries without GHCJS to build a native version of
 your application (it will use WebKitGTK+ to run without a browser).
