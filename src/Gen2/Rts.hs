@@ -1194,7 +1194,7 @@ fun h$lazy_e {
 
 // TODO: generate this only when profiling is enabled
 fun h$setCcs_e {
-  h$CCCS = `Stack`[`Sp`-1]; // TODO: maybe use popUnknown?
+  `jCurrentCCS` = `Stack`[`Sp`-1]; // TODO: maybe use popUnknown?
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }

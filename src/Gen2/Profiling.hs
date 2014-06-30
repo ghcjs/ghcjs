@@ -11,7 +11,8 @@ module Gen2.Profiling
   , ifProfilingM
   , profiling
   , profStat
-  , setSCC
+  , setCC
+  , jCurrentCCS
   , enterCostCentreFun
   , enterCostCentreThunk
   ) where
@@ -76,18 +77,25 @@ emitCostCentreStackDecl ccs = do
 
 enterCostCentreFun :: CostCentreStack -> JStat
 enterCostCentreFun ccs
-  | isCurrentCCS ccs = [j| h$enterFunCCS(h$CCCS, `R1`.cc); |]
+  | isCurrentCCS ccs = [j| h$enterFunCCS(`jCurrentCCS`, `R1`.cc); |]
   | otherwise = mempty -- top-level function, nothing to do
 
 enterCostCentreThunk :: JStat
 enterCostCentreThunk = [j| h$enterThunkCCS(`R1`.cc); |]
 
-setSCC :: CostCentre -> Bool -> Bool -> G JStat
+setCC :: CostCentre -> Bool -> Bool -> G JStat
 -- FIXME: ignoring tick flags for now
-setSCC cc _tick True = do
-    ccI <- costCentreLbl cc
-    return [j| h$CCCS = h$pushCostCentre(h$CCCS, `ccI`); |]
-setSCC _cc _tick _push = return mempty
+setCC cc _tick True = do
+    ccI@(TxtI ccLbl) <- costCentreLbl cc
+    addDependency $ OtherSymb (cc_mod cc) ccLbl
+    return [j| `jCurrentCCS` = h$pushCostCentre(`jCurrentCCS`, `ccI`); |]
+setCC _cc _tick _push = return mempty
+
+--------------------------------------------------------------------------------
+-- Getting/setting the current cost-centre stack
+
+jCurrentCCS :: JExpr
+jCurrentCCS = [je| h$currentThread.ccs |]
 
 --------------------------------------------------------------------------------
 -- Helpers for generating profiling related things
@@ -130,7 +138,7 @@ costCentreLbl cc = TxtI . T.pack <$> costCentreLbl' cc
 costCentreStackLbl' :: CostCentreStack -> G (Maybe String)
 costCentreStackLbl' ccs
   | noCCSAttached ccs  = return Nothing -- pprPanic "no ccs attached" (ppr ccs)
-  | isCurrentCCS ccs   = return $ Just "h$CCCS"
+  | isCurrentCCS ccs   = return $ Just "h$currentThread.ccs" -- FIXME
   | dontCareCCS == ccs = return $ Just "h$CCS_DONT_CARE"
   | otherwise          =
       case maybeSingletonCCS ccs of

@@ -530,7 +530,7 @@ updates s =
       `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]
   where
-    updateCC updatee = [j| `updatee`.cc = h$CCCS; |]
+    updateCC updatee = [j| `updatee`.cc = `jCurrentCCS`; |]
 
 {-
   Partial applications. There are two different kinds of partial application:

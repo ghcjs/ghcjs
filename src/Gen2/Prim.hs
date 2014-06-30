@@ -40,6 +40,7 @@ import qualified Data.Set as S
 import           Compiler.JMacro (j, je, JExpr(..), JStat(..))
 import           Compiler.Settings (buildingProf)
 
+import           Gen2.Profiling
 import           Gen2.RtsTypes
 import           Gen2.Utils
 
@@ -622,7 +623,7 @@ GetApStackValOp
 
 -- stack trace/cost-centre operations
 genPrim d _ GetCurrentCCSOp [a, o] [_dummy_arg] =
-  let ptr = if buildingProf d then [je| h$buildCCSPtr(h$CCCS) |]
+  let ptr = if buildingProf d then [je| h$buildCCSPtr(`jCurrentCCS`) |]
                               else jnull
   in PrimInline [j| `a` = `ptr`; `o` = 0; |]
 genPrim d _ GetCCSOfOp [a, o] [obj]

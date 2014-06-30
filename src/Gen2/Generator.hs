@@ -477,7 +477,7 @@ genExpr top (StgLet b e) = do
 genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
 genExpr top (StgSCC cc tick push e) = do
   (stats, result) <- genExpr top e
-  setSCCstats <- ifProfilingM $ setSCC cc tick push
+  setSCCstats <- ifProfilingM $ setCC cc tick push
   return (setSCCstats <> stats, result)
 genExpr top (StgTick m n e) = genExpr top e
 
@@ -704,14 +704,14 @@ genCase top bnd e at alts l srt
                 ExprInline d0 -> d0
                 ExprCont -> error "genCase: expression was not inline"
       (aj, ar) <- genAlts (addEval bnd top) bnd at d alts
-      saveCCS <- ifProfiling $ ccsVar |= jsv "h$CCCS"
-      restoreCCS <- ifProfiling [j| h$CCCS = `jsv ccsVar` |]
+      saveCCS <- ifProfiling $ ccsVar |= jCurrentCCS
+      restoreCCS <- ifProfiling [j| `jCurrentCCS` = `jsv ccsVar` |]
       return (mconcat (map decl bndi) <> saveCCS <> ej <> restoreCCS <> aj, ar)
   | otherwise = do
       n       <- length <$> genIdsI bnd
       rj      <- genRet (addEval bnd top) bnd at alts l srt
       (ej, r) <- genExpr (bnd, take n (map toJExpr $ enumFrom R1), ctxEval top) e
-      saveCCS <- ifProfilingM $ push [jsv "h$CCCS"]
+      saveCCS <- ifProfilingM $ push [jCurrentCCS]
       return (saveCCS <> rj <> ej, ExprCont)
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
@@ -756,7 +756,7 @@ genRet top e at as l srt = withNewIdent f
               load <- flip assignAll (enumFrom R1) <$> genIdsI e
               return (decs <> load)
       ras  <- loadRetArgs free
-      restoreCCS <- ifProfilingM $ popUnknown [jvar "h$CCCS"]
+      restoreCCS <- ifProfilingM $ popUnknown [jCurrentCCS]
       let top' = (ctxTop top, take (length $ ctxTarget top) (map toJExpr $ enumFrom R1), ctxEval top)
       (alts, altr) <- genAlts top' e at Nothing as
       return $ l <> ras <> restoreCCS <> alts <> [j| return `Stack`[`Sp`]; |]
