@@ -97,7 +97,7 @@ link :: DynFlags
 link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
   | gsNoJSExecutables settings = return ()
   | otherwise = do
-      Just (LinkResult lo lstats lmetasize llb lla lbase) <-
+      LinkResult lo lstats lmetasize llb lla lbase <-
         link' dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
       let genBase = isJust (gsGenBase settings)
           jsExt | genBase   = "base.js"
@@ -128,44 +128,42 @@ link' :: DynFlags
       -> [FilePath]                -- ^ extra js files to include
       -> (Fun -> Bool)             -- ^ functions from the objects to use as roots (include all their deps)
       -> Set Fun                   -- ^ extra symbols to link in
-      -> IO (Maybe LinkResult)
-link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStaticDeps
-  | gsNoJSExecutables settings = return Nothing
-  | otherwise = do
-      objDeps <- mapM readDepsFile objFiles
-      let debug = buildingDebug dflags
-          rootSelector | Just baseMod <- gsGenBase settings =
-                           \(Fun p m s) -> m == T.pack baseMod
-                       | otherwise = isRootFun
-          roots = S.fromList . filter rootSelector $
-            concatMap (map fst . M.toList . depsDeps) objDeps
-          rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
-      -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
-      compilationProgressMsg dflags $
-        case gsGenBase settings of
-          Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ baseMod ++ ")"
-          _            -> "Linking " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
-      base <- case gsUseBase settings of
-        NoBase        -> return Compactor.emptyBase
-        BaseFile file -> Compactor.loadBase file
-        BaseState b   -> return b
-      rds <- rtsDeps dflags (map fst pkgs)
-      c   <- newMVar M.empty
-      (allDeps, code) <-
-        collectDeps (lookupFun c $ zip objDeps objFiles)
-                (baseUnits base)
-                (roots `S.union` rds `S.union` extraStaticDeps)
-      let (outJs, metaSize, compactorState, stats) =
-             renderLinker settings dflags (baseCompactorState base) code
-          rtsPkgs = if usingBase settings
-                      then []
-                      else map stringToPackageId ["rts", "rts_" ++ rtsBuildTag dflags]
-          pkgs' = rtsPkgs ++ filter (not . (isAlreadyLinked base)) (map fst pkgs)
-          base' = Base compactorState (nub $ basePkgs base ++ map (T.pack . packageIdString) pkgs')
-                         (allDeps `S.union` baseUnits base)
-      libJsFiles <- concat <$> mapM getLibJsFiles (concatMap snd pkgs)
-      (shimsBefore, shimsAfter) <- getShims dflags settings (jsFiles ++ libJsFiles) pkgs'
-      return . Just $ LinkResult outJs stats metaSize shimsBefore shimsAfter base'
+      -> IO LinkResult
+link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
+    objDeps <- mapM readDepsFile objFiles
+    let debug = buildingDebug dflags
+        rootSelector | Just baseMod <- gsGenBase settings =
+                         \(Fun p m s) -> m == T.pack baseMod
+                     | otherwise = isRootFun
+        roots = S.fromList . filter rootSelector $
+          concatMap (map fst . M.toList . depsDeps) objDeps
+        rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
+    -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
+    compilationProgressMsg dflags $
+      case gsGenBase settings of
+        Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ baseMod ++ ")"
+        _            -> "Linking " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
+    base <- case gsUseBase settings of
+      NoBase        -> return Compactor.emptyBase
+      BaseFile file -> Compactor.loadBase file
+      BaseState b   -> return b
+    rds <- rtsDeps dflags (map fst pkgs)
+    c   <- newMVar M.empty
+    (allDeps, code) <-
+      collectDeps (lookupFun c $ zip objDeps objFiles)
+              (baseUnits base)
+              (roots `S.union` rds `S.union` extraStaticDeps)
+    let (outJs, metaSize, compactorState, stats) =
+           renderLinker settings dflags (baseCompactorState base) code
+        rtsPkgs = if usingBase settings
+                    then []
+                    else map stringToPackageId ["rts", "rts_" ++ rtsBuildTag dflags]
+        pkgs' = rtsPkgs ++ filter (not . (isAlreadyLinked base)) (map fst pkgs)
+        base' = Base compactorState (nub $ basePkgs base ++ map (T.pack . packageIdString) pkgs')
+                       (allDeps `S.union` baseUnits base)
+    libJsFiles <- concat <$> mapM getLibJsFiles (concatMap snd pkgs)
+    (shimsBefore, shimsAfter) <- getShims dflags settings (jsFiles ++ libJsFiles) pkgs'
+    return $ LinkResult outJs stats metaSize shimsBefore shimsAfter base'
   where
     isAlreadyLinked :: Base -> PackageId -> Bool
     isAlreadyLinked b pkg = T.pack (packageIdString pkg) `elem` basePkgs b
