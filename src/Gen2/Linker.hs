@@ -136,7 +136,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
                          \(Fun p m s) -> m == T.pack baseMod
                      | otherwise = isRootFun
         roots = S.fromList . filter rootSelector $
-          concatMap (map fst . M.toList . depsDeps) objDeps
+          concatMap (M.keys . depsDeps) objDeps
         rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
     -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
     compilationProgressMsg dflags $
@@ -342,7 +342,7 @@ getDeps lookup base fun = go' S.empty M.empty [] $
     go result _    [] = return result
     go result deps lls@((lpkg,lmod,n):ls) =
       let key = (lpkg, lmod)
-      in  case M.lookup (lpkg,lmod) deps of
+      in  case M.lookup key deps of
             Nothing -> lookup lpkg lmod >>= readDepsFile >>=
                          \d -> go result (M.insert key d deps) lls
             Just (Deps _ _ _ a _) -> go' result deps ls (S.toList $ a ! n)
