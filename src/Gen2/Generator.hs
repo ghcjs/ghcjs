@@ -108,9 +108,9 @@ generate settings df guts s cccs =
       m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
         ifProfiling' $ initCostCentres cccs
-        (st, g) <- genUnits df m s'
-        let p = map (\lu -> (luSymbols lu, luStat lu)) g
-            d = map (\lu -> (luTopDeps lu, luAllDeps lu)) g
+        (st, lus) <- genUnits df m s'
+        let p = map (\lu -> (luSymbols lu, luStat lu)) lus
+            d = map (\lu -> (luTopDeps lu, luAllDeps lu)) lus
             (st', dbg) = dumpAst st settings df s'
         deps <- genMetaData d
         return . BL.toStrict $
@@ -132,7 +132,7 @@ dumpAst st settings dflags s
   | otherwise        = (st, [])
       where
         (st', bs) = Object.serializeStat st [] [] [j| h$dumpAst = `x` |]
-        x = (intercalate "\n\n" (map showIndent s))
+        x = intercalate "\n\n" (map showIndent s)
 
 -- | variable prefix for the nth block in module
 modulePrefix :: Module -> Int -> Text
@@ -171,11 +171,11 @@ genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
                           -> G (Object.SymbolTable, [LinkableUnit])
       generateGlobalBlock (st, lus) = do
         glbl <- use gsGlobal
-        (st', ss, bs) <- objectEntry m st [] [] []
+        (st', [], bs) <- objectEntry m st [] [] []
                          . O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
                          $ mconcat (reverse glbl)
-        return (st', LinkableUnit ss bs [] [] : lus)
+        return (st', LinkableUnit [] bs [] [] : lus)
 
       -- | Generate the linkable unit for one binding or group of
       --   mutually recursive bindings
@@ -236,7 +236,7 @@ data MetadataCache = MDC
 genMetaData :: [([Id], [Id])] -> G Object.Deps
 genMetaData p1 = do
   m <- use gsModule
-  (ds, (MDC pkgs funs)) <- runStateT (sequence (zipWith oneDep p1 [0..])) (MDC IM.empty IM.empty)
+  (ds, MDC pkgs funs) <- runStateT (sequence (zipWith oneDep p1 [0..])) (MDC IM.empty IM.empty)
   let sp = S.fromList (IM.elems pkgs)
       sf = S.fromList (IM.elems funs)
       (dl, blocks) = unzip ds
