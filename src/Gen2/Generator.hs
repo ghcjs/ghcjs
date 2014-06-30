@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, TupleSections, CPP, OverloadedStrings, LambdaCase, MultiWayIf #-}
+{-# LANGUAGE QuasiQuotes, TupleSections, OverloadedStrings, LambdaCase, MultiWayIf, TemplateHaskell #-}
 
 {-
   Main generator module
@@ -82,6 +82,14 @@ import           Gen2.Sinker
 
 import qualified Debug.Trace
 
+data DependencyDataCache = DDC
+         { _ddcModule :: IM.IntMap       Object.Package  -- Unique Module -> Object.Package
+         , _ddcId     :: IM.IntMap       Object.Fun      -- Unique Id     -> Object.Fun
+         , _ddcOther  :: M.Map OtherSymb Object.Fun
+         }
+
+makeLenses ''DependencyDataCache
+
 type StgPgm     = [StgBinding]
 type StaticRefs = [Id]
 
@@ -105,10 +113,11 @@ generate settings df guts s =
       m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
         (st, g) <- genUnits df m s'
-        let p = map (\lu -> (luSymbols lu, luStat lu)) g
-            d = map (\lu -> (luTopDeps lu, luAllDeps lu)) g
-            (st', dbg) = dumpAst st settings df s'
-        deps <- genMetaData d
+        -- (exported symbol names, javascript statements) for each linkable unit
+        p <- forM g $ \u -> mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
+                            \ts -> return (ts ++ luOtherExports u, luStat u)
+        let (st', dbg) = dumpAst st settings df s'
+        deps <- genDependencyData g
         return . BL.toStrict $
           Object.object' st' deps (p ++ dbg) -- p first, so numbering of linkable units lines up
 
@@ -136,13 +145,13 @@ modulePrefix m n =
   let encMod = zEncodeString . moduleNameString . moduleName $ m
   in  T.pack $ "h$" ++ encMod ++ "_id_" ++ show n
 
-
 -- | data used to generate one ObjUnit in our object file
 data LinkableUnit = LinkableUnit
-                    { luSymbols  :: [Text]        -- ^ exported symbols as Text
-                    , luStat     :: BL.ByteString -- ^ serialized JS AST
-                    , luTopDeps  :: [Id]
-                    , luAllDeps  :: [Id]          -- ^ identifiers this unit depends on
+                    { luStat         :: BL.ByteString -- ^ serialized JS AST
+                    , luIdExports    :: [Id]          -- ^ exported names from haskell identifiers
+                    , luOtherExports :: [Text]        -- ^ other exports
+                    , luIdDeps       :: [Id]          -- ^ identifiers this unit depends on
+                    , luOtherDeps    :: [OtherSymb]   -- ^ symbols not from a haskell id that this unit depends on
                     } deriving (Eq, Ord, Show)
 
 -- | Generate the ingredients for the linkable units for this module
@@ -152,7 +161,7 @@ genUnits :: DynFlags
          -> G (Object.SymbolTable, [LinkableUnit]) -- ^ the final symbol table and the linkable units
 genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
     where
-      go :: Int                 -- ^ the block we're generating (block 1 is the global block for the module)
+      go :: Int                 -- ^ the block we're generating (block 0 is the global unit for the module)
          -> Object.SymbolTable  -- ^ the shared symbol table
          -> StgPgm
          -> G (Object.SymbolTable, [LinkableUnit])
@@ -162,16 +171,18 @@ genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
         return (st'', lu:lus)
       go _ st []     = return (st, [])
 
-
+      -- | Generate the global unit that all other blocks in the module depend on
+      --   used for cost centres
+      --   the global unit has no dependencies, exports the moduleGlobalSymbol
       generateGlobalBlock :: (Object.SymbolTable, [LinkableUnit])
                           -> G (Object.SymbolTable, [LinkableUnit])
       generateGlobalBlock (st, lus) = do
         glbl <- use gsGlobal
-        (st', ss, bs) <- objectEntry m st [] [] []
+        (st', ss, bs) <- serializeLinkableUnit m st [] [] []
                          . O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
                          $ mconcat (reverse glbl)
-        return (st', LinkableUnit ss bs [] [] : lus)
+        return (st', LinkableUnit bs [] [moduleGlobalSymbol m] [] [] : lus)
 
       -- | Generate the linkable unit for one binding or group of
       --   mutually recursive bindings
@@ -180,29 +191,34 @@ genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
                     -> Int
                     -> G (Object.SymbolTable, LinkableUnit)
       generateBlock st decl n = do
-        tl      <- genToplevel decl
-        extraTl <- use (gsGroup . ggsToplevelStats)
-        ci      <- use (gsGroup . ggsClosureInfo)
-        si      <- use (gsGroup . ggsStatic)
-        unf     <- use gsUnfloated
+        tl        <- genToplevel decl
+        extraTl   <- use (gsGroup . ggsToplevelStats)
+        ci        <- use (gsGroup . ggsClosureInfo)
+        si        <- use (gsGroup . ggsStatic)
+        unf       <- use gsUnfloated
+        extraDeps <- use (gsGroup . ggsExtraDeps)
         resetGroup
         let allDeps = collectIds unf decl
             topDeps = collectTopIds decl
-        (st', ss, bs) <- objectEntry m st topDeps ci si
+        (st', ss, bs) <- serializeLinkableUnit m st topDeps ci si
                            . O.optimize
                            . jsSaturate (Just $ modulePrefix m n)
                            $ mconcat (reverse extraTl) <> tl
         return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq`
-          (st', LinkableUnit ss bs topDeps allDeps)
+          (st', LinkableUnit bs topDeps [] allDeps (S.toList extraDeps))
 
-objectEntry :: Module
-            -> Object.SymbolTable
-            -> [Id]
+{- |
+   serialize the payload of a linkable unit in the object file, adding
+   strings to the SymbolTable where necessary
+-}
+serializeLinkableUnit :: Module
+            -> Object.SymbolTable  -- symbol table to start with
+            -> [Id]                -- id's exported by unit
             -> [ClosureInfo]
             -> [StaticInfo]
-            -> JStat
+            -> JStat               -- generated code for the unit
             -> G (Object.SymbolTable, [Text], BL.ByteString)
-objectEntry m st i ci si stat = do
+serializeLinkableUnit m st i ci si stat = do
   i' <- mapM idStr i
   let (st', o) = Object.serializeStat st ci si stat
   rnf i' `seq` rnf o `seq` return (st', i', o)
@@ -224,47 +240,65 @@ collectIds unfloated b = filter acceptId $ S.toList (bindingRefs unfloated b)
                     Object.packageName (modulePackageText m) == T.pack "ghc-prim"
       | otherwise = False
 
-data MetadataCache = MDC
-         { mdcPackage    :: (IM.IntMap Object.Package)  -- Unique PackageId -> Object.Package
-         , mdcId         :: (IM.IntMap Object.Fun)      -- Unique Id -> Object.Fun
-         }
-
-genMetaData :: [([Id], [Id])] -> G Object.Deps
-genMetaData p1 = do
+{- |
+     generate the object's dependy data, taking care that package and module names
+     are only stored once
+ -}
+genDependencyData :: [LinkableUnit] -> G Object.Deps
+genDependencyData units = do
   m <- use gsModule
-  (ds, (MDC pkgs funs)) <- runStateT (sequence (zipWith oneDep p1 [0..])) (MDC IM.empty IM.empty)
+  (ds, (DDC pkgs funs1 funs2)) <- runStateT (sequence (zipWith (oneDep m) units [0..]))
+                                            (DDC IM.empty IM.empty M.empty)
   let sp = S.fromList (IM.elems pkgs)
-      sf = S.fromList (IM.elems funs)
+      sf = S.fromList (IM.elems funs1 ++ M.elems funs2)
       (dl, blocks) = unzip ds
       ba = listArray (0, length blocks - 1) blocks
       dm = M.fromList (concat dl)
-      es = M.empty -- fixme exports
+      es = M.empty -- fixme implement foreign exports
   return $ Object.Deps (modulePackageText m) (moduleNameText m) es ba dm
-   where
-    oneDep (symbs, deps) n = do
-      ds <- S.fromList <$> mapM idFun deps
-      ss <- mapM idFun symbs
-      return (map (,n) ss, ds)
-    idFun i = do
-      let k = getKey . getUnique $ i
-      (MDC ps is) <- get
-      case IM.lookup k is of
-        Just x  -> return x
-        Nothing -> do
-          m <- lift (use gsModule)
-          let mod = fromMaybe m $ nameModule_maybe (getName i)
-              mk = getKey . getUnique $ mod
-          (TxtI idTxt) <- lift (jsIdI i)
-          case IM.lookup mk ps of
-            Just p -> do
-              let f = Object.Fun p (moduleNameText mod) idTxt
-              put (MDC ps $ IM.insert k f is)
-              return f
-            Nothing -> do
-              let p = modulePackageText mod
-                  f = Object.Fun p (moduleNameText mod) idTxt
-              put (MDC (IM.insert mk p ps) (IM.insert k f is))
-              return f
+    where
+      -- generate the list of exports and set of dependencies for one unit
+      oneDep :: Module
+             -> LinkableUnit
+             -> Int
+             -> StateT DependencyDataCache G ([(Object.Fun,Int)], S.Set Object.Fun)
+      oneDep m (LinkableUnit _ idExports otherExports idDeps otherDeps) n = do
+        dsi <- S.fromList <$> mapM lookupIdFun    idDeps
+        dso <- S.fromList <$> mapM lookupOtherFun otherDeps
+        ssi <- mapM lookupIdFun    idExports
+        sso <- mapM (lookupOtherFun . OtherSymb m) otherExports
+        return (map (,n) (ssi++sso), dsi `S.union` dso)
+
+      idModule :: Id -> G Module
+      idModule i = flip fromMaybe (nameModule_maybe $ getName i) <$> use gsModule
+
+      -- get the function for an Id from the cache, add it if necessary
+      lookupIdFun :: Id -> StateT DependencyDataCache G Object.Fun
+      lookupIdFun i =
+        let k = getKey . getUnique $ i
+            addEntry :: StateT DependencyDataCache G Object.Fun
+            addEntry = do
+              mod <- lift (idModule i)
+              (TxtI idTxt) <- lift (jsIdI i)
+              lookupFun (Just k) (OtherSymb mod idTxt)
+        in  maybe addEntry return =<< use (ddcId . to (IM.lookup k))
+
+      -- get the function for an OtherSymb from the cache, add it if necessary
+      lookupOtherFun :: OtherSymb -> StateT DependencyDataCache G Object.Fun
+      lookupOtherFun od@(OtherSymb mod idTxt) =
+        maybe (lookupFun Nothing od) return =<< use (ddcOther . to (M.lookup od))
+
+      -- lookup the dependency, add to the id cache if there's an id key, otherwise add to other cache
+      lookupFun :: Maybe Int -> OtherSymb -> StateT DependencyDataCache G Object.Fun
+      lookupFun mbIdKey od@(OtherSymb mod idTxt) = do
+        let mk        = getKey . getUnique $ mod
+            mpt       = modulePackageText mod
+            inCache p = Object.Fun p (moduleNameText mod) idTxt
+            addCache  = ddcModule %= IM.insert mk mpt >>
+                        return (Object.Fun mpt (moduleNameText mod) idTxt)
+        f <- maybe addCache (return . inCache) =<< use (ddcModule . to (IM.lookup mk))
+        maybe (ddcOther %= M.insert od f) (\k -> ddcId %= IM.insert k f) mbIdKey
+        return f
 
 moduleNameText :: Module -> Text
 moduleNameText m
@@ -273,7 +307,7 @@ moduleNameText m
     where xs      = moduleNameString . moduleName $ m
 
 modulePackageText :: Module -> Object.Package
-modulePackageText m 
+modulePackageText m
   | isWiredInPackage pkgStr = Object.Package n ""
   | otherwise               = Object.Package n v
   where

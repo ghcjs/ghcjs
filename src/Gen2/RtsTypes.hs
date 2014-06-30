@@ -3,7 +3,7 @@
              TypeSynonymInstances,
              FlexibleInstances,
              TupleSections,
-             CPP #-}
+             OverloadedStrings #-}
 
 module Gen2.RtsTypes where
 
@@ -34,6 +34,8 @@ import qualified Data.List    as L
 import qualified Data.Map     as M
 import           Data.Maybe   (fromMaybe)
 import           Data.Monoid
+import           Data.Set     (Set)
+import qualified Data.Set     as S
 import           Data.Text    (Text)
 import qualified Data.Text    as T
 
@@ -187,6 +189,9 @@ data IdType = IdPlain | IdEntry | IdConEntry deriving (Enum, Eq, Ord, Show)
 data IdKey = IdKey !Int !Int !IdType deriving (Eq, Ord)
 newtype IdCache = IdCache (M.Map IdKey Ident)
 
+data OtherSymb = OtherSymb Module Text
+  deriving (Ord, Eq, Show)
+
 emptyIdCache :: IdCache
 emptyIdCache = IdCache M.empty
 
@@ -207,13 +212,14 @@ data GenGroupState = GenGroupState
   , _ggsClosureInfo   :: [ClosureInfo]  -- ^ closure metadata (info tables) for the binding group
   , _ggsStatic        :: [StaticInfo]   -- ^ static (CAF) data in our binding group
   , _ggsStack         :: [StackSlot]    -- ^ stack info for the current expression
+  , _ggsExtraDeps     :: Set OtherSymb  -- ^ extra dependencies for the linkable unit that contains this group
   }
 
 instance Default GenGroupState where
-  def = GenGroupState [] [] [] []
+  def = GenGroupState [] [] [] [] S.empty
 
-type C   = State GenState JStat
-type G a = State GenState a
+type C = State GenState JStat
+type G = State GenState
 
 data StackSlot = SlotId Id Int
                | SlotUnknown
@@ -231,6 +237,10 @@ emitGlobal s = gsGlobal %= (s:)
 -- | start with a new binding group
 resetGroup :: G ()
 resetGroup = gsGroup .= def
+
+-- | add a dependency on a particular symbol to the current group
+addDependency :: OtherSymb -> G ()
+addDependency symbol = gsGroup . ggsExtraDeps %= (S.insert symbol)
 
 -- | emit a top-level statement for the current binding group
 emitToplevel :: JStat -> G ()
@@ -518,6 +528,11 @@ withRegsRE start end max fallthrough f =
           | otherwise   = [j| break; |]
       mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
 
+-- | the global linkable unit of a module exports this symbol, depend on it to include that unit
+--   (used for cost centres)
+moduleGlobalSymbol :: Module -> Text
+moduleGlobalSymbol m = "h$" <> T.pack (zEncodeString $ showModule m) <> "_<global>"
+
 jsIdIdent :: Id -> Maybe Int -> IdType -> G Ident
 jsIdIdent i mi suffix = do
   IdCache cache <- use gsIdents
@@ -533,7 +548,7 @@ jsIdIdent' :: Id -> Maybe Int -> IdType -> G Ident
 jsIdIdent' i mn suffix0 = do
   (prefix, u) <- mkPrefixU
   i' <- (\x -> T.pack $ "h$"++prefix++x++mns++suffix++u) . zEncodeString <$> name
-  i' `seq` return (TxtI i') 
+  i' `seq` return (TxtI i')
     where
       suffix = idTypeSuffix suffix0
       mns = maybe "" (('_':).show) mn
@@ -544,7 +559,9 @@ jsIdIdent' i mn suffix0 = do
            return (zEncodeString xstr, "")
         | otherwise = (,('_':) . encodeUnique . getKey . getUnique $ i) . ('$':)
                     . zEncodeString . showModule <$> use gsModule
-      showModule m
+
+showModule :: Module -> String
+showModule m
         | any (`L.isPrefixOf` pkg) wiredInPackages = dropVersion pkg ++ ":" ++ modName
         | otherwise                                = pkg ++ ":" ++ modName
         where
