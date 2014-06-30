@@ -386,7 +386,7 @@ printBootInfo v
   | "--print-topdir"         `elem` v = putStrLn t
   | "--print-libdir"         `elem` v = putStrLn t
   | "--print-global-db"      `elem` v = putStrLn (getGlobalPackageDB t)
-  | "--print-user-db"        `elem` v = putStrLn =<< getUserPackageDB
+  | "--print-user-db-dir"    `elem` v = putStrLn . fromMaybe "<none>" =<< getUserPackageDir
   | "--print-default-libdir" `elem` v = putStrLn =<< getDefaultLibDir
   | "--print-default-topdir" `elem` v = putStrLn =<< getDefaultTopDir
   | "--numeric-ghc-version"  `elem` v = putStrLn getGhcCompilerVersion

@@ -526,8 +526,17 @@ getPkgDatabases verbosity modify use_cache expand_vars my_flags = do
   let no_user_db = FlagNoUserDb `elem` my_flags
 
   mb_user_conf <-
-     if no_user_db then return Nothing
-                   else (\x -> Just (x,True)) `fmap` Info.getUserPackageDB
+     if no_user_db
+        then return Nothing
+        else do
+          user_db_dir <- Info.getUserPackageDir
+          case user_db_dir of
+               Nothing  -> return Nothing
+               Just dir -> do
+                 r <- lookForPackageDBIn dir
+                 case r of
+                   Nothing -> return (Just (dir </> "package.conf.d", False))
+                   Just f  -> return (Just (f, True))
 
   -- If the user database doesn't exist, and this command isn't a
   -- "modify" command, then we won't attempt to create or use it.

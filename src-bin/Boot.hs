@@ -172,7 +172,7 @@ data BootLocations = BootLocations { _blGhcjsTopDir :: FilePath -- ^ install to 
                                    , _blGhcjsLibDir :: FilePath
                                    , _blGhcLibDir   :: FilePath -- ^ copy GHC files from here
                                    , _blGlobalDB    :: FilePath -- ^ global package database
-                                   , _blUserDB      :: FilePath -- ^ user package database
+                                   , _blUserDBDir   :: Maybe FilePath -- ^ user package database location
                                    } deriving (Data, Typeable)
 
 data Program a = Program { _pgmName    :: Text           -- ^ program name for messages
@@ -452,12 +452,14 @@ optParser = BootSettings
 initPackageDB :: B ()
 initPackageDB = do
   msg info "creating package databases"
-  forM_ [blGlobalDB, blUserDB] $ \db -> do
-    db' <- view (beLocations . db)
-    rm_rf db' >> mkdir_p db'
-    ghcjs_pkg_ ["init", toTextI db'] `catchAny_` return ()
-  ghcjs_pkg_ ["recache", "--global"]
-  ghcjs_pkg_ ["recache", "--user"]
+  initDB "--global" <^> beLocations . blGlobalDB
+  traverseOf_ _Just initUser <^> beLocations . blUserDBDir
+  where
+    initUser dir = rm_f (dir </> "package.conf") >> initDB "--user" (dir </> "package.conf.d")
+    initDB dbName db = do
+      rm_rf db >> mkdir_p db
+      ghcjs_pkg_ ["init", toTextI db] `catchAny_` return ()
+      ghcjs_pkg_ ["recache", dbName]
 
 bootDescr :: Text
 bootDescr = "boot libraries"
@@ -1125,8 +1127,8 @@ configureBootLocations bs pgms = do
   ghcjsLibDir  <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-libdir"]
   ghcjsTopDir  <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-topdir"]
   globalDB     <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-global-db"]
-  userDB       <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-user-db"]
-  return $ BootLocations ghcjsTopDir ghcjsLibDir ghcLibDir globalDB userDB
+  userDBT      <- T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-user-db-dir"]
+  return $ BootLocations ghcjsTopDir ghcjsLibDir ghcLibDir globalDB (bool (userDBT == "<none>") Nothing (Just $ fromText userDBT))
 
 -- | build the program configuration and do some sanity checks
 configureBootPrograms :: BootSettings    -- ^ command line settings
@@ -1223,7 +1225,7 @@ printBootEnvSummary be = do
     h "boot configuration"
     t "rl" [["installation directory", path $ beLocations . blGhcjsTopDir]
            ,["global package DB", path $ beLocations . blGlobalDB]
-           ,["user package DB", path $ beLocations . blUserDB],[]
+           ,["user package DB location", path $ beLocations . blUserDBDir . to (fromMaybe "<none>")],[]
            ,["GHCJS version", ver "<unknown>" bpGhcjs]
            ,["program location", loc bpGhcjs]
            ,["library path", path $ beLocations . blGhcjsLibDir]

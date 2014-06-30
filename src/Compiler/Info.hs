@@ -2,6 +2,7 @@
 module Compiler.Info where
 
 import           Control.Applicative
+import qualified Control.Exception as E
 import           Control.Monad
 
 import           Data.Function      (on)
@@ -52,7 +53,7 @@ mkTopDir (Just x) = return x
 mkTopDir _        = getDefaultTopDir
 
 mkLibDir :: Maybe String -> IO FilePath
-mkLibDir (Just x) = return x -- (x</>"lib")
+mkLibDir (Just x) = return x
 mkLibDir _        = getDefaultLibDir
 
 getTopDir :: DynFlags -> FilePath
@@ -73,19 +74,20 @@ getGlobalPackageDB :: FilePath
                    -> FilePath
 getGlobalPackageDB libDir = libDir </> "package.conf.d"
 
--- | find location of the user package database
-getUserPackageDB :: IO FilePath
-getUserPackageDB = (</> (subdir </> "package.conf.d")) <$>
-                      getAppUserDataDirectory "ghcjs"
+getUserTopDir :: IO (Maybe FilePath)
+getUserTopDir =  (Just . (</> subdir) <$> getAppUserDataDirectory "ghcjs") `E.catch`
+                   \(E.SomeException _) -> return Nothing
   where
     targetARCH = arch
     targetOS   = os
     subdir     = targetARCH ++ '-':targetOS ++ '-':getFullCompilerVersion
 
--- | find installation directory for global packages
-getGlobalPackageInst :: FilePath
-                     -> FilePath
-getGlobalPackageInst libDir = libDir </> "lib"
+-- | find location of the user package database
+getUserPackageDir :: IO (Maybe FilePath)
+getUserPackageDir = getUserTopDir
+
+getUserCache :: IO (Maybe FilePath)
+getUserCache = fmap (</> "cache") <$> getUserTopDir
 
 -- | Just the GHC version
 getGhcCompilerVersion :: String
