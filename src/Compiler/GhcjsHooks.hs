@@ -173,8 +173,7 @@ touchObjectFile dflags path = do
 
 ghcjsWriteModule :: GhcjsSettings
                  -> GhcjsEnv
-                 -> HscEnv      -- ^ Environment in which to compile
-                 -- the module
+                 -> HscEnv      -- ^ Environment in which to compile the module
                  -> CgGuts
                  -> ModSummary
                  -> FilePath    -- ^ Output path
@@ -185,8 +184,7 @@ ghcjsWriteModule settings jsEnv env core mod output = do
 
 ghcjsCompileModule :: GhcjsSettings
                    -> GhcjsEnv
-                   -> HscEnv      -- ^ Environment in which to compile
-                   -- the module
+                   -> HscEnv      -- ^ Environment in which to compile the module
                    -> CgGuts
                    -> ModSummary
                    -> IO B.ByteString

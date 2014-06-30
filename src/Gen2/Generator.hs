@@ -116,12 +116,12 @@ generate settings df guts s cccs =
       m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
         ifProfiling' $ initCostCentres cccs
-        (st, g) <- genUnits df m s'
+        (st, lus) <- genUnits df m s'
         -- (exported symbol names, javascript statements) for each linkable unit
-        p <- forM g $ \u -> mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
-                            \ts -> return (ts ++ luOtherExports u, luStat u)
+        p <- forM lus $ \u -> mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
+                                \ts -> return (ts ++ luOtherExports u, luStat u)
         let (st', dbg) = dumpAst st settings df s'
-        deps <- genDependencyData g
+        deps <- genDependencyData lus
         return . BL.toStrict $
           Object.object' st' deps (p ++ dbg) -- p first, so numbering of linkable units lines up
 
@@ -141,7 +141,7 @@ dumpAst st settings dflags s
   | otherwise        = (st, [])
       where
         (st', bs) = Object.serializeStat st [] [] [j| h$dumpAst = `x` |]
-        x = (intercalate "\n\n" (map showIndent s))
+        x = intercalate "\n\n" (map showIndent s)
 
 -- | variable prefix for the nth block in module
 modulePrefix :: Module -> Int -> Text
@@ -182,7 +182,7 @@ genUnits df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
                           -> G (Object.SymbolTable, [LinkableUnit])
       generateGlobalBlock (st, lus) = do
         glbl <- use gsGlobal
-        (st', ss, bs) <- serializeLinkableUnit m st [] [] []
+        (st', [], bs) <- serializeLinkableUnit m st [] [] []
                          . O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
                          $ mconcat (reverse glbl)
@@ -251,8 +251,8 @@ collectIds unfloated b = filter acceptId $ S.toList (bindingRefs unfloated b)
 genDependencyData :: [LinkableUnit] -> G Object.Deps
 genDependencyData units = do
   m <- use gsModule
-  (ds, (DDC pkgs funs1 funs2)) <- runStateT (sequence (zipWith (oneDep m) units [0..]))
-                                            (DDC IM.empty IM.empty M.empty)
+  (ds, DDC pkgs funs1 funs2) <- runStateT (sequence (zipWith (oneDep m) units [0..]))
+                                          (DDC IM.empty IM.empty M.empty)
   let sp = S.fromList (IM.elems pkgs)
       sf = S.fromList (IM.elems funs1 ++ M.elems funs2)
       (dl, blocks) = unzip ds
