@@ -6,7 +6,8 @@
 
 module Main where
 
-import Data.List (partition, isPrefixOf)
+import Data.Either (partitionEithers)
+import Data.List (partition, stripPrefix)
 import Data.Maybe
 
 import System.Environment
@@ -25,7 +26,7 @@ pathSep = ":"
 
 main = do
   args0 <- getFullArguments -- adds wrapper arguments for Windows
-  let (minusB, args) = partition ("-B" `isPrefixOf`) $ args0
+  let (minusB, args) = partitionEithers . map (\ x -> maybe (Right x) Left . stripPrefix "-B" $ x) $ args0
       mbMinusB       = listToMaybe . reverse $ minusB
   case args of
     ["--ghc-version"] -> putStrLn getCompilerVersion

@@ -90,7 +90,7 @@ Library
                      GHCJS
     other-modules: Paths_ghcjs
     build-depends: base           >= 4        && < 5,
-                   Cabal,
+                   Cabal          >= 1.21,
                    ghc            >= 7.8      && < 7.10,
                    directory,
                    filepath,
@@ -106,7 +106,7 @@ Library
                    aeson          >= 0.7      && < 0.8,
                    text           >= 0.11     && < 1.2,
                    wl-pprint-text >= 1.1      && < 1.2,
-                   lens           >= 4.0      && < 4.2,
+                   lens           >= 4.0      && < 4.3,
                    yaml           >= 0.8      && < 0.9,
                    time,
                    system-filepath,
@@ -172,7 +172,7 @@ Executable ghcjs-pkg.bin
                       directory  >= 1   && < 1.3,
                       process    >= 1   && < 1.3,
                       filepath,
-                      Cabal,
+                      Cabal      >= 1.21,
                       binary,
                       bin-package-db,
                       bytestring
@@ -196,7 +196,7 @@ Executable ghcjs-boot
     Build-Depends:    base                 >= 4      && < 5,
                       ghcjs,
                       directory,
-                      Cabal,
+                      Cabal                >= 1.21,
                       mtl,
                       transformers,
                       lens,
