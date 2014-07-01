@@ -53,7 +53,7 @@ import           Data.Generics.Schemes (everywhere)
 import           Data.Int
 import qualified Data.IntMap.Strict as IM
 import           Data.Monoid
-import           Data.Maybe (isJust, fromMaybe)
+import           Data.Maybe (isJust, fromMaybe, maybeToList)
 import           Data.Map (Map)
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -362,14 +362,14 @@ genToplevelRhs :: Id
                -> StgRhs
                -> C
 -- special cases
-genToplevelRhs i (StgRhsClosure _cc _bi _ _ _ _ body)
+genToplevelRhs i (StgRhsClosure cc _bi _ _ _ _ body)
   -- foreign exports
   | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget t _ _) _ _)) _)
      [StgLitArg (MachInt is_js_conv), StgLitArg (MachStr js_name), StgVarArg tgt] _) <- body,
      t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
   -- top-level strings
-  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey     = genStrThunk i False bs
-  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey = genStrThunk i True bs
+  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey     = genStrThunk i False bs cc
+  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey = genStrThunk i True bs cc
 -- general cases:
 genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
@@ -1092,16 +1092,25 @@ genIdStackArgI i = zipWith f [1..] <$> genIdArgI i
 r2d :: Rational -> Double
 r2d = realToFrac
 
-genStrThunk :: Id -> Bool -> B.ByteString -> C
-genStrThunk i nonAscii str = do
+genStrThunk :: Id -> Bool -> B.ByteString -> CostCentreStack -> C
+genStrThunk i nonAscii str cc = do
   ii@(TxtI iit) <- jsIdI i
   let d = decl ii
+  ccs <- costCentreStackLbl cc
+  let ccsArg = map toJExpr $ maybeToList ccs
   emitStatic iit (StaticThunk Nothing) Nothing
   return $ case decodeModifiedUTF8 str of
-             Just t -> d <> if nonAscii then [j| `ii` = h$strt(`T.unpack t`); |]
-                                        else [j| `ii` = h$strta(`T.unpack t`); |]
-             Nothing -> d <> if nonAscii then [j| `ii` = h$strtb(`map toInteger(B.unpack str)`); |]
-                                         else [j| `ii` = h$strta(`map (chr.fromIntegral) (B.unpack str)`); |]
+             Just t -> d <> if nonAscii
+                              then [j| `ii` =  `ApplExpr (jvar "h$strt") $
+                                                  [toJExpr $ T.unpack t] ++ ccsArg`; |]
+                              else [j| `ii` =  `ApplExpr (jvar "h$strta") $
+                                                  [toJExpr $ T.unpack t] ++ ccsArg`; |]
+             Nothing -> d <> if nonAscii
+                               then [j| `ii` = `ApplExpr (jvar "h$strtb") $
+                                                  [toJExpr $ map toInteger (B.unpack str)] ++ ccsArg`; |]
+                               else [j| `ii` = `ApplExpr (jvar "h$strta") $
+                                                  [toJExpr $ map (chr.fromIntegral) (B.unpack str)] ++ ccsArg`; |]
+
 genLit :: Literal -> G [JExpr]
 genLit (MachChar c)      = return [ [je| `ord c` |] ]
 genLit (MachStr  str)    =
