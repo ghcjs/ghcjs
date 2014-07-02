@@ -141,14 +141,17 @@ bitsIdx n | n < 0 = error "bitsIdx: negative"
     go m b | testBit m b = b : go (clearBit m b) (b+1)
            | otherwise   = go (clearBit m b) (b+1)
 
+bhStats :: CgSettings -> JStat
+bhStats s =
+  [j| `push' s [toJExpr R1, jsv "h$upd_frame"]`;
+      `R1`.f = h$blackhole;
+      `R1`.d1 = h$currentThread;
+      `R1`.d2 = null; // will be filled with waiters array
+    |]
+
 updateThunk :: CgSettings -> JStat
 updateThunk s
-  | csInlineBlackhole s =
-      [j| `push' s [toJExpr R1, jsv "h$upd_frame"]`;
-          `R1`.f = h$blackhole;
-          `R1`.d1 = h$currentThread;
-          `R1`.d2 = null; // will be filled with waiters array
-        |]
+  | csInlineBlackhole s = bhStats s
   | otherwise = [j| h$bh(); |]
 
 -- fixme move somewhere else
@@ -266,12 +269,7 @@ var !h$staticThunksArr = [];        // indices of updatable thunks in static hea
 `garbageCollector`;
 `stackManip`;
 
-fun h$bh {
-  `push' s [toJExpr R1, jsv "h$upd_frame"]`;
-  `R1`.f  = h$blackhole;
-  `R1`.d1 = h$currentThread;
-  `R1`.d2 = null; // will be filled with waiters array
-}
+fun h$bh { `bhStats s`; }
 
 fun h$blackhole { throw "<<loop>>"; return 0; }
 `ClosureInfo "h$blackhole" (CIRegs 0 []) "blackhole" (CILayoutUnknown 2) CIBlackhole noStatic`;
