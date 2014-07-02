@@ -13,10 +13,7 @@ import           BasicTypes
 import           PrelNames
 import           DynFlags
 import           Encoding
-import           HscTypes
-import           TysPrim
 import           UniqSet
-import           NameSet
 import           Literal
 import           DataCon
 import           CoreSyn
@@ -26,7 +23,6 @@ import           Unique
 import           StgSyn
 import           PrimOp
 import           Module
-import           VarSet
 import           TyCon
 import           Util
 import           Type hiding (typeSize)
@@ -67,6 +63,7 @@ import qualified Text.Parsec as P
 
 import           Compiler.Settings
 
+import           Gen2.Base
 import           Gen2.Utils
 import           Gen2.Prim
 import           Gen2.Rts
@@ -105,12 +102,11 @@ addEval i = over _3 (flip addOneToUniqSet i)
 
 generate :: GhcjsSettings
          -> DynFlags
-         -> CgGuts
+         -> Module
          -> StgPgm
          -> ByteString -- ^ binary data for the .js_o object file
-generate settings df guts s =
+generate settings df m s =
   let (uf, s') = sinkPgm m s
-      m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
         (st, g) <- genUnits df m s'
         -- (exported symbol names, javascript statements) for each linkable unit
@@ -1425,7 +1421,7 @@ parseFfiJM :: String -> Int -> Either P.ParseError JStat
 parseFfiJM xs u = fmap (makeHygienic . saturateFFI u) . parseJM $ xs
   where
     makeHygienic :: JStat -> JStat
-    makeHygienic s = snd $ O.renameLocalsFun (map addFFIToken O.newLocals) ([], s)
+    makeHygienic s = snd $ O.renameLocalsFun (map addFFIToken newLocals) ([], s)
 
 --    addFFIToken (StrI xs) = TxtI (T.pack $ "ghcjs_ffi_" ++ show u ++ "_" ++ xs)
     addFFIToken (TxtI xs) = TxtI (T.pack ("ghcjs_ffi_" ++ show u ++ "_") <> xs)

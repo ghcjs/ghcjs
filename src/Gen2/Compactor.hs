@@ -47,27 +47,10 @@ import qualified Data.Text as T
 import           Compiler.JMacro
 import           Compiler.Settings
 
+import           Gen2.Base
 import           Gen2.ClosureInfo
 import qualified Gen2.Object    as Object
 import qualified Gen2.Optimizer as Optimizer
-
-renamedVars :: [Ident]
-renamedVars = map (\(TxtI xs) -> TxtI ("h$$"<>xs)) Optimizer.newLocals
-
-emptyCompactorState :: CompactorState
-emptyCompactorState = CompactorState renamedVars HM.empty HM.empty 0 HM.empty 0 HM.empty 0 HM.empty HM.empty HM.empty
-
-emptyBase :: Base
-emptyBase = Base emptyCompactorState [] S.empty
-
--- | make a base state from a CompactorState: empty the current symbols sets, move everything to
---   the parent
-makeCompactorParent :: CompactorState -> CompactorState
-makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls) =
-  CompactorState is nm HM.empty 0 HM.empty 0 HM.empty 0
-     (HM.union (fmap (+nes) pes) es)
-     (HM.union (fmap (+nss) pss) ss)
-     (HM.union (fmap (+nls) pls) ls)
 
 -- | collect global objects (data / CAFs). rename them and add them to the table
 collectGlobals :: [StaticInfo]
@@ -416,67 +399,10 @@ encodeMax = 737189
 
 renderBase :: Base                                   -- ^ base metadata
            -> BL.ByteString                          -- ^ rendered result
-renderBase (Base cs packages funs) = DB.runPut $ do
-  DB.putByteString "GHCJSBASE"
-  putCs cs
-  putList DB.put packages
-  putList putPkg pkgs
-  putList DB.put mods
-  putList putFun (S.toList funs)
-  where
-    pi :: Int -> DB.Put
-    pi = DB.putWord32le . fromIntegral
-    uniq :: Ord a => [a] -> [a]
-    uniq  = S.toList . S.fromList
-    pkgs  = uniq (map (\(x,_,_) -> x) $ S.toList funs)
-    pkgsM = M.fromList (zip pkgs [(0::Int)..])
-    mods  = uniq (map (\(_,x,_) -> x) $ S.toList funs)
-    modsM = M.fromList (zip mods [(0::Int)..])
-    putList f xs = pi (length xs) >> mapM_ f xs
-    -- serialise the compactor state
-    putCs (CompactorState [] _ _ _ _ _ _ _ _ _ _) = error "renderBase: putCs exhausted renamer symbol names"
-    putCs (CompactorState (ns:_) nm es _ ss _ ls _ pes pss pls) = do
-      DB.put ns
-      DB.put (HM.toList nm)
-      DB.put (HM.toList es)
-      DB.put (HM.toList ss)
-      DB.put (HM.toList ls)
-      DB.put (HM.toList pes)
-      DB.put (HM.toList pss)
-      DB.put (HM.toList pls)
-    putPkg (Object.Package n v) = DB.put n >> DB.put v
-    -- fixme group things first
-    putFun (p,m,s) = pi (pkgsM M.! p) >> pi (modsM M.! m) >> DB.put s
+renderBase = DB.runPut . putBase
 
 loadBase :: FilePath -> IO Base
 loadBase file = DB.runGet getBase <$> BL.readFile file
-  where
-    gi :: DB.Get Int
-    gi = fromIntegral <$> DB.getWord32le
-    getList f = DB.getWord32le >>= \n -> replicateM (fromIntegral n) f
-    getFun ps ms = (,,) <$> ((ps!) <$> gi) <*> ((ms!) <$> gi) <*> DB.get
-    la xs = listArray (0, length xs - 1) xs
-    getPkg = Object.Package <$> DB.get <*> DB.get
-    getCs = do
-      n   <- DB.get
-      nm  <- HM.fromList <$> DB.get
-      es  <- HM.fromList <$> DB.get
-      ss  <- HM.fromList <$> DB.get
-      ls  <- HM.fromList <$> DB.get
-      pes <- HM.fromList <$> DB.get
-      pss <- HM.fromList <$> DB.get
-      pls <- HM.fromList <$> DB.get
-      return (CompactorState (dropWhile (/=n) renamedVars) nm es (HM.size es) ss (HM.size ss) ls (HM.size ls) pes pss pls)
-    getBase = do
-      hdr <- DB.getByteString 9
-      when (hdr /= "GHCJSBASE") (error "loadBase: invalid base file")
-      cs <- makeCompactorParent <$> getCs
-      linkedPackages <- getList DB.get
-      pkgs <- la <$> getList getPkg
-      mods <- la <$> getList DB.get
-      funs <- getList (getFun pkgs mods)
-      return (Base cs linkedPackages $ S.fromList funs)
-
 
 ----------------------------
 
@@ -523,10 +449,6 @@ identsV _ r@(JRegEx{})   = pure r
 identsV f (JHash m)      = JHash <$> (traverse . identsE) f m
 identsV f (JFunc args s) = JFunc <$> traverse f args <*> identsS f s
 identsV _ (UnsatVal{})   = error "identsV: UnsatVal"
-
-instance DB.Binary Ident where
-  put (TxtI t) = DB.put t
-  get = fmap TxtI DB.get
 
 compact :: GhcjsSettings
         -> DynFlags

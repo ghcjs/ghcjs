@@ -137,7 +137,6 @@ echo "preparing boot and shims cache in ${BUILDDIR}"
     git checkout "${BRANCH}"
     git submodule update --init --recursive
     prepare_packages "boot"
-    prepare_packages "extra"
     
     prepare_primops
     cd ..

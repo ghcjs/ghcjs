@@ -17,6 +17,9 @@ module Compiler.JMacro.QQ (jmacro, jmacroE, parseJM, parseJME, expr2ident) where
 import Prelude hiding (tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
 import Control.Applicative hiding ((<|>), many, optional, (<*))
 import Control.Arrow (first)
+import Control.Lens ((^..))
+import Control.Lens.Plated (rewriteOn)
+import Data.Data.Lens (template)
 import Control.Monad.State.Strict
 import Data.Char (digitToInt, toLower, isUpper, isAlpha)
 import Data.List (isPrefixOf, sort)
@@ -114,22 +117,25 @@ fixIdent _ = "_"
 
 
 jm2th :: Data a => a -> TH.ExpQ
-jm2th v = dataToExpQ (const Nothing
+jm2th v = removeUnused <$> go v
+       where
+          go :: Data a => a -> TH.ExpQ
+          go = dataToExpQ (const Nothing
                       `extQ` handleStat
                       `extQ` handleExpr
                       `extQ` handleVal
                       `extQ` handleStr
                       `extQ` handleText
-                     ) v
+                     )
 
-    where handleStat :: JStat -> Maybe TH.ExpQ
+          handleStat :: JStat -> Maybe TH.ExpQ
           handleStat (BlockStat ss) = Just $ [|BlockStat|] `appE` TH.listE (blocks ss)
               where blocks :: [JStat] -> [TH.ExpQ]
                     blocks [] = []
                     blocks (DeclStat (TxtI i):xs) = case T.unpack i of
-                     ('!':'!':_) -> jm2th (DeclStat (TxtI (T.drop 2 i))) : blocks xs
+                     ('!':'!':_) -> go (DeclStat (TxtI (T.drop 2 i))) : blocks xs
                      ('!':i') ->
-                        [appE (TH.lamE [TH.varP . mkName . fixIdent $ i'] $
+                        [appE (TH.lamE [jmacroLam', TH.varP . mkName . fixIdent $ i'] $
                                  [|BlockStat|] `appE`
                                    (TH.listE . (ds:) . blocks $ xs))
                                        [|TxtI (T.pack i') |]]
@@ -137,28 +143,28 @@ jm2th v = dataToExpQ (const Nothing
 
                      i' ->
                         [ ([|jVarTy|]
-                           `appE` (TH.lamE [TH.varP . mkName . fixIdent $ i'] $
+                           `appE` (TH.lamE [jmacroLam', TH.varP . mkName . fixIdent $ i'] $
                                      [|BlockStat|] `TH.appE`
                                        (TH.listE $ blocks $ map (antiIdent i') xs)))
                         ]
 
-                    blocks (x:xs) = jm2th x : blocks xs
+                    blocks (x:xs) = go x : blocks xs
 
 
           handleStat (ForInStat b (TxtI i) e s) | Just i' <- T.stripPrefix "jmId_anti_" i =
                      Just $ [|ForInStat b|]
                               `appE` ([|expr2ident|] `TH.appE` TH.varE (mkName . fixIdent . T.unpack $ i'))
-                              `appE` jm2th e
-                              `appE` jm2th s
+                              `appE` go e
+                              `appE` go s
 
           handleStat (TryStat s (TxtI i) s1 s2)
               | s1 == BlockStat [] = Nothing
               | otherwise =
                  let i' = T.unpack i
                  in Just $ [|jTryCatchFinally|]
-                             `appE` jm2th s
-                             `appE` TH.lamE [TH.varP $ mkName i'] (jm2th $ antiIdent i' s1)
-                             `appE` jm2th s2
+                             `appE` go s
+                             `appE` TH.lamE [jmacroLam', TH.varP $ mkName i'] (go $ antiIdent i' s1)
+                             `appE` go s2
 
           handleStat (AntiStat s) = case parseHSExp (T.unpack s) of
                                       Right ans -> Just $ [|toStat|] `appE` return ans
@@ -171,14 +177,14 @@ jm2th v = dataToExpQ (const Nothing
                                       Right ans -> Just $ [|toJExpr|] `appE` return ans
                                       Left err -> Just $ fail err
           handleExpr (ValExpr (JFunc is' s)) = Just $
-              [|jLam|] `appE` TH.lamE (map (TH.varP . mkName . fixIdent) is)
-                                      (jm2th $ antiIdents is s)
+              [|jLam|] `appE` TH.lamE (jmacroLam' : map (TH.varP . mkName . fixIdent) is)
+                                      (go $ antiIdents is s)
             where is = map (\(TxtI i) -> T.unpack i) is'
 
           handleExpr _ = Nothing
 
           handleVal :: JVal -> Maybe TH.ExpQ
-          handleVal (JHash m) = Just $ [|jhFromList|] `appE` jm2th (M.toList m)
+          handleVal (JHash m) = Just $ [|jhFromList|] `appE` go (M.toList m)
           handleVal (JDouble (SaneDouble d))
             | isNegativeZero d      = Just [| JDouble (SaneDouble (negate 0)) |]
             | isInfinite d && d < 0 = Just [| JDouble (SaneDouble (-1/0))     |]
@@ -193,6 +199,20 @@ jm2th v = dataToExpQ (const Nothing
 
           handleText :: T.Text -> Maybe TH.ExpQ
           handleText x = let x' = T.unpack x in Just [|T.pack x'|]
+
+          jmacroLam' = return jmacroLam
+          jmacroLam = TH.VarP (mkName "__jmacroLam")
+
+          removeUnused :: TH.Exp -> TH.Exp
+          removeUnused = rewriteOn template rewriteLam
+
+          rewriteLam e | TH.LamE (p:ps) le <- e, p == jmacroLam =
+                             Just $ TH.LamE (map (\p' -> if isUsed p' le then p' else TH.WildP) ps) le
+                       | otherwise = Nothing
+
+          -- this could be made more precise by only looking in VarE and stopping wherever the name is bound again
+          isUsed (TH.VarP n) e = n `elem` (e ^.. template)
+          isUsed _           _ = True
 
 {--------------------------------------------------------------------
   Parsing

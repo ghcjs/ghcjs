@@ -86,8 +86,8 @@ getUserTopDir =  (Just . (</> subdir) <$> getAppUserDataDirectory "ghcjs") `E.ca
 getUserPackageDir :: IO (Maybe FilePath)
 getUserPackageDir = getUserTopDir
 
-getUserCache :: IO (Maybe FilePath)
-getUserCache = fmap (</> "cache") <$> getUserTopDir
+getUserCacheDir :: IO (Maybe FilePath)
+getUserCacheDir = fmap (</> "cache") <$> getUserTopDir
 
 -- | Just the GHC version
 getGhcCompilerVersion :: String

@@ -45,6 +45,7 @@ import           Data.Word
 
 import           Compiler.JMacro
 
+import           Gen2.Base
 import           Gen2.Dataflow
 import           Gen2.Rts
 import           Gen2.RtsTypes
@@ -58,25 +59,6 @@ optimize = renameLocalVars . removeDeadVars . dataflow
 
 renameLocalVars :: JStat -> JStat
 renameLocalVars = thisFunction . nestedFuns %~ renameLocalsFun newLocals
-
-newLocals :: [Ident]
-newLocals = filter (not . isKeyword) $ map (TxtI . T.pack) $ (map (:[]) chars0) ++ concatMap mkIdents [1..]
-  where
-    mkIdents n = [c0:cs | c0 <- chars0, cs <- replicateM n chars]
-    chars0 = ['a'..'z']++['A'..'Z']
-    chars = chars0++['0'..'9']
-    isKeyword (TxtI i) = i `HS.member` kwSet
-    kwSet = HS.fromList keywords
-    keywords = [ "break", "case", "catch", "continue", "debugger"
-               , "default", "delete", "do", "else", "finally", "for"
-               , "function", "if", "in", "instanceof", "new", "return"
-               , "switch", "this", "throw", "try", "typeof", "var", "void"
-               , "while", "with"
-               , "class", "enum", "export", "extends", "import", "super", "const"
-               , "implements", "interface", "let", "package", "private", "protected"
-               , "public", "static", "yield"
-               , "null", "true", "false"
-               ]
 
 -- traverse all expressions in the statement (no recursion into nested statements)
 statExprs :: Traversal' JStat JExpr

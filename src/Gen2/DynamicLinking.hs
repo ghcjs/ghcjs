@@ -8,6 +8,8 @@ module Gen2.DynamicLinking ( ghcjsLink
                            , ghcjsCompileCoreExpr
                            , ghcjsGetValueSafely
                            , ghcjsDoLink
+                           , isGhcjsPrimPackage
+                           , ghcjsPrimPackage
                            ) where
 
 import Id
@@ -81,8 +83,9 @@ ghcjsLinkJsBinary :: GhcjsSettings
                   -> [PackageId]
                   -> IO ()
 ghcjsLinkJsBinary settings jsFiles dflags objs dep_pkgs =
-  void $ variantLink gen2Variant dflags settings exe [] deps objs jsFiles isRoot S.empty
+  void $ variantLink gen2Variant dflags settings exe [] deps objs' jsFiles isRoot S.empty
     where
+      objs'    = map Right objs
       isRoot _ = True
       deps     = map (\pkg -> (pkg, packageLibPaths pkg)) dep_pkgs
       exe      = Utils.exeFileName dflags

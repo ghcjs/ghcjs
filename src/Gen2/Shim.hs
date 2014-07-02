@@ -109,8 +109,8 @@ collectShims dflags settings base pkgs = do
                     go [] _ = []
                 in go xs mempty
 
-tryReadShimFile :: DynFlags -> GhcjsSettings -> FilePath -> IO B.ByteString
-tryReadShimFile dflags ghcjsSettings file = do
+tryReadShimFile :: DynFlags -> FilePath -> IO B.ByteString
+tryReadShimFile dflags file = do
   exists <- doesFileExist file
   if not exists
     then putStrLn ("warning: " <> file <> " does not exist") >> return mempty

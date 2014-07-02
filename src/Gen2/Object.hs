@@ -5,6 +5,7 @@
              FlexibleInstances,
              TupleSections,
              ScopedTypeVariables,
+             DeriveGeneric,
              Rank2Types #-}
 
 {- |
@@ -82,6 +83,8 @@ import           Data.Text.Binary ()
 import qualified Data.Text.Lazy as TL
 import           Data.Word
 
+import           GHC.Generics
+
 import           System.IO (openBinaryFile, hClose, hSeek, SeekMode(..), IOMode(..) )
 
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
@@ -154,7 +157,8 @@ instance NFData Fun where rnf x = x `seq` ()
 
 data Package = Package { packageName    :: !Text
                        , packageVersion :: !Text
-                       } deriving (Eq, Ord, Show)
+                       } deriving (Eq, Ord, Show, Generic)
+instance DB.Binary Package
 
 -- we need to store the size separately, since getting a HashMap's size is O(n)
 data SymbolTable  = SymbolTable !Int !(HashMap Text Int)
@@ -170,6 +174,10 @@ insertSymbol s st@(SymbolTable n t) =
   case HM.lookup s t of
     Just k  -> (st, k)
     Nothing -> (SymbolTable (n+1) (HM.insert s n t), n)
+
+data ObjEnv = ObjEnv { oeSymbols :: SymbolTableR
+                     , oeName    :: String
+                     }
 
 data SymbolTableR = SymbolTableR { strText   :: Array Int Text
                                  , strString :: Array Int String
@@ -208,7 +216,7 @@ execStrictStateT ss i = runStrictStateT ss (\s _ -> return s) i
 
 type PutSM = StrictStateT SymbolTable DB.PutM
 type PutS  = PutSM ()
-type GetS  = ReaderT SymbolTableR DB.Get
+type GetS  = ReaderT ObjEnv DB.Get
 
 class Objectable a where
   put :: a -> PutS
@@ -218,11 +226,15 @@ class Objectable a where
   getList :: GetS [a]
   getList = getListOf get
 
-runGetS :: SymbolTableR -> GetS a -> ByteString -> a
-runGetS st m bs = DB.runGet (runReaderT m st) bs
+runGetS :: String -> SymbolTableR -> GetS a -> ByteString -> a
+runGetS name st m bs = DB.runGet (runReaderT m (ObjEnv st name)) bs
 
 runPutS :: SymbolTable -> PutS -> (SymbolTable, ByteString)
 runPutS st ps = DB.runPutM (execStrictStateT ps st)
+
+unexpected :: String -> GetS a
+unexpected err = ask >>= \e ->
+  error (oeName e ++ ": " ++ err)
 
 -- one toplevel block in the object file
 data ObjUnit = ObjUnit { oiSymbols :: [Text]         -- toplevel symbols (stored in index)
@@ -272,14 +284,14 @@ putIndex st xs = runPutS st (put $ zip symbols offsets)
     (symbols, values) = unzip xs
     offsets = scanl (+) 0 (map B.length values)
 
-getIndex :: SymbolTableR -> ByteString -> [([Text], Int64)]
-getIndex st bs = runGetS st get bs
+getIndex :: String -> SymbolTableR -> ByteString -> [([Text], Int64)]
+getIndex name st bs = runGetS name st get bs
 
 putDeps :: SymbolTable -> Deps -> (SymbolTable, ByteString)
 putDeps st deps = runPutS st (put deps)
 
-getDeps :: SymbolTableR -> ByteString -> Deps
-getDeps st bs = runGetS st get bs
+getDeps :: String -> SymbolTableR -> ByteString -> Deps
+getDeps name st bs = runGetS name st get bs
 
 instance Objectable Deps where
   put (Deps p m e a d) = put p >> put m >> put (M.toList e) >> put (elems a) >>
@@ -304,7 +316,7 @@ readDepsFile file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
     Right hdr -> do
       bs <- B.hGet h (fromIntegral $ symbsLen hdr + depsLen hdr)
       let symbs = getSymbolTable bs
-          deps  = getDeps symbs (B.drop (fromIntegral (symbsLen hdr)) bs)
+          deps  = getDeps file symbs (B.drop (fromIntegral (symbsLen hdr)) bs)
       return deps
 
 -- | call with contents of the file
@@ -315,7 +327,7 @@ readDeps name bs = case getHeader bs of
                        let bsymbs = B.drop (fromIntegral headerLength) bs
                            bdeps  = B.drop (fromIntegral (symbsLen hdr)) bsymbs
                            symbs  = getSymbolTable bsymbs
-                       in getDeps symbs bdeps
+                       in getDeps name symbs bdeps
 
 -- | extract the linkable units from an object file
 readObjectFile :: FilePath -> IO [ObjUnit]
@@ -330,7 +342,7 @@ readObjectFileKeys p file = bracket (openBinaryFile file ReadMode) hClose $ \h -
       bss <- B.hGet h (fromIntegral $ symbsLen hdr)
       hSeek h RelativeSeek (fromIntegral $ depsLen hdr)
       bsi <- B.fromStrict <$> BS.hGetContents h
-      return $ readObjectKeys' p (getSymbolTable bss) bsi (B.drop (fromIntegral $ idxLen hdr) bsi)
+      return $ readObjectKeys' file p (getSymbolTable bss) bsi (B.drop (fromIntegral $ idxLen hdr) bsi)
 
 readObject :: String -> ByteString -> [ObjUnit]
 readObject name = readObjectKeys name (\_ _ -> True)
@@ -343,18 +355,19 @@ readObjectKeys name p bs =
       let bssymbs = B.drop (fromIntegral headerLength) bs
           bsidx   = B.drop (fromIntegral $ symbsLen hdr + depsLen hdr) bssymbs
           bsobjs  = B.drop (fromIntegral $ idxLen hdr) bsidx
-      in readObjectKeys' p (getSymbolTable bssymbs) bsidx bsobjs
+      in readObjectKeys' name p (getSymbolTable bssymbs) bsidx bsobjs
 
-readObjectKeys' :: (Int -> [Text] -> Bool)
+readObjectKeys' :: String
+                -> (Int -> [Text] -> Bool)
                 -> SymbolTableR
                 -> ByteString
                 -> ByteString
                 -> [ObjUnit]
-readObjectKeys' p st bsidx bsobjs = catMaybes (zipWith readObj [0..] idx)
+readObjectKeys' name p st bsidx bsobjs = catMaybes (zipWith readObj [0..] idx)
     where
-      idx = getIndex st bsidx
+      idx = getIndex name st bsidx
       readObj n (x,off)
-        | p n x     = let (ci, s, si) = runGetS st ((,,) <$> get <*> get <*> get) (B.drop off bsobjs) -- fixme order!
+        | p n x     = let (ci, s, si) = runGetS name st ((,,) <$> get <*> get <*> get) (B.drop off bsobjs) -- fixme order!
                       in  Just (ObjUnit x ci si s)
         | otherwise = Nothing
 
@@ -464,7 +477,7 @@ instance Objectable Char where
   get = toEnum . fromIntegral <$> lift DB.getWord32le
   putList = put . T.pack
   getList = do
-    st <- ask
+    st <- oeSymbols <$> ask
     n <- lift DB.getWord32le
     return (strString st ! fromIntegral n)
 
@@ -508,7 +521,7 @@ instance Objectable a => Objectable (Maybe a) where
   get = getTag >>= \case
                       1 -> pure Nothing
                       2 -> Just <$> get
-                      n -> error ("Objectable get Maybe: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get Maybe: invalid tag: " ++ show n)
 
 instance Objectable Text where
   put t = do
@@ -517,7 +530,7 @@ instance Objectable Text where
     putState symbols'
     lift (DB.putWord32le $ fromIntegral n)
   get = do
-    st <- ask
+    st <- oeSymbols <$> ask
     n <- lift DB.getWord32le
     return (strText st ! fromIntegral n)
 
@@ -554,7 +567,7 @@ instance Objectable JStat where
                       13 -> LabelStat    <$> get <*> get
                       14 -> BreakStat    <$> get
                       15 -> ContinueStat <$> get
-                      n -> error ("Objectable get JStat: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get JStat: invalid tag: " ++ show n)
 
 instance Objectable JExpr where
   put (ValExpr v)          = tag 1 >> put v
@@ -575,7 +588,7 @@ instance Objectable JExpr where
                       6 -> IfExpr    <$> get <*> get <*> get
                       7 -> ApplExpr  <$> get <*> get
                       8 -> AntiExpr  <$> get
-                      n -> error ("Objectable get JExpr: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get JExpr: invalid tag: " ++ show n)
 
 instance Objectable JVal where
   put (JVar i)      = tag 1 >> put i
@@ -596,7 +609,7 @@ instance Objectable JVal where
                       6 -> JRegEx  <$> get
                       7 -> JHash . M.fromList  <$> get
                       8 -> JFunc   <$> get <*> get
-                      n -> error ("Objectable get JVal: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get JVal: invalid tag: " ++ show n)
 
 instance Objectable Ident where
   put (TxtI xs) = put xs
@@ -620,7 +633,7 @@ instance Objectable SaneDouble where
                       3 -> pure $ SaneDouble ((-1) / 0)
                       4 -> pure $ SaneDouble (-0)
                       5 -> SaneDouble <$> lift DB.get
-                      n -> error ("Objectable get SaneDouble: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get SaneDouble: invalid tag: " ++ show n)
 
 instance Objectable ClosureInfo where
   put (ClosureInfo v regs name layo typ static) = do
@@ -641,7 +654,7 @@ instance Objectable CIRegs where
   get = getTag >>= \case
                       1 -> pure CIRegsUnknown
                       2 -> CIRegs <$> getIW16 <*> get
-                      n -> error ("Objectable get CIRegs: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get CIRegs: invalid tag: " ++ show n)
 instance Objectable JOp where
   put = putEnum
   get = getEnum
@@ -659,13 +672,13 @@ instance Objectable CILayout where
                       1 -> pure CILayoutVariable
                       2 -> CILayoutUnknown <$> getIW16
                       3 -> CILayoutFixed   <$> getIW16 <*> get
-                      n -> error ("Objectable get CILayout: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get CILayout: invalid tag: " ++ show n)
 
 instance Objectable CIStatic where
   put (CIStaticRefs refs) = tag 1 >> put refs
   get = getTag >>= \case
                       1 -> CIStaticRefs <$> get
-                      n -> error ("Objectable get CIStatic: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get CIStatic: invalid tag: " ++ show n)
 
 instance Objectable CIType where
   put (CIFun arity regs) = tag 1 >> putIW16 arity >> putIW16 regs
@@ -681,7 +694,7 @@ instance Objectable CIType where
                       4 -> pure CIPap
                       5 -> pure CIBlackhole
                       6 -> pure CIStackFrame
-                      n -> error ("Objectable get CIType: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get CIType: invalid tag: " ++ show n)
 
 -- put an Int as a Word16, little endian. useful for many small values
 putIW16 :: Int -> PutS
@@ -718,7 +731,7 @@ instance Objectable Bool where
   get = getTag >>= \case
                       1 -> return False
                       2 -> return True
-                      n -> error ("Objectable get Bool: invalid tag: " ++ show n)
+                      n -> unexpected ("Objectable get Bool: invalid tag: " ++ show n)
 
 instance Objectable StaticInfo where
   put (StaticInfo ident val) = put ident >> put val
@@ -736,7 +749,7 @@ instance Objectable StaticVal where
                       3 -> StaticUnboxed <$> get
                       4 -> StaticData    <$> get <*> get
                       5 -> StaticList    <$> get <*> get
-                      n -> error ("Objectable get StaticVal: invalid tag " ++ show n)
+                      n -> unexpected ("Objectable get StaticVal: invalid tag " ++ show n)
 
 instance Objectable StaticUnboxed where
    put (StaticUnboxedBool b)   = tag 1 >> put b
@@ -746,7 +759,7 @@ instance Objectable StaticUnboxed where
                        1 -> StaticUnboxedBool   <$> get
                        2 -> StaticUnboxedInt    <$> get
                        3 -> StaticUnboxedDouble <$> get
-                       n -> error ("Objectable get StaticUnboxed: invalid tag " ++ show n)
+                       n -> unexpected ("Objectable get StaticUnboxed: invalid tag " ++ show n)
 
 instance Objectable StaticArg where
   put (StaticObjArg i)      = tag 1 >> put i
@@ -756,7 +769,7 @@ instance Objectable StaticArg where
                       1 -> StaticObjArg <$> get
                       2 -> StaticLitArg <$> get
                       3 -> StaticConArg <$> get <*> get
-                      n -> error ("Objectable get StaticArg: invalid tag " ++ show n)
+                      n -> unexpected ("Objectable get StaticArg: invalid tag " ++ show n)
 
 instance Objectable StaticLit where
   put (BoolLit b)    = tag 1 >> put b
@@ -774,8 +787,9 @@ instance Objectable StaticLit where
                       5 -> StringLit <$> get
                       6 -> BinLit    <$> get
                       7 -> LabelLit  <$> get <*> get
-                      n -> error ("Objectable get StaticLit: invalid tag " ++ show n)
+                      n -> unexpected ("Objectable get StaticLit: invalid tag " ++ show n)
 
 instance Objectable BS.ByteString where
   put = lift . DB.put
   get = lift DB.get
+

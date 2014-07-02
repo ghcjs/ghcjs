@@ -31,17 +31,18 @@ import qualified Gen2.DynamicLinking  as Gen2
 import qualified Gen2.Foreign         as Gen2
 import           Gen2.GHC.CoreToStg   (coreToStg) -- version that does not generate StgLetNoEscape
 import qualified Gen2.PrimIface       as Gen2
+import qualified Gen2.TH              as Gen2TH
 
-
-installGhcjsHooks :: GhcjsSettings
+installGhcjsHooks :: GhcjsEnv
+                  -> GhcjsSettings
                   -> [FilePath]  -- ^ JS objects
                   -> DynFlags -> DynFlags
-installGhcjsHooks settings js_objs dflags =
+installGhcjsHooks env settings js_objs dflags =
   Gen2.installForeignHooks True $ dflags { hooks = addHooks (hooks dflags) }
     where
       addHooks h = h { linkHook               = Just (Gen2.ghcjsLink settings js_objs True)
-                     , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
-                     , hscCompileCoreExprHook = Just Gen2.ghcjsCompileCoreExpr
+                     , getValueSafelyHook     = Just (Gen2TH.ghcjsGetValueSafely settings)
+                     , hscCompileCoreExprHook = Just (Gen2TH.ghcjsCompileCoreExpr env settings)
                      }
 
 installNativeHooks :: GhcjsSettings -> DynFlags -> DynFlags
@@ -210,7 +211,7 @@ ghcjsCompileModule settings jsEnv env core mod =
       core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
       stg <- coreToStg dflags (cg_module core) core_binds
       (stg', _ccs) <- stg2stg dflags (cg_module core) stg
-      return $ variantRender gen2Variant settings dflags core stg'
+      return $ variantRender gen2Variant settings dflags (cg_module core) stg'
 
 doFakeNative :: DynFlags -> FilePath -> IO ()
 doFakeNative df base = do
