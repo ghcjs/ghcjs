@@ -12,6 +12,7 @@ module Gen2.Profiling
   , profiling
   , profStat
   , setCC
+  , pushRestoreCCS
   , jCurrentCCS
   , enterCostCentreFun
   , enterCostCentreThunk
@@ -90,6 +91,13 @@ setCC cc _tick True = do
     addDependency $ OtherSymb (cc_mod cc) ccLbl
     return [j| `jCurrentCCS` = h$pushCostCentre(`jCurrentCCS`, `ccI`); |]
 setCC _cc _tick _push = return mempty
+
+pushRestoreCCS :: JStat
+pushRestoreCCS =
+  [j| `Sp` += 2;
+      `Stack`[`Sp`-1] = `jCurrentCCS`;
+      `Stack`[`Sp`]   = h$setCcs_e;
+    |]
 
 --------------------------------------------------------------------------------
 -- Getting/setting the current cost-centre stack

@@ -143,6 +143,7 @@ genericStackApply s =
             } else {
               `Sp` = `Sp` - regs - 1;
             }
+            `profStat s pushRestoreCCS`;
             `Stack`[`Sp`] = newAp;
             return `c`;
           } else {
@@ -206,7 +207,7 @@ genericFastApply s =
             `Sp` = `Sp` + 1;
           }
           `Stack`[`Sp`] = ap;
-
+          `profStat s pushRestoreCCS`;
         |]
     funCase :: JExpr -> JExpr -> JExpr -> JStat
     funCase c tag arity =
@@ -234,6 +235,7 @@ genericFastApply s =
               `Sp` = `Sp` + 1;
             }
             `Stack`[`Sp`] = newAp;
+            `profStat s pushRestoreCCS`;
             return `c`;
           } else {
             `traceRts s $ t"h$ap_gen_fast: undersat: " |+ myRegs |+ t" " |+ tag`; // build PAP and return stack top
@@ -356,6 +358,7 @@ stackApply s r n = [j| `decl func`;
           var newAp = h$apply[(`n`-`arity0`)|((`r`-rs)<<8)];
           `Stack`[`Sp`] = newAp;
           `traceRts s $ (funcName <> ": new stack frame: ") |+ (newAp |. "n")`;
+          `profStat s pushRestoreCCS`;
           return `c`;
         |]
       where
@@ -436,6 +439,7 @@ fastApply s r n =
             `saveRegs rs`;
             `Sp` = `Sp` + rsRemain  + 1;
             `Stack`[`Sp`] = h$apply[(rsRemain<<8)|(`n`-(`arity`&0xFF))];
+            `profStat s pushRestoreCCS`;
             return `c`;
           |]
           where
@@ -515,7 +519,7 @@ updates s =
           updatee.d1 = `R1`.d1;
           updatee.d2 = `R1`.d2;
           updatee.m  = `R1`.m;
-          `profStat s (updateCC updatee)`
+          `profStat s (updateCC updatee)`;
         } else {
           updatee.f  = h$unbox_e;
           updatee.d1 = `R1`;
