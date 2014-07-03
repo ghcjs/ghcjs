@@ -521,7 +521,7 @@ updates s =
           updatee.d1 = `R1`;
           updatee.d2 = null;
           updatee.m  = 0;
-          `profStat s (updateCC updatee)` // not sure about this
+          `profStat s (updateCC updatee)`;
         }
         `adjSpN 2`;
         `traceRts s $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
