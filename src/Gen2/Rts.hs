@@ -569,11 +569,6 @@ fun h$setObjInfo o typ name fields a size regs srefs {
   o.size = size;
 }
 
-// allocate function on heap
-fun h$static_fun f arity name gai {
-  return { f: f, d1: null, d2: null, m: 0 }
-}
-
 fun h$static_thunk f {
   // fixme push stuff to restore stuff here
   var h = { f: f, d1: null, d2: null, m: 0 };
