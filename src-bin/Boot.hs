@@ -265,16 +265,16 @@ main = do
       mapM_ addCheckpoint ["ghcjs-boot checkpoints file", "init"]
       installBuildTools
       view (beSettings . bsDev) >>= cond installDevelopmentTree installReleaseTree
-      -- initPackageDB
+      initPackageDB
       installRts
       installEtc
       installDocs
       installTests
       base <- view (beLocations . blGhcjsLibDir)
       setenv "CFLAGS" $ "-I" <> toTextI (base </> "include")
-      -- installFakes
-      -- installStage1
-      -- removeFakes
+      installFakes
+      installStage1
+      removeFakes
       unlessM (view $ beSettings . bsQuick) installStage2
       addCompleted
 
