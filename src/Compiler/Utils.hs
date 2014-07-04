@@ -10,6 +10,7 @@ module Compiler.Utils
     , copyNoOverwrite
     , findFile
     , jsexeExtension
+    , addExeExtension
     , exeFileName
     , mkGhcjsSuf
     , mkGhcjsOutput
@@ -77,8 +78,15 @@ findFile mk_file_path (dir : dirs)
        if b then return (Just file_path)
             else findFile mk_file_path dirs
 
-jsexeExtension :: FilePath
+jsexeExtension :: String
 jsexeExtension = "jsexe"
+
+addExeExtension :: FilePath -> FilePath
+#ifdef WINDOWS
+addExeExtension = (<.> "exe")
+#else
+addExeExtension = id
+#endif
 
 exeFileName :: DynFlags -> FilePath
 exeFileName dflags

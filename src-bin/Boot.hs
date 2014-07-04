@@ -117,6 +117,7 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsWithCabal    :: Maybe Text -- ^ location of cabal (cabal-install) executable, must have GHCJS support
                                  , _bsWithGhcjs    :: Maybe Text -- ^ location of GHCJS compiler
                                  , _bsWithGhcjsPkg :: Maybe Text -- ^ location of ghcjs-pkg program
+                                 , _bsWithGhcjsRun :: Maybe Text -- ^ location of ghcjs-run program
                                  , _bsWithGhc      :: Maybe Text -- ^ location of GHC compiler (must have a GHCJS-compatible Cabal library installed. ghcjs-boot copies some files from this compiler)
                                  , _bsWithNode     :: Maybe Text -- ^ location of the node.js program
                                  , _bsWithDataDir  :: Maybe Text -- ^ override data dir
@@ -194,6 +195,7 @@ instance MaybeRequired (Program Required) where isRequired = const True
 -- | configured programs, fail early if any of the required programs is missing
 data BootPrograms = BootPrograms { _bpGhcjs      :: Program Required
                                  , _bpGhcjsPkg   :: Program Required
+                                 , _bpGhcjsRun   :: Program Required
                                  , _bpGhc        :: Program Required
                                  , _bpGhcPkg     :: Program Required
                                  , _bpCabal      :: Program Required
@@ -299,7 +301,8 @@ instance Yaml.FromJSON BootSources where
 
 instance Yaml.FromJSON BootPrograms where
   parseJSON (Yaml.Object v) = BootPrograms
-    <$> v ..: "ghcjs" <*> v ..: "ghcjs-pkg" <*> v ..: "ghc"  <*> v ..: "ghc-pkg"
+    <$> v ..: "ghcjs" <*> v ..: "ghcjs-pkg" <*> v ..: "ghcjs-run"
+    <*> v ..: "ghc"   <*> v ..: "ghc-pkg"
     <*> v ..: "cabal" <*> v ..: "node"      <*> v ..: "git"  <*> v ..: "alex"
     <*> v ..: "happy" <*> v ..: "patch"     <*> v ..: "tar"
     <*> v ..: "cpp"   <*> v ..: "bash"      <*> v ..: "autoreconf"
@@ -445,6 +448,8 @@ optParser = BootSettings
                   help "ghcjs program to use" )
             <*> (optional . fmap T.pack . strOption ) ( long "with-ghcjs-pkg" <> metavar "PROGRAM" <>
                   help "ghcjs-pkg program to use" )
+            <*> (optional . fmap T.pack . strOption ) ( long "with-ghcjs-run" <> metavar "PROGRAM" <>
+                  help "ghcjs-run program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-ghc" <> metavar "PROGRAM" <>
                   help "ghc program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-node" <> metavar "PROGRAM" <>
@@ -632,9 +637,12 @@ installRts = subTop' "ghcjs-boot" $ do
   sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
   cp (ghcLib </> "settings")          (ghcjsLib </> "settings")
   cp (ghcLib </> "platformConstants") (ghcjsLib </> "platformConstants")
-  let unlitDest = ghcjsLib </> exe "unlit"
+  let unlitDest    = ghcjsLib </> exe "unlit"
+      ghcjsRunDest = ghcjsLib </> exe "ghcjs-run"
+  ghcjsRunSrc <- view (bePrograms . bpGhcjsRun . pgmLoc . to fromJust)
   cp (ghcLib </> exe "unlit") unlitDest
-  liftIO . Cabal.setFileExecutable . toStringI =<< absPath unlitDest
+  cp ghcjsRunSrc ghcjsRunDest
+  mapM_ (liftIO . Cabal.setFileExecutable . toStringI) [unlitDest, ghcjsRunDest]
   writefile (ghcjsLib </> "node") <^> bePrograms . bpNode . pgmLoc . to (maybe "-" toTextI)
   when (not isWindows) $ do
     let runSh = ghcjsLib </> "run" <.> "sh"

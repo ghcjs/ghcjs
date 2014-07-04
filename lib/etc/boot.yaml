@@ -165,6 +165,10 @@ programs:
   ghcjs-pkg:     ghcjs-pkg
   ghcjs-haddock: ghcjs-haddock
 
+  # non-wrapped GHCJS programs
+
+  ghcjs-run:     ghcjs-run
+
   # third party programs
 
   cabal:      cabal

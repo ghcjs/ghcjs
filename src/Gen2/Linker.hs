@@ -58,13 +58,14 @@ import           GHC.Generics
 import           System.FilePath          (splitPath, (<.>), (</>), dropExtension)
 import           System.Directory         (createDirectoryIfMissing, doesDirectoryExist
                                           ,doesFileExist, getDirectoryContents
-                                          ,getCurrentDirectory)
+                                          ,getCurrentDirectory, copyFile)
 
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
 import           Compiler.Info
 import           Compiler.JMacro
 import           Compiler.Settings
+import           Compiler.Utils
 
 import           Gen2.Base
 import           Gen2.ClosureInfo         hiding (Fun)
@@ -317,12 +318,11 @@ writeHtml df out = do
 writeRunner :: DynFlags -> FilePath -> IO ()
 writeRunner df out = when ("setup.jsexe" `isInfixOf` out) $ do
   cd <- getCurrentDirectory
-  let runner = cd </> dropExtension out
-      script = cd </> out </> "all.js"
-  node <- T.strip <$> T.readFile (topDir df </> "node")
-  T.writeFile runner ("#!/bin/bash\n" <> node <> " \"" <> escape script <> "\" \"$@\"\n")
-  Cabal.setFileExecutable (dropExtension out)
-    where escape = T.pack
+  let runner    = cd </> addExeExtension (dropExtension out)
+      runnerSrc = topDir df </> addExeExtension "ghcjs-run"
+  copyFile runnerSrc runner
+  Cabal.setFileExecutable runner
+  copyFile (topDir df </> "node") (cd </> out </> "node")
 
 -- | drop the version from a package name
 dropVersion :: Text -> Text
