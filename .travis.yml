@@ -18,11 +18,13 @@ install:
     - cabal-1.18 install ./Cabal ./cabal-install
     - cabal --version
     - cd ..
-    - cabal install --enable-executable-dynamic --enable-tests --enable-benchmarks
+    - git clone https://github.com/ghcjs/ghcjs-prim.git
+    - cabal install ./ghcjs-prim
+    - cabal install --enable-tests --enable-benchmarks
     - ghcjs --version
     - ghcjs-boot --version
     - ghcjs-boot --dev
-    - cabal install -j2 --ghcjs stm random syb transformers text parallel QuickCheck old-time vector
+    - cabal install -j2 --ghcjs random QuickCheck
     - ghcjs-pkg list
 
 script:

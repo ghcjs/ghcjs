@@ -33,6 +33,8 @@ import           Gen2.GHC.CoreToStg   (coreToStg) -- version that does not gener
 import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.TH              as Gen2TH
 
+import           System.IO.Error
+
 installGhcjsHooks :: GhcjsEnv
                   -> GhcjsSettings
                   -> [FilePath]  -- ^ JS objects
@@ -149,7 +151,7 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
 runGhcjsPhase _ _ (RealPhase ph) input dflags
   | Just next <- lookup ph skipPhases = do
     output <- phaseOutputFilename next
-    liftIO (copyFile input output)
+    liftIO (copyFile input output `catchIOError` \_ -> return ())
 #if MIN_VERSION_ghc(7,8,3)
     case ph of As _ -> (liftIO $ doFakeNative dflags (dropExtension output)); _ -> return ()
 #else

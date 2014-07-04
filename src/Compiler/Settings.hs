@@ -3,6 +3,7 @@
 module Compiler.Settings where
 
 import           Compiler.JMacro
+import           Compiler.Info
 
 import           Gen2.Base
 import qualified Gen2.Object         as Object
@@ -17,8 +18,10 @@ import qualified Data.Binary         as DB
 import qualified Data.Binary.Get     as DB
 import qualified Data.Binary.Put     as DB
 import           Data.ByteString        (ByteString)
+import           Data.Function          (on)
 import           Data.HashMap.Strict    (HashMap)
 import qualified Data.HashMap.Strict as HM
+import           Data.List              (nubBy)
 import           Data.Map               (Map)
 import qualified Data.Map            as M
 import           Data.Monoid
@@ -31,6 +34,7 @@ import           System.Process
 
 import           Module
 import           DynFlags
+import qualified DynFlags
 
 {- | We can link incrementally against a base bundle, where we assume
      that the symbols from the bundle and their dependencies have already
@@ -53,7 +57,7 @@ instance Monoid UseBase where
 
 data GhcjsSettings =
   GhcjsSettings { gsNativeExecutables :: Bool
-                , gsNoNative          :: Bool
+                , gsNativeToo         :: Bool
                 , gsNoJSExecutables   :: Bool
                 , gsStripProgram      :: Maybe FilePath
                 , gsLogCommandLine    :: Maybe FilePath
@@ -116,4 +120,17 @@ newGhcjsEnv = GhcjsEnv <$> newMVar M.empty <*> newMVar M.empty <*> newMVar 0
 
 buildingDebug :: DynFlags -> Bool
 buildingDebug dflags = WayDebug `elem` ways dflags
+
+compilerInfo :: GhcjsSettings
+             -> DynFlags
+             -> [(String, String)]
+compilerInfo settings dflags = do
+      let topDir = getTopDir dflags
+      nubBy ((==) `on` fst) $
+           [ ("Project name"     , "The Glorious Glasgow Haskell Compilation System for JavaScript")
+           , ("Global Package DB", getGlobalPackageDB topDir)
+           , ("Project version"  , getCompilerVersion)
+           , ("LibDir"           , topDir)
+           , ("Native Too"       , if gsNativeToo settings then "YES" else "NO")
+           ] ++ DynFlags.compilerInfo dflags
 

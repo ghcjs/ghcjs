@@ -59,8 +59,9 @@ import qualified Data.ByteString.Lazy           as BL
 import qualified Data.List                      as L
 import           Data.Monoid
 import qualified Data.Set                       as S
-import qualified Data.Text.Encoding             as T
 import qualified Data.Text                      as T
+import qualified Data.Text.Encoding             as T
+import qualified Data.Text.IO                   as T
 import qualified Data.Text.Lazy.Encoding        as TL
 import qualified Data.Text.Lazy                 as TL
 
@@ -158,7 +159,8 @@ getThRunner is_io dflags js_env hsc_env m = do
         fb <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibB lr)
         fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
         let rts = TL.encodeUtf8 $ Gen2.rtsText' (Gen2.dfCgSettings dflags)
-        (inp,out,err,pid) <- runInteractiveProcess "node" [topDir dflags </> "thrunner.js"] Nothing Nothing
+        node <- T.strip <$> T.readFile (topDir dflags </> "node")
+        (inp,out,err,pid) <- runInteractiveProcess (T.unpack node) [topDir dflags </> "thrunner.js"] Nothing Nothing
         mv  <- newMVar (Gen2.linkBase lr)
         forkIO $ catchIOError (forever $ hGetChar out >>= putChar) (\_ -> return ())
         let r = ThRunner pid inp err mv

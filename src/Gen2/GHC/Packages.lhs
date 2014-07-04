@@ -192,7 +192,9 @@ readPackageConfigs :: DynFlags -> IO [PackageConfig]
 readPackageConfigs dflags = do
   let system_conf_refs = [UserPkgConf, GlobalPkgConf]
 
-  e_pkg_path <- tryIO (getEnv "GHCJS_PACKAGE_PATH")
+  -- incompatible with Cabal
+  -- e_pkg_path <- tryIO (getEnv "GHCJS_PACKAGE_PATH")
+  let e_pkg_path = Left ""
   let base_conf_refs = case e_pkg_path of
         Left _ -> system_conf_refs
         Right path

@@ -114,7 +114,7 @@ getGhcjsSettings args =
     (ga,args') = partition (\a -> any (`isPrefixOf` unLoc a) as) args
     p = execParserPure (prefs mempty) optParser' (map unLoc ga)
     as = [ "--native-executables"
-         , "--no-native"
+         , "--native-too"
          , "--no-js-executables"
          , "--strip-program="
          , "--log-commandline="
@@ -126,7 +126,7 @@ getGhcjsSettings args =
          , "--use-base="
          ]
     envSettings = GhcjsSettings <$> getEnvOpt "GHCJS_NATIVE_EXECUTABLES"
-                                <*> getEnvOpt "GHCJS_NO_NATIVE"
+                                <*> getEnvOpt "GHCJS_NATIVE_TOO"
                                 <*> pure False
                                 <*> pure Nothing
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
@@ -143,7 +143,7 @@ optParser' = info (helper <*> optParser) fullDesc
 optParser :: Parser GhcjsSettings
 optParser = GhcjsSettings
             <$> switch ( long "native-executables" )
-            <*> switch ( long "no-native" )
+            <*> switch ( long "native-too" )
             <*> switch ( long "no-js-executables" )
             <*> optStr ( long "strip-program" )
             <*> optStr ( long "log-commandline" )
@@ -389,6 +389,7 @@ printBootInfo v
   | "--print-user-db-dir"    `elem` v = putStrLn . fromMaybe "<none>" =<< getUserPackageDir
   | "--print-default-libdir" `elem` v = putStrLn =<< getDefaultLibDir
   | "--print-default-topdir" `elem` v = putStrLn =<< getDefaultTopDir
+  | "--print-native-too"     `elem` v = print ("--native-too" `elem` v)
   | "--numeric-ghc-version"  `elem` v = putStrLn getGhcCompilerVersion
   | otherwise                         = error "no --ghcjs-setup-print or --ghcjs-booting-print options found"
   where

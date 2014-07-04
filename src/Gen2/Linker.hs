@@ -33,7 +33,7 @@ import qualified Data.HashMap.Strict      as HM
 import           Data.Int
 import qualified Data.IntSet              as IS
 import           Data.List                (partition, isPrefixOf, isSuffixOf, nub, foldl'
-                                          ,intercalate, group, sort, groupBy, find)
+                                          ,intercalate, group, sort, groupBy, find, isInfixOf)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe               (fromMaybe, isJust, isNothing)
@@ -51,11 +51,14 @@ import qualified Data.Vector              as V
 import           Data.Yaml                (FromJSON(..), Value(..))
 import qualified Data.Yaml                as Yaml
 
+import qualified Distribution.Simple.Utils as Cabal
+
 import           GHC.Generics
 
-import           System.FilePath          (splitPath, (<.>), (</>))
+import           System.FilePath          (splitPath, (<.>), (</>), dropExtension)
 import           System.Directory         (createDirectoryIfMissing, doesDirectoryExist
-                                          ,doesFileExist, getDirectoryContents)
+                                          ,doesFileExist, getDirectoryContents
+                                          ,getCurrentDirectory)
 
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
@@ -126,7 +129,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
         if genBase
           then generateBase out lbase
           else when (not (gsOnlyOut settings) && not (gsNoRts settings) && not (usingBase settings))
-                         (writeHtml dflags out >> combineFiles dflags out)
+                         (writeRunner dflags out >> writeHtml dflags out >> combineFiles dflags out)
 
 -- | link in memory
 link' :: DynFlags
@@ -310,6 +313,16 @@ writeHtml df out = do
     B.readFile (getLibDir df </>"template.html") >>= B.writeFile htmlFile
   where
     htmlFile = out </> "index.html"
+
+writeRunner :: DynFlags -> FilePath -> IO ()
+writeRunner df out = when ("setup.jsexe" `isInfixOf` out) $ do
+  cd <- getCurrentDirectory
+  let runner = cd </> dropExtension out
+      script = cd </> out </> "all.js"
+  node <- T.strip <$> T.readFile (topDir df </> "node")
+  T.writeFile runner ("#!/bin/bash\n" <> node <> " \"" <> escape script <> "\" \"$@\"\n")
+  Cabal.setFileExecutable (dropExtension out)
+    where escape = T.pack
 
 -- | drop the version from a package name
 dropVersion :: Text -> Text

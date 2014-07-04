@@ -79,7 +79,7 @@ import           System.Process                  (readProcessWithExitCode)
 import           Shelly                          ((<.>),{-(</>),-} fromText)
 import qualified Shelly                          as Sh
 
-import           Text.Read                       (readEither)
+import           Text.Read                       (readEither, readMaybe)
 
 --
 import           Compiler.GhcjsProgram           (printVersion)
@@ -118,6 +118,7 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsWithGhcjs    :: Maybe Text -- ^ location of GHCJS compiler
                                  , _bsWithGhcjsPkg :: Maybe Text -- ^ location of ghcjs-pkg program
                                  , _bsWithGhc      :: Maybe Text -- ^ location of GHC compiler (must have a GHCJS-compatible Cabal library installed. ghcjs-boot copies some files from this compiler)
+                                 , _bsWithNode     :: Maybe Text -- ^ location of the node.js program
                                  , _bsWithDataDir  :: Maybe Text -- ^ override data dir
                                  , _bsWithConfig   :: Maybe Text -- ^ installation source configuration (default: lib/etc/boot-sources.yaml in data dir)
                                  } deriving (Ord, Eq, Data, Typeable)
@@ -168,11 +169,12 @@ data CondPackage = CondPackage { _cpPlatform :: Maybe PlatformCond
                                , _cpPackage  :: Package
                                } deriving (Data, Typeable)
 
-data BootLocations = BootLocations { _blGhcjsTopDir :: FilePath -- ^ install to here
+data BootLocations = BootLocations { _blGhcjsTopDir :: FilePath       -- ^ install to here
                                    , _blGhcjsLibDir :: FilePath
-                                   , _blGhcLibDir   :: FilePath -- ^ copy GHC files from here
-                                   , _blGlobalDB    :: FilePath -- ^ global package database
+                                   , _blGhcLibDir   :: FilePath       -- ^ copy GHC files from here
+                                   , _blGlobalDB    :: FilePath       -- ^ global package database
                                    , _blUserDBDir   :: Maybe FilePath -- ^ user package database location
+                                   , _blNativeToo   :: Bool           -- ^ build/install native code too
                                    } deriving (Data, Typeable)
 
 data Program a = Program { _pgmName    :: Text           -- ^ program name for messages
@@ -195,6 +197,7 @@ data BootPrograms = BootPrograms { _bpGhcjs      :: Program Required
                                  , _bpGhc        :: Program Required
                                  , _bpGhcPkg     :: Program Required
                                  , _bpCabal      :: Program Required
+                                 , _bpNode       :: Program Required
                                  , _bpGit        :: Program Optional
                                  , _bpAlex       :: Program Optional
                                  , _bpHappy      :: Program Optional
@@ -262,16 +265,16 @@ main = do
       mapM_ addCheckpoint ["ghcjs-boot checkpoints file", "init"]
       installBuildTools
       view (beSettings . bsDev) >>= cond installDevelopmentTree installReleaseTree
-      initPackageDB
+      -- initPackageDB
       installRts
       installEtc
       installDocs
       installTests
       base <- view (beLocations . blGhcjsLibDir)
       setenv "CFLAGS" $ "-I" <> toTextI (base </> "include")
-      installFakes
-      installStage1
-      removeFakes
+      -- installFakes
+      -- installStage1
+      -- removeFakes
       unlessM (view $ beSettings . bsQuick) installStage2
       addCompleted
 
@@ -297,7 +300,7 @@ instance Yaml.FromJSON BootSources where
 instance Yaml.FromJSON BootPrograms where
   parseJSON (Yaml.Object v) = BootPrograms
     <$> v ..: "ghcjs" <*> v ..: "ghcjs-pkg" <*> v ..: "ghc"  <*> v ..: "ghc-pkg"
-    <*> v ..: "cabal" <*> v ..: "git"       <*> v ..: "alex"
+    <*> v ..: "cabal" <*> v ..: "node"      <*> v ..: "git"  <*> v ..: "alex"
     <*> v ..: "happy" <*> v ..: "patch"     <*> v ..: "tar"
     <*> v ..: "cpp"   <*> v ..: "bash"      <*> v ..: "autoreconf"
     <*> v ..: "make"
@@ -436,14 +439,16 @@ optParser = BootSettings
                   help "on OSX, prefer the GMP framework to the gmp lib" )
             <*> switch ( long "with-intree-gmp" <>
                   help "force using the in-tree GMP" )
-            <*> (optional . fmap T.pack . strOption) ( long "with-cabal" <> metavar "PROGRAM" <> value "cabal" <>
+            <*> (optional . fmap T.pack . strOption) ( long "with-cabal" <> metavar "PROGRAM" <>
                   help "cabal program to use" )
-            <*> (optional . fmap T.pack . strOption) ( long "with-ghcjs" <> metavar "PROGRAM" <> value "ghcjs" <>
+            <*> (optional . fmap T.pack . strOption) ( long "with-ghcjs" <> metavar "PROGRAM" <>
                   help "ghcjs program to use" )
-            <*> (optional . fmap T.pack . strOption ) (  long "with-ghcjs-pkg" <> metavar "PROGRAM" <> value "ghcjs-pkg" <>
+            <*> (optional . fmap T.pack . strOption ) ( long "with-ghcjs-pkg" <> metavar "PROGRAM" <>
                   help "ghcjs-pkg program to use" )
-            <*> (optional . fmap T.pack . strOption) ( long "with-ghc" <> metavar "PROGRAM" <> value "ghc" <>
+            <*> (optional . fmap T.pack . strOption) ( long "with-ghc" <> metavar "PROGRAM" <>
                   help "ghc program to use" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-node" <> metavar "PROGRAM" <>
+                  help "node.js program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-datadir" <> metavar "DIR" <>
                   help "data directory with libraries and configuration files" )
             <*> (optional . fmap T.pack . strOption) ( long "with-config" <> metavar "FILE" <>
@@ -630,13 +635,15 @@ installRts = subTop' "ghcjs-boot" $ do
   let unlitDest = ghcjsLib </> exe "unlit"
   cp (ghcLib </> exe "unlit") unlitDest
   liftIO . Cabal.setFileExecutable . toStringI =<< absPath unlitDest
+  writefile (ghcjsLib </> "node") <^> bePrograms . bpNode . pgmLoc . to (maybe "-" toTextI)
   when (not isWindows) $ do
     let runSh = ghcjsLib </> "run" <.> "sh"
     writefile runSh "#!/bin/sh\nCOMMAND=$1\nshift\n\"$COMMAND\" \"$@\"\n"
     liftIO . Cabal.setFileExecutable . toStringI =<< absPath runSh
   -- required for integer-gmp
-  prepareGmp
-  cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
+  whenM (view (beLocations . blNativeToo)) $ do
+    prepareGmp
+    cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
   when isWindows $ cp (ghcLib </> exe "touchy") (ghcjsLib </> exe "touchy")
   msg info "RTS prepared"
 
@@ -700,7 +707,8 @@ installGhcjsPrim = do
 installStage1 :: B ()
 installStage1 = subTop' "ghcjs-boot" $ do
   installStage "1a" =<< stagePackages bstStage1a
-  whenM (view $ beSettings . bsGmpInTree) installInTreeGmp
+  s <- ask
+  when (s ^. beSettings . bsGmpInTree && s ^. beLocations . blNativeToo) installInTreeGmp
   installGhcjsPrim
   installStage "1b" =<< stagePackages bstStage1b
     where
@@ -955,7 +963,7 @@ cabalInstallFlags = do
            bool isWindows ["--disable-executable-stripping", "--disable-library-stripping"] [] ++
            catMaybes [ (("-j"<>) . showT) <$> j
                      , bj debug "--ghcjs-options=-debug"
-                     , bj (v > info) "-v"
+                     , bj (v > info) "-v2"
                      ]
 
 #ifdef WINDOWS
@@ -1128,7 +1136,10 @@ configureBootLocations bs pgms = do
   ghcjsTopDir  <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-topdir"]
   globalDB     <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-global-db"]
   userDBT      <- T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-user-db-dir"]
-  return $ BootLocations ghcjsTopDir ghcjsLibDir ghcLibDir globalDB (bool (userDBT == "<none>") Nothing (Just $ fromText userDBT))
+  nativeToo    <- (=="True") . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-native-too"]
+  return $ BootLocations ghcjsTopDir ghcjsLibDir ghcLibDir globalDB
+                           (bool (userDBT == "<none>") Nothing (Just $ fromText userDBT))
+                           nativeToo
 
 -- | build the program configuration and do some sanity checks
 configureBootPrograms :: BootSettings    -- ^ command line settings
@@ -1175,7 +1186,8 @@ checkProgramVersions bs pgms =
     , (bpGhcjsPkg, "--numeric-ghcjs-version", Nothing,                         True)
     , (bpGhcjsPkg, "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
     , (bpCabal,    "--numeric-version",       Nothing,                         True)
-    ]
+    , (bpNode,     "--version",               Nothing,                         True)
+    ] >>= verifyNodeVersion
   where
     verifyVersion :: (Lens' BootPrograms (Program a), Text, Maybe String, Bool) -> BootPrograms -> IO BootPrograms
     verifyVersion (l, arg :: Text, expected :: Maybe String, update :: Bool) ps = do
@@ -1186,6 +1198,14 @@ checkProgramVersions bs pgms =
           failWith ("version mismatch for program " <> ps ^. l . pgmName <> " at " <> ps ^. l . pgmLocText
                       <> ", expected " <> T.pack exp <> " but got " <> res)
       return $ (if update then (l . pgmVersion .~ Just res) else id) ps
+    verifyNodeVersion pgms = do
+      let verTxt = fromMaybe "-" (pgms ^. bpNode . pgmVersion)
+          v      = mapM (readMaybe . T.unpack . T.dropWhile (== 'v')) . T.splitOn "." $ verTxt :: Maybe [Integer]
+      case v of
+        Just (x:y:_)
+          | x > 0 || y >= 10 -> return pgms
+          | otherwise        -> failWith ("minimum required version for node.js is 0.10, found: " <> verTxt)
+        _                    -> failWith ("unrecognized version for node.js: " <> verTxt)
 
 -- | check that cabal-install supports GHCJS and that our boot-GHC has a Cabal library that supports GHCJS
 checkCabalSupport :: BootSettings -> BootPrograms -> IO ()
@@ -1240,6 +1260,7 @@ printBootEnvSummary be = do
            ,["quick boot", y isQuick]
            ,["clean tree first", be ^. beSettings . bsClean . to y]
            ,["development boot", y isDev]
+           ,["native too", be ^. beLocations . blNativeToo . to y]
            ]
     h "packages"
     p ["stage 1a"] >> l (stg bstStage1a)

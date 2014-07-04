@@ -22,19 +22,6 @@ import qualified GHC.Paths
 
 import qualified Paths_ghcjs
 
-getCompilerInfo :: Maybe FilePath        -- ^ library path specified on the command line (-B flag)
-                -> IO [([Char], [Char])]
-getCompilerInfo mbMinusB = do
-      df <- runGhc (mbMinusB `mplus` Just GHC.Paths.libdir) getSessionDynFlags
-      let libDir = getLibDir df
-          topDir = getTopDir df
-      return . nubBy ((==) `on` fst) $
-           [ ("Project name"     , "The Glorious Glasgow Haskell Compilation System for JavaScript")
-           , ("Global Package DB", getGlobalPackageDB topDir)
-           , ("Project version"  , getCompilerVersion)
-           , ("LibDir"           , libDir)
-           ] ++ compilerInfo df
-
 -- | the directory to use if started without -B flag
 getDefaultTopDir :: IO FilePath
 getDefaultTopDir = do

@@ -170,6 +170,7 @@ programs:
   cabal:      cabal
   ghc:        ghc
   ghc-pkg:    ghc-pkg
+  node:       node
   bash:       bash
   make:       make
   patch:      patch

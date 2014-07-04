@@ -146,14 +146,14 @@ main = do
                 Left preLoadMode -> do
                     liftIO $ do
                         case preLoadMode of
-                            ShowInfo               -> showInfo dflags
+                            ShowInfo               -> showInfo ghcjsSettings dflags
                             ShowGhcUsage           -> showGhcUsage  dflags
                             ShowGhciUsage          -> showGhciUsage dflags
-                            PrintWithDynFlags f    -> putStrLn (f dflags)
+                            PrintWithDynFlags f    -> putStrLn (f ghcjsSettings dflags)
                     return True
                 Right postLoadMode ->
                     main' postLoadMode dflags argv3 flagWarnings ghcjsSettings native
-          skipJs <- if Ghcjs.gsNoNative ghcjsSettings
+          skipJs <- if not (Ghcjs.gsNativeToo ghcjsSettings) && not (Ghcjs.gsNativeExecutables ghcjsSettings)
                       then return False
                       else runPostStartup True
           when (not skipJs) (void $ runPostStartup False)
@@ -273,8 +273,9 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   liftIO $ checkOptions postLoadMode dflags6 srcs objs
 
   ---------------- Do the business -----------
-  let phaseMsg =  liftIO (Ghcjs.compilationProgressMsg dflags3 $
-        if native then "generating native" else "generating JavaScript")
+  let phaseMsg = when (Ghcjs.gsNativeToo ghcjsSettings) $
+                   liftIO (Ghcjs.compilationProgressMsg dflags3
+                     (if native then "generating native" else "generating JavaScript"))
 
   skipJs <- handleSourceError (\e -> do
        GHC.printException e
@@ -473,10 +474,10 @@ isShowNumGhcVersionMode (Left ShowNumGhcVersion) = True
 isShowNumGhcVersionMode _ = False
 
 data PreLoadMode
-  = ShowGhcUsage                           -- ghc -?
-  | ShowGhciUsage                          -- ghci -?
-  | ShowInfo                               -- ghc --info
-  | PrintWithDynFlags (DynFlags -> String) -- ghc --print-foo
+  = ShowGhcUsage                                                  -- ghcjs -?
+  | ShowGhciUsage                                                 -- ghci -?
+  | ShowInfo                                                      -- ghcjs --info
+  | PrintWithDynFlags (Ghcjs.GhcjsSettings -> DynFlags -> String) -- ghcjs --print-foo
 
 showGhcUsageMode, showGhciUsageMode, showInfoMode :: Mode
 showGhcUsageMode = mkPreLoadMode ShowGhcUsage
@@ -485,8 +486,8 @@ showInfoMode = mkPreLoadMode ShowInfo
 
 printSetting :: String -> Mode
 printSetting k = mkPreLoadMode (PrintWithDynFlags f)
-    where f dflags = fromMaybe (panic ("Setting not found: " ++ show k))
-                   $ lookup k (compilerInfo dflags)
+    where f settings dflags = fromMaybe (panic ("Setting not found: " ++ show k))
+                            $ lookup k (Ghcjs.compilerInfo settings dflags)
 
 mkPreLoadMode :: PreLoadMode -> Mode
 mkPreLoadMode = Right . Left
@@ -648,7 +649,8 @@ mode_flags =
           "Global Package DB",
           "C compiler flags",
           "Gcc Linker flags",
-          "Ld Linker flags"],
+          "Ld Linker flags",
+          "Native Too"],
     let k' = "-print-" ++ map (replaceSpace . toLower) k
         replaceSpace ' ' = '-'
         replaceSpace c   = c
@@ -806,10 +808,10 @@ showBanner _postLoadMode dflags = do
 
 -- We print out a Read-friendly string, but a prettier one than the
 -- Show instance gives us
-showInfo :: DynFlags -> IO ()
-showInfo dflags = do
+showInfo :: Ghcjs.GhcjsSettings -> DynFlags -> IO ()
+showInfo settings dflags = do
         let sq x = " [" ++ x ++ "\n ]"
-        putStrLn $ sq $ intercalate "\n ," $ map show $ compilerInfo dflags
+        putStrLn $ sq $ intercalate "\n ," $ map show $ Ghcjs.compilerInfo settings dflags
 
 showSupportedExtensions :: IO ()
 showSupportedExtensions = mapM_ putStrLn supportedLanguagesAndExtensions
