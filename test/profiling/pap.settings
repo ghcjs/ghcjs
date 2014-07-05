@@ -1,0 +1,2 @@
+compArguments: ["-prof", "-fprof-auto"]
+prof: True
