@@ -1163,6 +1163,7 @@ configureBootPrograms bs srcs pgms0 = do
                     & bpGhcjsPkg %~ r bsWithGhcjsPkg
                     & bpGhc      %~ r bsWithGhc
                     & bpCabal    %~ r bsWithCabal
+                    & bpNode     %~ r bsWithNode
   -- resolve all programs
   pgms2 <- mapMOf tpo (resolveProgram bs) =<< mapMOf tpr (resolveProgram bs) pgms1
   traverseOf_ tpr (reportProgramLocation bs) pgms2
