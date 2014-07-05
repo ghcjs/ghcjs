@@ -166,6 +166,7 @@ genericFastApply :: CgSettings -> JStat
 genericFastApply s =
   [j| fun h$ap_gen_fast tag {
         `traceRts s $ t"h$ap_gen_fast: " |+ tag`;
+        `profStat s enterCostCentreThunk`;
         var c = `R1`.f;
         switch(c.t) {
           case `Thunk`:
@@ -283,7 +284,8 @@ stackApply s r n = [j| `decl func`;
     funcName = T.pack ("h$ap_" ++ show n ++ "_" ++ show r)
 
     func = TxtI funcName
-    body = [j| var c = `R1`.f;
+    body = [j| `profStat s enterCostCentreThunk`;
+               var c = `R1`.f;
                `traceRts s $ funcName |+ t" " |+ (c|."n") |+ t" sp: " |+ Sp |+ t" a: " |+ (c|."a")`;
                switch(c.t) {
                  case `Thunk`:
@@ -593,6 +595,7 @@ pap s r = [j| `decl func`;
                `moveBy extra`;
                `loadOwnArgs d`;
                `R1` = c;
+               `profStat s $ enterCostCentreThunk`; // TODO: make sure about this
                return f;
              |]
     moveBy extra = SwitchStat extra
