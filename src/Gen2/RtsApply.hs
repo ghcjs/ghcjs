@@ -143,7 +143,6 @@ genericStackApply s =
             } else {
               `Sp` = `Sp` - regs - 1;
             }
-            `profStat s pushRestoreCCS`;
             `Stack`[`Sp`] = newAp;
             return `c`;
           } else {
@@ -166,7 +165,6 @@ genericFastApply :: CgSettings -> JStat
 genericFastApply s =
   [j| fun h$ap_gen_fast tag {
         `traceRts s $ t"h$ap_gen_fast: " |+ tag`;
-        `profStat s enterCostCentreThunk`;
         var c = `R1`.f;
         switch(c.t) {
           case `Thunk`:
@@ -208,7 +206,6 @@ genericFastApply s =
             `Sp` = `Sp` + 1;
           }
           `Stack`[`Sp`] = ap;
-          `profStat s pushRestoreCCS`;
         |]
     funCase :: JExpr -> JExpr -> JExpr -> JStat
     funCase c tag arity =
@@ -236,7 +233,6 @@ genericFastApply s =
               `Sp` = `Sp` + 1;
             }
             `Stack`[`Sp`] = newAp;
-            `profStat s pushRestoreCCS`;
             return `c`;
           } else {
             `traceRts s $ t"h$ap_gen_fast: undersat: " |+ myRegs |+ t" " |+ tag`; // build PAP and return stack top
@@ -284,8 +280,7 @@ stackApply s r n = [j| `decl func`;
     funcName = T.pack ("h$ap_" ++ show n ++ "_" ++ show r)
 
     func = TxtI funcName
-    body = [j| `profStat s enterCostCentreThunk`;
-               var c = `R1`.f;
+    body = [j| var c = `R1`.f;
                `traceRts s $ funcName |+ t" " |+ (c|."n") |+ t" sp: " |+ Sp |+ t" a: " |+ (c|."a")`;
                switch(c.t) {
                  case `Thunk`:
@@ -360,7 +355,6 @@ stackApply s r n = [j| `decl func`;
           var newAp = h$apply[(`n`-`arity0`)|((`r`-rs)<<8)];
           `Stack`[`Sp`] = newAp;
           `traceRts s $ (funcName <> ": new stack frame: ") |+ (newAp |. "n")`;
-          `profStat s pushRestoreCCS`;
           return `c`;
         |]
       where
@@ -441,7 +435,6 @@ fastApply s r n =
             `saveRegs rs`;
             `Sp` = `Sp` + rsRemain  + 1;
             `Stack`[`Sp`] = h$apply[(rsRemain<<8)|(`n`-(`arity`&0xFF))];
-            `profStat s pushRestoreCCS`;
             return `c`;
           |]
           where
@@ -595,7 +588,6 @@ pap s r = [j| `decl func`;
                `moveBy extra`;
                `loadOwnArgs d`;
                `R1` = c;
-               `profStat s $ enterCostCentreThunk`; // TODO: make sure about this
                return f;
              |]
     moveBy extra = SwitchStat extra
