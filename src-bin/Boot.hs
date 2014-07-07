@@ -1211,10 +1211,10 @@ checkProgramVersions bs pgms =
       let verTxt = fromMaybe "-" (pgms ^. bpNode . pgmVersion)
           v      = mapM (readMaybe . T.unpack . T.dropWhile (== 'v')) . T.splitOn "." $ verTxt :: Maybe [Integer]
       case v of
-        Just (x:y:_)
-          | x > 0 || y >= 10 -> return pgms
-          | otherwise        -> failWith ("minimum required version for node.js is 0.10, found: " <> verTxt)
-        _                    -> failWith ("unrecognized version for node.js: " <> verTxt)
+        Just (x:y:z:_)
+          | x > 0 || y > 10 || (y == 10 && z >= 28) -> return pgms
+          | otherwise -> failWith ("minimum required version for node.js is 0.10.28, found: " <> verTxt)
+        _             -> failWith ("unrecognized version for node.js: " <> verTxt)
 
 -- | check that cabal-install supports GHCJS and that our boot-GHC has a Cabal library that supports GHCJS
 checkCabalSupport :: BootSettings -> BootPrograms -> IO ()
