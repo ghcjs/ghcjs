@@ -112,7 +112,7 @@ then
     exit 1
 fi
 
-if BRANCH=$(git symbolic-ref --short -q HEAD)
+if BRANCH=$(git symbolic-ref -q HEAD | sed 's:^.*/\([^/]*\)$:\1:')
 then
     echo "using git branch: ${BRANCH}"
 else
