@@ -34,6 +34,7 @@ import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.TH              as Gen2TH
 
 import           System.IO.Error
+import           System.Environment
 
 installGhcjsHooks :: GhcjsEnv
                   -> GhcjsSettings
@@ -194,7 +195,7 @@ ghcjsCompileModule :: GhcjsSettings
                    -> ModSummary
                    -> IO B.ByteString
 -- dynamic-too will invoke this twice, cache results in GhcjsEnv
-ghcjsCompileModule settings jsEnv env core mod =
+ghcjsCompileModule settings jsEnv env core mod = do
   ifGeneratingDynamicToo dflags genDynToo genOther
   where
     genDynToo = do

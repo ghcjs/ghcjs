@@ -349,34 +349,39 @@ adjustDefaultSettings s
 installBuildTools :: B ()
 installBuildTools
   | not isWindows = return ()
-  | otherwise = checkpoint' "buildtools" "buildtools already installed" $ do
-  mw <- subTop $ do
-    checkpoint' "mingw" "MingW installation already copied" $ do
-      msg info "MingW installation not found, copying from GHC"
-      flip cp_r ".." <^> beLocations . blGhcLibDir . to (</> (".." </> "mingw"))
-    canonicalize . (</> (".." </> "mingw")) =<< absPath =<< pwd
-  bt <- subTop $ do
-    p <- absPath =<< pwd
-    let bt = p </> "buildtools"
-    toolsExist <- test_d "buildtools"
-    unlessM (test_d "buildtools") $ do
-      unlessM (test_d "buildtools-boot") $
-        install' "Windows buildtools bootstrap archive" "buildtools-boot" <^> beSources . bsrcBuildtoolsBootWindows
-      prependPathEnv [p </> "buildtools-boot" </> "bin"]
-      install' "Windows buildtools" "buildtools" <^> beSources . bsrcBuildtoolsBootWindows
-    return bt
-  prependPathEnv [ mw </> "bin"
-                 , bt </> "bin"
-                 , bt </> "msys" </> "1.0" </> "bin"
-                 , bt </> "git" </> "bin"
-                 ]
-  setenv "MINGW_HOME" (toTextI mw)
-  setenv "PERL5LIB" (msysPath $ bt </> "share" </> "autoconf")
-  mkdir_p (bt </> "etc")
-  writefile (bt </> "msys" </> "1.0" </> "etc" </> "fstab") $ T.unlines
-    [ escapePath bt <> " /mingw"
-    , escapePath (bt </> "msys" </> "1.0" </> "bin") <> " /bin"
-    ]
+  | otherwise = instBt >> setBuildEnv
+  where
+    instBt = checkpoint' "buildtools" "buildtools already installed" $ do
+      subTop $ do
+        checkpoint' "mingw" "MingW installation already copied" $ do
+          msg info "MingW installation not found, copying from GHC"
+          flip cp_r ".." <^> beLocations . blGhcLibDir . to (</> (".." </> "mingw"))
+      subTop $ do
+        p <- absPath =<< pwd
+        checkpoint' "buildtools" "Buildtools already installed" $ do
+          checkpoint' "buildtools-boot" "Buildtools bootstrap archive already installed" $
+            install' "Windows buildtools bootstrap archive" "buildtools-boot" <^> beSources . bsrcBuildtoolsBootWindows
+          prependPathEnv [p </> "buildtools-boot" </> "bin"]
+          install' "Windows buildtools" "buildtools" <^> beSources . bsrcBuildtoolsWindows
+    setBuildEnv = do
+      libDir <- view (beLocations . blGhcjsLibDir)
+      cd libDir
+      p <- absPath =<< pwd
+      let bt = p </> "buildtools"
+      mw <- canonicalize (p </> ".." </> "mingw")
+      prependPathEnv [ mw </> "bin"
+                     , bt </> "bin"
+                     , bt </> "msys" </> "1.0" </> "bin"
+                     , bt </> "git" </> "bin"
+                     ]
+      setenv "MINGW_HOME" (toTextI mw)
+      setenv "PERL5LIB" (msysPath $ bt </> "share" </> "autoconf")
+      mkdir_p (bt </> "etc")
+      mkdir_p (bt </> "msys" </> "1.0" </> "mingw")
+      writefile (bt </> "msys" </> "1.0" </> "etc" </> "fstab") $ T.unlines
+        [ escapePath bt <> " /mingw"
+        , escapePath (bt </> "msys" </> "1.0" </> "bin") <> " /bin"
+        ]
 
 prependPathEnv :: [FilePath] -> B ()
 prependPathEnv xs = do
@@ -393,13 +398,15 @@ msysPath p
   | isWindows = let p' = toTextI p
                     backToForward '\\' = '/'
                     backToForward x    = x
-                in "/" <> T.map backToForward (T.filter (/=':') p')
+                    isRel = "." `T.isPrefixOf` p' -- fixme
+                in bool isRel "" "/" <> T.map backToForward (T.filter (/=':') p')
   | otherwise = toTextI p
 
 escapePath :: FilePath -> Text
 escapePath p = let p' = toTextI p
-                   escape ' ' = "\\ "
-                   escape c   = T.singleton c
+                   escape ' '  = "\\ "
+                   escape '\\' = "/"
+                   escape c    = T.singleton c
                in  T.concatMap escape p'
 
 optParser' :: ParserInfo BootSettings
@@ -515,7 +522,13 @@ installDevelopmentTree = subTop $ do
       msgD info ("cloning git repository for " <> descr)
       cloneGitSrcs descr <^> beSources . srcs
       branch' <- view (beSources . branch)
-      (sub $ cd repoName >> git_ ["checkout", branch'])
+      sub $ do
+        cd repoName
+#ifdef WINDOWS
+        git_ ["config", "core.autocrlf", "false"]
+        git_ ["reset", "--hard"]
+#endif
+        git_ ["checkout", branch']
     cloneGitSrcs d [] = failWith ("could not clone " <> d <> ", no available sources")
     cloneGitSrcs d (x:xs) = git_ ["clone", x] `catchAny_`
       (msgD warn "clone failed, trying next source" >> cloneGitSrcs d xs)
@@ -574,7 +587,7 @@ prepareGmp = subTop' integerGmp . checkpoint' "gmp" "in-tree gmp already prepare
     cd "gmp"
     lsFilter "." isGmpSubDir rm_rf
     msg info "unpacking in-tree GMP"
-    lsFilter "tarball" (return . isTarball) (installArchive "in-tree libgmp" ".")
+    lsFilter "tarball" (return . isTarball) (installArchive False "in-tree libgmp" ".")
     d <- pwd
     ad <- absPath d
     lsFilter "." isGmpSubDir $ \dir -> do
@@ -866,18 +879,38 @@ unpackTar stripFirst dest tarFile = do
       setPermissions mode tgt = do
         absTgt <- absPath tgt
         msgD trace ("setting permissions of " <> toTextI tgt <> " to " <> showT mode)
-        liftIO (setFileMode (toStringI absTgt) mode)
+        let tgt  = toStringI absTgt
+            tgt' = bool (last tgt `elem` ['/','\\']) (init tgt) tgt
+        liftIO (setFileMode tgt' mode)
 
-git_         = runE_ bpGit
-alex_        = runE_ bpAlex
-happy_       = runE_ bpHappy
+
 ghc_         = runE_ bpGhc
 ghc_pkg      = runE  bpGhcPkg
 ghcjs_pkg    = runE  bpGhcjsPkg
 ghcjs_pkg_   = runE_ bpGhcjsPkg
+alex_        = runE_ bpAlex
+happy_       = runE_ bpHappy
+#ifdef WINDOWS
+tar_      xs = do
+  cp <- hasCheckpoint "buildtools"
+  if cp then inLibDir runE_ bpTar   []     ("buildtools" </> "msys" </> "1.0" </> "bin" </> "tar") xs
+        else inLibDir runE_ bpTar   []     ("buildtools-boot" </> "bin" </> "tar") xs
+git_         = inLibDir runE_ bpGit   []     ("buildtools" </> "git" </> "bin" </> "git")
+patch_       = inLibDir runE_ bpPatch []     ("buildtools" </> "msys" </> "1.0" </> "bin" </> "patch")
+cpp          = inLibDir runE  bpCpp   ["-E", "-x", "assembler-with-cpp"] (".." </> "mingw" </> "bin" </> "gcc")
+inLibDir r pgm args dir xs = do
+  libDir <- view (beLocations . blGhcjsLibDir)
+  let pgm' = pgm . to (pgmLoc .~ Just (libDir </> dir))
+                 . to (pgmArgs .~ args)
+  r pgm' xs
+#else
+tar_         = runE_ bpTar
+git_         = runE_ bpGit
+-- alex_        = runE_ bpAlex
+-- happy_       = runE_ bpHappy
 patch_       = runE_ bpPatch
 cpp          = runE  bpCpp
-tar_         = runE_ bpTar
+#endif
 cabal        = runE  bpCabal
 cabal_       = runE_ bpCabal
 
@@ -893,21 +926,21 @@ cabalStage1 pkgs = sub $ do
   setenv "GHCJS_BOOTING" "1"
   setenv "GHCJS_BOOTING_STAGE1" "1"
   setenv "GHCJS_WITH_GHC" (toTextI ghc)
-  let configureOpts = catMaybes [("--with-iconv-includes="  <>)<$>s^.bsIconvInclude
-                                ,("--with-iconv-libraries=" <>)<$>s^.bsIconvLib
-                                ,("--with-gmp-includes="    <>)<$>(s^.bsGmpInclude<>inTreePath p "include")
-                                ,("--with-gmp-libraries=  " <>)<$>s^.bsGmpLib
-                                ]
+  let configureOpts = catMaybes $ [("--with-iconv-includes="  <>)<$>s^.bsIconvInclude
+                                  ,("--with-iconv-libraries=" <>)<$>s^.bsIconvLib
+                                  ,("--with-gmp-includes="    <>)<$>(s^.bsGmpInclude<>inTreePath p "include")
+                                  ,("--with-gmp-libraries=  " <>)<$>s^.bsGmpLib
+                                  ] ++ gmpOpts
       -- fixme this hardcodes the location of integer-gmp
       inTreePath p sub =
         bj (s^.bsGmpInTree) (toTextI (p </> "boot" </> "integer-gmp" </> "gmp" </> "intree"  </> sub))
-      gmpOpts = catMaybes [bj (s^.bsGmpFramework) "--with-gmp-framework-preferred"
-                          ,bj (s^.bsGmpInTree)    "--with-intree-gmp"
-                          ]
+      gmpOpts = [bj (s^.bsGmpFramework) "--with-gmp-framework-preferred"
+                ,bj (s^.bsGmpInTree)    "--with-intree-gmp"
+                ]
   flags <- cabalInstallFlags
   let args = "install" : pkgs ++
              [ "--solver=topdown" -- the modular solver refuses to install stage1 packages
-             ] ++ map ("--configure-option="<>) configureOpts ++ gmpOpts ++ flags
+             ] ++ map ("--configure-option="<>) configureOpts ++ flags
   checkInstallPlan pkgs args
   cabal_ args
 
@@ -975,9 +1008,15 @@ cabalInstallFlags = do
                      ]
 
 #ifdef WINDOWS
-bash_ pgm xs = view (bePrograms . bpBash) >>= \b -> run_ b ["-c", T.unwords args]
+bash_ pgm xs
+  | Just l <- pgm ^. pgmLoc = do
+      libDir <- view (beLocations . blGhcjsLibDir)
+      bashP  <- view (bePrograms . bpBash . to (bt libDir))
+      run_ bashP ["-c", T.unwords (args l)]
+  | otherwise               = failWith ("program " <> pgm ^. pgmName <> " is required but could not be found at " <> pgm ^. pgmSearch)
   where
-    args = map escapeArg $ (pgm ^. pgmLoc . to toTextI) : (pgm ^. pgmArgs ++ xs)
+    bt l = pgmLoc .~ Just (l </> "buildtools" </> "msys" </> "1.0" </> "bin" </> "bash")
+    args l = map escapeArg $ msysPath l : (pgm ^. pgmArgs ++ xs)
     -- might not escape everything, be careful
     escapeArg = T.concatMap escapeChar
     escapeChar ' '  = "\\ "
@@ -985,8 +1024,14 @@ bash_ pgm xs = view (bePrograms . bpBash) >>= \b -> run_ b ["-c", T.unwords args
     escapeChar x    = T.singleton x
 
 configure_  = bash_ (Program "configure" "./configure" Nothing (Just "./configure") [])
-autoreconf_ = bash_ bpAutoreconf
-runMake_    = bash_ bpMake
+autoreconf_ xs = do
+  libDir <- view (beLocations . blGhcjsLibDir)
+  view (bePrograms . bpAutoreconf . to (setLoc libDir)) >>= \p -> bash_ p xs
+    where setLoc libDir = pgmLoc .~ Just (libDir </> "buildtools" </> "bin" </> "autoreconf")
+runMake_    xs = do
+  libDir <- view (beLocations . blGhcjsLibDir)
+  view (bePrograms . bpMake . to (setMakeLoc libDir)) >>= \p -> bash_ p xs
+    where setMakeLoc libDir = pgmLoc .~ Just (libDir </> "buildtools" </> "msys" </> "1.0" </> "bin" </> "make")
 #else
 configure_  = run_ (Program "configure" "./configure" Nothing (Just "./configure") [])
 autoreconf_ = runE_ bpAutoreconf
@@ -1068,20 +1113,21 @@ install req descr dest (s:ss)
                                       , "Use `ghcjs-boot --dev' if you installed GHCJS from a Git repository."
                                       ]
                            install req descr dest ss
-                         else installArchive descr dest s' >> return True
+                         else installArchive True descr dest s' >> return True
                     else do
                          msg trace ("source " <> s <> " for " <> descr <> " does not exist, trying next")
                          install req descr dest ss
 
 -- | install files from an archive
-installArchive :: Text
+installArchive :: Bool
+               -> Text
                -> FilePath
                -> FilePath
                -> B ()
-installArchive descr dest src
+installArchive stripFirst descr dest src
   | suff ".tar"     = do
       msg info ("installing " <> descr <> " unpacking tar (internal) " <> s <> " -> " <> d)
-      unpackTar True dest src
+      unpackTar stripFirst dest src
   | suff ".tar.gz"  = m "tar.gz"  >> untar "-xzf"
   | suff ".tar.bz2" = m "tar.bz2" >> untar "-xjf"
   | suff ".tar.xz"  = m "tar.xz"  >> untar "-xJf"
@@ -1091,7 +1137,8 @@ installArchive descr dest src
     suff e = e `T.isSuffixOf` s
     d      = toTextI dest
     s      = toTextI src
-    untar o = sub (absPath src >>= \as -> mkdir_p dest >> cd dest >> tar_ [o, toTextI as, "--strip-components=1"])
+    str    = bool stripFirst ["--strip-components=1"] []
+    untar o = sub (absPath src >>= \as -> mkdir_p dest >> cd dest >> tar_ ([o, msysPath as] ++ str))
 
 -- | download a file over HTTP
 fetch :: Text     -- ^ description
@@ -1424,7 +1471,8 @@ addCheckpoint name = unlessM (hasCheckpoint name) $ do
 --   whole checkpoints file so use sparingly
 hasCheckpoint :: Text -> B Bool
 hasCheckpoint name =
-  (((name `elem`) . T.lines) <$> (readfile =<< checkpointFile)) `catchAny_` return False
+  (((name `elem`) . map T.strip . T.lines) <$> (readfile =<< checkpointFile)) `catchAny`
+     \e -> msg warn ("no checkpoint " <> name <> " because of " <> showT e) >> return False
 
 -- | perform the action if the checkpoint does not exist,
 --   add the checkpoint when the action completes without exceptions

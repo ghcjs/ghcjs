@@ -83,7 +83,7 @@ import           System.Timeout
 
 import           Unsafe.Coerce
 
-#import "HsVersions.h"
+#include "HsVersions.h"
 
 -- | run some TH code, start a runner if necessary
 runTh :: forall m. Quasi m

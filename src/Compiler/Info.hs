@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings #-}
+{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings, LambdaCase #-}
 module Compiler.Info where
 
 import           Control.Applicative
@@ -19,6 +19,20 @@ import           DynFlags
 
 import           GHC
 import qualified GHC.Paths
+
+#ifdef WINDOWS
+import           Control.Lens hiding ((<.>))
+
+import           Data.Char
+import           Data.Maybe
+import qualified Data.Text as T
+
+import           System.Directory (doesFileExist)
+import           System.Environment
+import           System.FilePath ((<.>), dropExtension)
+
+import           Compiler.Utils
+#endif
 
 import qualified Paths_ghcjs
 
@@ -124,31 +138,29 @@ ghcjsBootDefaultDataDir = Paths_ghcjs.getDataDir
 getFullArguments :: IO [String]
 #ifdef WINDOWS
 getFullArguments = do
-  exeName <- getProgName
-  exePath <- getExecutablePath
-  let exe  = exePath </> exeName
-      exe' = dropExtension exe
+  exe <- getExecutablePath
+  let exe' = dropExtension exe
       opts = [ exe <.> "options"
-             , exe' ++ getFullCompilerVersion <.> "options"
-             , exe' ++ getCompilerVersion <.> "options"
+             , exe' ++ "-" ++ getFullCompilerVersion <.> "exe" <.> "options"
+             , exe' ++ "-" ++ getCompilerVersion <.> "exe" <.> "options"
              ]
       addArgs [] = return []
-      addArgs (o:os) xs =
+      addArgs (o:os) =
         doesFileExist o >>= \case
           True  -> getOptionArgs o
           False -> addArgs os
   exists <- doesFileExist (exe)
-  when (not exists) (error "could not determine executable location")
-  addArgs opts =<< getArgs
+  when (not exists) (error $ "could not determine executable location: " ++ exe)
+  (++) <$> addArgs opts <*> getArgs
 
 getOptionArgs :: FilePath -> IO [String]
 getOptionArgs file = do
-  env <- getEnvironment
-  fmap (catMaybes . map (f env). lines) . readFile
+  env <- (traverse . both %~ T.pack) <$> getEnvironment
+  fmap (catMaybes . map (f env). lines) . readFile $ file
   where f env line
-          | "#" == take 1 . dropWhile isSpace $ line = Nothing
-          | all isSpace line                         = Nothing
-          | otherwise                                = Just (substPatterns [] env line)
+          | "#" == (take 1 . dropWhile isSpace $ line) = Nothing
+          | all isSpace line                           = Nothing
+          | otherwise                                  = Just (T.unpack $ substPatterns [] env (T.pack line))
 #else
 getFullArguments = getArgs
 #endif

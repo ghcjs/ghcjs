@@ -93,7 +93,11 @@ exeFileName dflags
   | Just s <- outputFile dflags =
       -- unmunge the extension
       let s' = dropPrefix "js_" (drop 1 $ takeExtension s)
+#ifdef WINDOWS
+      in if null s' || map toLower s' == "exe"
+#else
       in if null s'
+#endif
            then dropExtension s <.> jsexeExtension
            else dropExtension s <.> s'
   | otherwise =
