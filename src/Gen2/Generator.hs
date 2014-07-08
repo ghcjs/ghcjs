@@ -499,14 +499,20 @@ might_be_a_function ty
 genApp :: ExprCtx -> Id -> [StgArg] -> G (JStat, ExprResult)
 -- special cases for unpacking C Strings, avoid going through a typed array when possible
 genApp ctx i [StgLitArg (MachStr bs)]
-    | [top] <- ctxTarget ctx, getUnique i == unpackCStringIdKey = return . (,ExprInline Nothing) . assignj top $
-        case decodeModifiedUTF8 bs of
-          Just t  -> [je| h$ustra(`t`) |]
-          Nothing -> [je| h$urstra(`map (chr.fromIntegral) (B.unpack bs)`) |]
-    | [top] <- ctxTarget ctx, getUnique i == unpackCStringUtf8IdKey = return . (,ExprInline Nothing) . assignj top $
-        case decodeModifiedUTF8 bs of
-          Just t  -> [je| h$ustr(`t`) |]
-          Nothing -> [je| h$urstr(`map toInteger (B.unpack bs)`) |]
+    | [top] <- ctxTarget ctx, getUnique i == unpackCStringIdKey =
+        (,ExprInline Nothing) . assignj top <$> do
+          prof <- csProf <$> use gsSettings
+          let profArg = if prof then [jCurrentCCS] else []
+          return $ case decodeModifiedUTF8 bs of
+            Just t  -> ApplExpr (jsv "h$ustra") $ [toJExpr t] ++ profArg
+            Nothing -> ApplExpr (jsv "h$urstra") $ [toJExpr $ map (chr.fromIntegral) (B.unpack bs)] ++ profArg
+    | [top] <- ctxTarget ctx, getUnique i == unpackCStringUtf8IdKey =
+        (,ExprInline Nothing) . assignj top <$> do
+          prof <- csProf <$> use gsSettings
+          let profArg = if prof then [jCurrentCCS] else []
+          return $ case decodeModifiedUTF8 bs of
+            Just t  -> ApplExpr (jsv "h$ustr") $ [toJExpr t] ++ profArg
+            Nothing -> ApplExpr (jsv "h$urstr") $ [toJExpr $ map toInteger (B.unpack bs)] ++ profArg
  -- we could handle unpackNBytes# here, but that's probably not common
  -- enough to warrant a special case
 genApp ctx i [StgLitArg (MachStr bs), x]
