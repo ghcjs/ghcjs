@@ -117,7 +117,7 @@ copyWrapperW v env descr installDirs exe = do
       e            = exeName exe
       e'           = dropExtensions e
       b            = bindir installDirs
-      srcExe       = e                                            -- ex: bin\ghcjs.exe
+      srcExe       = b </> e' <.> "exe"                           -- ex: bin\ghcjs.exe
       destExeVer   = b </> e' ++ "-" ++ verSuff env <.> "exe"     -- ex: bin\ghcjs-0.1.0-7.8.3.exe         (copy of srcExe)
       srcOptions   = datadir installDirs </> "lib" </> "bin" </>  -- ex: lib\ghcjs.exe.options
                         e' <.> "exe" <.> "options"

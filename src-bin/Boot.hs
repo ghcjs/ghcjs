@@ -58,8 +58,10 @@ import qualified Data.Vector                     as V
 import           Data.Yaml                       ((.:))
 import qualified Data.Yaml                       as Yaml
 
-import           Filesystem                      (getWorkingDirectory, getModified, getSize)
+import           Filesystem                      (getWorkingDirectory, getModified, getSize
+                                                 ,canonicalizePath)
 import           Filesystem.Path                 hiding ((<.>), (</>), null, concat)
+import           Filesystem.Path.CurrentOS       (encodeString)
 
 import qualified Network.Browser                 as Br
 import           Network.HTTP                    (mkRequest, RequestMethod(..), Response(..))
@@ -115,6 +117,7 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsGmpFramework :: Bool       -- ^ with-gmp-framework-preferred
                                  , _bsGmpInTree    :: Bool       -- ^ force using the in-tree GMP
                                  , _bsWithCabal    :: Maybe Text -- ^ location of cabal (cabal-install) executable, must have GHCJS support
+                                 , _bsWithGhcjsBin :: Maybe Text -- ^ bin directory for GHCJS programs
                                  , _bsWithGhcjs    :: Maybe Text -- ^ location of GHCJS compiler
                                  , _bsWithGhcjsPkg :: Maybe Text -- ^ location of ghcjs-pkg program
                                  , _bsWithGhcjsRun :: Maybe Text -- ^ location of ghcjs-run program
@@ -256,7 +259,7 @@ main = do
     settings <- adjustDefaultSettings <$> execParser optParser'
     when (settings ^. bsShowVersion) (printVersion >> exitSuccess)
     env <- initBootEnv settings
-    printBootEnvSummary env
+    printBootEnvSummary False env
     r <- Sh.shelly $ runReaderT ((actions >> pure Nothing) `catchAny` (pure . Just)) env
     maybe exitSuccess Ex.throwIO r
   where
@@ -268,6 +271,7 @@ main = do
       installBuildTools
       view (beSettings . bsDev) >>= cond installDevelopmentTree installReleaseTree
       initPackageDB
+      cleanCache
       installRts
       installEtc
       installDocs
@@ -278,6 +282,7 @@ main = do
       installStage1
       removeFakes
       unlessM (view $ beSettings . bsQuick) installStage2
+      liftIO . printBootEnvSummary True =<< ask
       addCompleted
 
 cleanTree :: B ()
@@ -451,6 +456,8 @@ optParser = BootSettings
                   help "force using the in-tree GMP" )
             <*> (optional . fmap T.pack . strOption) ( long "with-cabal" <> metavar "PROGRAM" <>
                   help "cabal program to use" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-ghcjs-bin" <> metavar "DIR" <>
+                  help "bin directory for GHCJS programs" )
             <*> (optional . fmap T.pack . strOption) ( long "with-ghcjs" <> metavar "PROGRAM" <>
                   help "ghcjs program to use" )
             <*> (optional . fmap T.pack . strOption ) ( long "with-ghcjs-pkg" <> metavar "PROGRAM" <>
@@ -477,6 +484,12 @@ initPackageDB = do
       rm_rf db >> mkdir_p db
       ghcjs_pkg_ ["init", toTextI db] `catchAny_` return ()
       ghcjs_pkg_ ["recache", dbName]
+
+cleanCache :: B ()
+cleanCache =
+  liftIO Info.getUserCacheDir >>= \case
+    Just p -> rm_rf (fromString p) `catchAny_` return ()
+    Nothing -> return ()
 
 bootDescr :: Text
 bootDescr = "boot libraries"
@@ -1206,25 +1219,39 @@ configureBootPrograms bs srcs pgms0 = do
   let r l   = maybe id (pgmSearch .~) (bs ^. l)
       tpo   = template :: Traversal' BootPrograms (Program Optional)
       tpr   = template :: Traversal' BootPrograms (Program Required)
-      pgms1 = pgms0 & bpGhcjs    %~ r bsWithGhcjs
+      binPrefix pgms pfx =
+        let addBin p = p . pgmSearch . iso fromText toTextI %~ (pfx</>)
+        in  pgms & addBin bpGhcjs
+                 & addBin bpGhcjsPkg
+                 & addBin bpGhcjsRun
+      pgms1 = maybe pgms0 (binPrefix pgms0 . fromText) (bs ^. bsWithGhcjsBin)
+      pgms2 = pgms1 & bpGhcjs    %~ r bsWithGhcjs
                     & bpGhcjsPkg %~ r bsWithGhcjsPkg
+                    & bpGhcjsRun %~ r bsWithGhcjsRun
                     & bpGhc      %~ r bsWithGhc
                     & bpCabal    %~ r bsWithCabal
                     & bpNode     %~ r bsWithNode
   -- resolve all programs
-  pgms2 <- mapMOf tpo (resolveProgram bs) =<< mapMOf tpr (resolveProgram bs) pgms1
-  traverseOf_ tpr (reportProgramLocation bs) pgms2
-  traverseOf_ tpo (reportProgramLocation bs) pgms2
-  pgms3 <- checkProgramVersions bs pgms2
-  checkCabalSupport bs pgms3
-  return pgms3
+  pgms3 <- mapMOf tpo (resolveProgram bs) =<< mapMOf tpr (resolveProgram bs) pgms2
+  traverseOf_ tpr (reportProgramLocation bs) pgms3
+  traverseOf_ tpo (reportProgramLocation bs) pgms3
+  pgms4 <- checkProgramVersions bs pgms3
+  checkCabalSupport bs pgms4
+  return pgms4
 
 -- | resolves program
 resolveProgram :: MaybeRequired (Program a) => BootSettings -> Program a -> IO (Program a)
-resolveProgram bs pgm@(Program name search v _ args) = findExecutable (T.unpack search) >>= \case
-      Just p'                  -> return (Program name search v (Just $ fromString p') args)
-      Nothing | isRequired pgm -> failWith ("program " <> name <> " is required but could not be found at " <> search)
-              | otherwise      -> return (Program name search v Nothing args)
+resolveProgram bs pgm = do
+  let search' = pgm ^. pgmSearch . to fromText
+  absSearch <- (</> search') <$> getWorkingDirectory
+  let searchPaths = catMaybes [ Just search'
+                              , bj (relative search' && length (splitDirectories search') > 1) absSearch
+                              ]
+  fmap catMaybes (mapM (findExecutable . encodeString) searchPaths) >>= \case
+      (p':_)                  -> (\cp -> pgm & pgmLoc .~ Just cp) <$> {- canonicalizePath -} return (fromString p')
+      _      | isRequired pgm -> failWith ("program " <> pgm ^. pgmName <>
+                                           " is required but could not be found at " <> pgm ^. pgmSearch)
+             | otherwise      -> return (pgm & pgmLoc .~ Nothing)
 
 -- | report location of a configured program
 reportProgramLocation :: BootSettings -> Program a -> IO ()
@@ -1270,7 +1297,9 @@ checkCabalSupport bs pgms = do
   when (not $ "--ghcjs" `T.isInfixOf` cbl) $
     failWith ("cabal-install program " <> pgms ^. bpCabal . pgmLocText <> " does not support GHCJS")
   void (run' bs (pgms ^. bpGhc) ["-e", "either error id (Text.Read.readEither \"GHCJS\" :: Either String Distribution.Simple.CompilerFlavor)"]) `Ex.catch`
-    \(Ex.SomeException _) -> failWith ("GHC program " <> pgms ^. bpGhc . pgmLocText <> " does not have a Cabal library that supports GHCJS")
+    \(Ex.SomeException _) -> failWith
+       ("GHC program " <> pgms ^. bpGhc . pgmLocText <> " does not have a Cabal library that supports GHCJS\n" <>
+        "(note that the Cabal library is not the same as the cabal-install program, you need a compatible version for both)")
 
 -- | read the boot configuration yaml file
 readBootConfigFile :: BootSettings -> IO BootConfigFile
@@ -1282,15 +1311,17 @@ readBootConfigFile bs = do
     Left err  -> failWith ("error parsing boot configuration file " <> toTextI bf <> "\n" <> T.pack err)
     Right bss -> return bss
 
-printBootEnvSummary :: BootEnv -> IO ()
-printBootEnvSummary be = do
+printBootEnvSummary :: Bool -> BootEnv -> IO ()
+printBootEnvSummary after be = do
   section "Boot libraries installation for GHCJS" $ do
     bootLoc  <- getExecutablePath
     bootMod  <- getModified (fromString bootLoc)
     bootConf <- bootConfigFile (be ^. beSettings)
     ghcjsMod <- maybe (return "<unknown>") (fmap show . getModified) (be ^. bePrograms . bpGhcjs . pgmLoc)
     curDir   <- getWorkingDirectory
-    p ["ghcjs-boot will install the libraries and runtime system for GHCJS"]
+    p $ bool after
+          ["ghcjs-boot has installed the libraries and runtime system for GHCJS"]
+          ["ghcjs-boot will install the libraries and runtime system for GHCJS"]
     h "boot program"
     t "rl" [["ghcjs-boot program version", Info.getCompilerVersion]
            ,["file location", bootLoc]
@@ -1544,7 +1575,7 @@ cond :: a -> a -> Bool -> a
 cond t f b = bool b t f
 
 bj :: Bool -> a -> Maybe a
-bj b v = if b then (Just v) else Nothing
+bj b v = if b then Just v else Nothing
 
 infixl 2 <^>
 (<^>) :: MonadReader s m => (a -> m b) -> Getting a s a -> m b
