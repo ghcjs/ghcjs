@@ -14,6 +14,7 @@ module Gen2.Profiling
   , setCC
   , pushRestoreCCS
   , jCurrentCCS
+  , jCafCCS
   , enterCostCentreFun
   , enterCostCentreThunk
   ) where
@@ -104,6 +105,9 @@ pushRestoreCCS =
 
 jCurrentCCS :: JExpr
 jCurrentCCS = [je| h$currentThread.ccs |]
+
+jCafCCS :: JExpr
+jCafCCS = [je| h$CAF |]
 
 --------------------------------------------------------------------------------
 -- Helpers for generating profiling related things

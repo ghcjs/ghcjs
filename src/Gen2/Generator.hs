@@ -502,23 +502,27 @@ genApp ctx i [StgLitArg (MachStr bs)]
     | [top] <- ctxTarget ctx, getUnique i == unpackCStringIdKey =
         (,ExprInline Nothing) . assignj top <$> do
           prof <- csProf <$> use gsSettings
-          let profArg = if prof then [jCurrentCCS] else []
+          let profArg = if prof then [jCafCCS] else []
           return $ case decodeModifiedUTF8 bs of
             Just t  -> ApplExpr (jsv "h$ustra") $ [toJExpr t] ++ profArg
             Nothing -> ApplExpr (jsv "h$urstra") $ [toJExpr $ map (chr.fromIntegral) (B.unpack bs)] ++ profArg
     | [top] <- ctxTarget ctx, getUnique i == unpackCStringUtf8IdKey =
         (,ExprInline Nothing) . assignj top <$> do
           prof <- csProf <$> use gsSettings
-          let profArg = if prof then [jCurrentCCS] else []
+          let profArg = if prof then [jCafCCS] else []
           return $ case decodeModifiedUTF8 bs of
             Just t  -> ApplExpr (jsv "h$ustr") $ [toJExpr t] ++ profArg
             Nothing -> ApplExpr (jsv "h$urstr") $ [toJExpr $ map toInteger (B.unpack bs)] ++ profArg
  -- we could handle unpackNBytes# here, but that's probably not common
  -- enough to warrant a special case
 genApp ctx i [StgLitArg (MachStr bs), x]
-    | [top] <- ctxTarget ctx, getUnique i == unpackCStringAppendIdKey, Just d <- decodeModifiedUTF8 bs = do -- fixme breaks assumption in codegen if bs doesn't decode
+    | [top] <- ctxTarget ctx, getUnique i == unpackCStringAppendIdKey, Just d <- decodeModifiedUTF8 bs = do
+        -- fixme breaks assumption in codegen if bs doesn't decode
+        prof <- csProf <$> use gsSettings
+        let profArg = if prof then [jCafCCS] else []
         a <- genArg x
-        return ([j| `top` = h$appendToHsStringA(`d`, `a`); |], ExprInline Nothing)
+        return ([j| `top` = `ApplExpr (jsv "h$appendToHsStringA") $ [toJExpr d, toJExpr a] ++ profArg`; |]
+               ,ExprInline Nothing)
 genApp top i a
     | not (isUnboxedTupleType (idType i)) &&
       (isPrimitiveType (idType i) || isStrictType (idType i)) &&
