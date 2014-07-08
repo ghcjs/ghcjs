@@ -144,7 +144,7 @@ Library
 
 -- the compiler executable, Setup.hs installs a wrapper script that
 -- supplies the installation directory
-Executable ghcjs.bin
+Executable ghcjs
     Main-Is:        Main.hs
     Default-Language: Haskell2010
     hs-source-dirs: src-bin
@@ -153,7 +153,7 @@ Executable ghcjs.bin
     GHC-Options:    -O2 -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded
 
 -- a wrapper for haddock
-Executable haddock-ghcjs.bin
+Executable haddock-ghcjs
     if os(Windows)
       cpp-options: -DWINDOWS
     Main-Is:        Haddock.hs
@@ -167,7 +167,7 @@ Executable haddock-ghcjs.bin
 
 -- the package manager, like with the compiler, this executable is called
 -- through a wrapper script
-Executable ghcjs-pkg.bin
+Executable ghcjs-pkg
     if flag(compiler-only)
       Buildable:      False
     Main-Is:          Pkg.hs

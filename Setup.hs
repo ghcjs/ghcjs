@@ -21,6 +21,12 @@ import           System.FilePath       ((</>), (<.>), splitExtensions, dropExten
 import           System.IO
 import           System.IO.Error       (IOError, isDoesNotExistError)
 
+{-
+    add all executables that are not wrapped (or require an .options file on Windows) here
+ -}
+notWrapped :: [String]
+notWrapped = ["ghcjs-boot", "ghcjs-run"]
+
 main :: IO ()
 main = defaultMainWithHooks ghcjsHooks
 
@@ -65,18 +71,18 @@ verSuff :: WrapperEnv -> String
 verSuff env = weVersion env ++ "-" ++ weGhcVersion env
 
 requiresWrapper :: String -> Bool
-requiresWrapper exe = ".bin" `isSuffixOf` exe
+requiresWrapper exe = exe `notElem` notWrapped
 
 getWrapperEnv :: Verbosity -> PackageDescription -> Flag CopyDest -> InstallDirs FilePath -> [Executable] -> IO WrapperEnv
 getWrapperEnv v descr copyDest' installDirs exes
-  | [Executable name _ bi] <- filter ((=="ghcjs.bin").exeName) exes =
+  | [Executable name _ bi] <- filter ((=="ghcjs").exeName) exes =
      let ghcjsVal xs =
-           trim <$> rawSystemStdout v (bindir installDirs </> "ghcjs.bin") ["--ghcjs-setup-print", xs]
+           trim <$> rawSystemStdout v (bindir installDirs </> "ghcjs") ["--ghcjs-setup-print", xs]
      in  WrapperEnv <$> ghcjsVal "--print-default-topdir"
                     <*> pure (dropPrefix copyDest' $ bindir installDirs)
                     <*> pure (showVersion . pkgVersion . package $ descr)
                     <*> ghcjsVal "--numeric-ghc-version"
-  | otherwise = error "cannot find ghcjs.bin executable in package"
+  | otherwise = error "cannot find ghcjs executable in package"
 
 dropPrefix (Flag (CopyTo pre)) s | isPrefixOf pre s = drop (length pre) s
 dropPrefix (Flag (CopyTo pre)) s = error $ "dropPrefix - " ++ show pre ++ " not a prefix of " ++ show s
@@ -84,8 +90,7 @@ dropPrefix _ s = s
 
 {- |
      on Windows we can't run shell scripts, so we don't install wrappers
-     just copy program.bin.exe to program.exe and
-     program-{version}-{ghcversion}.exe
+     just copy program.exe to program-{version}-{ghcversion}.exe
 
      the programs read a program-{version}-{ghcversion}.exe.options file from the
      same directory, which contains the command line arguments to prepend
@@ -100,9 +105,7 @@ copyWrapperW :: Verbosity
              -> IO ()
 copyWrapperW v env descr installDirs exe = do
       installExecutableFile v srcExe destExeVer -- always make a versioned copy
-      when (requiresWrapper e) $ do         -- we need a wrapper
-        installExecutableFile v srcExe destExe  -- a symbolic link from destExeVer would be better
-        removeFile srcExe
+      when (requiresWrapper e) $ do             -- we need a wrapper
         optionsExists <- doesFileExist destOptions
         when (not optionsExists) $ do
           options <- replacePlaceholders env <$> readFile srcOptions
@@ -114,8 +117,7 @@ copyWrapperW v env descr installDirs exe = do
       e            = exeName exe
       e'           = dropExtensions e
       b            = bindir installDirs
-      srcExe       = b </> e                        <.> "exe"     -- ex: bin\ghcjs.bin.exe                 (removed if .bin in the name)
-      destExe      = b </> e'                       <.> "exe"     -- ex: bin\ghcjs.exe                     (copy of srcExe if different name)
+      srcExe       = e                                            -- ex: bin\ghcjs.exe
       destExeVer   = b </> e' ++ "-" ++ verSuff env <.> "exe"     -- ex: bin\ghcjs-0.1.0-7.8.3.exe         (copy of srcExe)
       srcOptions   = datadir installDirs </> "lib" </> "bin" </>  -- ex: lib\ghcjs.exe.options
                         e' <.> "exe" <.> "options"
@@ -157,7 +159,7 @@ copyWrapperU v env descr installDirs exe
     e                = exeName exe
     e'               = dropExtensions e
     b                = bindir installDirs
-    srcExe           = e                                                       -- ex: bin/ghcjs.bin             (removed, replaced with symlink to destExe if there are no wrappers)
+    srcExe           = e                                                       -- ex: bin/ghcjs                 (removed, replaced with symlink to destExe if there are no wrappers)
     destExe          = e' ++ "-" ++ verSuff env <.> ".bin"                     -- ex: bin/ghcjs-0.1.0-7.8.3.bin (copy of srcExe)
     srcWrapper       = datadir installDirs </> "lib" </> "bin" </> e' <.> "sh" -- ex: etc/ghcjs.sh
     destWrapper      = e'                                                      -- ex: bin/ghcjs                 (symlink to destWrapperVer, existing files/links overwritten)
@@ -178,7 +180,7 @@ linkFileU v workingDir src dest = do
       ignoreDoesNotExist e | isDoesNotExistError e = return ()
                            | otherwise             = Ex.throw e
   removeFile (workingDir </> dest) `Ex.catch` ignoreDoesNotExist
-  exitCode <- rawSystemIOWithEnv v "/bin/ln" ["-s", src, dest] (Just workingDir) Nothing Nothing Nothing Nothing
+  exitCode <- rawSystemIOWithEnv v "/usr/bin/env" ["ln", "-s", src, dest] (Just workingDir) Nothing Nothing Nothing Nothing
   when (exitCode /= ExitSuccess) (error  $ "could not create symlink " ++ src ++ " -> " ++ dest ++ " in " ++ workingDir)
 
 -- | replace placeholders in a wrapper script or options file
