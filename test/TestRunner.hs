@@ -295,8 +295,8 @@ truncLimit n t | T.length t >= n = T.take n t <> "\n[output truncated]"
 instance Show StdioResult where
   show (StdioResult ex out err) =
     "\n>>> exit: " ++ show ex ++ "\n>>> stdout >>>\n" ++
-    T.unpack (truncLimit outputLimit out) ++ 
-    "\n<<< stderr >>>\n" ++ T.unpack (truncLimit outputLimit err) ++ "\n<<<\n"
+    (T.unpack . T.strip) (truncLimit outputLimit out) ++
+    "\n<<< stderr >>>\n" ++ (T.unpack . T.strip) (truncLimit outputLimit err) ++ "\n<<<\n"
 
 stdioTest :: TestOpts -> FilePath -> Test
 stdioTest testOpts file = testCaseLog testOpts (encodeString file) (stdioAssertion testOpts file)
