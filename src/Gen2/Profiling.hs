@@ -15,6 +15,7 @@ module Gen2.Profiling
   , pushRestoreCCS
   , jCurrentCCS
   , jCafCCS
+  , jSystemCCS
   , enterCostCentreFun
   , enterCostCentreThunk
   ) where
@@ -101,13 +102,16 @@ pushRestoreCCS =
     |]
 
 --------------------------------------------------------------------------------
--- Getting/setting the current cost-centre stack
+-- Some cost-centre stacks to be used in generator
 
 jCurrentCCS :: JExpr
 jCurrentCCS = [je| h$currentThread.ccs |]
 
 jCafCCS :: JExpr
 jCafCCS = [je| h$CAF |]
+
+jSystemCCS :: JExpr
+jSystemCCS = [je| h$CCS_SYSTEM |]
 
 --------------------------------------------------------------------------------
 -- Helpers for generating profiling related things
