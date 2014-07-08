@@ -1002,7 +1002,7 @@ cabalInstallFlags = do
            bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++
            -- workaround for Cabal bug?
            bool isWindows ["--disable-executable-stripping", "--disable-library-stripping"] [] ++
-           catMaybes [ (("-j"<>) . showT) <$> j
+           catMaybes [ (("-j"<>) . showT) <$> (Just (1::Int)) -- j  (fixme, workaround for boot issues)
                      , bj debug "--ghcjs-options=-debug"
                      , bj (v > info) "-v2"
                      ]
