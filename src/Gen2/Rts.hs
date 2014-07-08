@@ -323,7 +323,7 @@ fun h$noop_e {
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$noop_e" (CIRegs 1 [PtrV]) "no-op IO ()" (CILayoutFixed 0 []) (CIFun 1 0) noStatic`;
-var !h$noop = h$c0(h$noop_e);
+var !h$noop = h$c0(h$noop_e, h$CCS_SYSTEM);
 
 fun h$catch_e {
   `adjSpN 3`;
@@ -571,7 +571,7 @@ fun h$setObjInfo o typ name fields a size regs srefs {
 
 fun h$static_thunk f {
   // fixme push stuff to restore stuff here
-  var h = { f: f, d1: null, d2: null, m: 0 };
+  var h = { f: f, d1: null, d2: null, m: 0, cc: h$CCS_SYSTEM };
   h$CAFs.push(h);
   h$CAFsReset.push(f);
   return h;
@@ -1149,7 +1149,7 @@ fun h$stmInvariantViolatedHandler_e {
 }
 `ClosureInfo "h$stmInvariantViolatedHandler_e" (CIRegs 0 [PtrV]) "finish checking invariant" (CILayoutFixed 0 []) (CIFun 2 1) noStatic`;
 
-var !h$stmInvariantViolatedHandler = h$c(h$stmInvariantViolatedHandler_e);
+var !h$stmInvariantViolatedHandler = h$c(h$stmInvariantViolatedHandler_e, h$CCS_SYSTEM);
 
 fun h$stmCatchRetry_e {
   `adjSpN 2`;
