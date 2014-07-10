@@ -27,6 +27,7 @@ import           Data.Binary
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
+import           Data.Char                (toLower)
 import           Data.Function            (on)
 import           Data.HashMap.Strict      (HashMap)
 import qualified Data.HashMap.Strict      as HM
@@ -55,8 +56,9 @@ import qualified Distribution.Simple.Utils as Cabal
 
 import           GHC.Generics
 
-import           System.FilePath          (splitPath, (<.>), (</>), dropExtension)
+import           System.FilePath          (splitPath, (<.>), (</>), dropExtension, takeExtension)
 import           System.Directory         (createDirectoryIfMissing, doesDirectoryExist
+                                          ,canonicalizePath
                                           ,doesFileExist, getDirectoryContents
                                           ,getCurrentDirectory, copyFile)
 
@@ -130,7 +132,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
         if genBase
           then generateBase out lbase
           else when (not (gsOnlyOut settings) && not (gsNoRts settings) && not (usingBase settings))
-                         (writeRunner dflags out >> writeHtml dflags out >> combineFiles dflags out)
+                         (writeRunner settings dflags out >> writeHtml dflags out >> combineFiles dflags out)
 
 -- | link in memory
 link' :: DynFlags
@@ -278,19 +280,27 @@ splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
 
 getLibJsFiles :: FilePath -> IO [FilePath]
-getLibJsFiles path = do
-  let libDir = path </> "js"
-  exists <- doesDirectoryExist libDir
-  if exists
-    -- filter out ".", "..", and other unwanted files
-    then map (libDir </>) . filter (".js" `isSuffixOf`) <$> getDirectoryContents libDir
-    else return []
+getLibJsFiles pkgLibPath = go pkgLibPath "js"
+  where
+    go dir file = do
+      let df = dir </> file
+      j <- isJsFile df
+      if j then return [df] else do
+        d <- doesDirectoryExist df
+        if d && file /= "." && file /= ".."
+          then getDirectoryContents df >>=
+                 fmap concat . mapM (go df) . sort
+          else return []
+    isJsFile path = do
+      e <- doesFileExist path
+      return (e && map toLower (takeExtension path) == ".js")
 
 -- fixme the wired-in package id's we get from GHC we have no version
 getShims :: DynFlags -> GhcjsSettings -> [FilePath] -> [PackageId] -> IO ([FilePath], [FilePath])
 getShims dflags settings extraFiles pkgDeps = do
   (b,a) <- collectShims dflags settings (getLibDir dflags </> "shims") (map convertPkg pkgDeps)
-  return (extraFiles++b,a)
+  extraFiles' <- mapM canonicalizePath extraFiles
+  return (b++extraFiles',a)
 
 convertPkg :: PackageId -> (Text, Version)
 convertPkg p =
@@ -315,8 +325,8 @@ writeHtml df out = do
   where
     htmlFile = out </> "index.html"
 
-writeRunner :: DynFlags -> FilePath -> IO ()
-writeRunner df out = when ("setup.jsexe" `isInfixOf` out) $ do
+writeRunner :: GhcjsSettings -> DynFlags -> FilePath -> IO ()
+writeRunner settings df out = when (gsBuildingCabalSetup settings) $ do
   cd <- getCurrentDirectory
   let runner    = cd </> addExeExtension (dropExtension out)
       runnerSrc = topDir df </> addExeExtension "ghcjs-run"

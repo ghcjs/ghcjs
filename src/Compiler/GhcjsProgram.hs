@@ -115,6 +115,7 @@ getGhcjsSettings args =
     p = execParserPure (prefs mempty) optParser' (map unLoc ga)
     as = [ "--native-executables"
          , "--native-too"
+         , "--building-cabal-setup"
          , "--no-js-executables"
          , "--strip-program="
          , "--log-commandline="
@@ -127,6 +128,7 @@ getGhcjsSettings args =
          ]
     envSettings = GhcjsSettings <$> getEnvOpt "GHCJS_NATIVE_EXECUTABLES"
                                 <*> getEnvOpt "GHCJS_NATIVE_TOO"
+                                <*> pure False
                                 <*> pure False
                                 <*> pure Nothing
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
@@ -144,6 +146,7 @@ optParser :: Parser GhcjsSettings
 optParser = GhcjsSettings
             <$> switch ( long "native-executables" )
             <*> switch ( long "native-too" )
+            <*> switch ( long "building-cabal-setup" )
             <*> switch ( long "no-js-executables" )
             <*> optStr ( long "strip-program" )
             <*> optStr ( long "log-commandline" )

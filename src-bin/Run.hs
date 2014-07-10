@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-
    ghcjs-run runs a program compiled by ghcjs with node.js
  -}
@@ -17,7 +18,7 @@ main = do
   args <- getArgs
   path <- getExecutablePath
   cd   <- getCurrentDirectory
-  let jsExe  = dropExtension path <.> "jsexe"
+  let jsExe  = dropExeExtension path <.> "jsexe"
       script = jsExe </> "all" <.> "js"
   node <- trim <$> readFile (jsExe </> "node")
   ph <- runProcess node (script:args) (Just cd) Nothing Nothing Nothing Nothing
@@ -26,3 +27,15 @@ main = do
 trim :: String -> String
 trim = let f = reverse . dropWhile isSpace in f . f
 
+dropExeExtension :: FilePath -> FilePath
+dropExeExtension x
+  | not (null exeExtension) && map toLower (takeExtension x) == exeExtension
+      = dropExtension x
+  | otherwise = x
+
+exeExtension :: String
+#ifdef WINDOWS
+exeExtension = ".exe"
+#else
+exeExtension = ""
+#endif

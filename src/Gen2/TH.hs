@@ -146,7 +146,7 @@ finishTh is_io js_env m runner = do
   TH.qRunIO $ maybe (void $ terminateProcess ph) (\_ -> return ()) =<< timeout 30000000 (waitForProcess ph)
 
 thSettings :: GhcjsSettings
-thSettings = GhcjsSettings False True False Nothing Nothing Nothing True True True Nothing NoBase
+thSettings = GhcjsSettings False True False False Nothing Nothing Nothing True True True Nothing NoBase
 
 getThRunner :: Quasi m => Bool -> DynFlags -> GhcjsEnv -> HscEnv -> String -> m ThRunner
 getThRunner is_io dflags js_env hsc_env m = do

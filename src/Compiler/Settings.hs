@@ -56,17 +56,18 @@ instance Monoid UseBase where
   _ `mappend` x      = x
 
 data GhcjsSettings =
-  GhcjsSettings { gsNativeExecutables :: Bool
-                , gsNativeToo         :: Bool
-                , gsNoJSExecutables   :: Bool
-                , gsStripProgram      :: Maybe FilePath
-                , gsLogCommandLine    :: Maybe FilePath
-                , gsGhc               :: Maybe FilePath
-                , gsOnlyOut           :: Bool
-                , gsNoRts             :: Bool
-                , gsNoStats           :: Bool
-                , gsGenBase           :: Maybe String   -- ^ module name
-                , gsUseBase           :: UseBase
+  GhcjsSettings { gsNativeExecutables  :: Bool
+                , gsNativeToo          :: Bool
+                , gsBuildingCabalSetup :: Bool
+                , gsNoJSExecutables    :: Bool
+                , gsStripProgram       :: Maybe FilePath
+                , gsLogCommandLine     :: Maybe FilePath
+                , gsGhc                :: Maybe FilePath
+                , gsOnlyOut            :: Bool
+                , gsNoRts              :: Bool
+                , gsNoStats            :: Bool
+                , gsGenBase            :: Maybe String   -- ^ module name
+                , gsUseBase            :: UseBase
                 }
 
 usingBase :: GhcjsSettings -> Bool
@@ -87,11 +88,12 @@ generateAllJs s
   settings, but it doesn't work very well. find something better.
  -}
 instance Monoid GhcjsSettings where
-  mempty = GhcjsSettings False False False Nothing Nothing Nothing False False False Nothing NoBase
-  mappend (GhcjsSettings ne1 nn1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1)
-          (GhcjsSettings ne2 nn2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2) =
+  mempty = GhcjsSettings False False False False Nothing Nothing Nothing False False False Nothing NoBase
+  mappend (GhcjsSettings ne1 nn1 bc1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1)
+          (GhcjsSettings ne2 nn2 bc2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2) =
           GhcjsSettings (ne1 || ne2)
                         (nn1 || nn2)
+                        (bc1 || bc2)
                         (nj1 || nj2)
                         (sp1 `mplus` sp2)
                         (lc1 `mplus` lc2)
