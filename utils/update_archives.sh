@@ -112,7 +112,9 @@ then
     exit 1
 fi
 
-if BRANCH=$(git symbolic-ref --short -q HEAD)
+# This is a simulation of git symbolic-ref --short -q HEAD, which doesn't work with
+# older versions of git.  The --short option is supported by git-1.9.1.
+if BRANCH=$(git symbolic-ref -q HEAD | sed 's:^.*/\([^/]*\)$:\1:')
 then
     echo "using git branch: ${BRANCH}"
 else
