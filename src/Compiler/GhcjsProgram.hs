@@ -215,7 +215,10 @@ checkIsBooted mbMinusB = do
 bootstrapFallback :: IO ()
 bootstrapFallback = do
     ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_WITH_GHC"
-    getFullArguments >>= rawSystem ghc . filter (not . ("-B" `isPrefixOf`)) >>= exitWith -- run without GHCJS package args
+    getFullArguments >>= rawSystem ghc . ghcArgs >>= exitWith -- run without GHCJS package args
+    where
+      ignoreArg a  = "-B" `isPrefixOf` a || a == "--building-cabal-setup"
+      ghcArgs args = filter (not . ignoreArg) args ++ ["-threaded"]
 
 installExecutable :: DynFlags -> GhcjsSettings -> [String] -> IO ()
 installExecutable dflags settings srcs = do
