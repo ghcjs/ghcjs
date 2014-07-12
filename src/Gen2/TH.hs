@@ -221,8 +221,8 @@ ghcjsCompileCoreExpr js_env settings hsc_env srcspan ds_expr = do
   let bs = [bind n prep_expr]
       cg = CgGuts (mod n) [] bs NoStubs [] (NoHpcInfo False) emptyModBreaks
   stg_pgm0      <- Gen2.coreToStg dflags (mod n) bs
-  (stg_pgm1, _) <- stg2stg dflags (mod n) stg_pgm0
-  let bs = Gen2.generate settings dflags (mod n) stg_pgm1 ([],[],[])
+  (stg_pgm1, c) <- stg2stg dflags (mod n) stg_pgm0
+  let bs = Gen2.generate settings dflags (mod n) stg_pgm1 c
       r  = TH.Q (runTh isNonQ js_env hsc_env dflags ty bs (symb n))
   if isNonQ
      then TH.runQ r               -- run inside IO, limited functionality, no reification
@@ -235,8 +235,7 @@ ghcjsCompileCoreExpr js_env settings hsc_env srcspan ds_expr = do
     bind n e = NonRec (thExpr n) e
     mod n    = mkModule pkg (mkModuleName $ "ThRunner" ++ show n)
     pkg      = stringToPackageId "thrunner"
-    dflags0  = hsc_dflags hsc_env
-    dflags   = dflags0 { ways = filter (/=WayProf) (ways dflags0) }
+    dflags   = hsc_dflags hsc_env
 
 linkTh :: GhcjsSettings        -- settings (contains the base state)
        -> [FilePath]           -- extra js files
@@ -258,24 +257,24 @@ linkTh settings js_files dflags hpt code = do
       packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
       dflags' = dflags { ways = WayDebug : ways dflags }
   -- link all packages that TH depends on, error if not configured
-  (th_deps_pkgs, mk_th_deps) <- Gen2.thDeps dflags
-  (rts_deps_pkgs, _) <- Gen2.rtsDeps dflags
+  (th_deps_pkgs, mk_th_deps) <- Gen2.thDeps dflags'
+  (rts_deps_pkgs, _) <- Gen2.rtsDeps dflags'
   let addDep pkgs name
         | any (matchPackageName name) pkgs = pkgs
         | otherwise = lookupRequiredPackage dflags "to run Template Haskell" name : pkgs
       pkg_deps' = L.foldl' addDep pkg_deps (th_deps_pkgs ++ rts_deps_pkgs)
       th_deps   = mk_th_deps pkg_deps'
-      th_deps'  = T.pack . show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps
+      th_deps'  = T.pack $ (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++ show (ways dflags')
       deps      = map (\pkg -> (pkg, packageLibPaths pkg)) pkg_deps'
       is_root   = const True
       link      = Gen2.link' dflags' settings "template haskell" [] deps obj_files js_files is_root th_deps
   if isJust code
      then link
-     else Gen2.getCached dflags "template-haskell" th_deps' >>= \case
+     else Gen2.getCached dflags' "template-haskell" th_deps' >>= \case
             Just c  -> return (runGet get $ BL.fromStrict c)
             Nothing -> do
               lr <- link
-              Gen2.putCached dflags "template-haskell" th_deps'
+              Gen2.putCached dflags' "template-haskell" th_deps'
                               [topDir dflags </> "ghcjs_boot.completed"]
                               (BL.toStrict . runPut . put $ lr)
               return lr

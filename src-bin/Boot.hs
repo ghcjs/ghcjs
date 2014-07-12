@@ -1022,7 +1022,7 @@ cabalInstallFlags = do
            catMaybes [ (("-j"<>) . showT) <$> (Just (1::Int)) -- j  (fixme, workaround for boot issues)
                      , bj debug "--ghcjs-options=-debug"
                      , bj (v > info) "-v2"
---                     , bj prof "--enable-library-profiling"
+                     , bj prof "--enable-library-profiling"
                      ]
 
 #ifdef WINDOWS
