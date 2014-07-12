@@ -2,6 +2,7 @@
              OverloadedStrings,
              TupleSections,
              LambdaCase,
+             DeriveGeneric,
              TemplateHaskell #-}
 {- |
   GHCJS linker, collects dependencies from
@@ -22,15 +23,18 @@ import           Control.Monad
 import           Control.Parallel.Strategies
 
 import           Data.Array
+import           Data.Binary
+import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
+import           Data.Char                (toLower)
 import           Data.Function            (on)
 import           Data.HashMap.Strict      (HashMap)
 import qualified Data.HashMap.Strict      as HM
 import           Data.Int
 import qualified Data.IntSet              as IS
-import           Data.List                ( partition, isPrefixOf, isSuffixOf, nub, foldl'
-                                          , intercalate, group, sort, groupBy, find)
+import           Data.List                (partition, isPrefixOf, isSuffixOf, nub, foldl'
+                                          ,intercalate, group, sort, groupBy, find, isInfixOf)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe               (fromMaybe, isJust, isNothing)
@@ -48,16 +52,24 @@ import qualified Data.Vector              as V
 import           Data.Yaml                (FromJSON(..), Value(..))
 import qualified Data.Yaml                as Yaml
 
-import           System.FilePath          (splitPath, (<.>), (</>))
-import           System.Directory         ( createDirectoryIfMissing, doesDirectoryExist
-                                          , doesFileExist, getDirectoryContents)
+import qualified Distribution.Simple.Utils as Cabal
+
+import           GHC.Generics
+
+import           System.FilePath          (splitPath, (<.>), (</>), dropExtension, takeExtension)
+import           System.Directory         (createDirectoryIfMissing, doesDirectoryExist
+                                          ,canonicalizePath
+                                          ,doesFileExist, getDirectoryContents
+                                          ,getCurrentDirectory, copyFile)
 
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
 import           Compiler.Info
 import           Compiler.JMacro
 import           Compiler.Settings
+import           Compiler.Utils
 
+import           Gen2.Base
 import           Gen2.ClosureInfo         hiding (Fun)
 import qualified Gen2.Compactor           as Compactor
 import           Gen2.Object
@@ -69,6 +81,7 @@ import           Gen2.Shim
 
 type LinkableUnit = (Package, Module, Int) -- ^ module and the index of the block in the object file
 type Module       = Text
+type LinkedObj    = Either (String, ByteString) FilePath -- ^ can be already loaded
 
 -- number of bytes linked per module
 type LinkerStats  = Map (Package, Module) Int64
@@ -81,7 +94,9 @@ data LinkResult = LinkResult
   , linkLibB        :: [FilePath]    -- ^ library code to load before RTS
   , linkLibA        :: [FilePath]    -- ^ library code to load after RTS
   , linkBase        :: Base          -- ^ base metadata to use if we want to link incrementally against this result
-  }
+  } deriving (Generic)
+
+instance Binary LinkResult
 
 -- | link and write result to disk (jsexe directory)
 link :: DynFlags
@@ -89,7 +104,7 @@ link :: DynFlags
      -> FilePath                  -- ^ output file/directory
      -> [FilePath]                -- ^ include path for home package
      -> [(PackageId, [FilePath])] -- ^ directories to load package modules
-     -> [FilePath]                -- ^ the object files we're linking
+     -> [LinkedObj]               -- ^ the object files we're linking
      -> [FilePath]                -- ^ extra js files to include
      -> (Fun -> Bool)             -- ^ functions from the objects to use as roots (include all their deps)
      -> Set Fun                   -- ^ extra symbols to link in
@@ -109,14 +124,15 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
           let statsFile = if genBase then "out.base.stats" else "out.stats"
           TL.writeFile (out </> statsFile) (linkerStats lmetasize lstats)
         when (not $ gsNoRts settings) $ do
-          TL.writeFile (out </> "rts.js") (rtsText' $ dfCgSettings dflags)
-        forM_ [(llb, "lib"), (lla, "lib1")] $ \(l,file) ->
+          TL.writeFile (out </> "rts.js") (rtsText' dflags $ dfCgSettings dflags)
+        forM_ [(llb, "lib"), (lla, "lib1")] $ \(l,file) -> do
           BL.writeFile (out </> file <.> jsExt) . BL.fromChunks
-            =<< mapM (tryReadShimFile dflags settings) l
+            =<< mapM (tryReadShimFile dflags) l
+          writeFile (out </> file <.> jsExt <.> "files") (unlines l)
         if genBase
           then generateBase out lbase
           else when (not (gsOnlyOut settings) && not (gsNoRts settings) && not (usingBase settings))
-                         (writeHtml dflags out >> combineFiles dflags out)
+                         (writeRunner settings dflags out >> writeHtml dflags out >> combineFiles dflags out)
 
 -- | link in memory
 link' :: DynFlags
@@ -124,46 +140,47 @@ link' :: DynFlags
       -> String                    -- ^ target (for progress message)
       -> [FilePath]                -- ^ include path for home package
       -> [(PackageId, [FilePath])] -- ^ directories to load package modules
-      -> [FilePath]                -- ^ the object files we're linking
+      -> [LinkedObj]               -- ^ the object files we're linking
       -> [FilePath]                -- ^ extra js files to include
       -> (Fun -> Bool)             -- ^ functions from the objects to use as roots (include all their deps)
       -> Set Fun                   -- ^ extra symbols to link in
       -> IO LinkResult
 link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
-    objDeps <- mapM readDepsFile objFiles
-    let debug = buildingDebug dflags
-        rootSelector | Just baseMod <- gsGenBase settings =
-                         \(Fun p m s) -> m == T.pack baseMod
-                     | otherwise = isRootFun
-        roots = S.fromList . filter rootSelector $
-          concatMap (M.keys . depsDeps) objDeps
-        rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
-    -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
-    compilationProgressMsg dflags $
-      case gsGenBase settings of
-        Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ baseMod ++ ")"
-        _            -> "Linking " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
-    base <- case gsUseBase settings of
-      NoBase        -> return Compactor.emptyBase
-      BaseFile file -> Compactor.loadBase file
-      BaseState b   -> return b
-    rds <- rtsDeps dflags (map fst pkgs)
-    c   <- newMVar M.empty
-    (allDeps, code) <-
-      collectDeps (lookupFun c $ zip objDeps objFiles)
-              (baseUnits base)
-              (roots `S.union` rds `S.union` extraStaticDeps)
-    let (outJs, metaSize, compactorState, stats) =
-           renderLinker settings dflags (baseCompactorState base) code
-        rtsPkgs = if usingBase settings
-                    then []
-                    else map stringToPackageId ["rts", "rts_" ++ rtsBuildTag dflags]
-        pkgs' = rtsPkgs ++ filter (not . (isAlreadyLinked base)) (map fst pkgs)
-        base' = Base compactorState (nub $ basePkgs base ++ map (T.pack . packageIdString) pkgs')
-                       (allDeps `S.union` baseUnits base)
-    libJsFiles <- concat <$> mapM getLibJsFiles (concatMap snd pkgs)
-    (shimsBefore, shimsAfter) <- getShims dflags settings (jsFiles ++ libJsFiles) pkgs'
-    return $ LinkResult outJs stats metaSize shimsBefore shimsAfter base'
+      objDeps <- mapM readDepsFile' objFiles
+      let debug = buildingDebug dflags
+          rootSelector | Just baseMod <- gsGenBase settings =
+                           \(Fun p m s) -> m == T.pack baseMod
+                       | otherwise = isRootFun
+          roots = S.fromList . filter rootSelector $
+            concatMap (map fst . M.toList . depsDeps) objDeps
+          rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
+      -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageIdString $ pkgs))
+      compilationProgressMsg dflags $
+        case gsGenBase settings of
+          Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ baseMod ++ ")"
+          _            -> "Linking " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
+      base <- case gsUseBase settings of
+        NoBase        -> return emptyBase
+        BaseFile file -> Compactor.loadBase file
+        BaseState b   -> return b
+      (_, mk_rds) <- rtsDeps dflags
+      let rds = mk_rds (map fst pkgs)
+      c   <- newMVar M.empty
+      (allDeps, code) <-
+        collectDeps (lookupFun c $ zip objDeps objFiles)
+                (baseUnits base)
+                (roots `S.union` rds `S.union` extraStaticDeps)
+      let (outJs, metaSize, compactorState, stats) =
+             renderLinker settings dflags (baseCompactorState base) code
+          rtsPkgs = if usingBase settings
+                      then []
+                      else map stringToPackageId ["rts", "rts_" ++ rtsBuildTag dflags]
+          pkgs' = rtsPkgs ++ filter (not . (isAlreadyLinked base)) (map fst pkgs)
+          base' = Base compactorState (nub $ basePkgs base ++ map (T.pack . packageIdString) pkgs')
+                         (allDeps `S.union` baseUnits base)
+      libJsFiles <- concat <$> mapM getLibJsFiles (concatMap snd pkgs)
+      (shimsBefore, shimsAfter) <- getShims dflags settings (jsFiles ++ libJsFiles) pkgs'
+      return $ LinkResult outJs stats metaSize shimsBefore shimsAfter base'
   where
     isAlreadyLinked :: Base -> PackageId -> Bool
     isAlreadyLinked b pkg = T.pack (packageIdString pkg) `elem` basePkgs b
@@ -180,12 +197,12 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
       where
         xs = packageIdString pkg
 
-    lookupFun :: MVar (Map (Package, Text, String) FilePath)
-              -> [(Deps,FilePath)]
-              -> Package -> Module -> IO FilePath
+    lookupFun :: MVar (Map (Package, Text, String) LinkedObj)
+              -> [(Deps,LinkedObj)]
+              -> Package -> Module -> IO LinkedObj
     lookupFun cache objs = {-# SCC "lookupFun" #-} lCached
       where
-        lCached :: Package -> Module -> IO FilePath
+        lCached :: Package -> Module -> IO LinkedObj
         lCached pkg mod = do
           c <- takeMVar cache
           let ext :: String
@@ -220,7 +237,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
                 in  doesFileExist p >>=
                       \case
                          False -> searchPaths (p:searched) xs
-                         True  -> return p
+                         True  -> return (Right p)
 
 renderLinker :: GhcjsSettings
              -> DynFlags
@@ -256,7 +273,7 @@ linkerStats meta s =
       (map (\xs@(((p,_),_):_) -> showPkg p <> "\n" <> TL.unlines (map showMod xs)) pkgMods)
     metaStats = "packed metadata: " <> TL.pack (show meta)
 
-rtsText' :: CgSettings -> TL.Text
+rtsText' :: DynFlags -> CgSettings -> TL.Text
 rtsText' = rtsText
 {- prerender RTS for faster linking (fixme this results in a build error, why?)
 rtsText' debug = if debug
@@ -268,18 +285,27 @@ splitPath' :: FilePath -> [FilePath]
 splitPath' = map (filter (`notElem` "/\\")) . splitPath
 
 getLibJsFiles :: FilePath -> IO [FilePath]
-getLibJsFiles path = do
-  let libDir = path </> "js"
-  exists <- doesDirectoryExist libDir
-  if exists
-    -- filter out ".", "..", and other unwanted files
-    then map (libDir </>) . filter (".js" `isSuffixOf`) <$> getDirectoryContents libDir
-    else return []
+getLibJsFiles pkgLibPath = go pkgLibPath "js"
+  where
+    go dir file = do
+      let df = dir </> file
+      j <- isJsFile df
+      if j then return [df] else do
+        d <- doesDirectoryExist df
+        if d && file /= "." && file /= ".."
+          then getDirectoryContents df >>=
+                 fmap concat . mapM (go df) . sort
+          else return []
+    isJsFile path = do
+      e <- doesFileExist path
+      return (e && map toLower (takeExtension path) == ".js")
 
 -- fixme the wired-in package id's we get from GHC we have no version
 getShims :: DynFlags -> GhcjsSettings -> [FilePath] -> [PackageId] -> IO ([FilePath], [FilePath])
-getShims dflags settings extraFiles pkgDeps =
-  collectShims dflags settings (getLibDir dflags </> "shims") (map convertPkg pkgDeps)
+getShims dflags settings extraFiles pkgDeps = do
+  (b,a) <- collectShims dflags settings (getLibDir dflags </> "shims") (map convertPkg pkgDeps)
+  extraFiles' <- mapM canonicalizePath extraFiles
+  return (b++extraFiles',a)
 
 convertPkg :: PackageId -> (Text, Version)
 convertPkg p =
@@ -303,6 +329,15 @@ writeHtml df out = do
     B.readFile (getLibDir df </>"template.html") >>= B.writeFile htmlFile
   where
     htmlFile = out </> "index.html"
+
+writeRunner :: GhcjsSettings -> DynFlags -> FilePath -> IO ()
+writeRunner settings df out = when (gsBuildingCabalSetup settings) $ do
+  cd <- getCurrentDirectory
+  let runner    = cd </> addExeExtension (dropExtension out)
+      runnerSrc = topDir df </> addExeExtension "ghcjs-run"
+  copyFile runnerSrc runner
+  Cabal.setFileExecutable runner
+  copyFile (topDir df </> "node") (cd </> out </> "node")
 
 -- | drop the version from a package name
 dropVersion :: Text -> Text
@@ -328,7 +363,7 @@ modFuns :: Deps -> [Fun]
 modFuns (Deps p m e a d) = map fst (M.toList d)
 
 -- | get all dependencies for a given set of roots
-getDeps :: (Package -> Module -> IO FilePath)
+getDeps :: (Package -> Module -> IO LinkedObj)
         -> Set LinkableUnit -- Fun -- ^ don't link these symbols
         -> Set Fun -- ^ start here
         -> IO (Set LinkableUnit)
@@ -342,8 +377,8 @@ getDeps lookup base fun = go' S.empty M.empty [] $
     go result _    [] = return result
     go result deps lls@((lpkg,lmod,n):ls) =
       let key = (lpkg, lmod)
-      in  case M.lookup key deps of
-            Nothing -> lookup lpkg lmod >>= readDepsFile >>=
+      in  case M.lookup (lpkg,lmod) deps of
+            Nothing -> lookup lpkg lmod >>= readDepsFile' >>=
                          \d -> go result (M.insert key d deps) lls
             Just (Deps _ _ _ a _) -> go' result deps ls (S.toList $ a ! n)
 
@@ -356,7 +391,7 @@ getDeps lookup base fun = go' S.empty M.empty [] $
     go' result deps open ffs@(f:fs) =
         let key = (funPackage f, funModule f)
         in  case M.lookup key deps of
-            Nothing -> lookup (funPackage f) (funModule f) >>= readDepsFile >>=
+            Nothing -> lookup (funPackage f) (funModule f) >>= readDepsFile' >>=
                            \d -> go' result (M.insert key d deps) open ffs
             Just (Deps p m e a d) ->
                let lu = maybe err (p,m,) (M.lookup f d)
@@ -369,10 +404,10 @@ getDeps lookup base fun = go' S.empty M.empty [] $
                     else go' (S.insert lu result) deps (lu:open) fs
 
 -- | get all modules used by the roots and deps
-getDepsSources :: (Package -> Module -> IO FilePath)
+getDepsSources :: (Package -> Module -> IO LinkedObj)
                -> Set LinkableUnit -- Fun
                -> Set Fun
-               -> IO (Set LinkableUnit, [(FilePath, Set LinkableUnit)])
+               -> IO (Set LinkableUnit, [(LinkedObj, Set LinkableUnit)])
 getDepsSources lookup base roots = do
   allDeps <- getDeps lookup base roots
   allPaths <- mapM (\x@(pkg,mod,_) ->
@@ -380,8 +415,8 @@ getDepsSources lookup base roots = do
   return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
 
 -- | collect dependencies for a set of roots
-collectDeps :: (Package -> Module -> IO FilePath)
-            -> Set LinkableUnit -- Fun -- ^ do not include these
+collectDeps :: (Package -> Module -> IO LinkedObj)
+            -> Set LinkableUnit -- ^ do not include these
             -> Set Fun -- ^ roots
             -> IO (Set LinkableUnit, [(Package, Module, JStat, [ClosureInfo], [StaticInfo])])
 collectDeps lookup base roots = do
@@ -392,13 +427,16 @@ collectDeps lookup base roots = do
   code <- mapM (uncurry extractDeps) (primSrcs ++ srcs)
   return (allDeps, code)
 
-extractDeps :: FilePath
+extractDeps :: LinkedObj
             -> Set LinkableUnit
             -> IO (Package, Module, JStat, [ClosureInfo], [StaticInfo])
-extractDeps file units = do
-  let symbs     = IS.fromList . map (\(_,_,n) -> n) . S.toList $ units
-      (p, m, _) = S.elemAt 0 units
-  l <- readObjectFileKeys (\n _ -> n `IS.member` symbs || isGlobalUnit n) file
+extractDeps obj units = do
+  let symbs        = IS.fromList . map (\(_,_,n) -> n) . S.toList $ units
+      (p, m, _)    = S.elemAt 0 units
+      selector n _ = n `IS.member` symbs || isGlobalUnit n
+  l <- either (\(n,b) -> return $ readObjectKeys n selector (BL.fromStrict b))
+              (readObjectFileKeys selector)
+              obj
   return (p, m, mconcat (map oiStat l), concatMap oiClInfo l, concatMap oiStatic l)
 
 pkgTxt :: Package -> Text
@@ -418,7 +456,9 @@ funPkgTxtNoVer = packageName . funPackage
      depenencies that the RTS uses or symbols that the user program
      refers to directly
  -}
-newtype StaticDeps = StaticDeps [(Text, Text, Text)] -- package/module/symbol
+newtype StaticDeps =
+  StaticDeps { unStaticDeps :: [(Text, Text, Text)] -- package/module/symbol
+             }
 
 noStaticDeps :: StaticDeps
 noStaticDeps = StaticDeps []
@@ -441,37 +481,39 @@ instance FromJSON StaticDeps where
       parseMod p (Object v) = concat <$> mapM (uncurry (parseSymb p)) (HM.toList v)
       parseMod _ _          = mempty
       parseSymb p m (String s) = pure [(p,m,s)]
-      parseSymb p m (Array v)  = {- v & traverse ^.. parseSingleSymb p m -- -} mapM (parseSingleSymb p m) (V.toList v)
+      parseSymb p m (Array v)  = mapM (parseSingleSymb p m) (V.toList v)
       parseSymb _ _ _          = mempty
       parseSingleSymb p m (String s) = pure (p,m,s)
       parseSingleSymb _ _ _          = mempty
   parseJSON _          = mempty
 
 -- | dependencies for the RTS, these need to be always linked
-rtsDeps :: DynFlags -> [PackageId] -> IO (Set Fun)
+rtsDeps :: DynFlags -> IO ([Text], [PackageId] -> Set Fun)
 rtsDeps = readSystemDeps "RTS" "linking" "rtsdeps.yaml"
 
 -- | dependencies for the Template Haskell, these need to be linked when running
 --   Template Haskell (in addition to the RTS deps)
-thDeps :: DynFlags -> [PackageId] -> IO (Set Fun)
+thDeps :: DynFlags -> IO ([Text], [PackageId] -> Set Fun)
 thDeps = readSystemDeps "Template Haskell" "running Template Haskell" "thdeps.yaml"
 
 readSystemDeps :: String
                -> String
                -> FilePath
                -> DynFlags
-               -> [PackageId]
-               -> IO (Set Fun)
-readSystemDeps depsName requiredFor file df pkgs =
-  staticDeps depsFile pkgs >>=
-    \case
-      Left err -> error ("could not read " ++ depsName ++ " dependencies from " ++ depsFile ++ ":\n" ++ err)
-      Right (StaticDeps unresolved, deps) ->
-        case unresolved of
-          ((p,_,_):_) -> error ("Package `" ++ T.unpack p ++ "' is required for " ++ requiredFor ++ ", but was not found")
-          _           -> return deps
+               -> IO ([Text], [PackageId] -> Set Fun)
+readSystemDeps depsName requiredFor file df = do
+  b <- B.readFile (getLibDir df </> file)
+  case Yaml.decodeEither b of
+    Left err -> error ("could not read " ++ depsName ++ " dependencies from " ++ file ++ ":\n" ++ err)
+    Right sdeps -> return (depsPkgs sdeps, staticDeps' sdeps)
   where
     depsFile = getLibDir df </> file
+    depsPkgs s = map head . group . sort $ map (^._1) (unStaticDeps s)
+    staticDeps' s pkgs
+      | StaticDeps ((p,_,_):_) <- unresolved =
+          error ("Package `" ++ T.unpack p ++ "' is required for " ++ requiredFor ++ ", but was not found")
+      | otherwise = funs
+      where (unresolved, funs) = staticDeps s pkgs
 
 {- | read a static dependencies specification and give the roots
 
@@ -479,15 +521,16 @@ readSystemDeps depsName requiredFor file df pkgs =
      that is linked multiple times, then the returned dependencies
      will all come from the same version, but it's undefined which one.
   -}
-staticDeps :: FilePath                                   -- ^ yaml file to read
-           -> [PackageId]                                -- ^ packages we're using
-           -> IO (Either String (StaticDeps, (Set Fun))) -- ^ Left for a parse error, the StaticDeps contains the symbols for which no package could be found
-staticDeps file pkgs = do
-  b <- B.readFile file
-  return $ fmap mkDeps (Yaml.decodeEither b)
+staticDeps :: StaticDeps              -- ^ deps from yaml file
+           -> [PackageId]             -- ^ packages we're using
+           -> (StaticDeps, (Set Fun)) -- ^ the StaticDeps contains the symbols for which no package could be found
+staticDeps sdeps pkgs = mkDeps sdeps
   where
     zenc  = T.pack . zEncodeString . T.unpack
-    pkgsT = map (T.pack . packageIdString) pkgs
+    pkgsT = map pTxt pkgs
+    pTxt p | isWiredInPackage xs = dropVersion (T.pack xs)
+           | otherwise           = T.pack xs
+      where xs = packageIdString p
     pkgsU = fmap splitVersion pkgsT
     mkDeps (StaticDeps ds) =
       (\(_,u,r) -> (StaticDeps u,r)) (foldl' resolveDep (HM.empty, [], S.empty) ds)
@@ -508,6 +551,11 @@ staticDeps file pkgs = do
                                                    -- name and version prefix match
                , find (\(pn',pv') -> pn' == pn && (T.null pv || (pv <> ".") `T.isPrefixOf` (pv' <> "."))) pkgsU
                ]
+
+-- read dependencies from an object that might have already been loaded
+readDepsFile' :: LinkedObj -> IO Deps
+readDepsFile' (Left (name, bs)) = pure (readDeps name (BL.fromStrict bs))
+readDepsFile' (Right file)      = readDepsFile file
 
 generateBase :: FilePath -> Base -> IO ()
 generateBase outDir b =

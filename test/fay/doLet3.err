@@ -1,2 +1,2 @@
-fay/doLet3.hs:16:7-19: Irrefutable pattern failed for pattern [e :: GHC.Types.Int]
+doLet3.hs:16:7-19: Irrefutable pattern failed for pattern [e :: GHC.Types.Int]
 

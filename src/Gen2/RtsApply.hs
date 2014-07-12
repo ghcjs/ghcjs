@@ -17,6 +17,9 @@
 
 module Gen2.RtsApply where
 
+import           CostCentre
+import           DynFlags
+
 import           Compiler.JMacro
 
 import           Gen2.RtsAlloc
@@ -32,16 +35,17 @@ import qualified Data.Text as T
 t :: T.Text -> T.Text
 t = id
 
-rtsApply :: CgSettings -> JStat
-rtsApply s = mconcat $  map (uncurry (stackApply s)) applySpec
-                    ++ map (uncurry (fastApply s)) applySpec
-                    ++ map (pap s) specPap
+rtsApply :: DynFlags -> CgSettings -> JStat
+rtsApply dflags s =
+            mconcat  $ map (uncurry (stackApply dflags s)) applySpec
+                    ++ map (uncurry (fastApply dflags s)) applySpec
+                    ++ map (pap dflags s) specPap
                     ++ [ mkApplyArr
-                       , genericStackApply s
-                       , genericFastApply s
+                       , genericStackApply dflags s
+                       , genericFastApply dflags s
                        , zeroApply s
-                       , updates s
-                       , papGen s
+                       , updates dflags s
+                       , papGen dflags s
                        , moveRegs2
                        ]
 
@@ -92,13 +96,14 @@ mkApplyArr =
 -- generic stack apply that can do everything, but less efficiently
 -- on stack: tag: (regs << 8 | arity)
 -- fixme: set closure info of stack frame
-genericStackApply :: CgSettings -> JStat
-genericStackApply s =
+genericStackApply :: DynFlags -> CgSettings -> JStat
+genericStackApply dflags s =
   [j| fun h$ap_gen {
         `traceRts s $ t"h$ap_gen"`;
         var cf = `R1`.f;
         switch(cf.t) {
           case `Thunk`:
+            `profStat s pushRestoreCCS`;
             return cf;
           case `Fun`:
             `funCase cf (funArity' cf)`;
@@ -144,6 +149,7 @@ genericStackApply s =
               `Sp` = `Sp` - regs - 1;
             }
             `Stack`[`Sp`] = newAp;
+           `profStat s pushRestoreCCS`;
             return `c`;
           } else {
             `traceRts s $ t"h$ap_gen: undersat"`;
@@ -153,7 +159,7 @@ genericStackApply s =
                dat.push(`Stack`[`Sp`-i-1]);
             }
             `Sp` = `Sp` - myRegs - 2;
-            `R1` = h$init_closure({ f: p, d1: null, d2: null, m: 0 }, dat);
+            `R1` = `initClosure dflags p dat jCurrentCCS`;
             return `Stack`[`Sp`];
           }
         |]
@@ -161,8 +167,8 @@ genericStackApply s =
   generic fast apply: can handle anything (slowly)
   signature tag in argument
 -}
-genericFastApply :: CgSettings -> JStat
-genericFastApply s =
+genericFastApply :: DynFlags -> CgSettings -> JStat
+genericFastApply dflags s =
   [j| fun h$ap_gen_fast tag {
         `traceRts s $ t"h$ap_gen_fast: " |+ tag`;
         var c = `R1`.f;
@@ -206,6 +212,7 @@ genericFastApply s =
             `Sp` = `Sp` + 1;
           }
           `Stack`[`Sp`] = ap;
+          `profStat s pushRestoreCCS`;
         |]
     funCase :: JExpr -> JExpr -> JExpr -> JStat
     funCase c tag arity =
@@ -233,6 +240,7 @@ genericFastApply s =
               `Sp` = `Sp` + 1;
             }
             `Stack`[`Sp`] = newAp;
+            `profStat s pushRestoreCCS`;
             return `c`;
           } else {
             `traceRts s $ t"h$ap_gen_fast: undersat: " |+ myRegs |+ t" " |+ tag`; // build PAP and return stack top
@@ -243,7 +251,7 @@ genericFastApply s =
               for(var i=0;i<myRegs;i++) {
                 dat.push(h$getReg(i+2));
               }
-              `R1` = h$init_closure({ f: p, d1: null, d2: null, m: 0 }, dat);
+              `R1` = `initClosure dflags p dat jCurrentCCS`;
             }
             return `Stack`[`Sp`];
           }
@@ -266,11 +274,13 @@ genericFastApply s =
         |]
 
 
-stackApply :: CgSettings
+stackApply :: DynFlags
+           -> CgSettings
            -> Int         -- ^ number of registers in stack frame
            -> Int         -- ^ number of arguments
            -> JStat
-stackApply s r n = [j| `decl func`;
+stackApply dflags s r n =
+                 [j| `decl func`;
                      `JVar func` = `JFunc [] body`;
                      `ClosureInfo funcName (CIRegs 0 [PtrV]) funcName layout CIStackFrame noStatic`;
                    |]
@@ -285,6 +295,7 @@ stackApply s r n = [j| `decl func`;
                switch(c.t) {
                  case `Thunk`:
                    `traceRts s $ funcName <> ": thunk"`;
+                   `profStat s pushRestoreCCS`;
                    return c;
                  case `Fun`:
                    `traceRts s $ funcName <> ": fun"`;
@@ -318,7 +329,7 @@ stackApply s r n = [j| `decl func`;
                     } else {
                       `traceRts s $ funcName <> ": undersat"`;
                       // fixme do we want double pap?
-                      `mkPap s pap (toJExpr R1) (toJExpr n) stackArgs`;
+                      `mkPap dflags s pap (toJExpr R1) (toJExpr n) stackArgs`;
                       `Sp` = `Sp` - `r+1`;
                       `R1` = `pap`;
                       return `Stack`[`Sp`];
@@ -336,7 +347,7 @@ stackApply s r n = [j| `decl func`;
                       `oversatCase c ar0 ar`;
                     } else {
                       `traceRts s $ funcName <> ": undersat"`;
-                      `mkPap s pap (toJExpr R1) (toJExpr n) stackArgs`;
+                      `mkPap dflags s pap (toJExpr R1) (toJExpr n) stackArgs`;
                       `Sp` = `Sp` - `r+1`;
                       `R1` = `pap`;
                       return `Stack`[`Sp`];
@@ -354,6 +365,7 @@ stackApply s r n = [j| `decl func`;
           `Sp` = `Sp` - rs;
           var newAp = h$apply[(`n`-`arity0`)|((`r`-rs)<<8)];
           `Stack`[`Sp`] = newAp;
+          `profStat s pushRestoreCCS`;
           `traceRts s $ (funcName <> ": new stack frame: ") |+ (newAp |. "n")`;
           return `c`;
         |]
@@ -366,8 +378,8 @@ stackApply s r n = [j| `decl func`;
   stg_ap_r_n_fast is entered if a function of unknown arity
   is called, n arguments are already in r registers
 -}
-fastApply :: CgSettings -> Int -> Int -> JStat
-fastApply s r n =
+fastApply :: DynFlags -> CgSettings -> Int -> Int -> JStat
+fastApply dflags s r n =
   [j| `decl func`;
       `JVar func` = `JFunc myFunArgs body`;
     |]
@@ -401,6 +413,7 @@ fastApply s r n =
                    case `Thunk`:
                      `traceRts s $ (funName <> ": thunk")`;
                      `push' s $ reverse (map toJExpr $ take r (enumFrom R2)) ++ mkAp n r`;
+                     `profStat s pushRestoreCCS`;
                      return c;
                    case `Blackhole`:
                      `traceRts s $ (funName <> ": blackhole")`;
@@ -422,7 +435,7 @@ fastApply s r n =
               `oversatCase c arity`;
             } else {
               `traceRts s (funName <> ": undersat")`;
-              `mkPap s pap (toJExpr R1) (toJExpr n) (map toJExpr regArgs)`;
+              `mkPap dflags s pap (toJExpr R1) (toJExpr n) (map toJExpr regArgs)`;
               `R1` = `pap`;
               return `Stack`[`Sp`];
             }
@@ -435,6 +448,7 @@ fastApply s r n =
             `saveRegs rs`;
             `Sp` = `Sp` + rsRemain  + 1;
             `Stack`[`Sp`] = h$apply[(rsRemain<<8)|(`n`-(`arity`&0xFF))];
+            `profStat s pushRestoreCCS`;
             return `c`;
           |]
           where
@@ -452,6 +466,7 @@ zeroApply s =
                   var c = `R1`.f;
                   `traceRts s $ t"h$ap_1_0: " |+ (c|."n") |+ t" :a " |+ (c|."a") |+ t" (" |+ (clTypeName c) |+ t")"`;
                   if(c.t === `Thunk`) {
+                    `profStat s pushRestoreCCS`;
                     return c;
                   } else if(c.t === `Blackhole`) {
                     `push' s [toJExpr R1, jsv "h$return"]`;
@@ -495,8 +510,8 @@ enter s e =
               }
             |]
 
-updates :: CgSettings -> JStat
-updates s =
+updates :: DynFlags -> CgSettings -> JStat
+updates dflags s =
   [j|
       fun h$upd_frame {
         var updatee = `Stack`[`Sp` - 1];
@@ -542,16 +557,17 @@ updates s =
      - d2.d2.. = args (r)
 -}
 -- arity is the remaining arity after our supplied arguments are applied
-mkPap :: CgSettings
+mkPap :: DynFlags
+      -> CgSettings
       -> Ident   -- ^ id of the pap object
       -> JExpr   -- ^ the function that's called (can be a second pap)
       -> JExpr   -- ^ number of arguments in pap
       -> [JExpr] -- ^ values for the supplied arguments
       -> JStat
-mkPap s tgt fun n values =
+mkPap dflags s tgt fun n values =
       traceRts s ("making pap with: " ++ show (length values) ++ " items") <>
       allocDynamic s True tgt (iex entry) (fun:papAr:map toJExpr values')
-        (if csProf s then Just [je| `R1`.cc |] else Nothing)
+        (if csProf s then Just jCurrentCCS else Nothing)
   where
     papAr = [je| `funOrPapArity fun Nothing` - `length values * 256` - `n` |]
     values' | null values = [jnull]
@@ -567,10 +583,12 @@ specPap = [0..numSpecPap]
 numSpecPap :: Int
 numSpecPap = 6
 
-pap :: CgSettings
+pap :: DynFlags
+    -> CgSettings
     -> Int
     -> JStat
-pap s r = [j| `decl func`;
+pap dflags s r =
+         [j| `decl func`;
              `iex func` = `JFunc [] body`;
              `ClosureInfo funcName CIRegsUnknown funcName (CILayoutUnknown (r+2)) CIPap noStatic`;
            |]
@@ -583,6 +601,7 @@ pap s r = [j| `decl func`;
                var d = `R1`.d2;
                var f = c.f;
                `assertRts s (isFun' f ||| isPap' f) (funcName <> ": expected function or pap")`;
+               `profStat s $ enterCostCentreFun currentCCS`;
                var extra = (`funOrPapArity c (Just f)` >> 8) - `r`;
                `traceRts s $ (funcName <> ": pap extra args moving: ") |+ extra`;
                `moveBy extra`;
@@ -597,8 +616,9 @@ pap s r = [j| `decl func`;
     dField d n = SelExpr d (TxtI . T.pack $ ('d':show (n-1)))
 
 -- generic pap
-papGen :: CgSettings -> JStat
-papGen s = [j| fun h$pap_gen {
+papGen :: DynFlags -> CgSettings -> JStat
+papGen dflags s =
+         [j| fun h$pap_gen {
                var c = `R1`.d1;
                var f = c.f;
                var d = `R1`.d2;
@@ -606,6 +626,7 @@ papGen s = [j| fun h$pap_gen {
                var or = `papArity (toJExpr R1)` >> 8;
                var r = pr - or;
                `assertRts s (isFun' f ||| isPap' f) $ t "h$pap_gen: expected function or pap"`;
+               `profStat s $ enterCostCentreFun currentCCS`;
                `traceRts s $ (t "h$pap_gen: generic pap extra args moving: " |+ or)`;
                h$moveRegs2(or, r);
                `loadOwnArgs d r`;

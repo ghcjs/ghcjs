@@ -10,6 +10,7 @@ module Compiler.Utils
     , copyNoOverwrite
     , findFile
     , jsexeExtension
+    , addExeExtension
     , exeFileName
     , mkGhcjsSuf
     , mkGhcjsOutput
@@ -78,15 +79,26 @@ findFile mk_file_path (dir : dirs)
        if b then return (Just file_path)
             else findFile mk_file_path dirs
 
-jsexeExtension :: FilePath
+jsexeExtension :: String
 jsexeExtension = "jsexe"
+
+addExeExtension :: FilePath -> FilePath
+#ifdef WINDOWS
+addExeExtension = (<.> "exe")
+#else
+addExeExtension = id
+#endif
 
 exeFileName :: DynFlags -> FilePath
 exeFileName dflags
   | Just s <- outputFile dflags =
       -- unmunge the extension
       let s' = dropPrefix "js_" (drop 1 $ takeExtension s)
+#ifdef WINDOWS
+      in if null s' || map toLower s' == "exe"
+#else
       in if null s'
+#endif
            then dropExtension s <.> jsexeExtension
            else dropExtension s <.> s'
   | otherwise =

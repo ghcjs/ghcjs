@@ -6,7 +6,8 @@
 
 module Main where
 
-import Data.List (partition, isPrefixOf)
+import Data.Either (partitionEithers)
+import Data.List (partition, stripPrefix)
 import Data.Maybe
 
 import System.Environment
@@ -25,16 +26,17 @@ pathSep = ":"
 
 main = do
   args0 <- getFullArguments -- adds wrapper arguments for Windows
-  let (minusB, args) = partition ("-B" `isPrefixOf`) $ args0
+  let (minusB, args) = partitionEithers . map (\ x -> maybe (Right x) Left . stripPrefix "-B" $ x) $ args0
       mbMinusB       = listToMaybe . reverse $ minusB
   case args of
     ["--ghc-version"] -> putStrLn getCompilerVersion
     xs                -> do
       libDir  <- mkTopDir mbMinusB
       env     <- getEnvironment
-      userDB  <- getUserPackageDB
+      userDB  <- getUserPackageDir
       let extraArgs = "-B" : libDir : []
-          ghcjsPkgPath  = getGlobalPackageDB libDir ++ pathSep ++ userDB
+          -- fixme user db can also be a package.conf
+          ghcjsPkgPath  = getGlobalPackageDB libDir ++ maybe "" (\d -> pathSep++d</>"package.conf.d") userDB
           pkgPath   = maybe ghcjsPkgPath (\x -> x ++ pathSep ++ ghcjsPkgPath) (lookup "GHCJS_PACKAGE_PATH" env)
           runEnv    = ("GHCJS_PACKAGE_PATH", pkgPath) : filter ((/="GHCJS_PACKAGE_PATH").fst) env
       exitWith =<< waitForProcess =<< runProcess ("haddock") (extraArgs ++ xs)

@@ -1,1 +1,1 @@
-ghc/deSugar/dsrun008.hs:2:15-42: Irrefutable pattern failed for pattern (2, x)
+dsrun008.hs:2:15-42: Irrefutable pattern failed for pattern (2, x)

@@ -1,7 +1,8 @@
-{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings #-}
+{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings, LambdaCase #-}
 module Compiler.Info where
 
 import           Control.Applicative
+import qualified Control.Exception as E
 import           Control.Monad
 
 import           Data.Function      (on)
@@ -19,20 +20,21 @@ import           DynFlags
 import           GHC
 import qualified GHC.Paths
 
-import qualified Paths_ghcjs
+#ifdef WINDOWS
+import           Control.Lens hiding ((<.>))
 
-getCompilerInfo :: Maybe FilePath        -- ^ library path specified on the command line (-B flag)
-                -> IO [([Char], [Char])]
-getCompilerInfo mbMinusB = do
-      df <- runGhc (mbMinusB `mplus` Just GHC.Paths.libdir) getSessionDynFlags
-      let libDir = getLibDir df
-          topDir = getTopDir df
-      return . nubBy ((==) `on` fst) $
-           [ ("Project name"     , "The Glorious Glasgow Haskell Compilation System for JavaScript")
-           , ("Global Package DB", getGlobalPackageDB topDir)
-           , ("Project version"  , getCompilerVersion)
-           , ("LibDir"           , libDir)
-           ] ++ compilerInfo df
+import           Data.Char
+import           Data.Maybe
+import qualified Data.Text as T
+
+import           System.Directory (doesFileExist)
+import           System.Environment
+import           System.FilePath ((<.>), dropExtension)
+
+import           Compiler.Utils
+#endif
+
+import qualified Paths_ghcjs
 
 -- | the directory to use if started without -B flag
 getDefaultTopDir :: IO FilePath
@@ -52,7 +54,7 @@ mkTopDir (Just x) = return x
 mkTopDir _        = getDefaultTopDir
 
 mkLibDir :: Maybe String -> IO FilePath
-mkLibDir (Just x) = return x -- (x</>"lib")
+mkLibDir (Just x) = return x
 mkLibDir _        = getDefaultLibDir
 
 getTopDir :: DynFlags -> FilePath
@@ -73,19 +75,20 @@ getGlobalPackageDB :: FilePath
                    -> FilePath
 getGlobalPackageDB libDir = libDir </> "package.conf.d"
 
--- | find location of the user package database
-getUserPackageDB :: IO FilePath
-getUserPackageDB = (</> (subdir </> "package.conf.d")) <$>
-                      getAppUserDataDirectory "ghcjs"
+getUserTopDir :: IO (Maybe FilePath)
+getUserTopDir =  (Just . (</> subdir) <$> getAppUserDataDirectory "ghcjs") `E.catch`
+                   \(E.SomeException _) -> return Nothing
   where
     targetARCH = arch
     targetOS   = os
     subdir     = targetARCH ++ '-':targetOS ++ '-':getFullCompilerVersion
 
--- | find installation directory for global packages
-getGlobalPackageInst :: FilePath
-                     -> FilePath
-getGlobalPackageInst libDir = libDir </> "lib"
+-- | find location of the user package database
+getUserPackageDir :: IO (Maybe FilePath)
+getUserPackageDir = getUserTopDir
+
+getUserCacheDir :: IO (Maybe FilePath)
+getUserCacheDir = fmap (</> "cache") <$> getUserTopDir
 
 -- | Just the GHC version
 getGhcCompilerVersion :: String
@@ -135,31 +138,29 @@ ghcjsBootDefaultDataDir = Paths_ghcjs.getDataDir
 getFullArguments :: IO [String]
 #ifdef WINDOWS
 getFullArguments = do
-  exeName <- getProgName
-  exePath <- getExecutablePath
-  let exe  = exePath </> exeName
-      exe' = dropExtension exe
+  exe <- getExecutablePath
+  let exe' = dropExtension exe
       opts = [ exe <.> "options"
-             , exe' ++ getFullCompilerVersion <.> "options"
-             , exe' ++ getCompilerVersion <.> "options"
+             , exe' ++ "-" ++ getFullCompilerVersion <.> "exe" <.> "options"
+             , exe' ++ "-" ++ getCompilerVersion <.> "exe" <.> "options"
              ]
       addArgs [] = return []
-      addArgs (o:os) xs =
+      addArgs (o:os) =
         doesFileExist o >>= \case
           True  -> getOptionArgs o
           False -> addArgs os
   exists <- doesFileExist (exe)
-  when (not exists) (error "could not determine executable location")
-  addArgs opts =<< getArgs
+  when (not exists) (error $ "could not determine executable location: " ++ exe)
+  (++) <$> addArgs opts <*> getArgs
 
 getOptionArgs :: FilePath -> IO [String]
 getOptionArgs file = do
-  env <- getEnvironment
-  fmap (catMaybes . map (f env). lines) . readFile
+  env <- (traverse . both %~ T.pack) <$> getEnvironment
+  fmap (catMaybes . map (f env). lines) . readFile $ file
   where f env line
-          | "#" == take 1 . dropWhile isSpace $ line = Nothing
-          | all isSpace line                         = Nothing
-          | otherwise                                = Just (substPatterns [] env line)
+          | "#" == (take 1 . dropWhile isSpace $ line) = Nothing
+          | all isSpace line                           = Nothing
+          | otherwise                                  = Just (T.unpack $ substPatterns [] env (T.pack line))
 #else
 getFullArguments = getArgs
 #endif

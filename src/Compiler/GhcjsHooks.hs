@@ -31,17 +31,21 @@ import qualified Gen2.DynamicLinking  as Gen2
 import qualified Gen2.Foreign         as Gen2
 import           Gen2.GHC.CoreToStg   (coreToStg) -- version that does not generate StgLetNoEscape
 import qualified Gen2.PrimIface       as Gen2
+import qualified Gen2.TH              as Gen2TH
 
+import           System.IO.Error
+import           System.Environment
 
-installGhcjsHooks :: GhcjsSettings
+installGhcjsHooks :: GhcjsEnv
+                  -> GhcjsSettings
                   -> [FilePath]  -- ^ JS objects
                   -> DynFlags -> DynFlags
-installGhcjsHooks settings js_objs dflags =
+installGhcjsHooks env settings js_objs dflags =
   Gen2.installForeignHooks True $ dflags { hooks = addHooks (hooks dflags) }
     where
       addHooks h = h { linkHook               = Just (Gen2.ghcjsLink settings js_objs True)
-                     , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
-                     , hscCompileCoreExprHook = Just Gen2.ghcjsCompileCoreExpr
+                     , getValueSafelyHook     = Just (Gen2TH.ghcjsGetValueSafely settings)
+                     , hscCompileCoreExprHook = Just (Gen2TH.ghcjsCompileCoreExpr env settings)
                      }
 
 installNativeHooks :: GhcjsSettings -> DynFlags -> DynFlags
@@ -148,7 +152,7 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
 runGhcjsPhase _ _ (RealPhase ph) input dflags
   | Just next <- lookup ph skipPhases = do
     output <- phaseOutputFilename next
-    liftIO (copyFile input output)
+    liftIO (copyFile input output `catchIOError` \_ -> return ())
 #if MIN_VERSION_ghc(7,8,3)
     case ph of As _ -> (liftIO $ doFakeNative dflags (dropExtension output)); _ -> return ()
 #else
@@ -189,7 +193,7 @@ ghcjsCompileModule :: GhcjsSettings
                    -> ModSummary
                    -> IO B.ByteString
 -- dynamic-too will invoke this twice, cache results in GhcjsEnv
-ghcjsCompileModule settings jsEnv env core mod =
+ghcjsCompileModule settings jsEnv env core mod = do
   ifGeneratingDynamicToo dflags genDynToo genOther
   where
     genDynToo = do
@@ -208,7 +212,7 @@ ghcjsCompileModule settings jsEnv env core mod =
       core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
       stg <- coreToStg dflags (cg_module core) core_binds
       (stg', cCCs) <- stg2stg dflags (cg_module core) stg
-      return $ variantRender gen2Variant settings dflags core stg' cCCs
+      return $ variantRender gen2Variant settings dflags (cg_module core) stg' cCCs
 
 doFakeNative :: DynFlags -> FilePath -> IO ()
 doFakeNative df base = do

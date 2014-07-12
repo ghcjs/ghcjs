@@ -2,6 +2,8 @@
 
 module Gen2.Rts where
 
+import           DynFlags
+
 import           Data.Array
 import           Data.Bits
 import           Data.Char                        (toLower, toUpper)
@@ -241,14 +243,14 @@ logStack = [j| h$logStack(); |]
 
 -- rtsDebug = renderJs (addDebug $ jsSaturate (Just "h$RTS") rts')
 
-rtsText :: CgSettings -> TL.Text
-rtsText = displayT . renderPretty 0.8 150 . pretty . rts
+rtsText :: DynFlags -> CgSettings -> TL.Text
+rtsText dflags = displayT . renderPretty 0.8 150 . pretty . rts dflags
 
-rts :: CgSettings -> JStat
-rts s = jsSaturate (Just "h$RTS") (rts' s)
+rts :: DynFlags -> CgSettings -> JStat
+rts dflags s = jsSaturate (Just "h$RTS") (rts' dflags s)
 
-rts' :: CgSettings -> JStat
-rts' s = [j|
+rts' :: DynFlags -> CgSettings -> JStat
+rts' dflags s = [j|
 
 var !h$currentThread   = null;      // thread state object for current thread
 var !h$stack           = null;      // stack for the current thread
@@ -772,7 +774,7 @@ fun h$logStack {
   }
 }
 
-`rtsApply s`;
+`rtsApply dflags s`;
 // rtsPrim
 `closureTypes`;
 
@@ -1189,10 +1191,10 @@ fun h$lazy_e {
 
 // TODO: generate this only when profiling is enabled
 fun h$setCcs_e {
-  `jCurrentCCS` = `Stack`[`Sp`-1]; // TODO: maybe use popUnknown?
+  h$restoreCCS(`Stack`[`Sp`-1]);
   `adjSpN 2`;
   return `Stack`[`Sp`];
 }
-`ClosureInfo "h$setCcs_e" (CIRegs 0 []) "set cost centre stack" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
+`ClosureInfo "h$setCcs_e" (CIRegs 0 [PtrV]) "set cost centre stack" (CILayoutFixed 1 [ObjV]) CIStackFrame noStatic`;
 
 |]

@@ -3,6 +3,8 @@
 
 module Gen2.RtsAlloc where
 
+import           DynFlags
+
 import           Control.Lens
 
 import           Data.Array
@@ -11,12 +13,21 @@ import qualified Data.Map as M
 import           Data.Monoid
 import qualified Data.Text as T
 
+import           Compiler.Settings
 import           Compiler.JMacro
 
 import           Gen2.ClosureInfo
 import           Gen2.Profiling
 import           Gen2.RtsTypes
 import           Gen2.Utils
+
+-- init a variable sized object from an array of values
+initClosure :: DynFlags -> JExpr -> JExpr -> JExpr -> JExpr
+initClosure dflags entry values ccs
+  | buildingProf dflags =
+      [je| h$init_closure({ f: `entry`, d1: null, d2: null, m: 0, cc: `ccs`}, `values`) |]
+  | otherwise =
+      [je| h$init_closure({ f: `entry`, d1: null, d2: null, m: 0}, `values`) |]
 
 -- allocate multiple, possibly mutually recursive, closures
 

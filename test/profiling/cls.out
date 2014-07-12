@@ -1,13 +1,3 @@
 ["MAIN.DONT_CARE (<built-in>)"]
-["Main.CAF (<entire-module>)","Main.main (Main.hs:(7,1)-(13,9))"]
-["Main.CAF (<entire-module>)","Main.main (Main.hs:(7,1)-(13,9))"]
-Main: err
-Stack trace:
-  Main.inner (Main.hs:5:53-77)
-  Main.mkCls.\ (Main.hs:5:35-77)
-  Main.outer (Main.hs:5:29-77)
-  Main.mkCls (Main.hs:5:1-77)
-  Main.main.a (Main.hs:9:7-18)
-  Main.main.b (Main.hs:11:7-14)
-  Main.main (Main.hs:(7,1)-(13,9))
-  Main.CAF (<entire-module>)
+["Main.CAF (<entire-module>)","Main.main (cls.hs:(6,1)-(12,9))"]
+["Main.CAF (<entire-module>)","Main.main (cls.hs:(6,1)-(12,9))"]

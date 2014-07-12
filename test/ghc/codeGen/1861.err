@@ -1,1 +1,1 @@
-user error (Pattern match failure in do expression at ghc/codeGen/1861.hs:2:11-13)
+user error (Pattern match failure in do expression at 1861.hs:2:11-13)

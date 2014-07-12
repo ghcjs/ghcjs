@@ -14,10 +14,7 @@ import           BasicTypes
 import           PrelNames
 import           DynFlags
 import           Encoding
-import           HscTypes
-import           TysPrim
 import           UniqSet
-import           NameSet
 import           Literal
 import           DataCon
 import           CoreSyn
@@ -27,7 +24,6 @@ import           Unique
 import           StgSyn
 import           PrimOp
 import           Module
-import           VarSet
 import           TyCon
 import           Util
 import           Type hiding (typeSize)
@@ -68,6 +64,7 @@ import qualified Text.Parsec as P
 
 import           Compiler.Settings
 
+import           Gen2.Base
 import           Gen2.Utils
 import           Gen2.Prim
 import           Gen2.Rts
@@ -107,13 +104,12 @@ addEval i = over _3 (flip addOneToUniqSet i)
 
 generate :: GhcjsSettings
          -> DynFlags
-         -> CgGuts
+         -> Module
          -> StgPgm
          -> CollectedCCs
          -> ByteString -- ^ binary data for the .js_o object file
-generate settings df guts s cccs =
+generate settings df m s cccs =
   let (uf, s') = sinkPgm m s
-      m        = cg_module guts
   in  flip evalState (initState df m uf) $ do
         ifProfiling' $ initCostCentres cccs
         (st, lus) <- genUnits df m s'
@@ -476,8 +472,8 @@ genExpr top (StgLet b e) = do
   return (b' <> s, r)
 genExpr top (StgLetNoEscape{}) = error "genExpr: StgLetNoEscape"
 genExpr top (StgSCC cc tick push e) = do
-  (stats, result) <- genExpr top e
   setSCCstats <- ifProfilingM $ setCC cc tick push
+  (stats, result) <- genExpr top e
   return (setSCCstats <> stats, result)
 genExpr top (StgTick m n e) = genExpr top e
 
@@ -719,9 +715,9 @@ genCase top bnd e at alts l srt
       return (mconcat (map decl bndi) <> saveCCS <> ej <> restoreCCS <> aj, ar)
   | otherwise = do
       n       <- length <$> genIdsI bnd
+      saveCCS <- ifProfilingM $ push [jCurrentCCS]
       rj      <- genRet (addEval bnd top) bnd at alts l srt
       (ej, r) <- genExpr (bnd, take n (map toJExpr $ enumFrom R1), ctxEval top) e
-      saveCCS <- ifProfilingM $ push [jCurrentCCS]
       return (saveCCS <> rj <> ej, ExprCont)
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
@@ -1473,7 +1469,7 @@ parseFfiJM :: String -> Int -> Either P.ParseError JStat
 parseFfiJM xs u = fmap (makeHygienic . saturateFFI u) . parseJM $ xs
   where
     makeHygienic :: JStat -> JStat
-    makeHygienic s = snd $ O.renameLocalsFun (map addFFIToken O.newLocals) ([], s)
+    makeHygienic s = snd $ O.renameLocalsFun (map addFFIToken newLocals) ([], s)
 
 --    addFFIToken (StrI xs) = TxtI (T.pack $ "ghcjs_ffi_" ++ show u ++ "_" ++ xs)
     addFFIToken (TxtI xs) = TxtI (T.pack ("ghcjs_ffi_" ++ show u ++ "_") <> xs)

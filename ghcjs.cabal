@@ -68,6 +68,9 @@ Library
                      Gen2.ClosureInfo,
                      Gen2.Foreign,
                      Gen2.Sinker,
+                     Gen2.TH,
+                     Gen2.Base,
+                     Gen2.Cache,
                      Gen2.DynamicLinking,
                      Gen2.GHC.CoreToStg,
                      Gen2.GHC.Linker,
@@ -101,13 +104,14 @@ Library
                    ghc-paths,
                    template-haskell,
                    bin-package-db,
+                   ghcjs-prim,
                    syb            >= 0.4      && < 0.5,
                    bytestring     >= 0.10     && < 0.11,
                    attoparsec     >= 0.12     && < 0.13,
                    aeson          >= 0.7      && < 0.8,
                    text           >= 0.11     && < 1.2,
                    wl-pprint-text >= 1.1      && < 1.2,
-                   lens           >= 4.0      && < 4.2,
+                   lens           >= 4.0      && < 4.3,
                    yaml           >= 0.8      && < 0.9,
                    time,
                    system-filepath,
@@ -121,10 +125,12 @@ Library
                    text-binary    >= 0.1      && < 0.2,
                    unordered-containers >= 0.2 && < 0.3,
                    parallel       >= 3.2      && < 3.3,
+                   cryptohash     >= 0.11     && < 0.12,
                    hashable,
                    unordered-containers,
                    optparse-applicative       >= 0.9 && < 0.10,
                    stringsearch               >= 0.3 && < 0.4,
+                   base16-bytestring          >= 0.1 && < 0.2,
                    -- for JMacro
                    regex-posix                >= 0.90 && < 0.100,
                    safe                       >= 0.3  && < 0.4,
@@ -139,7 +145,7 @@ Library
 
 -- the compiler executable, Setup.hs installs a wrapper script that
 -- supplies the installation directory
-Executable ghcjs.bin
+Executable ghcjs
     Main-Is:        Main.hs
     Default-Language: Haskell2010
     hs-source-dirs: src-bin
@@ -148,7 +154,7 @@ Executable ghcjs.bin
     GHC-Options:    -O2 -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded
 
 -- a wrapper for haddock
-Executable haddock-ghcjs.bin
+Executable haddock-ghcjs
     if os(Windows)
       cpp-options: -DWINDOWS
     Main-Is:        Haddock.hs
@@ -162,7 +168,7 @@ Executable haddock-ghcjs.bin
 
 -- the package manager, like with the compiler, this executable is called
 -- through a wrapper script
-Executable ghcjs-pkg.bin
+Executable ghcjs-pkg
     if flag(compiler-only)
       Buildable:      False
     Main-Is:          Pkg.hs
@@ -218,6 +224,20 @@ Executable ghcjs-boot
                       time                 >= 1.4    && < 1.5,
                       unix-compat          >= 0.4    && < 0.5,
                       executable-path      >= 0      && < 0.1
+
+Executable ghcjs-run
+    if flag(compiler-only)
+      Buildable:      False
+    if os(Windows)
+      cpp-options: -DWINDOWS
+    ghc-options:      -threaded -O
+    Main-Is:          Run.hs
+    Default-Language: Haskell2010
+    Hs-Source-Dirs:   src-bin
+    Build-Depends:    base                 >= 4      && < 5,
+                      directory,
+                      process,
+                      filepath
 
 -- our test suite, requires JavaScript environments to run the tests:
 --   - node.js              http://nodejs.org

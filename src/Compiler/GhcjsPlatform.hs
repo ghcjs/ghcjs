@@ -29,7 +29,7 @@ setGhcjsPlatform :: GhcjsSettings
 setGhcjsPlatform set js_env js_objs basePath df
   = addPlatformDefines basePath
       $ setDfOpts
-      $ installGhcjsHooks set js_objs
+      $ installGhcjsHooks js_env set js_objs
       $ installDriverHooks set js_env
       $ df { settings = settings' }
   where

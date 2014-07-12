@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-
   This module takes over desugaring and typechecking foreign declarations and calls
   from GHC. foreign import javascript should be desugared differently
@@ -18,6 +19,7 @@ import Hooks
 import DynFlags
 
 import Id
+import IdInfo
 import OrdList
 import Name
 import Bag
@@ -137,7 +139,11 @@ ghcjsDsFExport fn_id co ext_name cconv isDyn = -- return (empty, empty, [])
     dflags <- getDynFlags
     u <- newUnique
     u1 <- newUnique
+#if MIN_VERSION_ghc(7,8,3)
+    let bnd = mkExportedLocalId VanillaId (mkSystemVarName u1 $ fsLit "dsjs") unitTy
+#else
     let bnd = mkExportedLocalId (mkSystemVarName u1 $ fsLit "dsjs") unitTy
+#endif
         bs  = mkFExportJsBits bnd dflags (cconv == JavaScriptCallConv) ext_name
                      (if isDyn then Nothing else Just fn_id)
                      fe_arg_tys orig_res_ty cconv u
@@ -795,7 +801,11 @@ ghcjsTcForeignExports decls
   where
    combine (binds, fs, gres1) (L loc fe) = do
        (b, f, gres2) <- setSrcSpan loc (ghcjsTcFExport fe)
+#if MIN_VERSION_ghc(7,8,3)
+       return (b `consBag` binds, L loc f : fs, gres1 `unionBags` gres2)
+#else
        return ((FromSource, b) `consBag` binds, L loc f : fs, gres1 `unionBags` gres2)
+#endif
 
 ghcjsTcFExport :: ForeignDecl Name -> TcM (LHsBind Id, ForeignDecl Id, Bag GlobalRdrElt)
 ghcjsTcFExport fo@(ForeignExport (L loc nm) hs_ty _ spec)

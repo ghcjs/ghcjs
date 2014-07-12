@@ -39,24 +39,26 @@ packages:
   # in stage 1a, we cannot do linking yet
 
   stage1a:
+    - ./boot/array
     - ./boot/base
+    - ./boot/binary
+    - ./boot/bytestring
+    - ./boot/containers
+    - ./boot/deepseq
     - ./boot/ghc-prim
     - ./boot/integer-gmp
+    - ./boot/pretty
+    - ./boot/primitive
+    - ./boot/template-haskell
 
   # after stage 1a, ghcjs-boot installs ghcjs-prim and
   # continues with stage 1b
 
   stage1b:
-    - ./boot/array
-    - ./boot/bytestring
-    - ./boot/containers
-    - ./boot/deepseq
     - ./boot/directory
     - ./boot/filepath
     - ./boot/old-locale
-    - ./boot/pretty
     - ./boot/process
-    - ./boot/template-haskell
     - ./boot/time
     - IfUnix:    ./boot/unix
     - IfWindows: ./boot/Win32
@@ -84,7 +86,6 @@ packages:
     - ./boot/mtl
     - ./boot/old-time
     - ./boot/parallel
-    - ./boot/primitive
     - ./boot/scientific
     - ./boot/stm
     - ./boot/syb
@@ -164,11 +165,16 @@ programs:
   ghcjs-pkg:     ghcjs-pkg
   ghcjs-haddock: ghcjs-haddock
 
+  # non-wrapped GHCJS programs
+
+  ghcjs-run:     ghcjs-run
+
   # third party programs
 
   cabal:      cabal
   ghc:        ghc
   ghc-pkg:    ghc-pkg
+  node:       node
   bash:       bash
   make:       make
   patch:      patch

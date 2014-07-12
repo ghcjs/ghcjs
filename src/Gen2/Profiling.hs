@@ -37,6 +37,7 @@ import qualified Data.Text            as T
 
 import           Compiler.JMacro
 import           Compiler.JMacro.Base
+import           Compiler.Settings
 
 import           Gen2.ClosureInfo
 import           Gen2.RtsTypes
@@ -90,16 +91,12 @@ setCC :: CostCentre -> Bool -> Bool -> G JStat
 -- FIXME: ignoring tick flags for now
 setCC cc _tick True = do
     ccI@(TxtI ccLbl) <- costCentreLbl cc
-    addDependency $ OtherSymb (cc_mod cc) ccLbl
+    addDependency $ OtherSymb (cc_mod cc) (moduleGlobalSymbol $ cc_mod cc)
     return [j| `jCurrentCCS` = h$pushCostCentre(`jCurrentCCS`, `ccI`); |]
 setCC _cc _tick _push = return mempty
 
 pushRestoreCCS :: JStat
-pushRestoreCCS =
-  [j| `Sp` += 2;
-      `Stack`[`Sp`-1] = `jCurrentCCS`;
-      `Stack`[`Sp`]   = h$setCcs_e;
-    |]
+pushRestoreCCS = [j| h$pushRestoreCCS(); |]
 
 --------------------------------------------------------------------------------
 -- Some cost-centre stacks to be used in generator
@@ -132,7 +129,7 @@ ifProfiling' a = do
     if prof then a else return ()
 
 profiling :: G Bool
-profiling = csProf <$> use gsSettings
+profiling = buildingProf <$> use gsDynFlags
 
 profStat :: CgSettings -> JStat -> JStat
 profStat s e = if csProf s then e else mempty
@@ -145,7 +142,7 @@ costCentreLbl' cc = do
     df      <- use gsDynFlags
     curModl <- use gsModule
     let lbl = show $ runSDoc (ppr cc) (initSDocContext df $ mkCodeStyle CStyle)
-    return . zEncodeString $
+    return . ("h$"++) . zEncodeString $
       moduleNameColons (moduleName curModl) ++ "_" ++ if isCafCC cc then "CAF_ccs" else lbl
 
 costCentreLbl :: CostCentre -> G Ident

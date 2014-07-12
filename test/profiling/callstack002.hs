@@ -6,7 +6,7 @@ import Text.Printf
 import Prelude hiding (map)
 import GHC.Stack
 
-f :: Int -> Int
+f :: Integer -> Integer
 f x = traceStack (printf "f: %d" x) (x * 2)
 
 map :: (a -> b) -> [a] -> [b]

@@ -1,2 +1,3 @@
 compArguments: ["-prof", "-fprof-auto"]
+disableOpt: True
 prof: True

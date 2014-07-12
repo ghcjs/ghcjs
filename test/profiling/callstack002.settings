@@ -1,2 +1,4 @@
 compArguments: ["-prof", "-fprof-auto-calls", "-fno-full-laziness", "-fno-state-hack"]
+# due to newline issues when printing an error
+disableSpiderMonkey: True
 prof: True

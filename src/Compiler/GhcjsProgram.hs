@@ -114,7 +114,8 @@ getGhcjsSettings args =
     (ga,args') = partition (\a -> any (`isPrefixOf` unLoc a) as) args
     p = execParserPure (prefs mempty) optParser' (map unLoc ga)
     as = [ "--native-executables"
-         , "--no-native"
+         , "--native-too"
+         , "--building-cabal-setup"
          , "--no-js-executables"
          , "--strip-program="
          , "--log-commandline="
@@ -126,7 +127,8 @@ getGhcjsSettings args =
          , "--use-base="
          ]
     envSettings = GhcjsSettings <$> getEnvOpt "GHCJS_NATIVE_EXECUTABLES"
-                                <*> getEnvOpt "GHCJS_NO_NATIVE"
+                                <*> getEnvOpt "GHCJS_NATIVE_TOO"
+                                <*> pure False
                                 <*> pure False
                                 <*> pure Nothing
                                 <*> getEnvMay "GHCJS_LOG_COMMANDLINE_NAME"
@@ -143,7 +145,8 @@ optParser' = info (helper <*> optParser) fullDesc
 optParser :: Parser GhcjsSettings
 optParser = GhcjsSettings
             <$> switch ( long "native-executables" )
-            <*> switch ( long "no-native" )
+            <*> switch ( long "native-too" )
+            <*> switch ( long "building-cabal-setup" )
             <*> switch ( long "no-js-executables" )
             <*> optStr ( long "strip-program" )
             <*> optStr ( long "log-commandline" )
@@ -166,7 +169,7 @@ printNumericVersion :: IO ()
 printNumericVersion = putStrLn getCompilerVersion
 
 printRts :: DynFlags -> IO ()
-printRts dflags = TL.putStrLn (Gen2.rtsText $ Gen2.dfCgSettings dflags) >> exitSuccess
+printRts dflags = TL.putStrLn (Gen2.rtsText dflags $ Gen2.dfCgSettings dflags) >> exitSuccess
 
 printDeps :: FilePath -> IO ()
 printDeps = Object.readDepsFile >=> TL.putStrLn . Object.showDeps
@@ -212,7 +215,10 @@ checkIsBooted mbMinusB = do
 bootstrapFallback :: IO ()
 bootstrapFallback = do
     ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_WITH_GHC"
-    getFullArguments >>= rawSystem ghc . filter (not . ("-B" `isPrefixOf`)) >>= exitWith -- run without GHCJS package args
+    getFullArguments >>= rawSystem ghc . ghcArgs >>= exitWith -- run without GHCJS package args
+    where
+      ignoreArg a  = "-B" `isPrefixOf` a || a == "--building-cabal-setup"
+      ghcArgs args = filter (not . ignoreArg) args ++ ["-threaded"]
 
 installExecutable :: DynFlags -> GhcjsSettings -> [String] -> IO ()
 installExecutable dflags settings srcs = do
@@ -386,9 +392,10 @@ printBootInfo v
   | "--print-topdir"         `elem` v = putStrLn t
   | "--print-libdir"         `elem` v = putStrLn t
   | "--print-global-db"      `elem` v = putStrLn (getGlobalPackageDB t)
-  | "--print-user-db"        `elem` v = putStrLn =<< getUserPackageDB
+  | "--print-user-db-dir"    `elem` v = putStrLn . fromMaybe "<none>" =<< getUserPackageDir
   | "--print-default-libdir" `elem` v = putStrLn =<< getDefaultLibDir
   | "--print-default-topdir" `elem` v = putStrLn =<< getDefaultTopDir
+  | "--print-native-too"     `elem` v = print ("--native-too" `elem` v)
   | "--numeric-ghc-version"  `elem` v = putStrLn getGhcCompilerVersion
   | otherwise                         = error "no --ghcjs-setup-print or --ghcjs-booting-print options found"
   where

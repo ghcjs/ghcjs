@@ -62,6 +62,11 @@ compiler flags:
         --nhc98                         compile with NHC
     ...
 
+Next, install `ghcjs-prim`:
+
+    $ git clone https://github.com/ghcjs/ghcjs-prim.git
+    $ cabal install ./ghcjs-prim
+
 Now install `GHCJS` itself:
 
     $ git clone https://github.com/ghcjs/ghcjs.git

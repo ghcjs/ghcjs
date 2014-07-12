@@ -3,7 +3,9 @@
 module Compiler.Settings where
 
 import           Compiler.JMacro
+import           Compiler.Info
 
+import           Gen2.Base
 import qualified Gen2.Object         as Object
 
 import           Control.Applicative
@@ -11,9 +13,15 @@ import           Control.Concurrent.MVar
 import           Control.Lens
 import           Control.Monad
 
+import           Data.Array
+import qualified Data.Binary         as DB
+import qualified Data.Binary.Get     as DB
+import qualified Data.Binary.Put     as DB
 import           Data.ByteString        (ByteString)
+import           Data.Function          (on)
 import           Data.HashMap.Strict    (HashMap)
 import qualified Data.HashMap.Strict as HM
+import           Data.List              (nubBy)
 import           Data.Map               (Map)
 import qualified Data.Map            as M
 import           Data.Monoid
@@ -21,8 +29,12 @@ import           Data.Set               (Set)
 import qualified Data.Set            as S
 import           Data.Text              (Text)
 
+import           System.IO
+import           System.Process
+
 import           Module
 import           DynFlags
+import qualified DynFlags
 
 {- | We can link incrementally against a base bundle, where we assume
      that the symbols from the bundle and their dependencies have already
@@ -44,17 +56,18 @@ instance Monoid UseBase where
   _ `mappend` x      = x
 
 data GhcjsSettings =
-  GhcjsSettings { gsNativeExecutables :: Bool
-                , gsNoNative          :: Bool
-                , gsNoJSExecutables   :: Bool
-                , gsStripProgram      :: Maybe FilePath
-                , gsLogCommandLine    :: Maybe FilePath
-                , gsGhc               :: Maybe FilePath
-                , gsOnlyOut           :: Bool
-                , gsNoRts             :: Bool
-                , gsNoStats           :: Bool
-                , gsGenBase           :: Maybe String   -- ^ module name
-                , gsUseBase           :: UseBase
+  GhcjsSettings { gsNativeExecutables  :: Bool
+                , gsNativeToo          :: Bool
+                , gsBuildingCabalSetup :: Bool
+                , gsNoJSExecutables    :: Bool
+                , gsStripProgram       :: Maybe FilePath
+                , gsLogCommandLine     :: Maybe FilePath
+                , gsGhc                :: Maybe FilePath
+                , gsOnlyOut            :: Bool
+                , gsNoRts              :: Bool
+                , gsNoStats            :: Bool
+                , gsGenBase            :: Maybe String   -- ^ module name
+                , gsUseBase            :: UseBase
                 }
 
 usingBase :: GhcjsSettings -> Bool
@@ -75,11 +88,12 @@ generateAllJs s
   settings, but it doesn't work very well. find something better.
  -}
 instance Monoid GhcjsSettings where
-  mempty = GhcjsSettings False False False Nothing Nothing Nothing False False False Nothing NoBase
-  mappend (GhcjsSettings ne1 nn1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1)
-          (GhcjsSettings ne2 nn2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2) =
+  mempty = GhcjsSettings False False False False Nothing Nothing Nothing False False False Nothing NoBase
+  mappend (GhcjsSettings ne1 nn1 bc1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1)
+          (GhcjsSettings ne2 nn2 bc2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2) =
           GhcjsSettings (ne1 || ne2)
                         (nn1 || nn2)
+                        (bc1 || bc2)
                         (nj1 || nj2)
                         (sp1 `mplus` sp2)
                         (lc1 `mplus` lc2)
@@ -90,12 +104,21 @@ instance Monoid GhcjsSettings where
                         (gb1 `mplus` gb2)
                         (ub1 <> ub2)
 
+data ThRunner =
+  ThRunner { thrProcess        :: ProcessHandle
+           , thrHandleIn       :: Handle
+           , thrHandleErr      :: Handle
+           , thrBase           :: MVar Base
+           }
+
 data GhcjsEnv = GhcjsEnv
   { compiledModules :: MVar (Map Module ByteString) -- ^ keep track of already compiled modules so we don't compile twice for dynamic-too
+  , thRunners :: MVar (Map String ThRunner) -- ^ template haskell runners
+  , thSplice :: MVar Int
   }
 
 newGhcjsEnv :: IO GhcjsEnv
-newGhcjsEnv = GhcjsEnv <$> newMVar M.empty
+newGhcjsEnv = GhcjsEnv <$> newMVar M.empty <*> newMVar M.empty <*> newMVar 0
 
 buildingDebug :: DynFlags -> Bool
 buildingDebug dflags = WayDebug `elem` ways dflags
@@ -103,24 +126,17 @@ buildingDebug dflags = WayDebug `elem` ways dflags
 buildingProf :: DynFlags -> Bool
 buildingProf dflags = WayProf `elem` ways dflags
 
-data CompactorState =
-  CompactorState { _identSupply   :: [Ident]               -- ^ ident supply for new names
-                 , _nameMap       :: !(HashMap Text Ident) -- ^ renaming mapping for internal names
-                 , _entries       :: !(HashMap Text Int)   -- ^ entry functions (these get listed in the metadata init array)
-                 , _numEntries    :: !Int
-                 , _statics       :: !(HashMap Text Int)   -- ^ mapping of global closure -> index in current block, for static initialisation
-                 , _numStatics    :: !Int                  -- ^ number of static entries
-                 , _labels        :: !(HashMap Text Int)   -- ^ non-Haskell JS labels
-                 , _numLabels     :: !Int                  -- ^ number of labels
-                 , _parentEntries :: !(HashMap Text Int)   -- ^ entry functions we're not linking, offset where parent gets [0..n], grantparent [n+1..k] etc
-                 , _parentStatics :: !(HashMap Text Int)   -- ^ objects we're not linking in base bundle
-                 , _parentLabels  :: !(HashMap Text Int)   -- ^ non-Haskell JS labels in parent
-                 } deriving (Show)
+compilerInfo :: GhcjsSettings
+             -> DynFlags
+             -> [(String, String)]
+compilerInfo settings dflags = do
+      let topDir = getTopDir dflags
+      nubBy ((==) `on` fst) $
+           [ ("Project name"     , "The Glorious Glasgow Haskell Compilation System for JavaScript")
+           , ("Global Package DB", getGlobalPackageDB topDir)
+           , ("Project version"  , getCompilerVersion)
+           , ("LibDir"           , topDir)
+           , ("Native Too"       , if gsNativeToo settings then "YES" else "NO")
+           ] ++ DynFlags.compilerInfo dflags
 
-data Base = Base { baseCompactorState :: CompactorState
-                 , basePkgs           :: [Text]
-                 , baseUnits          :: Set (Object.Package, Text, Int)
-                 }
-
-makeLenses ''CompactorState
 

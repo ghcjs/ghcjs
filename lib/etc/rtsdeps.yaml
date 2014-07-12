@@ -5,7 +5,9 @@ base:
   GHC.Conc.Sync:          reportError
   Control.Exception.Base: nonTermination
   GHC.Exception:          SomeException
-  GHC.TopHandler:         runMainIO
+  GHC.TopHandler:
+    - runMainIO
+    - topHandler
   GHC.Base:               $fMonadIO
 ghc-prim:
   GHC.Types:

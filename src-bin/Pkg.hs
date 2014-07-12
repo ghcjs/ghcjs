@@ -526,8 +526,17 @@ getPkgDatabases verbosity modify use_cache expand_vars my_flags = do
   let no_user_db = FlagNoUserDb `elem` my_flags
 
   mb_user_conf <-
-     if no_user_db then return Nothing
-                   else (\x -> Just (x,True)) `fmap` Info.getUserPackageDB
+     if no_user_db
+        then return Nothing
+        else do
+          user_db_dir <- Info.getUserPackageDir
+          case user_db_dir of
+               Nothing  -> return Nothing
+               Just dir -> do
+                 r <- lookForPackageDBIn dir
+                 case r of
+                   Nothing -> return (Just (dir </> "package.conf.d", False))
+                   Just f  -> return (Just (f, True))
 
   -- If the user database doesn't exist, and this command isn't a
   -- "modify" command, then we won't attempt to create or use it.
@@ -535,7 +544,9 @@ getPkgDatabases verbosity modify use_cache expand_vars my_flags = do
         | Just (user_conf,user_exists) <- mb_user_conf,
           modify || user_exists = [user_conf, global_conf]
         | otherwise             = [global_conf]
-  e_pkg_path <- tryIO (System.Environment.getEnv "GHCJS_PACKAGE_PATH")
+  -- incompatible with Cabal
+  -- e_pkg_path <- tryIO (System.Environment.getEnv "GHCJS_PACKAGE_PATH")
+  let e_pkg_path = Left ""
   let env_stack =
         case e_pkg_path of
                 Left  _ -> sys_databases
@@ -1383,7 +1394,7 @@ checkPackageConfig pkg verbosity db_stack auto_ghci_libs update = do
   mapM_ (checkFile   True "haddock-interfaces") (haddockInterfaces pkg)
   mapM_ (checkDirURL True "haddock-html")       (haddockHTMLs pkg)
   checkModules pkg
-  mapM_ (checkHSLib verbosity (libraryDirs pkg) auto_ghci_libs) (hsLibraries pkg)
+  -- mapM_ (checkHSLib verbosity (libraryDirs pkg) auto_ghci_libs) (hsLibraries pkg)
   -- ToDo: check these somehow?
   --    extra_libraries :: [String],
   --    c_includes      :: [String],
@@ -1514,7 +1525,7 @@ checkModules pkg = do
       -- there's no interface file for GHC.Prim
       unless (modl == fromString "GHC.Prim") $ do
       let files = [ toFilePath modl <.> extension
-                  | extension <- ["hi", "p_hi", "dyn_hi" ] ]
+                  | extension <- ["hi", "p_hi", "dyn_hi", "js_hi", "js_p_hi"] ]
       m <- liftIO $ doesFileExistOnPath files (importDirs pkg)
       when (isNothing m) $
          verror ForceFiles ("cannot find any of " ++ show files)

@@ -380,11 +380,8 @@ runhaskellResult :: TestOpts
 runhaskellResult testOpts settings file = do
     let args = tsArguments settings
     r <- runProcess (testsuiteLocation testOpts </> directory file) (runhaskellProgram testOpts)
-             ([ includeOpt testOpts file, "-w", encodeString $ filename file] ++ args) ""
+             ([ "-w", encodeString $ filename file] ++ args) ""
     return r
-
-includeOpt :: TestOpts -> FilePath -> String
-includeOpt opts fp = "-i" <> encodeString (testsuiteLocation opts </> directory fp)
 
 extraJsFiles :: FilePath -> IO [String]
 extraJsFiles file =
@@ -413,18 +410,16 @@ runGhcjsResult opts file = do
             outputExe'  = outputExe <.> "jsexe"
             outputBuild = cd </> output </> "build"
             outputRun   = outputExe' </> ("all.js"::FilePath)
-            input  = encodeString (testsuiteLocation opts </> file)
+            input  = file
             desc = ", optimization: " ++ show optimize
-            inc = includeOpt opts file
             opt = if optimize then ["-O2"] else []
             extraCompArgs = tsCompArguments settings
             prof = tsProf settings
-            compileOpts = [ inc
-                          , "--no-rts", "--no-stats", "-o", encodeString outputExe
+            compileOpts = [ "--no-rts", "--no-stats", "-o", encodeString outputExe
                           , "-odir", encodeString outputBuild
                           , "-hidir", encodeString outputBuild
                           , "--use-base=" ++ encodeString ((if prof then profBaseSymbs else baseSymbs) opts)
-                          , input
+                          , encodeString (filename input)
                           ] ++ opt ++ extraCompArgs ++ extraFiles
             args = tsArguments settings
             runTestPgm name disabled getPgm
@@ -435,7 +430,7 @@ runGhcjsResult opts file = do
         C.bracket (createDirectory False output)
                   (\_ -> removeTree output) $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
           createDirectory False outputBuild
-          e <- liftIO $ runProcess cd (ghcjsProgram opts) compileOpts ""
+          e <- liftIO $ runProcess (testsuiteLocation opts </> directory file) (ghcjsProgram opts) compileOpts ""
           case e of
             Nothing    -> assertFailure "cannot find ghcjs"
             Just (r,_) -> do

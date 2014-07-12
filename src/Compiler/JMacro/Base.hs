@@ -45,6 +45,7 @@ import Control.Monad.Identity
 
 import Data.Function
 import Data.Bits ((.&.), shiftR)
+import Data.Binary (Binary)
 import Data.Char (toLower, isControl, ord)
 import qualified Data.Map as M
 import qualified Data.Text.Lazy as TL
@@ -53,6 +54,7 @@ import qualified Data.Text as T
 import Data.Generics
 import Data.Hashable (Hashable)
 import Data.Monoid (Monoid, mappend, mempty)
+import Data.Text.Binary ()
 
 import Numeric(showHex)
 import Safe
@@ -277,7 +279,7 @@ instance Show SaneDouble where
 
 -- | Identifiers
 newtype Ident = TxtI Text
- deriving (Show, Data, Typeable, Hashable, Eq, Ord)
+ deriving (Show, Data, Typeable, Hashable, Eq, Ord, Binary)
 
 expr2stat :: JExpr -> JStat
 expr2stat (ApplExpr x y) = (ApplStat x y)
