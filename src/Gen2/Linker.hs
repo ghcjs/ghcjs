@@ -303,7 +303,7 @@ getLibJsFiles pkgLibPath = go pkgLibPath "js"
 -- fixme the wired-in package id's we get from GHC we have no version
 getShims :: DynFlags -> GhcjsSettings -> [FilePath] -> [PackageId] -> IO ([FilePath], [FilePath])
 getShims dflags settings extraFiles pkgDeps = do
-  (b,a) <- collectShims dflags settings (getLibDir dflags </> "shims") (map convertPkg pkgDeps)
+  (b,a) <- collectShims (getLibDir dflags </> "shims") (map convertPkg pkgDeps)
   extraFiles' <- mapM canonicalizePath extraFiles
   return (b++extraFiles',a)
 

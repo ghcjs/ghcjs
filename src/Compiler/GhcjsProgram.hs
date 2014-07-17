@@ -260,7 +260,7 @@ generateLib settings = do
                            v = map fromIntegral (versionBranch $ pkgVersion p)
                        in (T.pack n, v)
         pkgs' = M.toList $ M.fromListWith max (map convertPkg pkgs)
-    (beforeFiles, afterFiles) <- Gen2.collectShims dflags2 settings base pkgs'
+    (beforeFiles, afterFiles) <- Gen2.collectShims base pkgs'
     B.writeFile "lib.js"  . mconcat =<< mapM B.readFile beforeFiles
     B.writeFile "lib1.js" . mconcat =<< mapM B.readFile afterFiles
     putStrLn "generated lib.js and lib1.js for:"
