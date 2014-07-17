@@ -179,7 +179,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
           base' = Base compactorState (nub $ basePkgs base ++ map (T.pack . packageIdString) pkgs')
                          (allDeps `S.union` baseUnits base)
       libJsFiles <- concat <$> mapM getLibJsFiles (concatMap snd pkgs)
-      (shimsBefore, shimsAfter) <- getShims dflags settings (jsFiles ++ libJsFiles) pkgs'
+      (shimsBefore, shimsAfter) <- getShims dflags (jsFiles ++ libJsFiles) pkgs'
       return $ LinkResult outJs stats metaSize shimsBefore shimsAfter base'
   where
     isAlreadyLinked :: Base -> PackageId -> Bool
@@ -301,9 +301,9 @@ getLibJsFiles pkgLibPath = go pkgLibPath "js"
       return (e && map toLower (takeExtension path) == ".js")
 
 -- fixme the wired-in package id's we get from GHC we have no version
-getShims :: DynFlags -> GhcjsSettings -> [FilePath] -> [PackageId] -> IO ([FilePath], [FilePath])
-getShims dflags settings extraFiles pkgDeps = do
-  (b,a) <- collectShims dflags settings (getLibDir dflags </> "shims") (map convertPkg pkgDeps)
+getShims :: DynFlags -> [FilePath] -> [PackageId] -> IO ([FilePath], [FilePath])
+getShims dflags extraFiles pkgDeps = do
+  (b,a) <- collectShims (getLibDir dflags </> "shims") (map convertPkg pkgDeps)
   extraFiles' <- mapM canonicalizePath extraFiles
   return (b++extraFiles',a)
 

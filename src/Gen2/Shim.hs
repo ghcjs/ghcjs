@@ -87,12 +87,10 @@ instance FromJSON VersionRange where
   parseJSON (String t) = maybe mempty pure (parseVersionRange t)
   parseJSON _          = mempty
 
-collectShims :: DynFlags
-             -> GhcjsSettings
-             -> FilePath                                    -- ^ the base path
+collectShims :: FilePath                                    -- ^ the base path
              -> [(Text, Version)]                           -- ^ packages being linked
              -> IO ([FilePath], [FilePath])                 -- ^ files to load (before, after) rts
-collectShims dflags settings base pkgs = do
+collectShims base pkgs = do
   files <- mapM (collectShim base) pkgs
   let files' = map (base </>) (concat files)
       (beforeRts, afterRts) = splitFiles files'
