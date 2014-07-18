@@ -1,2 +1,3 @@
 copyFiles: ["hTell001.hs"]
+disableSpiderMonkey: True
 
