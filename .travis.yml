@@ -2,7 +2,6 @@ env:
     - GHCVER=7.8.3
 
 before_install:
-    - sudo apt-get remove nodejs
     - sudo add-apt-repository -y ppa:hvr/ghc
     - sudo add-apt-repository -y ppa:chris-lea/node.js
     - sudo apt-get update -qq
@@ -20,7 +19,8 @@ install:
     - cabal --version
     - cd ..
     - git clone https://github.com/ghcjs/ghcjs-prim.git
-    - cabal install ./ghcjs-prim
+    - git clone https://github.com/ghcjs/haddock-internal.git
+    - cabal install ./ghcjs-prim ./haddock-internal
     - cabal install --enable-tests --enable-benchmarks
     - ghcjs --version
     - ghcjs-boot --version
