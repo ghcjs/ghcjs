@@ -8,6 +8,4 @@
 # the Setup program does the same variable substitution as it does with the wrapper scripts
 #
 -B{topdir}
--l{topdir}
-
 

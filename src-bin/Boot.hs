@@ -673,6 +673,7 @@ installRts = subTop' "ghcjs-boot" $ do
   cp ghcjsRunSrc ghcjsRunDest
   mapM_ (liftIO . Cabal.setFileExecutable . toStringI) [unlitDest, ghcjsRunDest]
   writefile (ghcjsLib </> "node") <^> bePrograms . bpNode . pgmLoc . to (maybe "-" toTextI)
+  writefile (ghcjsLib </> "cabalBootConfig") ""
   when (not isWindows) $ do
     let runSh = ghcjsLib </> "run" <.> "sh"
     writefile runSh "#!/bin/sh\nCOMMAND=$1\nshift\n\"$COMMAND\" \"$@\"\n"
@@ -953,8 +954,9 @@ cabalStage1 pkgs = sub $ do
       gmpOpts = [bj (s^.bsGmpFramework) "--with-gmp-framework-preferred"
                 ,bj (s^.bsGmpInTree)    "--with-intree-gmp"
                 ]
+  globalFlags <- cabalGlobalFlags
   flags <- cabalInstallFlags
-  let args = "install" : pkgs ++
+  let args = globalFlags ++ ("install" : pkgs) ++
              [ "--solver=topdown" -- the modular solver refuses to install stage1 packages
              ] ++ map ("--configure-option="<>) configureOpts ++ flags
   checkInstallPlan pkgs args
@@ -965,9 +967,10 @@ cabalInstall [] = do
   msg info "cabal-install: no packages, nothing to do"
   return ()
 cabalInstall pkgs = do
+  globalFlags <- cabalGlobalFlags
   flags <- cabalInstallFlags
   setenv "GHCJS_BOOTING" "1"
-  let args = ("install" : pkgs ++ flags)
+  let args = globalFlags ++ "install" : pkgs ++ flags
   checkInstallPlan pkgs args
   cabal_ args
 
@@ -990,6 +993,12 @@ checkInstallPlan pkgs opts = do
     err plan = failWith $ "unacceptable install plan, expecting exactly the following list of packages to be installed,\n" <>
                           "without reinstalls and only one version of each package in the database:\n\n" <>
                           T.unlines (map ("  - " <>) pkgs) <> "\nbut got:\n\n" <> plan
+
+cabalGlobalFlags :: B [Text]
+cabalGlobalFlags = do
+  instDir  <- view (beLocations . blGhcjsTopDir)
+  return [ "--config-file", toTextI (instDir </> "cabalBootConfig")
+         ]
 
 cabalInstallFlags :: B [Text]
 cabalInstallFlags = do
@@ -1015,6 +1024,10 @@ cabalInstallFlags = do
            , "--htmldir",       toTextI (instDir </> "doc" </> "html")
            , "--haddockdir",    toTextI (instDir </> "doc" </> "haddock")
            , "--sysconfdir",    toTextI (instDir </> "etc")
+           , "--enable-documentation"
+           , "--haddock-html"
+           , "--haddock-hoogle"
+           , bool prof "--enable-library-profiling" "--disable-library-profiling"
            ] ++
            bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++
            -- workaround for Cabal bug?
@@ -1022,7 +1035,6 @@ cabalInstallFlags = do
            catMaybes [ (("-j"<>) . showT) <$> (Just (1::Int)) -- j  (fixme, workaround for boot issues)
                      , bj debug "--ghcjs-options=-debug"
                      , bj (v > info) "-v2"
-                     , bj prof "--enable-library-profiling"
                      ]
 
 #ifdef WINDOWS

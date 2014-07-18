@@ -24,7 +24,7 @@ setGhcjsPlatform :: GhcjsSettings
                  -> GhcjsEnv
                  -> [FilePath]  -- ^ JS objects for linking against
                  -> FilePath
-                 -- ^ GHCJS base dir, usually "~/.ghcjs/platform-version"
+                 -- ^ GHCJS base dir, usually "~/.ghcjs/platform-version/ghcjs"
                  -> DynFlags -> DynFlags
 setGhcjsPlatform set js_env js_objs basePath df
   = addPlatformDefines basePath

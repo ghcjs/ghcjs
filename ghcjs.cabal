@@ -137,6 +137,10 @@ Library
                    parsec                     >= 3.1  && < 3.2,
                    haskell-src-exts           >= 1.15 && < 1.16,
                    haskell-src-meta           >= 0.6.0.3  && < 0.7
+    -- we need the version that comes with GHC. this is a hack to help
+    -- cabal solve the dependencies
+    if impl(ghc == 7.8.3)
+      build-depends: transformers < 0.4
     exposed: True
     buildable: True
     hs-source-dirs: src
@@ -162,9 +166,13 @@ Executable haddock-ghcjs
     hs-source-dirs: src-bin
     Build-Depends:  base                >= 4    &&  < 5,
                     process,
+                    ghc,
+                    containers,
+                    directory,
                     filepath,
-                    ghcjs
-    GHC-Options:    -O
+                    ghcjs,
+                    haddock-internal
+    GHC-Options:    -O -Wall
 
 -- the package manager, like with the compiler, this executable is called
 -- through a wrapper script
