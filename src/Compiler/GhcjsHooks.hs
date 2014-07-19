@@ -98,7 +98,7 @@ runGhcjsPhase settings env (RealPhase (Cpp sf)) input_fn dflags0
            return (RealPhase (HsPp sf), input_fn)
         else do
             output_fn <- phaseOutputFilename (HsPp sf)
-            liftIO $ Utils.doCpp dflags1 True{-raw-}
+            liftIO $ Utils.doCpp dflags1 True{-raw-} True
                            input_fn output_fn
             -- re-read the pragmas now that we've preprocessed the file
             -- See #2464,#3457

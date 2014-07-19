@@ -119,7 +119,7 @@ tryReadShimFile dflags file = do
           s1 = s { sPgm_P = (fst (sPgm_P s), cppOpts (snd $ sPgm_P s)) }
           dflags1 = dflags { settings = s1 }
       outfile <- SysTools.newTempName dflags "jspp"
-      Utils.doCpp dflags1 True file outfile
+      Utils.doCpp dflags1 True False file outfile
       B.readFile outfile
 
 collectShim :: FilePath -> (Pkg, Version) -> IO [FilePath]

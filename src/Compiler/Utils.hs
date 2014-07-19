@@ -137,8 +137,8 @@ getEnvMay xs = fmap Just (getEnv xs)
 getEnvOpt :: MonadIO m => String -> m Bool
 getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)
 
-doCpp :: DynFlags -> Bool -> FilePath -> FilePath -> IO ()
-doCpp dflags raw input_fn output_fn = do
+doCpp :: DynFlags -> Bool -> Bool -> FilePath -> FilePath -> IO ()
+doCpp dflags raw strip_comments input_fn output_fn = do
     let hscpp_opts = picPOpts dflags
     let cmdline_include_paths = includePaths dflags
 
@@ -179,9 +179,10 @@ doCpp dflags raw input_fn output_fn = do
         -- about this.
                     ++ [ SysTools.Option     "-x"
                        , SysTools.Option     "assembler-with-cpp"
+                       ] ++
         -- Do not strip comments since they contain directives for the closure compiler
-                       , SysTools.Option     "-C"
-                       , SysTools.Option     input_fn
+                       (if not strip_comments then [ SysTools.Option     "-C" ] else []) ++
+                       [ SysTools.Option     input_fn
         -- We hackily use Option instead of FileOption here, so that the file
         -- name is not back-slashed on Windows.  cpp is capable of
         -- dealing with / in filenames, so it works fine.  Furthermore
