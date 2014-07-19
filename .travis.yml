@@ -24,7 +24,7 @@ install:
     - cabal install --enable-tests --enable-benchmarks
     - ghcjs --version
     - ghcjs-boot --version
-    - ghcjs-boot --dev
+    - ghcjs-boot --dev --with-node nodejs
     - cabal install -j2 --ghcjs random QuickCheck
     - ghcjs-pkg list
 
