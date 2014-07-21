@@ -36,6 +36,19 @@ import           Compiler.Utils
 
 import qualified Paths_ghcjs
 
+compilerInfo :: Bool
+             -> DynFlags
+             -> [(String, String)]
+compilerInfo nativeToo dflags = do
+      let topDir = getTopDir dflags
+      nubBy ((==) `on` fst) $
+           [ ("Project name"     , "The Glorious Glasgow Haskell Compilation System for JavaScript")
+           , ("Global Package DB", getGlobalPackageDB topDir)
+           , ("Project version"  , getCompilerVersion)
+           , ("LibDir"           , topDir)
+           , ("Native Too"       , if nativeToo then "YES" else "NO")
+           ] ++ DynFlags.compilerInfo dflags
+
 -- | the directory to use if started without -B flag
 getDefaultTopDir :: IO FilePath
 getDefaultTopDir = do

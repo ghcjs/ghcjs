@@ -47,7 +47,7 @@ import           Distribution.Simple.Program (runProgramInvocation, simpleProgra
 
 import           Options.Applicative
 
-import           System.Directory (doesFileExist, doesDirectoryExist)
+import           System.Directory (doesFileExist, doesDirectoryExist, createDirectoryIfMissing)
 import           System.Environment (getArgs)
 import           System.Exit
 import           System.FilePath
@@ -72,32 +72,6 @@ import           Rules (mkRuleBase)
 import qualified Gen2.GHC.PrelRules
 
 import           Gen2.GHC.Packages
-
-{- |
-  Check if we're building a Cabal Setup script, in which case automatically
-  switch to building a native executable and skip building all JS
-
-  Detection is a bit tricky:
-  - compilation mode is --make
-  - Cabal doesn't manage dependencies for Setup.hs, so -hide-all-packages is not used
-  - There is one Haskell source file, named Setup.hs or Setup.lhs
-  - executable is named setup or setup.exe in a setup subdir
-  - object and hi output dirs end with a setup subdir
--}
-buildingCabalSetup :: [FilePath] -> DynFlags -> Bool
-buildingCabalSetup [hs_src] dflags
-  = ghcMode dflags == CompManager         &&
-    not (gopt Opt_HideAllPackages dflags) &&
-    isSetupOutput (outputFile dflags)     &&
-    isSetupDir    (objectDir  dflags)     &&
-    isSetupDir    (hiDir      dflags)     &&
-    isSetupSource hs_src
-  where
-    forwardSlashes = map (\x -> if x == '\\' then '/' else x)
-    isSetupOutput  = maybe False (("/setup/setup" `isSuffixOf`) . forwardSlashes . dropExtension)
-    isSetupDir     = maybe False (("/setup" `isSuffixOf`) . forwardSlashes)
-    isSetupSource  = (`elem` ["setup.hs", "Setup.hs", "Setup.lhs"]) . takeFileName
-buildingCabalSetup _ _ = False
 
 getGhcjsSettings :: [Located String] -> IO ([Located String], GhcjsSettings)
 getGhcjsSettings args =
@@ -215,10 +189,19 @@ checkIsBooted mbMinusB = do
 bootstrapFallback :: IO ()
 bootstrapFallback = do
     ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_WITH_GHC"
-    getFullArguments >>= rawSystem ghc . ghcArgs >>= exitWith -- run without GHCJS package args
+    as  <- ghcArgs <$> getFullArguments
+    e   <- rawSystem ghc $ as -- run without GHCJS library prefix arg
+    case (e, getOutput as) of
+      (ExitSuccess, Just o) ->
+        createDirectoryIfMissing False (o <.> "jsexe")
+      _ -> return ()
+    exitWith e
     where
       ignoreArg a  = "-B" `isPrefixOf` a || a == "--building-cabal-setup"
       ghcArgs args = filter (not . ignoreArg) args ++ ["-threaded"]
+      getOutput []         = Nothing
+      getOutput ("-o":x:_) = Just x
+      getOutput (x:xs)     = getOutput xs
 
 installExecutable :: DynFlags -> GhcjsSettings -> [String] -> IO ()
 installExecutable dflags settings srcs = do
@@ -266,16 +249,6 @@ generateLib settings = do
     putStrLn "generated lib.js and lib1.js for:"
     mapM_ (\(p,v) -> putStrLn $ "    " ++ T.unpack p ++
       if null v then "" else ("-" ++ L.intercalate "." (map show v))) pkgs'
-
-{-
--- | Sets up GHCJS package databases, requires a call to initPackages
-addPkgConf :: DynFlags -> IO DynFlags
-addPkgConf df = do
-  dbu <- getUserPackageDB
-  let replaceConf UserPkgConf   = PkgConfFile dbu
-      replaceConf x             = x
-  return $ df { extraPkgConfs = map replaceConf . extraPkgConfs df }
--}
 
 setGhcjsSuffixes :: Bool     -- oneshot option, -c
                  -> DynFlags
@@ -397,6 +370,7 @@ printBootInfo v
   | "--print-default-topdir" `elem` v = putStrLn =<< getDefaultTopDir
   | "--print-native-too"     `elem` v = print ("--native-too" `elem` v)
   | "--numeric-ghc-version"  `elem` v = putStrLn getGhcCompilerVersion
+  | "--print-rts-profiled"   `elem` v = print rtsIsProfiled
   | otherwise                         = error "no --ghcjs-setup-print or --ghcjs-booting-print options found"
   where
     t = fromMaybe (error noTopDirErrorMsg) (getArgsTopDir v)

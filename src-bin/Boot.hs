@@ -110,6 +110,7 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsJobs         :: Maybe Int  -- ^ number of parallel jobs
                                  , _bsDebug        :: Bool       -- ^ build debug version of the libraries (GHCJS records the STG in the object files for easier inspection)
                                  , _bsProf         :: Bool       -- ^ build profiling version of the libraries
+                                 , _bsHaddock      :: Bool       -- ^ build documentation
                                  , _bsVerbosity    :: Verbosity  -- ^ verbosity level 0..3, 2 is default
                                  , _bsIconvInclude :: Maybe Text -- ^ directory containing iconv.h
                                  , _bsIconvLib     :: Maybe Text -- ^ directory containing iconv library
@@ -443,6 +444,8 @@ optParser = BootSettings
                   help "build debug libraries with extra checks" )
             <*> fmap not (switch ( long "no-prof" <>
                   help "don't generate profiling version of the libraries" ))
+            <*> fmap not (switch ( long "no-haddock" <>
+                  help "don't generate documentation" ))
             <*> (fmap Verbosity . option) ( long "verbosity"   <> short 'v' <> value 2 <>
                   help "verbose output" )
             <*> (optional . fmap T.pack . strOption) ( long "with-iconv-includes" <> metavar "DIR" <>
@@ -955,7 +958,7 @@ cabalStage1 pkgs = sub $ do
                 ,bj (s^.bsGmpInTree)    "--with-intree-gmp"
                 ]
   globalFlags <- cabalGlobalFlags
-  flags <- cabalInstallFlags
+  flags <- cabalInstallFlags (length pkgs == 1)
   let args = globalFlags ++ ("install" : pkgs) ++
              [ "--solver=topdown" -- the modular solver refuses to install stage1 packages
              ] ++ map ("--configure-option="<>) configureOpts ++ flags
@@ -968,7 +971,7 @@ cabalInstall [] = do
   return ()
 cabalInstall pkgs = do
   globalFlags <- cabalGlobalFlags
-  flags <- cabalInstallFlags
+  flags <- cabalInstallFlags (length pkgs == 1)
   setenv "GHCJS_BOOTING" "1"
   let args = globalFlags ++ "install" : pkgs ++ flags
   checkInstallPlan pkgs args
@@ -1000,8 +1003,8 @@ cabalGlobalFlags = do
   return [ "--config-file", toTextI (instDir </> "cabalBootConfig")
          ]
 
-cabalInstallFlags :: B [Text]
-cabalInstallFlags = do
+cabalInstallFlags :: Bool -> B [Text]
+cabalInstallFlags parmakeGhcjs = do
   debug    <- view (beSettings . bsDebug)
   v        <- view (beSettings . bsVerbosity)
   j        <- view (beSettings . bsJobs)
@@ -1009,6 +1012,7 @@ cabalInstallFlags = do
   ghcjsPkg <- view (bePrograms . bpGhcjsPkg)
   instDir  <- view (beLocations . blGhcjsTopDir)
   prof     <- view (beSettings . bsProf)
+  haddock  <- view (beSettings . bsHaddock)
   return $ [ "--global"
            , "--ghcjs"
            , "--one-shot"
@@ -1024,7 +1028,7 @@ cabalInstallFlags = do
            , "--htmldir",       toTextI (instDir </> "doc" </> "html")
            , "--haddockdir",    toTextI (instDir </> "doc" </> "haddock")
            , "--sysconfdir",    toTextI (instDir </> "etc")
-           , "--enable-documentation"
+           , bool haddock "--enable-documentation" "--disable-documentation"
            , "--haddock-html"
            , "--haddock-hoogle"
            , bool prof "--enable-library-profiling" "--disable-library-profiling"
@@ -1032,7 +1036,7 @@ cabalInstallFlags = do
            bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++
            -- workaround for Cabal bug?
            bool isWindows ["--disable-executable-stripping", "--disable-library-stripping"] [] ++
-           catMaybes [ (("-j"<>) . showT) <$> (Just (1::Int)) -- j  (fixme, workaround for boot issues)
+           catMaybes [ (((bool parmakeGhcjs "--ghcjs-options=-j" "-j")<>) . showT) <$> j
                      , bj debug "--ghcjs-options=-debug"
                      , bj (v > info) "-v2"
                      ]
@@ -1278,8 +1282,8 @@ reportProgramLocation bs p
 
 -- | check that the GHC, ghcjs and ghcjs-pkg we're using are the correct version
 checkProgramVersions :: BootSettings -> BootPrograms -> IO BootPrograms
-checkProgramVersions bs pgms =
-  foldrM verifyVersion pgms
+checkProgramVersions bs pgms = do
+  pgms' <- foldrM verifyVersion pgms
     [ (bpGhcjs,    "--numeric-version",       Just Info.getCompilerVersion,    True)
     , (bpGhcjs,    "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
     , (bpGhc,      "--numeric-version",       Just Info.getGhcCompilerVersion, True)
@@ -1287,8 +1291,16 @@ checkProgramVersions bs pgms =
     , (bpGhcjsPkg, "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
     , (bpCabal,    "--numeric-version",       Nothing,                         True)
     , (bpNode,     "--version",               Nothing,                         True)
-    ] >>= verifyNodeVersion
+    ]
+  verifyNotProfiled
+  verifyNodeVersion pgms'
   where
+    verifyNotProfiled :: IO ()
+    verifyNotProfiled = do
+      res <- T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-rts-profiled"]
+      when (res /= "False") $ failWith ("GHCJS program " <> pgms ^. bpGhcjs . pgmLocText <>
+                                        " has been installed with executable profiling.\n" <>
+                                        "You need a non-profiled executable to boot")
     verifyVersion :: (Lens' BootPrograms (Program a), Text, Maybe String, Bool) -> BootPrograms -> IO BootPrograms
     verifyVersion (l, arg :: Text, expected :: Maybe String, update :: Bool) ps = do
       res <- T.strip <$> run' bs (ps ^. l) [arg]

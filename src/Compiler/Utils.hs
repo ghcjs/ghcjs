@@ -56,7 +56,6 @@ import           System.Environment
 import           System.FilePath
 
 import           Gen2.Utils
-import           Compiler.Settings
 
 touchFile :: DynFlags -> FilePath -> IO ()
 touchFile df file = do

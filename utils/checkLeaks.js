@@ -46,7 +46,7 @@ var ctxProcess = copy(process);
 ctxProcess.exit = function(exitCode) {
     this.disableTimeout = true;
 }
-ctxSetTimeout = function() {
+var ctxSetTimeout = function() {
     if(!ctxProcess.disableTimeout)
         return setTimeout.apply(this, arguments);
 }

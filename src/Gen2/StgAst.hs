@@ -38,8 +38,6 @@ import           UniqFM
 import           UniqSet
 import qualified Var
 
-import           Compiler.Info
-
 import           Control.Monad
 import           System.Environment (getArgs)
 import           System.IO.Unsafe

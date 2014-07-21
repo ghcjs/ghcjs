@@ -232,7 +232,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
 
 
   -- add GHCJS configuration
-    buildingSetup = Ghcjs.buildingCabalSetup (map fst srcs) dflags4
+    buildingSetup = Ghcjs.gsBuildingCabalSetup ghcjsSettings
     dflags4a = case (postLoadMode, ghcLink dflags4) of
                     (DoMake, LinkBinary) | native
                              && not (Ghcjs.gsNativeExecutables ghcjsSettings)
@@ -487,7 +487,7 @@ showInfoMode = mkPreLoadMode ShowInfo
 printSetting :: String -> Mode
 printSetting k = mkPreLoadMode (PrintWithDynFlags f)
     where f settings dflags = fromMaybe (panic ("Setting not found: " ++ show k))
-                            $ lookup k (Ghcjs.compilerInfo settings dflags)
+                            $ lookup k (Ghcjs.compilerInfo (Ghcjs.gsNativeToo settings) dflags)
 
 mkPreLoadMode :: PreLoadMode -> Mode
 mkPreLoadMode = Right . Left
@@ -811,7 +811,7 @@ showBanner _postLoadMode dflags = do
 showInfo :: Ghcjs.GhcjsSettings -> DynFlags -> IO ()
 showInfo settings dflags = do
         let sq x = " [" ++ x ++ "\n ]"
-        putStrLn $ sq $ intercalate "\n ," $ map show $ Ghcjs.compilerInfo settings dflags
+        putStrLn $ sq $ intercalate "\n ," $ map show $ Ghcjs.compilerInfo (Ghcjs.gsNativeToo settings) dflags
 
 showSupportedExtensions :: IO ()
 showSupportedExtensions = mapM_ putStrLn supportedLanguagesAndExtensions

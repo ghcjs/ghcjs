@@ -147,6 +147,12 @@ decodeModifiedUTF8 = either (const Nothing) Just . TE.decodeUtf8' . unmodify
   where
     unmodify = BL.toStrict . S.replace (B.pack [192,128]) (B.singleton 0)
 
+buildingDebug :: DynFlags -> Bool
+buildingDebug dflags = WayDebug `elem` ways dflags
+
+buildingProf :: DynFlags -> Bool
+buildingProf dflags = WayProf `elem` ways dflags
+
 -- use instead of ErrUtils variant to prevent being suppressed
 compilationProgressMsg :: DynFlags -> String -> IO ()
 compilationProgressMsg dflags msg

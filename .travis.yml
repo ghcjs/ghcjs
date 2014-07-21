@@ -24,12 +24,12 @@ install:
     - cabal install --enable-tests --enable-benchmarks
     - ghcjs --version
     - ghcjs-boot --version
-    - ghcjs-boot --dev --with-node nodejs
+    - ghcjs-boot --dev --quick --with-node nodejs -j2 --no-prof --no-haddock
     - cabal install -j2 --ghcjs random QuickCheck
     - ghcjs-pkg list
 
 script:
-    - ./dist/build/test/test -j 2 -t ghc -t conc -t integer -t ffi -t profiling
+    - ./dist/build/test/test -j 2 -t ghc -t conc -t integer -t ffi -t pkg --with-node nodejs
 
 notifications:
   irc:

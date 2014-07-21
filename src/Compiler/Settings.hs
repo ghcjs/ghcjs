@@ -3,10 +3,8 @@
 module Compiler.Settings where
 
 import           Compiler.JMacro
-import           Compiler.Info
 
 import           Gen2.Base
-import qualified Gen2.Object         as Object
 
 import           Control.Applicative
 import           Control.Concurrent.MVar
@@ -119,24 +117,4 @@ data GhcjsEnv = GhcjsEnv
 
 newGhcjsEnv :: IO GhcjsEnv
 newGhcjsEnv = GhcjsEnv <$> newMVar M.empty <*> newMVar M.empty <*> newMVar 0
-
-buildingDebug :: DynFlags -> Bool
-buildingDebug dflags = WayDebug `elem` ways dflags
-
-buildingProf :: DynFlags -> Bool
-buildingProf dflags = WayProf `elem` ways dflags
-
-compilerInfo :: GhcjsSettings
-             -> DynFlags
-             -> [(String, String)]
-compilerInfo settings dflags = do
-      let topDir = getTopDir dflags
-      nubBy ((==) `on` fst) $
-           [ ("Project name"     , "The Glorious Glasgow Haskell Compilation System for JavaScript")
-           , ("Global Package DB", getGlobalPackageDB topDir)
-           , ("Project version"  , getCompilerVersion)
-           , ("LibDir"           , topDir)
-           , ("Native Too"       , if gsNativeToo settings then "YES" else "NO")
-           ] ++ DynFlags.compilerInfo dflags
-
 

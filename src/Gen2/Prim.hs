@@ -38,7 +38,6 @@ import           Data.Monoid
 import qualified Data.Set as S
 
 import           Compiler.JMacro (j, je, JExpr(..), JStat(..))
-import           Compiler.Settings (buildingProf)
 
 import           Gen2.Profiling
 import           Gen2.RtsTypes

@@ -58,18 +58,21 @@ encodeMapping xs = encodeStr . combineMappings $ map (\ys -> (length ys, head ys
 -- we can assume that the encoder does not generate characters that have to be
 -- escaped or are outside ASCII range as long as it's double quoted
 assignDat :: String -> String -> String
-assignDat var val = "h$" ++ var ++ " = \"" ++ val ++ "\";"
+assignDat var val = "var h$" ++ var ++ " = \"" ++ val ++ "\";"
 
 mkRanges :: (Char -> Bool) -> String
-mkRanges p = encodeRLE $ map p (enumFromTo minBound maxBound)
+mkRanges p = encodeRLE $ map p listChars
 
 toAbs :: Int -> Int
 toAbs x | x < 0     = 2 * (abs x) - 1
         | otherwise = 2 * x
 
+-- skip unassigned planes 3-13
+listChars = map toEnum ([0..0x2FFFF] ++ [0xE0000..0x10FFFF])
+
 -- must map to a nonnegative int
 mkMapping :: (Char -> Int) -> String
-mkMapping f = encodeMapping $ map f (enumFromTo minBound maxBound)
+mkMapping f = encodeMapping $ map f listChars
 
 -- map the biggest categories to zero. PrivateUse is fixed and
 -- the ranges are hardcoded in string.js

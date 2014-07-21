@@ -51,6 +51,7 @@ import           Gen2.Base
 import           Gen2.ClosureInfo
 import qualified Gen2.Object    as Object
 import qualified Gen2.Optimizer as Optimizer
+import           Gen2.Utils (buildingProf, buildingDebug)
 
 -- | collect global objects (data / CAFs). rename them and add them to the table
 collectGlobals :: [StaticInfo]
