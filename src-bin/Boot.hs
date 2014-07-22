@@ -127,6 +127,8 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsWithNode     :: Maybe Text -- ^ location of the node.js program
                                  , _bsWithDataDir  :: Maybe Text -- ^ override data dir
                                  , _bsWithConfig   :: Maybe Text -- ^ installation source configuration (default: lib/etc/boot-sources.yaml in data dir)
+                                 , _bsShimsDevBranch :: Maybe Text -- ^ override shims branch or commit
+                                 , _bsBootDevBranch  :: Maybe Text -- ^ override ghcjs-boot branch or commit
                                  } deriving (Ord, Eq, Data, Typeable)
 
 {- | locations to get installation files from
@@ -478,6 +480,10 @@ optParser = BootSettings
                   help "data directory with libraries and configuration files" )
             <*> (optional . fmap T.pack . strOption) ( long "with-config" <> metavar "FILE" <>
                   help "boot configuration file (default: boot.yaml in datadir)" )
+            <*> (optional . fmap T.pack . strOption ) ( long "shims-dev-branch" <> metavar "BRANCH" <>
+                  help "override shims branch or commit to check out" )
+            <*> (optional . fmap T.pack . strOption ) ( long "ghcjs-boot-dev-branch" <> metavar "BRANCH" <>
+                  help "override ghcjs-boot branch or commit to check out" )
 
 initPackageDB :: B ()
 initPackageDB = do
@@ -1211,9 +1217,17 @@ initBootEnv bs = do
                              & template . iso toTextI fromText %~ substText
       substText = Utils.substPatterns subst env
   BootConfigFile stgs srcs pgms1 <- substituteConfig <$> readBootConfigFile bs
-  pgms2 <- configureBootPrograms bs srcs pgms1
+  let srcs' = configureBootSources bs srcs
+  pgms2 <- configureBootPrograms bs srcs' pgms1
   locs  <- configureBootLocations bs pgms2
-  return (BootEnv bs srcs locs pgms2 stgs)
+  return (BootEnv bs srcs' locs pgms2 stgs)
+
+-- | configure the sources
+configureBootSources :: BootSettings -> BootSources -> BootSources
+configureBootSources bs srcs =
+  srcs & bsrcShimsDevBranch %~ override bsShimsDevBranch
+       & bsrcBootDevBranch  %~ override bsBootDevBranch
+  where override l = maybe id const (bs^.l)
 
 -- | configure the locations
 configureBootLocations :: BootSettings
