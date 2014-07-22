@@ -520,58 +520,29 @@ genApp ctx i [StgLitArg (MachStr bs), x]
         return ([j| `top` = `ApplExpr (jsv "h$appendToHsStringA") $ [toJExpr d, toJExpr a] ++ profArg`; |]
                ,ExprInline Nothing)
 genApp top i a
-    | not (isUnboxedTupleType (idType i)) &&
-      (isPrimitiveType (idType i) || isStrictType (idType i)) &&
-      not (might_be_a_function (idType i))
-            = do
+    | n == 0 && (isUnboxedTupleType (idType i) || isStrictType (idType i)) = do
                 a <- assignAllCh "genApp" (ctxTarget top) <$> genIds i
                 return (a, ExprInline Nothing)
     | n == 0 && i `elementOfUniqSet` ctxEval top = do
                 a <- assignAllCh "genApp" (ctxTarget top) <$> genIds i
                 return (a, ExprInline Nothing)
-    | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) && not (isLocalId i) = do
-          ii <- enterId
-          cgs <- use gsSettings
-          let e | csInlineEnter cgs = [j| var t = `ii`.f;
-                                          var tt = t.t;
-                                          `R1` = `ii`;
-                                          if(tt === `Thunk`) {
-                                            return t;
-                                          } else if(tt === `Blackhole`) {
-                                            return h$ap_0_0_fast();
-                                          }
-                                        |]
-                | otherwise = [j| return h$e(`ii`); |]
-          return (e, ExprCont)
-    | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i))
-          = do
+    | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) = do
              ii <- enterId
-             cgs <- use gsSettings
-             let e | csInlineEnter cgs = [j| var t = `ii`.f;
-                                             var tt = t.t;
-                                             `R1` = `ii`;
-                                             if(tt === `Thunk`) {
-                                               return t;
-                                             } else if(tt === `Blackhole`) {
-                                               return h$ap_0_0_fast();
-                                             }
-                                           |]
-                   | otherwise = [j| return h$e(`ii`); |]
-             return (e, ExprCont)
+             return ([j| return h$e(`ii`) |], ExprCont)
     | idRepArity i == n && not (isLocalId i) && n /= 0 = do
         as' <- concatMapM genArg a
-        j <- jumpToII i as' =<< r1
-        return (j, ExprCont)
+        jmp <- jumpToII i as' =<< r1
+        return (jmp, ExprCont)
     | idRepArity i < n && idRepArity i > 0 =
          let (reg,over) = splitAt (idRepArity i) a
          in  do
            reg' <- concatMapM genArg reg
            pc   <- pushCont over
-           j    <- jumpToII i reg' =<< r1
-           return (pc <> j, ExprCont)
+           jmp  <- jumpToII i reg' =<< r1
+           return (pc <> jmp, ExprCont)
     | otherwise = do
-           j <- jumpToFast a =<< r1
-           return (j, ExprCont)
+           jmp <- jumpToFast a =<< r1
+           return (jmp, ExprCont)
   where
     stackTop = [je| `Stack`[`Sp`] |]
     enterId :: G JExpr
@@ -1583,11 +1554,8 @@ isInlineForeignCall (CCall (CCallSpec _ cconv safety)) =
   not (cconv /= JavaScriptCallConv && playSafe safety)
 
 isInlineApp :: UniqSet Id -> Id -> [StgArg] -> Bool
-isInlineApp v i [] = i `elementOfUniqSet` v
+isInlineApp v i [] = isUnboxedTupleType (idType i) || isStrictType (idType i) || i `elementOfUniqSet` v
 isInlineApp v i [StgLitArg (MachStr b)]
   | getUnique i `elem` [unpackCStringIdKey, unpackCStringUtf8IdKey, unpackCStringAppendIdKey] = True
-isInlineApp v i args
-  | not (might_be_a_function (idType i)) &&
-    (isPrimitiveType (idType i) || isStrictType (idType i)) = True
-  | otherwise = False
+isInlineApp _ _ _ = False
 
