@@ -2,6 +2,8 @@ env:
     - GHCVER=7.8.3
 
 before_install:
+    - export GHCJS_BOOTING=1
+    - export GHCJS_BOOTING_STAGE1=1
     - sudo add-apt-repository -y ppa:hvr/ghc
     - sudo add-apt-repository -y ppa:chris-lea/node.js
     - sudo apt-get update -qq
@@ -12,6 +14,8 @@ before_install:
 install:
     - cabal-1.18 update
     - cabal-1.18 install alex happy
+    - mkdir _ghcjs_deps
+    - cd _ghcjs_deps
     - git clone https://github.com/ghcjs/cabal.git
     - cd cabal
     - git checkout ghcjs
@@ -19,12 +23,19 @@ install:
     - cabal --version
     - cd ..
     - git clone https://github.com/ghcjs/ghcjs-prim.git
+    - cd ghcjs-prim
+    - git checkout $TRAVIS_BRANCH
+    - cd ..
     - git clone https://github.com/ghcjs/haddock-internal.git
+    - cd haddock-internal
+    - git checkout $TRAVIS_BRANCH
+    - cd ..
     - cabal install ./ghcjs-prim ./haddock-internal
+    - cd ..
     - cabal install --enable-tests --enable-benchmarks
     - ghcjs --version
     - ghcjs-boot --version
-    - ghcjs-boot --dev --quick --with-node nodejs -j2 --no-prof --no-haddock
+    - ghcjs-boot --dev --build-stage1-unbooted --with-node nodejs -j2 --no-prof --no-haddock
     - cabal install -j2 --ghcjs random QuickCheck
     - ghcjs-pkg list
 

@@ -127,8 +127,11 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsWithNode     :: Maybe Text -- ^ location of the node.js program
                                  , _bsWithDataDir  :: Maybe Text -- ^ override data dir
                                  , _bsWithConfig   :: Maybe Text -- ^ installation source configuration (default: lib/etc/boot-sources.yaml in data dir)
+                                 , _bsShimsDevRepo   :: Maybe Text -- ^ override shims repository
                                  , _bsShimsDevBranch :: Maybe Text -- ^ override shims branch or commit
+                                 , _bsBootDevRepo    :: Maybe Text -- ^ override ghcjs-boot repository
                                  , _bsBootDevBranch  :: Maybe Text -- ^ override ghcjs-boot branch or commit
+                                 , _bsStage1Unbooted :: Bool       -- ^ build stage1 (like --quick) but leave the compiler in unbooted state with the Cabal package still registered
                                  } deriving (Ord, Eq, Data, Typeable)
 
 {- | locations to get installation files from
@@ -269,25 +272,27 @@ main = do
   where
     actions :: B ()
     actions = verbosely . tracing False $ do
-      whenM (view (beSettings . bsClean)) cleanTree
+      e <- ask
+      when (e ^. beSettings . bsClean) cleanTree
       removeCompleted
       mapM_ addCheckpoint ["ghcjs-boot checkpoints file", "init"]
       installBuildTools
-      view (beSettings . bsDev) >>= cond installDevelopmentTree installReleaseTree
+      bool (e ^. beSettings . bsDev) installDevelopmentTree installReleaseTree
       initPackageDB
       cleanCache
       installRts
       installEtc
       installDocs
       installTests
-      base <- view (beLocations . blGhcjsLibDir)
+      let base = e ^. beLocations . blGhcjsLibDir
       setenv "CFLAGS" $ "-I" <> toTextI (base </> "include")
       installFakes
       installStage1
-      removeFakes
-      unlessM (view $ beSettings . bsQuick) installStage2
+      unless (e ^. beSettings . bsStage1Unbooted) $ do
+        removeFakes
+        unless (e ^. beSettings . bsQuick) installStage2
       liftIO . printBootEnvSummary True =<< ask
-      addCompleted
+      unless (e ^. beSettings . bsStage1Unbooted) addCompleted
 
 cleanTree :: B ()
 cleanTree = do
@@ -480,10 +485,16 @@ optParser = BootSettings
                   help "data directory with libraries and configuration files" )
             <*> (optional . fmap T.pack . strOption) ( long "with-config" <> metavar "FILE" <>
                   help "boot configuration file (default: boot.yaml in datadir)" )
+            <*> (optional . fmap T.pack . strOption ) ( long "shims-dev-repo" <> metavar "REPOSITORY" <>
+                  help "override shims repository location" )
             <*> (optional . fmap T.pack . strOption ) ( long "shims-dev-branch" <> metavar "BRANCH" <>
                   help "override shims branch or commit to check out" )
+            <*> (optional . fmap T.pack . strOption ) ( long "ghcjs-boot-dev-repo" <> metavar "REPOSITORY" <>
+                  help "override ghcjs-boot repository location" )
             <*> (optional . fmap T.pack . strOption ) ( long "ghcjs-boot-dev-branch" <> metavar "BRANCH" <>
                   help "override ghcjs-boot branch or commit to check out" )
+            <*> switch ( long "build-stage1-unbooted" <>
+                  help "build stage1 packages but leave the compiler in unbooted state (for testing only)" )
 
 initPackageDB :: B ()
 initPackageDB = do
@@ -1225,9 +1236,11 @@ initBootEnv bs = do
 -- | configure the sources
 configureBootSources :: BootSettings -> BootSources -> BootSources
 configureBootSources bs srcs =
-  srcs & bsrcShimsDevBranch %~ override bsShimsDevBranch
-       & bsrcBootDevBranch  %~ override bsBootDevBranch
-  where override l = maybe id const (bs^.l)
+  srcs & bsrcShimsDev       %~ override (const . (:[])) bsShimsDevRepo
+       & bsrcShimsDevBranch %~ override const bsShimsDevBranch
+       & bsrcBootDev        %~ override (const . (:[])) bsBootDevRepo
+       & bsrcBootDevBranch  %~ override const bsBootDevBranch
+  where override f l = maybe id f (bs^.l)
 
 -- | configure the locations
 configureBootLocations :: BootSettings
