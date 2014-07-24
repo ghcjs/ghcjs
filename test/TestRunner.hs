@@ -99,14 +99,16 @@ setupTests tmpDir = do
   onlyOptEnv    <- getEnvOpt "GHCJS_TEST_ONLYOPT"
   onlyUnoptEnv  <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
   log           <- newIORef []
+  let noProf    = taNoProfiling testArgs
   (symbs, base) <- prepareBaseBundle testDir ghcjs []
-  (profSymbs, profBase) <- prepareBaseBundle testDir ghcjs ["-prof"]
+  (profSymbs, profBase) <- if noProf then return (symbs, base)
+                                     else prepareBaseBundle testDir ghcjs ["-prof"]
   let specFile  = testDir </> if taBenchmark testArgs then "benchmarks.yaml" else "tests.yaml"
       symbsFile = tmpDir </> "base.symbs"
       profSymbsFile = tmpDir </> "base.p_symbs"
       disUnopt  = onlyOptEnv || taBenchmark testArgs
       disOpt    = onlyUnoptEnv
-      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv log testDir
+      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv noProf log testDir
                               symbsFile base
                               profSymbsFile profBase
                               ghcjs runhaskell nodePgm smPgm
@@ -169,6 +171,7 @@ data TestArgs = TestArgs { taHelp             :: Bool
                          , taWithNode         :: Maybe String
                          , taWithSpiderMonkey :: Maybe String
                          , taWithTests        :: Maybe String
+                         , taNoProfiling      :: Bool
                          , taBenchmark        :: Bool
                          } deriving Show
 
@@ -180,11 +183,13 @@ optParser = TestArgs <$> switch (long "help" <> help "show help message")
                      <*> (optional . strOption) (long "with-node" <> metavar "PROGRAM" <> help "node.js program to use")
                      <*> (optional . strOption) (long "with-spidermonkey" <> metavar "PROGRAM" <> help "SpiderMonkey jsshell program to use")
                      <*> (optional . strOption) (long "with-tests" <> metavar "LOCATION" <> help "location of the test cases")
+                     <*> switch (long "no-profiling" <> help "do not run profiling tests")
                      <*> switch (long "benchmark" <> help "run benchmarks instead of regression tests")
 
 -- settings for the test suite
 data TestOpts = TestOpts { disableUnopt        :: Bool
                          , disableOpt          :: Bool
+                         , noProfiling         :: Bool
                          , failedTests         :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
                          , testsuiteLocation   :: FilePath
                          , baseSymbs           :: FilePath
@@ -196,7 +201,6 @@ data TestOpts = TestOpts { disableUnopt        :: Bool
                          , nodeProgram         :: Maybe FilePath
                          , spiderMonkeyProgram :: Maybe FilePath
                          }
-benchmark = TestOpts True False
 
 -- settings for a single test
 data TestSettings =
@@ -393,7 +397,7 @@ extraJsFiles file =
 runGhcjsResult :: TestOpts -> FilePath -> IO [((StdioResult, Integer), String)]
 runGhcjsResult opts file = do
   settings <- settingsFor opts file
-  if tsDisabled settings
+  if tsDisabled settings || (tsProf settings && noProfiling opts)
     then return []
     else do
       let unopt = if disableUnopt opts || tsDisableUnopt settings then [] else [False]
