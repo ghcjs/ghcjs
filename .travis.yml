@@ -40,7 +40,7 @@ install:
     - ghcjs-pkg list
 
 script:
-    - ./dist/build/test/test --with-node nodejs --no-profiling -j 2 -t ghc -t conc -t integer -t ffi -t pkg
+    - ./dist/build/test/test --travis --with-node nodejs --no-profiling -j 2 -t ghc -t conc -t integer -t pkg
 
 notifications:
   irc:

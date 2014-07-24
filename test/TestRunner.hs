@@ -108,7 +108,7 @@ setupTests tmpDir = do
       profSymbsFile = tmpDir </> "base.p_symbs"
       disUnopt  = onlyOptEnv || taBenchmark testArgs
       disOpt    = onlyUnoptEnv
-      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv noProf log testDir
+      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv noProf (taTravis testArgs) log testDir
                               symbsFile base
                               profSymbsFile profBase
                               ghcjs runhaskell nodePgm smPgm
@@ -173,6 +173,7 @@ data TestArgs = TestArgs { taHelp             :: Bool
                          , taWithTests        :: Maybe String
                          , taNoProfiling      :: Bool
                          , taBenchmark        :: Bool
+                         , taTravis           :: Bool
                          } deriving Show
 
 optParser :: Parser TestArgs
@@ -185,11 +186,13 @@ optParser = TestArgs <$> switch (long "help" <> help "show help message")
                      <*> (optional . strOption) (long "with-tests" <> metavar "LOCATION" <> help "location of the test cases")
                      <*> switch (long "no-profiling" <> help "do not run profiling tests")
                      <*> switch (long "benchmark" <> help "run benchmarks instead of regression tests")
+                     <*> switch (long "travis" <> help "use settings for running on Travis CI")
 
 -- settings for the test suite
 data TestOpts = TestOpts { disableUnopt        :: Bool
                          , disableOpt          :: Bool
                          , noProfiling         :: Bool
+                         , travisCI            :: Bool
                          , failedTests         :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
                          , testsuiteLocation   :: FilePath
                          , baseSymbs           :: FilePath
@@ -208,6 +211,7 @@ data TestSettings =
                , tsDisableSpiderMonkey :: Bool
                , tsDisableOpt          :: Bool
                , tsDisableUnopt        :: Bool
+               , tsDisableTravis       :: Bool
                , tsDisabled            :: Bool
                , tsProf                :: Bool     -- ^ use profiling bundle
                , tsCompArguments       :: [String] -- ^ command line arguments to pass to compiler
@@ -216,13 +220,14 @@ data TestSettings =
                } deriving (Eq, Show)
 
 instance Default TestSettings where
-  def = TestSettings False False False False False False [] [] []
+  def = TestSettings False False False False False False False [] [] []
 
 instance FromJSON TestSettings where
   parseJSON (Object o) = TestSettings <$> o .:? "disableNode"         .!= False
                                       <*> o .:? "disableSpiderMonkey" .!= False
                                       <*> o .:? "disableOpt"          .!= False
                                       <*> o .:? "disableUnopt"        .!= False
+                                      <*> o .:? "disableTravis"       .!= False
                                       <*> o .:? "disabled"            .!= False
                                       <*> o .:? "prof"                .!= False
                                       <*> o .:? "compArguments"       .!= []
@@ -397,7 +402,7 @@ extraJsFiles file =
 runGhcjsResult :: TestOpts -> FilePath -> IO [((StdioResult, Integer), String)]
 runGhcjsResult opts file = do
   settings <- settingsFor opts file
-  if tsDisabled settings || (tsProf settings && noProfiling opts)
+  if tsDisabled settings || (tsProf settings && noProfiling opts) || (tsDisableTravis settings && travisCI opts)
     then return []
     else do
       let unopt = if disableUnopt opts || tsDisableUnopt settings then [] else [False]
