@@ -292,9 +292,9 @@ linkTh settings js_files dflags expr_pkgs hpt code = do
 -- this is a hack because we don't have a TcGblEnv. Fix before 7.10
 packageDeps :: DynFlags -> [PackageId] -> IO [PackageId]
 packageDeps dflags pkgs = do
-  configs <- filter ((`elem`pkgs) . packageConfigId) <$> getPreloadPackagesAnd dflags pkgs
   let allPkgIds = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
-      allDeps = L.nub . map (\(InstalledPackageId i) -> i) . concatMap depends $ configs
+  configs <- filter ((`elem`pkgs) . packageConfigId) <$> getPreloadPackagesAnd dflags (filter (`elem` allPkgIds) pkgs)
+  let allDeps = L.nub . map (\(InstalledPackageId i) -> i) . concatMap depends $ configs
   return $ filter (\p -> any (L.isPrefixOf (packageIdString p)) allDeps || p `elem` pkgs) allPkgIds
 
 lookupRequiredPackage :: DynFlags -> String -> Text -> PackageId

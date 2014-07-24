@@ -36,7 +36,7 @@ install:
     - ghcjs --version
     - ghcjs-boot --version
     - ghcjs-boot --dev --build-stage1-unbooted --with-node nodejs -j2 --no-prof --no-haddock
-    - cabal install -j2 --ghcjs random QuickCheck
+    - cabal install -j2 --ghcjs random QuickCheck stm syb
     - ghcjs-pkg list
 
 script:
