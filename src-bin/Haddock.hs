@@ -49,6 +49,7 @@ import qualified Compiler.GhcjsPlatform as Ghcjs
 import qualified Compiler.GhcjsProgram  as Ghcjs
 import qualified Compiler.Settings      as Ghcjs
 
+main :: IO ()
 main = do
   args <- Info.getFullArguments -- adds wrapper arguments for Windows
   haddock args

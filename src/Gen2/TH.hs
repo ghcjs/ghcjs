@@ -35,6 +35,7 @@ import           Unique
 import           Type
 import           Maybes
 import           UniqFM
+import           UniqSet
 import           SimplStg
 import           Serialized
 import           Annotations
@@ -45,9 +46,12 @@ import           RdrName
 
 import           Control.Concurrent
 import           Control.Concurrent.MVar
+import           Control.Lens
 import           Control.Monad
 
+import           Data.Data.Lens
 import qualified Data.Map                       as M
+import           Data.Maybe
 import           Data.Text                      (Text)
 import           Data.Binary
 import           Data.Binary.Get
@@ -64,6 +68,8 @@ import qualified Data.Text.Encoding             as T
 import qualified Data.Text.IO                   as T
 import qualified Data.Text.Lazy.Encoding        as TL
 import qualified Data.Text.Lazy                 as TL
+
+import           Distribution.Package (InstalledPackageId(..))
 
 import           GHC.Desugar
 
@@ -91,11 +97,12 @@ runTh :: forall m. Quasi m
       -> GhcjsEnv
       -> HscEnv
       -> DynFlags
+      -> [PackageId]
       -> Type       -- ^ type of the result
       -> ByteString -- ^ in-memory object of the compiled CoreExpr
       -> Text       -- ^ JavaScript symbol name that the expression is bound to
       -> m HValue
-runTh is_io js_env hsc_env dflags ty code symb = do
+runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
   loc <- if is_io then return Nothing
                   else Just <$> TH.qLocation
   let m   = maybe "<global>" TH.loc_module loc
@@ -123,7 +130,7 @@ runTh is_io js_env hsc_env dflags ty code symb = do
       r <- getThRunner is_io dflags js_env hsc_env m
       base <- TH.qRunIO $ takeMVar (thrBase r)
       let settings = thSettings { gsUseBase = BaseState base }
-      lr  <- TH.qRunIO $ linkTh settings [] dflags (hsc_HPT hsc_env) (Just code)
+      lr  <- TH.qRunIO $ linkTh settings [] dflags expr_pkgs (hsc_HPT hsc_env) (Just code)
       ext <- TH.qRunIO $ mconcat <$> mapM B.readFile (Gen2.linkLibB lr ++ Gen2.linkLibA lr)
       let bs = ext <> BL.toStrict (Gen2.linkOut lr)
                    <> T.encodeUtf8 ("\nh$TH.loadedSymbol = " <> symb <> ";\n")
@@ -155,7 +162,7 @@ getThRunner is_io dflags js_env hsc_env m = do
     Just r  -> TH.qRunIO (putMVar (thRunners js_env) runners) >> return r
     Nothing -> do
       r <- TH.qRunIO $ do
-        lr <- linkTh thSettings [] dflags (hsc_HPT hsc_env) Nothing
+        lr <- linkTh thSettings [] dflags [] (hsc_HPT hsc_env) Nothing
         fb <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibB lr)
         fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
         let rts = TL.encodeUtf8 $ Gen2.rtsText' dflags (Gen2.dfCgSettings dflags)
@@ -223,7 +230,7 @@ ghcjsCompileCoreExpr js_env settings hsc_env srcspan ds_expr = do
   stg_pgm0      <- Gen2.coreToStg dflags (mod n) bs
   (stg_pgm1, c) <- stg2stg dflags (mod n) stg_pgm0
   let bs = Gen2.generate settings dflags (mod n) stg_pgm1 c
-      r  = TH.Q (runTh isNonQ js_env hsc_env dflags ty bs (symb n))
+      r  = TH.Q (runTh isNonQ js_env hsc_env dflags (eDeps prep_expr) ty bs (symb n))
   if isNonQ
      then TH.runQ r               -- run inside IO, limited functionality, no reification
      else return (unsafeCoerce r) -- full functionality (for splices)
@@ -236,14 +243,16 @@ ghcjsCompileCoreExpr js_env settings hsc_env srcspan ds_expr = do
     mod n    = mkModule pkg (mkModuleName $ "ThRunner" ++ show n)
     pkg      = stringToPackageId "thrunner"
     dflags   = hsc_dflags hsc_env
+    eDeps e  = uniqSetToList . mkUniqSet . catMaybes $ map (fmap modulePackageId . nameModule_maybe . idName) (e ^.. template)
 
 linkTh :: GhcjsSettings        -- settings (contains the base state)
        -> [FilePath]           -- extra js files
        -> DynFlags             -- dynamic flags
+       -> [PackageId]
        -> HomePackageTable     -- what to link
        -> Maybe ByteString     -- current module or Nothing to get the initial code + rts
        -> IO Gen2.LinkResult
-linkTh settings js_files dflags hpt code = do
+linkTh settings js_files dflags expr_pkgs hpt code = do
   let home_mod_infos = eltsUFM hpt
       pidMap    = pkgIdMap (pkgState dflags)
       pkg_deps :: [PackageId]
@@ -259,10 +268,11 @@ linkTh settings js_files dflags hpt code = do
   -- link all packages that TH depends on, error if not configured
   (th_deps_pkgs, mk_th_deps) <- Gen2.thDeps dflags'
   (rts_deps_pkgs, _) <- Gen2.rtsDeps dflags'
+  expr_pkgs_deps <- packageDeps dflags expr_pkgs
   let addDep pkgs name
         | any (matchPackageName name) pkgs = pkgs
         | otherwise = lookupRequiredPackage dflags "to run Template Haskell" name : pkgs
-      pkg_deps' = L.foldl' addDep pkg_deps (th_deps_pkgs ++ rts_deps_pkgs)
+      pkg_deps' = L.foldl' addDep pkg_deps (th_deps_pkgs ++ rts_deps_pkgs) ++ expr_pkgs_deps
       th_deps   = mk_th_deps pkg_deps'
       th_deps'  = T.pack $ (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++ show (ways dflags')
       deps      = map (\pkg -> (pkg, packageLibPaths pkg)) pkg_deps'
@@ -278,6 +288,14 @@ linkTh settings js_files dflags hpt code = do
                               [topDir dflags </> "ghcjs_boot.completed"]
                               (BL.toStrict . runPut . put $ lr)
               return lr
+
+-- this is a hack because we don't have a TcGblEnv. Fix before 7.10
+packageDeps :: DynFlags -> [PackageId] -> IO [PackageId]
+packageDeps dflags pkgs = do
+  configs <- filter ((`elem`pkgs) . packageConfigId) <$> getPreloadPackagesAnd dflags pkgs
+  let allPkgIds = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
+      allDeps = L.nub . map (\(InstalledPackageId i) -> i) . concatMap depends $ configs
+  return $ filter (\p -> any (L.isPrefixOf (packageIdString p)) allDeps || p `elem` pkgs) allPkgIds
 
 lookupRequiredPackage :: DynFlags -> String -> Text -> PackageId
 lookupRequiredPackage dflags requiredFor pkgName

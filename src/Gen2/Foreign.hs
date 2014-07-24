@@ -67,6 +67,10 @@ import Platform
 
 import Gen2.PrimIface
 
+import Data.Char
+import Data.List (stripPrefix)
+import Data.List.Split
+
 type Binding = (Id, CoreExpr)
 
 installForeignHooks :: Bool -> DynFlags -> DynFlags
@@ -703,7 +707,6 @@ ghcjsTcFImport (L dloc fo@(ForeignImport (L nloc nm) hs_ty _ imp_decl))
                  -- Use a LocalId to obey the invariant that locally-defined
                  -- things are LocalIds.  However, it does not need zonking,
                  -- (so TcHsSyn.zonkForeignExports ignores it).
-
        ; imp_decl' <- ghcjsTcCheckFIType sig_ty arg_tys res_ty imp_decl
           -- Can't use sig_ty here because sig_ty :: Type and
           -- we need HsType Id hence the undefined
@@ -712,6 +715,12 @@ ghcjsTcFImport (L dloc fo@(ForeignImport (L nloc nm) hs_ty _ imp_decl))
 ghcjsTcFImport d = pprPanic "ghcjsTcFImport" (ppr d)
 
 ghcjsTcCheckFIType :: Type -> [Type] -> Type -> ForeignImport -> TcM ForeignImport
+-- this is a temporary hack until template-haskell has been updated,
+-- this allows Template Haskell to produce JavaScriptCallConv declarations without proper support for them
+ghcjsTcCheckFIType sig_ty arg_tys res_ty idecl@(CImport cconv safety mh (CFunction (StaticTarget lbl mpkg b)))
+  | Just lbl' <- stripPrefix "__ghcjs_javascript_" (unpackFS lbl) = do
+      let lbl'' = mkFastString $ map (chr . read) (splitOn "_" lbl')
+      ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport JavaScriptCallConv safety mh (CFunction (StaticTarget lbl'' mpkg b)))
 ghcjsTcCheckFIType sig_ty arg_tys res_ty idecl@(CImport cconv safety mh (CFunction target))
   | cconv == JavaScriptCallConv = do
       dflags <- getDynFlags
