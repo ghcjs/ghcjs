@@ -92,15 +92,17 @@ main = do
     -- 1. extract the -B flag from the args
     (argv0, booting, booting_stage1) <- Ghcjs.getWrappedArgs
 
-    -- fall back to native GHC if we're booting (we can't build Setup.hs with GHCJS yet)
-    when (booting_stage1 && any ("Cabal-" `isPrefixOf`) argv0) Ghcjs.bootstrapFallback
-
     let (minusB_args, argv1) = partition ("-B" `isPrefixOf`) argv0
         mbMinusB | null minusB_args = Nothing
                  | otherwise = Just (drop 2 (last minusB_args))
+        argv1' = map (mkGeneralLocated "on the commandline") argv1
+    when (any (== "--run") argv1) (Ghcjs.runJsProgram mbMinusB argv1)
+    (argv1'', ghcjsSettings) <- Ghcjs.getGhcjsSettings argv1'
 
-    let argv1' = map (mkGeneralLocated "on the commandline") argv1
-    (argv1'', ghcjsSettings)    <- Ghcjs.getGhcjsSettings argv1'
+    -- fall back to native GHC if we're booting (we can't build Setup.hs with GHCJS yet)
+    when (booting_stage1 && Ghcjs.gsBuildingCabalSetup ghcjsSettings)
+      Ghcjs.bootstrapFallback
+
     (argv2, staticFlagWarnings) <- parseStaticFlags argv1''
 
     -- 2. Parse the "mode" flags (--make, --interactive etc.)
@@ -373,6 +375,10 @@ checkOptions mode dflags srcs objs = do
    when (notNull (filter wayRTSOnly (ways dflags))
          && isInterpretiveMode mode) $
         hPutStrLn stderr ("Warning: -debug, -threaded and -ticky are ignored by GHCi")
+
+   when (isInterpretiveMode mode) $
+      do throwGhcException (UsageError
+                   "--interactive is not yet supported.")
 
         -- -prof and --interactive are not a good combination
    when ((filter (not . wayRTSOnly) (ways dflags) /= interpWays)

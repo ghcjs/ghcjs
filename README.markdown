@@ -96,17 +96,32 @@ for example:
     $ node helloWorld.jsexe/all.js
     Hello world!
 
+### Cabal support
+
 Use `cabal install --ghcjs packageName` to install a package
 
 Most packages from hackage should work out of the box. The main exception is packages with foreign (non-Haskell) dependencies.
 For these packages a JavaScript implementation of the dependencies must be provided. If a package you want to use does
 not work, please create a ticket.
 
+### Sandboxes
+
+You can create a new sandbox or add GHCJS support to an existing sandbox with:
+
+    $ cabal sandbox init ghcjs
+
+If you also want to set GHCJS as the default compiler in the sandbox, run:
+
+    $ cabal sandbox init ghcjs
+    $ echo "compiler: ghcjs" >> cabal.config
+
+### Package databases
+
 Use `ghcjs-pkg` to manipulate the GHCJS package database
 
 The package database and runtime files from the [shims](https://github.com/ghcjs/shims.git) repository are kept in the
 GHCJS application data directory, typically `~/.ghcjs/`. Remove this directory to reset your GHCJS installation, you
-need to run `ghcjs-boot --init` again.
+will need to run `ghcjs-boot --init` again.
 
 See [GHCJS introduction](http://weblog.luite.com/wordpress/?p=14) for more examples.
 

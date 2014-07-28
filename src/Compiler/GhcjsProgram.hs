@@ -184,6 +184,19 @@ checkIsBooted mbMinusB = do
                        "(running `ghcjs-boot' might fix this)\n"
     exitWith (ExitFailure 87)
 
+
+runJsProgram :: Maybe String -> [String] -> IO ()
+runJsProgram Nothing _ = error noTopDirErrorMsg
+runJsProgram (Just topDir) args
+  | (_:script:scriptArgs) <- dropWhile (/="--run") args = do
+      hSetBuffering stdin NoBuffering
+      hSetBuffering stdout NoBuffering
+      hSetBuffering stderr NoBuffering
+      node <- T.strip <$> T.readFile (topDir </> "node")
+      ph <- runProcess (T.unpack node) (script:scriptArgs) Nothing Nothing Nothing Nothing Nothing
+      exitWith =<< waitForProcess ph
+  | otherwise = error "usage: ghcjs --run [script] [arguments]"
+
 -- | when booting GHCJS, we pretend to have the Cabal lib installed
 --   call GHC to compile our Setup.hs
 bootstrapFallback :: IO ()
