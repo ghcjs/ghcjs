@@ -797,7 +797,7 @@ genAlts top e (UbxTupAlt n) _ [(_, bs, use, expr)] = do
   (ej, er) <- genExpr top expr
   return (l <> ej, er)
 genAlts top e (AlgAlt tc) _ [alt] | isUnboxedTupleTyCon tc = error "genAlts: unexpected unboxed tuple"
-genAlts top e (AlgAlt tc) (Just es) [(DataAlt dc, bs, use, expr)] = do
+genAlts top e (AlgAlt tc) (Just es) [(DataAlt dc, bs, use, expr)] | not (isUnboxableCon dc) = do
   bsi <- mapM genIdsI bs
   let bus  = concat $ zipWith (\bss u -> zip bss (repeat u)) bsi use
       args = zipWith (\(i,u) de -> if u then decl i <> assignj i de else mempty) bus es
