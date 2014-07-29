@@ -115,6 +115,8 @@ isJsFile = (==".js") . takeExtension
 mkGhcjsOutput :: String -> String
 mkGhcjsOutput "" = ""
 mkGhcjsOutput file
+  | null ext         = file
+  | ext == ".js"     = file
   | ext == ".hi"     = replaceExtension file ".js_hi"
   | ext == ".o"      = replaceExtension file ".js_o"
   | ext == ".dyn_hi" = replaceExtension file ".js_dyn_hi"
@@ -122,6 +124,7 @@ mkGhcjsOutput file
   | otherwise        = replaceExtension file (".js_" ++ drop 1 ext)
   where
     ext = takeExtension file
+
 mkGhcjsSuf :: String -> String
 mkGhcjsSuf "o"      = "js_o"
 mkGhcjsSuf "hi"     = "js_hi"

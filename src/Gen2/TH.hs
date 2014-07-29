@@ -131,7 +131,7 @@ runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
       base <- TH.qRunIO $ takeMVar (thrBase r)
       let settings = thSettings { gsUseBase = BaseState base }
       lr  <- TH.qRunIO $ linkTh settings [] dflags expr_pkgs (hsc_HPT hsc_env) (Just code)
-      ext <- TH.qRunIO $ mconcat <$> mapM B.readFile (Gen2.linkLibB lr ++ Gen2.linkLibA lr)
+      ext <- TH.qRunIO $ mconcat <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibB lr ++ Gen2.linkLibA lr)
       let bs = ext <> BL.toStrict (Gen2.linkOut lr)
                    <> T.encodeUtf8 ("\nh$TH.loadedSymbol = " <> symb <> ";\n")
       hv <- requestRunner is_io r (TH.RunTH tht bs loc) >>= \case
@@ -143,14 +143,13 @@ runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
 -- | instruct the runner to finish up
 finishTh :: Quasi m => Bool -> GhcjsEnv -> String -> ThRunner -> m ()
 finishTh is_io js_env m runner = do
-  TH.qRunIO $ do
-    takeMVar (thrBase runner)
-    modifyMVar_ (thRunners js_env) (return . M.delete m)
-  requestRunner is_io runner TH.FinishTH >>= \case
-    TH.FinishTH' -> return ()
-    _            -> error "finishTh: unexpected response, expected FinishTH' message"
-  let ph = thrProcess runner
-  TH.qRunIO $ maybe (void $ terminateProcess ph) (\_ -> return ()) =<< timeout 30000000 (waitForProcess ph)
+    let ph = thrProcess runner
+    TH.qRunIO $ takeMVar (thrBase runner)
+    requestRunner is_io runner TH.FinishTH >>= \case
+      TH.FinishTH' -> return ()
+      _            -> error "finishTh: unexpected response, expected FinishTH' message"
+    TH.qRunIO $ modifyMVar_ (thRunners js_env) (return . M.delete m)
+    TH.qRunIO $ maybe (void $ terminateProcess ph) (\_ -> return ()) =<< timeout 30000000 (waitForProcess ph)
 
 thSettings :: GhcjsSettings
 thSettings = GhcjsSettings False True False False Nothing Nothing Nothing True True True Nothing NoBase

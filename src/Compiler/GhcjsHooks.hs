@@ -153,11 +153,6 @@ runGhcjsPhase _ _ (RealPhase ph) input dflags
   | Just next <- lookup ph skipPhases = do
     output <- phaseOutputFilename next
     liftIO (copyFile input output `catchIOError` \_ -> return ())
-#if MIN_VERSION_ghc(7,8,3)
-    case ph of As _ -> (liftIO $ doFakeNative dflags (dropExtension output)); _ -> return ()
-#else
-    when (ph == As) (liftIO $ doFakeNative dflags (dropExtension output))
-#endif
     return (RealPhase next, output)
   where
 #if MIN_VERSION_ghc(7,8,3)
@@ -214,13 +209,4 @@ ghcjsCompileModule settings jsEnv env core mod = do
       (stg', cCCs) <- stg2stg dflags (cg_module core) stg
       return $ variantRender gen2Variant settings dflags (cg_module core) stg' cCCs
 
-doFakeNative :: DynFlags -> FilePath -> IO ()
-doFakeNative df base = do
-  b <- Utils.getEnvOpt "GHCJS_FAKE_NATIVE"
-  when b $ do
-    mapM_ backupExt ["hi", "o", "dyn_hi", "dyn_o"]
-    mapM_ touchExt  ["hi", "o", "dyn_hi", "dyn_o"]
-  where
-    backupExt ext = Utils.copyNoOverwrite (base ++ ".backup_" ++ ext) (base ++ "." ++ ext)
-    touchExt  ext = Utils.touchFile df (base ++ "." ++ ext)
 

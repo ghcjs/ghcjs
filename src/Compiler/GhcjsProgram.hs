@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, ScopedTypeVariables, MultiWayIf, TupleSections #-}
+{-# LANGUAGE CPP, ScopedTypeVariables, LambdaCase, MultiWayIf, TupleSections #-}
 {-
   The GHCJS-specific parts of the frontend (ghcjs program)
 
@@ -23,12 +23,13 @@ import           Panic (handleGhcException)
 import           Exception
 
 import           Control.Applicative
+import           Control.Concurrent.MVar (readMVar)
 import           Control.Monad
 import           Control.Monad.IO.Class
 
 import qualified Data.ByteString as B
 import           Data.IORef
-import           Data.List (isSuffixOf, isPrefixOf, partition,)
+import           Data.List (isSuffixOf, isPrefixOf, partition)
 import qualified Data.List as L
 import qualified Data.Map as M
 import           Data.Maybe
@@ -53,6 +54,7 @@ import           System.Exit
 import           System.FilePath
 import           System.IO
 import           System.Process
+import           System.Timeout
 
 import           Compiler.GhcjsPlatform
 import           Compiler.Info
@@ -66,6 +68,7 @@ import qualified Gen2.PrimIface   as Gen2
 import qualified Gen2.Shim        as Gen2
 import qualified Gen2.Rts         as Gen2
 import qualified Gen2.RtsTypes    as Gen2
+import qualified Gen2.TH          as Gen2
 
 -- workaround for platform dependence bugs
 import           Rules (mkRuleBase)
@@ -299,10 +302,7 @@ ghcjsErrorHandler fm (FlushOut flushOut) inner =
                          fatalErrorMsg'' fm "stack overflow: use +RTS -K<size> to increase it"
                      _ -> case fromException exception of
                           Just (ex :: ExitCode) -> liftIO $ throwIO ex
-                          _ -> case fromException exception of
-                               -- don't panic!
-                               Just (Panic str) -> fatalErrorMsg'' fm str
-                               _                -> fatalErrorMsg'' fm (show exception)
+                          _ -> fatalErrorMsg'' fm (ghcjsShowException exception)
            exitWith (ExitFailure 1)
          ) $
 
@@ -313,15 +313,38 @@ ghcjsErrorHandler fm (FlushOut flushOut) inner =
                 case ge of
                      PhaseFailed _ code -> exitWith code
                      Signal _ -> exitWith (ExitFailure 1)
-                     _ -> do fatalErrorMsg'' fm (show ge)
+                     _ -> do fatalErrorMsg'' fm (ghcjsShowException $ toException ge)
                              exitWith (ExitFailure 1)
             ) $
   inner
 
-sourceErrorHandler :: GhcMonad m => m a -> m a
-sourceErrorHandler m = handleSourceError (\e -> do
-  GHC.printException e
-  liftIO $ exitWith (ExitFailure 1)) m
+ghcjsShowException :: SomeException -> String
+ghcjsShowException e = case fromException e of
+  Just (PprPanic s _) -> ghcjsShowException $ toException (Panic (s ++ "\n<<details unavailable>>"))
+  Just (Panic s) -> "panic! (the 'impossible' happened)\n"
+                ++ "  (GHCJS version " ++ getCompilerVersion ++ ", GHC version " ++ getGhcCompilerVersion ++ "):\n\t"
+                ++ s ++ "\n\n"
+                ++ "Please report this as a GHCJS bug:  https://github.com/ghcjs/ghcjs/issues\n"
+  Just (PprSorry s _) -> ghcjsShowException $ toException (Sorry (s ++ "\n<<details unavailable>>"))
+  Just (Sorry s) -> "sorry! (unimplemented feature or known bug)\n"
+                  ++ "  (GHCJS version " ++ getCompilerVersion ++ ", GHC version " ++ getGhcCompilerVersion ++ "):\n\t"
+                  ++ s ++ "\n"
+  _ -> show e
+
+ghcjsCleanupHandler :: (ExceptionMonad m, MonadIO m) => DynFlags -> GhcjsEnv -> m a -> m a
+ghcjsCleanupHandler dflags env inner =
+      defaultCleanupHandler dflags inner `gfinally`
+          (liftIO $ do
+              runners <- readMVar (thRunners env)
+              forM_ (M.assocs runners) $ \(m,r) ->
+                getProcessExitCode (thrProcess r) >>= \case
+                  Just _ -> return ()
+                  Nothing ->
+                    (timeout 2000000 (Gen2.finishTh True env m r) >>= maybe (terminate r) return)
+                      `catch` \(_::SomeException) -> terminate r
+          )
+  where
+    terminate r = terminateProcess (thrProcess r) `catch` \(_::SomeException) -> return ()
 
 runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
                    -- like GHC's -B argument

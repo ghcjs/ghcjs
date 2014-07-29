@@ -220,8 +220,10 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        liftIO $ exitWith (ExitFailure 1)) $ do
          liftIO $ handleFlagWarnings dflags4 flagWarnings'
 
+  jsEnv <- liftIO Ghcjs.newGhcjsEnv
+
         -- make sure we clean up after ourselves
-  GHC.defaultCleanupHandler dflags4 $ do
+  Ghcjs.ghcjsCleanupHandler dflags4 jsEnv $ do
 
   liftIO $ showBanner postLoadMode dflags4
 
@@ -246,12 +248,10 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   let baseDir = Ghcjs.getLibDir dflags4a
   dflags4b <- if native
                 then return (Ghcjs.setNativePlatform ghcjsSettings baseDir dflags4a)
-                else do
-                   jsEnv <- liftIO Ghcjs.newGhcjsEnv
-                   return $
-                     Ghcjs.setGhcjsPlatform ghcjsSettings jsEnv js_objs baseDir $
-                     updateWays $ addWay' (WayCustom "js") $
-                     Ghcjs.setGhcjsSuffixes {- oneshot -} False dflags4a -- fixme value of oneshot?
+                else return $
+                       Ghcjs.setGhcjsPlatform ghcjsSettings jsEnv js_objs baseDir $
+                       updateWays $ addWay' (WayCustom "js") $
+                       Ghcjs.setGhcjsSuffixes {- oneshot -} False dflags4a -- fixme value of oneshot?
 
   let dflags5 = dflags4b { ldInputs = map (FileOption "") objs
                                    ++ ldInputs dflags4b }
