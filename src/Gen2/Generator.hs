@@ -596,7 +596,7 @@ genEntry _ i (StgRhsCon _cc con args) = return () -- mempty -- error "local data
 
 genEntry ctx i cl@(StgRhsClosure cc _bi live upd_flag srt args body) = resetSlots $ do
   ll <- loadLiveFun live
-  upd <- genUpdFrame upd_flag
+  upd <- genUpdFrame upd_flag i
   body <- genBody (ctxEval ctx) i args body
   ei <- jsEntryIdI i
   et <- genEntryType args
@@ -606,7 +606,7 @@ genEntry ctx i cl@(StgRhsClosure cc _bi live upd_flag srt args body) = resetSlot
                else enterCostCentreFun cc
   let f = JFunc [] (ll <> upd <> setcc <> body)
   sr <- genStaticRefs srt
-  emitClosureInfo (ClosureInfo (itxt ei) (CIRegs 0 $ PtrV : concatMap idVt args) (itxt ei <> " ," <> T.pack (show i))
+  emitClosureInfo (ClosureInfo (itxt ei) (CIRegs 0 $ PtrV : concatMap idVt args) (itxt ei <> ", " <> T.pack (show i))
                      (fixedLayout $ map (uTypeVt . idType) live) et sr)
   emitToplevel
              [j| `decl ei`;
@@ -642,9 +642,10 @@ genFunInfo name as = ValExpr . JList $ [s, jstr name] ++ map (toJExpr . uTypeVt 
 argSize :: [Type] -> Int
 argSize = sum . map (varSize . uTypeVt)
 
-genUpdFrame :: UpdateFlag -> C
-genUpdFrame Updatable = updateThunk <$> use gsSettings
-genUpdFrame _         = mempty
+genUpdFrame :: UpdateFlag -> Id -> C
+genUpdFrame _ i | isOneShotBndr i = mempty
+genUpdFrame Updatable _           = updateThunk <$> use gsSettings
+genUpdFrame _         _           = mempty
 
 -- allocate local closures
 allocCls :: [(Id, StgRhs)] -> C
