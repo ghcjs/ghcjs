@@ -116,7 +116,9 @@ tryReadShimFile dflags file = do
       let s = settings dflags
           -- suppress line numbers and enable extended syntax
           cppOpts opts = (Option "-P") : filter (/=(Option "-traditional")) opts
-          s1 = s { sPgm_P = (fst (sPgm_P s), cppOpts (snd $ sPgm_P s)) }
+          s1 = s { sPgm_P = (fst (sPgm_P s), cppOpts (snd $ sPgm_P s))
+                 , sOpt_P = filter (/="-traditional") (sOpt_P s)
+                 }
           dflags1 = dflags { settings = s1 }
       outfile <- SysTools.newTempName dflags "jspp"
       Utils.doCpp dflags1 True False file outfile
