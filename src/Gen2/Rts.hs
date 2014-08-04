@@ -1189,7 +1189,10 @@ fun h$lazy_e {
 }
 `ClosureInfo "h$lazy_e" (CIRegs 0 [PtrV]) "generic lazy value" (CILayoutFixed 0 []) CIThunk noStatic`;
 
-// TODO: generate this only when profiling is enabled
+|] <>
+  -- Top-level statements to generate only in profiling mode
+  profStat s [j|
+
 fun h$setCcs_e {
   h$restoreCCS(`Stack`[`Sp`-1]);
   `adjSpN 2`;
