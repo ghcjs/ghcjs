@@ -1,0 +1,8 @@
+{
+  "name": "core-overlay",
+  "private": true,
+  "dependencies": {
+    "polymer": "Polymer/polymer#>=0.3.0 <1.0.0",
+    "core-transition": "Polymer/core-transition#>=0.3.0 <1.0.0"
+  }
+}

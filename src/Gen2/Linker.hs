@@ -41,6 +41,7 @@ import           Data.Maybe               (fromMaybe, isJust, isNothing)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
+import           Data.String              (fromString)
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.IO             as T
@@ -56,6 +57,7 @@ import qualified Distribution.Simple.Utils as Cabal
 
 import           GHC.Generics
 
+import qualified Shelly                   as Sh
 import           System.FilePath          (splitPath, (<.>), (</>), dropExtension, takeExtension)
 import           System.Directory         (createDirectoryIfMissing, doesDirectoryExist
                                           ,canonicalizePath
@@ -325,8 +327,15 @@ combineFiles df fp = do
 writeHtml :: DynFlags -> FilePath -> IO ()
 writeHtml df out = do
   e <- doesFileExist htmlFile
-  when (not e) $
-    B.readFile (getLibDir df </>"template.html") >>= B.writeFile htmlFile
+  unless e . Sh.shelly $ do
+    let libdir = getLibDir df
+    if "-DGHCJS_PROF_GUI" `elem` opt_P df
+      then do
+        Sh.cp (fromString $ libdir </> "template-prof.html") (fromString htmlFile)
+        Sh.cp_r (fromString $ libdir </> "polymer-components")
+                (fromString $ out </> "polymer-components")
+      else
+        Sh.cp (fromString $ libdir </> "template.html") (fromString htmlFile)
   where
     htmlFile = out </> "index.html"
 

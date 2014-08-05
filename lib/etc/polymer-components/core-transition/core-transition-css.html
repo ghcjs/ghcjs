@@ -1,0 +1,76 @@
+<!--
+Copyright (c) 2014 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+-->
+
+<link rel="import" href="core-transition.html">
+
+<polymer-element name="core-transition-css" extends="core-transition" attributes="transitionType">
+<template>
+  <link no-shim rel="stylesheet" href="core-transition-overlay.css">
+</template>
+<script>
+
+  Polymer('core-transition-css', {
+    
+    baseClass: 'core-transition',
+    openedClass: 'core-opened',
+    closedClass: 'core-closed',
+    completeEventName: 'transitionend',
+
+    registerCallback: function(element) {
+      this.transitionStyle = element.templateContent().firstElementChild;
+    },
+
+    // template is just for loading styles, we don't need a shadowRoot
+    fetchTemplate: function() {
+      return null;
+    },
+
+    go: function(node, state) {
+      if (state.opened !== undefined) {
+        this.transitionOpened(node, state.opened);
+      }
+    },
+
+    setup: function(node) {
+      if (!node._hasTransitionStyle) {
+        if (!node.shadowRoot) {
+          node.createShadowRoot().innerHTML = '<content></content>';
+        }
+        this.installScopeStyle(this.transitionStyle, 'transition',
+            node.shadowRoot);
+        node._hasTransitionStyle = true;
+        node.classList.add(this.baseClass);
+        if (this.transitionType) {
+          node.classList.add(this.baseClass + '-' + this.transitionType);
+        }
+      }
+    },
+
+    transitionOpened: function(node, opened) {
+      this.listenOnce(node, this.completeEventName, function() {
+        node.classList.toggle(this.revealedClass, opened);
+        if (!opened) {
+          node.classList.remove(this.closedClass);
+        }
+        this.complete(node);
+      });
+      node.classList.toggle(this.openedClass, opened);
+      node.classList.toggle(this.closedClass, !opened);
+    }
+
+  });
+</script>
+</polymer-element>
+
+<core-transition-css id="core-transition-fade"></core-transition-css>
+<core-transition-css id="core-transition-center" transitionType="center"></core-transition-css>
+<core-transition-css id="core-transition-top" transitionType="top"></core-transition-css>
+<core-transition-css id="core-transition-bottom" transitionType="bottom"></core-transition-css>
+<core-transition-css id="core-transition-left" transitionType="left"></core-transition-css>
+<core-transition-css id="core-transition-right" transitionType="right"></core-transition-css>
