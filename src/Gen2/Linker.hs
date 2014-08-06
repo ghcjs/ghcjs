@@ -329,16 +329,12 @@ writeHtml df out = do
   e <- doesFileExist htmlFile
   unless e $ do
     let libdir = getLibDir df
-    if "-DGHCJS_PROF_GUI" `elem` opt_P df
-      then do
-        Cabal.installOrdinaryFile Cabal.normal
-          (fromString $ libdir </> "template-prof.html") (fromString htmlFile)
-        Cabal.installDirectoryContents Cabal.normal
-          (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
-          (fromString $ out </> "polymer-components")
-      else
-        Cabal.installOrdinaryFile Cabal.normal
-          (fromString $ libdir </> "template.html") (fromString htmlFile)
+    when ("-DGHCJS_PROF_GUI" `elem` opt_P df) $
+      Cabal.installDirectoryContents Cabal.normal
+        (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
+        (fromString $ out </> "polymer-components")
+    Cabal.installOrdinaryFile Cabal.normal
+      (fromString $ libdir </> "template.html") (fromString htmlFile)
   where
     htmlFile = out </> "index.html"
 
