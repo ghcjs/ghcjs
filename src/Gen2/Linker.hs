@@ -54,10 +54,10 @@ import           Data.Yaml                (FromJSON(..), Value(..))
 import qualified Data.Yaml                as Yaml
 
 import qualified Distribution.Simple.Utils as Cabal
+import qualified Distribution.Verbosity    as Cabal
 
 import           GHC.Generics
 
-import qualified Shelly                   as Sh
 import           System.FilePath          (splitPath, (<.>), (</>), dropExtension, takeExtension)
 import           System.Directory         (createDirectoryIfMissing, doesDirectoryExist
                                           ,canonicalizePath
@@ -327,15 +327,18 @@ combineFiles df fp = do
 writeHtml :: DynFlags -> FilePath -> IO ()
 writeHtml df out = do
   e <- doesFileExist htmlFile
-  unless e . Sh.shelly $ do
+  unless e $ do
     let libdir = getLibDir df
     if "-DGHCJS_PROF_GUI" `elem` opt_P df
       then do
-        Sh.cp (fromString $ libdir </> "template-prof.html") (fromString htmlFile)
-        Sh.cp_r (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
-                (fromString $ out </> "polymer-components")
+        Cabal.installOrdinaryFile Cabal.normal
+          (fromString $ libdir </> "template-prof.html") (fromString htmlFile)
+        Cabal.installDirectoryContents Cabal.normal
+          (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
+          (fromString $ out </> "polymer-components")
       else
-        Sh.cp (fromString $ libdir </> "template.html") (fromString htmlFile)
+        Cabal.installOrdinaryFile Cabal.normal
+          (fromString $ libdir </> "template.html") (fromString htmlFile)
   where
     htmlFile = out </> "index.html"
 
