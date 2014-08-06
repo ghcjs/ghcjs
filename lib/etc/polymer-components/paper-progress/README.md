@@ -1,4 +1,0 @@
-paper-progress
-==============
-
-Paper Progress

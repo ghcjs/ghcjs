@@ -332,7 +332,7 @@ writeHtml df out = do
     if "-DGHCJS_PROF_GUI" `elem` opt_P df
       then do
         Sh.cp (fromString $ libdir </> "template-prof.html") (fromString htmlFile)
-        Sh.cp_r (fromString $ libdir </> "polymer-components")
+        Sh.cp_r (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
                 (fromString $ out </> "polymer-components")
       else
         Sh.cp (fromString $ libdir </> "template.html") (fromString htmlFile)
