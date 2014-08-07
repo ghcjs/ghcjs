@@ -108,7 +108,7 @@ Library
                    syb            >= 0.4      && < 0.5,
                    bytestring     >= 0.10     && < 0.11,
                    attoparsec     >= 0.12     && < 0.13,
-                   aeson          >= 0.7      && < 0.8,
+                   aeson          >= 0.7      && < 0.9,
                    text           >= 0.11     && < 1.2,
                    wl-pprint-text >= 1.1      && < 1.2,
                    lens           >= 4.0      && < 4.4,
