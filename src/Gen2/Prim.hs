@@ -444,7 +444,7 @@ genPrim _ _ ReadOffAddrOp_Addr [c1,c2] [a,o,i] =
                    `c2` = 0;
                  }
                |]
-genPrim _ _ ReadOffAddrOp_Float [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getFloat32(`o`+(`i`<2),true); |]
+genPrim _ _ ReadOffAddrOp_Float [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getFloat32(`o`+(`i`<<2),true); |]
 genPrim _ _ ReadOffAddrOp_Double [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getFloat64(`o`+(`i`<<3),true); |]
 -- ReadOffAddrOp_StablePtr -- fixme
 genPrim _ _ ReadOffAddrOp_Int8   [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt8(`o`+`i`); |]
