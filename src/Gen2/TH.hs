@@ -274,8 +274,9 @@ linkTh settings js_files dflags expr_pkgs hpt code = do
       pkg_deps' = L.foldl' addDep pkg_deps (th_deps_pkgs ++ rts_deps_pkgs) ++ expr_pkgs_deps
       th_deps   = mk_th_deps pkg_deps'
       th_deps'  = T.pack $ (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++ show (ways dflags')
-      deps      = map (\pkg -> (pkg, packageLibPaths pkg)) pkg_deps'
+      deps      = map (\pkg -> (pkg, packageLibPaths pkg)) (L.nub $ pkg_deps' ++ pkgs)
       is_root   = const True
+      pkgs      = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
       link      = Gen2.link' dflags' settings "template haskell" [] deps obj_files js_files is_root th_deps
   if isJust code
      then link
