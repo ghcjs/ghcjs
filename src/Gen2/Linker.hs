@@ -329,10 +329,16 @@ writeHtml df out = do
   e <- doesFileExist htmlFile
   unless e $ do
     let libdir = getLibDir df
-    when ("-DGHCJS_PROF_GUI" `elem` opt_P df) $
+    when ("-DGHCJS_PROF_GUI" `elem` opt_P df) $ do
+      -- copy polymer files
       Cabal.installDirectoryContents Cabal.normal
         (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
         (fromString $ out </> "polymer-components")
+      -- copy Chart.js
+      Cabal.installOrdinaryFile Cabal.normal
+        (fromString $ libdir </> "shims" </> "lib" </> "Chart.js")
+        (fromString $ out </> "Chart.js")
+    -- copy index.html
     Cabal.installOrdinaryFile Cabal.normal
       (fromString $ libdir </> "template.html") (fromString htmlFile)
   where
