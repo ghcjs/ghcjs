@@ -77,6 +77,8 @@ Now install `GHCJS` itself:
     $ git clone https://github.com/ghcjs/ghcjs.git
     $ cabal install ./ghcjs
 
+If `cabal install ./ghcjs` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problms, since GHC ships with an older version. Try `--with-constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
+
 Build the base libraries for `GHCJS`:
 
     if you used the Git repository to install:
@@ -84,6 +86,8 @@ Build the base libraries for `GHCJS`:
 
     if you are using a package from hackage that includes the libraries:
     $ ghcjs-boot
+
+Some distros install node.js as `nodejs` instead of `node`. Add `--with-node nodejs` to the `ghcjs-boot` command in that case.
 
 Usage
 =====
