@@ -742,7 +742,7 @@ genRet top e at as l srt = withNewIdent f
 -- reorder the things we need to push to reuse existing stack values as much as possible
 -- True if already on the stack at that location
 optimizeFree :: [Id] -> G [(Id,Int,Bool)]
-optimizeFree ids = resetSlots $ do
+optimizeFree ids = do
   let ids' = concat $ map (\i -> map (i,) [1..varSize . uTypeVt . idType $ i]) ids
       l    = length ids'
   slots <- take l . (++repeat SlotUnknown) <$> getSlots
@@ -789,7 +789,7 @@ genAlts top e (PrimAlt tc) _ [(_, bs, use, expr)] = do
   return (dids <> assignAll {- Ch ("genAlts PrimAlt: " ++ show (idType e)) -} bss ie <> ej, er)
 genAlts top e (PrimAlt tc) _ alts = do
   ie <- genIds e
-  (r, bss) <- normalizeBranches top <$> mapM (mkPrimIfBranch top (tyConVt tc)) alts
+  (r, bss) <- normalizeBranches top <$> mapM (isolateSlots . mkPrimIfBranch top (tyConVt tc)) alts
   setSlots []
   return (mkSw ie bss, r)
 genAlts top e (UbxTupAlt n) _ [(_, bs, use, expr)] = do
@@ -810,7 +810,7 @@ genAlts top e (AlgAlt tc) _ [alt] = do
 genAlts top e (AlgAlt tc) _ alts@[(DataAlt dc,_,_,_),_]
   | isBoolTy (dataConType dc) = do
       i <- jsId e
-      (r, [(_,s1,_), (_,s2,_)]) <- normalizeBranches top <$> mapM (mkAlgBranch top e) alts
+      (r, [(_,s1,_), (_,s2,_)]) <- normalizeBranches top <$> mapM (isolateSlots . mkAlgBranch top e) alts
       let s = if dataConTag dc == 2 then [j| if(`i`) { `s1` } else { `s2` } |]
                                     else [j| if(`i`) { `s2` } else { `s1` } |]
       setSlots []
@@ -818,7 +818,7 @@ genAlts top e (AlgAlt tc) _ alts@[(DataAlt dc,_,_,_),_]
 -- fixme, add all alts
 genAlts top e (AlgAlt tc) _ alts = do
       ei <- jsId e
-      (r, brs) <- normalizeBranches top <$> mapM (mkAlgBranch top e) alts
+      (r, brs) <- normalizeBranches top <$> mapM (isolateSlots . mkAlgBranch top e) alts
       setSlots []
       return (mkSwitch [je| `ei`.f.a |] brs, r)
 genAlts top e a _ l = do
