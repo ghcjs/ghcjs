@@ -25,4 +25,4 @@ ghcjs-prim:
   GHCJS.Prim.Internal:
     - wouldBlock
     - blockedIndefinitelyOnMVar
-    - blockedIndefinitlyOnSTM
+    - blockedIndefinitelyOnSTM

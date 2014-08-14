@@ -231,7 +231,8 @@ dsJsFExportDynamic id co0 cconv = do
                       (mkFunTy addrPrimTy ty)
         mkExportTy = mkFunTy (mkFunTys arg_tys res_ty) unitTy
         (fun_args0, fun_r) = splitFunTys (dropForAlls fun_ty)
-        expr       = Lam arg_id $ mkApps (Var mkExport) [Lit (mkMachString $ (snd (jsTySigLit dflags True fun_r) : ".") ++ map (snd . jsTySigLit dflags False) fun_args0), Var arg_id]
+        -- fixme: disabled due to bug. enable again to make foreign exports work
+        expr       = Lam arg_id $ (Var arg_id) -- mkApps (Var mkExport) [Lit (mkMachString $ (snd (jsTySigLit dflags True fun_r) : ".") ++ map (snd . jsTySigLit dflags False) fun_args0), Var arg_id]
         fed        = (id `setInlineActivation` NeverActive)
     return ([(fed,expr)], empty, empty)
 

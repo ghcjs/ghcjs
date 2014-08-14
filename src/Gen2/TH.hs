@@ -60,6 +60,7 @@ import           Data.ByteString                (ByteString)
 import qualified Data.ByteString                as B
 import qualified Data.ByteString.Base16         as B16
 import qualified Data.ByteString.Lazy           as BL
+import           Data.Function
 import qualified Data.List                      as L
 import           Data.Monoid
 import qualified Data.Set                       as S
@@ -259,8 +260,7 @@ linkTh settings js_files dflags expr_pkgs hpt code = do
       linkables = map (expectJust "link".hm_linkable) home_mod_infos
       getOfiles (LM _ _ us) = map nameOfObject (filter isObject us)
       -- fixme include filename here?
-      th_obj    = maybe [] (\b -> [Left ("<Template Haskell>", b)]) code
-      obj_files = th_obj ++ map Right (concatMap getOfiles linkables)
+      obj_files = maybe [] (\b -> Left ("<Template Haskell>", b) : map Right (concatMap getOfiles linkables)) code
       packageLibPaths :: PackageId -> [FilePath]
       packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
       dflags' = dflags { ways = WayDebug : ways dflags }
@@ -271,10 +271,10 @@ linkTh settings js_files dflags expr_pkgs hpt code = do
   let addDep pkgs name
         | any (matchPackageName name) pkgs = pkgs
         | otherwise = lookupRequiredPackage dflags "to run Template Haskell" name : pkgs
-      pkg_deps' = L.foldl' addDep pkg_deps (th_deps_pkgs ++ rts_deps_pkgs) ++ expr_pkgs_deps
+      pkg_deps' = closeDeps dflags (L.foldl' addDep pkg_deps (th_deps_pkgs ++ rts_deps_pkgs) ++ expr_pkgs_deps)
       th_deps   = mk_th_deps pkg_deps'
       th_deps'  = T.pack $ (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++ show (ways dflags')
-      deps      = map (\pkg -> (pkg, packageLibPaths pkg)) (L.nub $ pkg_deps' ++ pkgs)
+      deps      = map (\pkg -> (pkg, packageLibPaths pkg)) pkg_deps'
       is_root   = const True
       pkgs      = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
       link      = Gen2.link' dflags' settings "template haskell" [] deps obj_files js_files is_root th_deps
@@ -296,6 +296,26 @@ packageDeps dflags pkgs = do
   configs <- filter ((`elem`pkgs) . packageConfigId) <$> getPreloadPackagesAnd dflags (filter (`elem` allPkgIds) pkgs)
   let allDeps = L.nub . map (\(InstalledPackageId i) -> i) . concatMap depends $ configs
   return $ filter (\p -> any (L.isPrefixOf (packageIdString p)) allDeps || p `elem` pkgs) allPkgIds
+
+-- get the closure the dependency graph
+closeDeps :: DynFlags -> [PackageId] -> [PackageId]
+closeDeps dflags pkgs = map packageConfigId $ go (map getInstalledPackage pkgs)
+  where
+    p       = pkgIdMap . pkgState $ dflags
+    allPkgs = eltsUFM . pkgIdMap . pkgState $ dflags
+    getInstalledPackage pkgId =
+      fromMaybe (error ("cannot find package " ++ show pkgId)) (lookupPackage p pkgId)
+    lookupInstalledPackage ipid =
+      case filter ((==ipid) . installedPackageId) allPkgs of
+        (x:_) -> x
+        _     -> error $ "cannot find package id " ++ show ipid
+    go :: [PackageConfig] -> [PackageConfig]
+    go xs
+      | length xs == length xs' = xs
+      | otherwise               = go xs'
+      where
+        xs' = L.nubBy ((==) `on` installedPackageId) $
+              concatMap (\x -> x : map lookupInstalledPackage (depends x)) xs
 
 lookupRequiredPackage :: DynFlags -> String -> Text -> PackageId
 lookupRequiredPackage dflags requiredFor pkgName

@@ -215,7 +215,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
             Just p -> putMVar cache c >> return p
             Nothing -> do
               p <- l ext pkg mod
-              -- putStrLn ("looked up: " ++ p)
+              -- putStrLn ("looked up: " ++ either (const $ T.unpack (pkgTxt pkg) ++ ":" ++ T.unpack mod ++ " already loaded") show p)
               putMVar cache (M.insert k p c)
               return p
         objs' = M.fromList $ map (\(Deps pkg m _ _ _, p) -> ((pkg,m),p)) objs
@@ -367,8 +367,7 @@ getDeps :: (Package -> Module -> IO LinkedObj)
         -> Set LinkableUnit -- Fun -- ^ don't link these symbols
         -> Set Fun -- ^ start here
         -> IO (Set LinkableUnit)
-getDeps lookup base fun = go' S.empty M.empty [] $
-           {- filter (`S.notMember` base) -} (S.toList fun)
+getDeps lookup base fun = go' S.empty M.empty [] $ S.toList fun
   where
     go :: Set LinkableUnit
        -> Map (Package, Module) Deps
