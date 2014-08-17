@@ -25,7 +25,7 @@ import           System.IO.Error       (IOError, isDoesNotExistError)
     add all executables that are not wrapped (or require an .options file on Windows) here
  -}
 notWrapped :: [String]
-notWrapped = ["ghcjs-boot", "ghcjs-run"]
+notWrapped = ["ghcjs-boot", "ghcjs-run", "ghcjs-patch"]
 
 main :: IO ()
 main = defaultMainWithHooks ghcjsHooks

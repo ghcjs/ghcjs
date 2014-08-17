@@ -243,6 +243,38 @@ Executable ghcjs-boot
                       unix-compat          >= 0.4    && < 0.5,
                       executable-path      >= 0      && < 0.1
 
+Executable ghcjs-patch
+    if os(Windows)
+      cpp-options: -DWINDOWS
+    ghc-options:      -threaded -O
+    Main-Is:          Patch.hs
+    Default-Language: Haskell2010
+    Hs-Source-Dirs:   src-bin
+    Build-Depends:    base                 >= 4      && < 5,
+                      ghcjs,
+                      directory,
+                      Cabal,
+                      mtl,
+                      transformers,
+                      lens,
+                      unordered-containers,
+                      vector,
+                      network,
+                      filepath             >= 1.3    && < 1.4,
+                      text                 >= 0.11   && < 1.2,
+                      bytestring           >= 0.10   && < 0.11,
+                      system-filepath      >= 0.4    && < 0.5,
+                      shelly               >= 1.5    && < 1.6,
+                      system-fileio        >= 0.3    && < 0.4,
+                      optparse-applicative >= 0.9    && < 0.10,
+                      tar                  >= 0.4    && < 0.5,
+                      HTTP                 >= 4000.2 && < 5000,
+                      yaml                 >= 0.8    && < 0.9,
+                      process              >= 1.2    && < 1.3,
+                      time                 >= 1.4    && < 1.5,
+                      unix-compat          >= 0.4    && < 0.5,
+                      executable-path      >= 0      && < 0.1
+
 Executable ghcjs-run
     if flag(compiler-only)
       Buildable:      False
