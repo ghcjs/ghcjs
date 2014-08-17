@@ -35,6 +35,7 @@ import           Control.Monad
 import qualified Data.ByteString as B
 import qualified Data.Foldable   as F
 import qualified Data.List       as L
+import           Data.Maybe (catMaybes)
 import           Data.Monoid
 import qualified Data.Set        as S
 import qualified Data.Text       as T
@@ -124,8 +125,8 @@ tryReadShimFile dflags file = do
       Utils.doCpp dflags1 True False file outfile
       B.readFile outfile
 
-collectShim :: FilePath -> (Pkg, Version) -> IO [FilePath]
-collectShim base (pkgName, pkgVer) = do
+readShim :: FilePath -> (Pkg, Version) -> IO (Maybe Shim)
+readShim base (pkgName, pkgVer) = do
   checkShimsInstallation base
   let configFile = base </> T.unpack pkgName <.> "yaml"
   e <- doesFileExist configFile
@@ -134,9 +135,16 @@ collectShim base (pkgName, pkgVer) = do
          case Yaml.decodeEither cfg of
            Left err -> do
              putStrLn ("invalid shim config: " ++ configFile ++ "\n   " ++ err)
-             return mempty
-           Right shim -> return (foldShim pkgName pkgVer shim)
-       else return mempty
+             return Nothing
+           Right shim -> return shim
+       else return Nothing
+
+collectShim :: FilePath -> (Pkg, Version) -> IO [FilePath]
+collectShim base (pkgName, pkgVer) = do
+  mbShim <- readShim base (pkgName, pkgVer)
+  case mbShim of
+    Just shim -> return (foldShim pkgName pkgVer shim)
+    Nothing   -> return mempty
 
 checkShimsInstallation :: FilePath -> IO ()
 checkShimsInstallation base = do
@@ -189,10 +197,17 @@ parseVersionRange tv = either (const Nothing) Just $
     openRange2 = (\x -> Interval (Just x) Nothing) <$>
                     (version <* spaces <* string "..")
 
--- 1.2.* -> (Interval (Just [1,2]) (Just [1,3])) 
+-- 1.2.* -> (Interval (Just [1,2]) (Just [1,3]))
 wildcardRange :: Version -> VersionRange
 wildcardRange xs
   | (y:ys) <- reverse xs = Interval (Just xs) (Just . reverse $ (y+1):ys)
   | otherwise = SingleVersion []
 
+versionRangeToBuildDep :: VersionRange -> Text
+versionRangeToBuildDep (SingleVersion ver) = "== " <> showVersion ver
+versionRangeToBuildDep (Interval lo hi) = T.intercalate " && " $ catMaybes
+                                                    [((">= " <>) . showVersion) <$> lo,
+                                                     (("< "  <>) . showVersion) <$> hi]
 
+showVersion :: Version -> Text
+showVersion = T.intercalate "." . map (T.pack . show)
