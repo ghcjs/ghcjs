@@ -31,13 +31,15 @@ import           DynFlags
 
 import qualified Compiler.Info          as Info
 
-getCacheMeta :: [FilePath] -> IO BL.ByteString
-getCacheMeta files =  DB.runPut . DB.put <$>
-  mapM (\file -> (file,) <$> getModified file) files
+getCacheMeta :: [FilePath] -> IO (Maybe BL.ByteString)
+getCacheMeta files = do
+  m <- mapM (\file -> (file,) <$> getModified file) files
+  return $ if any ((==0).snd) m then Nothing else Just (DB.runPut $ DB.put m)
 
 checkCacheMeta :: BL.ByteString -> IO Bool
 checkCacheMeta meta =
-  and <$> mapM (\(file,mod) -> (==mod) <$> getModified file) (DB.runGet DB.get $ meta)
+  and <$> mapM (\(file,mod) -> (\m -> m==mod && m/=0) <$>
+    getModified file) (DB.runGet DB.get $ meta)
 
 getModified :: FilePath -> IO Integer
 getModified file =
@@ -88,7 +90,9 @@ putCached dflags prefix key deps content =
   cacheFileName dflags prefix key >>= \case
     Nothing   -> return False
     Just file -> do
-      meta <- getCacheMeta deps
-      (BL.writeFile file (DB.runPut $ DB.put (meta, content)) >> return True) `catchIOError`
-        \_ -> return False
+      getCacheMeta deps >>= \case
+        Nothing -> return False
+        Just meta ->
+          (BL.writeFile file (DB.runPut $ DB.put (meta, content)) >> return True) `catchIOError`
+            \_ -> return False
   

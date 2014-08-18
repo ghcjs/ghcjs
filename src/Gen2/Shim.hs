@@ -153,7 +153,7 @@ checkShimsInstallation base = do
 
 foldShim :: Pkg -> Version -> Shim -> [FilePath]
 foldShim pkg ver sh
-  | inRange ver sh = dependencies sh ++ concatMap (foldShim pkg ver) (subs sh)
+  | inRange ver sh || null ver = dependencies sh ++ concatMap (foldShim pkg ver) (subs sh)
   | otherwise      = []
 
 parseVersion :: Text -> Maybe Version
