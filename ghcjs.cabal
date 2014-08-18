@@ -137,10 +137,10 @@ Library
                    parsec                     >= 3.1  && < 3.2,
                    haskell-src-exts           >= 1.15 && < 1.16,
                    haskell-src-meta           >= 0.6.0.3  && < 0.7
-    -- we need the version that comes with GHC. this is a hack to help
-    -- cabal solve the dependencies
-    if impl(ghc == 7.8.3)
-      build-depends: transformers < 0.4
+    -- we need the transformers version that comes with GHC.
+    -- this is a hack to (hopefully) help cabal solve the dependencies
+    if impl(ghc == 7.8.3) || impl(ghc == 7.8.2)
+      build-depends: transformers-compat == 0.3.3.3
     exposed: True
     buildable: True
     hs-source-dirs: src
