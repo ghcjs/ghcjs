@@ -10,18 +10,18 @@ TESTRUNNER="./dist/build/test/test"
 travis_boot() {
     case "$PART" in
         CORE1)
-            ghcjs_boot --build-stage1-unbooted --no-prof
+            ghcjs_boot -j2 --build-stage1-unbooted --no-prof
             cabal_install random QuickCheck stm syb
         ;;
         CORE2)
-            ghcjs_boot --build-stage1-unbooted --no-prof
+            ghcjs_boot -j2 --build-stage1-unbooted --no-prof
             cabal_install random QuickCheck stm syb
         ;;
         PROFILING)
-            ghcjs_boot --build-stage1-unbooted
+            ghcjs_boot -j2 --build-stage1-unbooted
         ;;
         GHCJS)
-            ghcjs_boot --no-prof
+            ghcjs_boot -j1 --no-prof
         ;;
         *)
             echo $"Unknown test part: $PART"
@@ -50,7 +50,7 @@ travis_test() {
 }
 
 ghcjs_boot() {
-    "$GHCJSBOOT" --dev -j2 --no-haddock --with-node "$NODE" "$@"
+    "$GHCJSBOOT" --dev --no-haddock --with-node "$NODE" "$@"
 }
 
 cabal_install() {
