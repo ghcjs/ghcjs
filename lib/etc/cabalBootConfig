@@ -1,0 +1,12 @@
+
+install-dirs global
+  prefix: /usr/local
+  bindir: $prefix/bin
+  libdir: $prefix/lib
+  libsubdir: $pkgid
+  libexecdir: $prefix/libexec
+  datadir: $prefix/share
+  datasubdir: $pkgid
+  docdir: $prefix/doc/lib/$pkgid
+  htmldir: $docdir/html
+  haddockdir: $htmldir

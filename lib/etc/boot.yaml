@@ -163,7 +163,7 @@ programs:
 
   ghcjs:         ghcjs
   ghcjs-pkg:     ghcjs-pkg
-  ghcjs-haddock: ghcjs-haddock
+  haddock-ghcjs: haddock-ghcjs
 
   # non-wrapped GHCJS programs
 

@@ -210,6 +210,7 @@ data BootPrograms = BootPrograms { _bpGhcjs      :: Program Required
                                  , _bpGhcPkg     :: Program Required
                                  , _bpCabal      :: Program Required
                                  , _bpNode       :: Program Required
+                                 , _bpHaddock    :: Program Required
                                  , _bpGit        :: Program Optional
                                  , _bpAlex       :: Program Optional
                                  , _bpHappy      :: Program Optional
@@ -291,6 +292,7 @@ main = do
       unless (e ^. beSettings . bsStage1Unbooted) $ do
         removeFakes
         unless (e ^. beSettings . bsQuick) installStage2
+      when (e ^. beSettings . bsHaddock) buildDocIndex
       liftIO . printBootEnvSummary True =<< ask
       unless (e ^. beSettings . bsStage1Unbooted) addCompleted
 
@@ -317,7 +319,8 @@ instance Yaml.FromJSON BootPrograms where
   parseJSON (Yaml.Object v) = BootPrograms
     <$> v ..: "ghcjs" <*> v ..: "ghcjs-pkg" <*> v ..: "ghcjs-run"
     <*> v ..: "ghc"   <*> v ..: "ghc-pkg"
-    <*> v ..: "cabal" <*> v ..: "node"      <*> v ..: "git"  <*> v ..: "alex"
+    <*> v ..: "cabal" <*> v ..: "node"      <*> v ..: "haddock-ghcjs"
+    <*> v ..: "git"   <*> v ..: "alex"
     <*> v ..: "happy" <*> v ..: "patch"     <*> v ..: "tar"
     <*> v ..: "cpp"   <*> v ..: "bash"      <*> v ..: "autoreconf"
     <*> v ..: "make"
@@ -693,7 +696,6 @@ installRts = subTop' "ghcjs-boot" $ do
   cp ghcjsRunSrc ghcjsRunDest
   mapM_ (liftIO . Cabal.setFileExecutable . toStringI) [unlitDest, ghcjsRunDest]
   writefile (ghcjsLib </> "node") <^> bePrograms . bpNode . pgmLoc . to (maybe "-" toTextI)
-  writefile (ghcjsLib </> "cabalBootConfig") ""
   when (not isWindows) $ do
     let runSh = ghcjsLib </> "run" <.> "sh"
     writefile runSh "#!/bin/sh\nCOMMAND=$1\nshift\n\"$COMMAND\" \"$@\"\n"
@@ -742,6 +744,12 @@ installTests = unlessM (hasCheckpoint "tests") $ do
     msg info "installing test suite"
     (install False "test suite" <$^> beLocations . blGhcjsLibDir . to (</>"test") <<*^> beSources . bsrcTest) >>=
       cond (addCheckpoint "tests") (msg warn "test suite could not be installed, continuing without")
+
+buildDocIndex :: B ()
+buildDocIndex = subTop' "doc" $ do
+  haddockFiles <- findWhen (return . flip hasExtension "haddock") "."
+  haddock_ $ ["--gen-contents", "--gen-index", "-o", "html", "--title=GHCJS Libraries"] ++
+    map (\p -> "--read-interface=../" <> toTextI (directory p) <> "," <> toTextI p) haddockFiles
 
 installStage2 :: B ()
 installStage2 = subTop' "ghcjs-boot" $ do
@@ -927,6 +935,7 @@ ghcjs_pkg    = runE  bpGhcjsPkg
 ghcjs_pkg_   = runE_ bpGhcjsPkg
 alex_        = runE_ bpAlex
 happy_       = runE_ bpHappy
+haddock_     = runE_ bpHaddock
 #ifdef WINDOWS
 tar_      xs = do
   cp <- hasCheckpoint "buildtools"
@@ -1038,16 +1047,10 @@ cabalInstallFlags parmakeGhcjs = do
            , "--with-compiler", ghcjs ^. pgmLocText
            , "--with-hc-pkg",   ghcjsPkg ^. pgmLocText
            , "--prefix",        toTextI instDir
-           , "--libdir",        toTextI (instDir </> "lib")
-           , "--libexecdir",    toTextI (instDir </> "bin")
-           , "--datadir",       toTextI (instDir </> "share")
-           , "--docdir",        toTextI (instDir </> "doc")
-           , "--htmldir",       toTextI (instDir </> "doc" </> "html")
-           , "--haddockdir",    toTextI (instDir </> "doc" </> "haddock")
-           , "--sysconfdir",    toTextI (instDir </> "etc")
            , bool haddock "--enable-documentation" "--disable-documentation"
            , "--haddock-html"
            , "--haddock-hoogle"
+           , "--haddock-hyperlink-source"
            , bool prof "--enable-library-profiling" "--disable-library-profiling"
            ] ++
            bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++

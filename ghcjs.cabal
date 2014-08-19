@@ -14,6 +14,7 @@ data-dir:       .
 data-files:     lib/cache/boot.tar
                 lib/cache/shims.tar
                 lib/cache/test.tar
+                lib/etc/cabalBootConfig
                 lib/etc/*.yaml
                 lib/etc/*.html
                 lib/etc/*.js
