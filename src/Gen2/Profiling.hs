@@ -13,6 +13,7 @@ module Gen2.Profiling
   , profStat
   , setCC
   , pushRestoreCCS
+  , incrementCCAlloc
   , jCurrentCCS
   , jCafCCS
   , jSystemCCS
@@ -97,6 +98,12 @@ setCC _cc _tick _push = return mempty
 
 pushRestoreCCS :: JStat
 pushRestoreCCS = [j| h$pushRestoreCCS(); |]
+
+--------------------------------------------------------------------------------
+-- Incrementing allocation counts
+
+incrementCCAlloc :: ToJExpr e => e -> JStat
+incrementCCAlloc e = [j| `e`.lastAlloc++; |]
 
 --------------------------------------------------------------------------------
 -- Some cost-centre stacks to be used in generator
