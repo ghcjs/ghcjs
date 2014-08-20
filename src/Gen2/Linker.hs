@@ -334,10 +334,10 @@ writeHtml df out = do
       Cabal.installDirectoryContents Cabal.normal
         (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
         (fromString $ out </> "polymer-components")
-      -- copy Chart.js
-      Cabal.installOrdinaryFile Cabal.normal
-        (fromString $ libdir </> "shims" </> "lib" </> "Chart.js")
-        (fromString $ out </> "Chart.js")
+      -- copy ghcjs-gui
+      Cabal.installDirectoryContents Cabal.normal
+        (fromString $ libdir </> "shims" </> "lib" </> "ghcjs-gui")
+        (fromString $ out </> "ghcjs-gui")
     -- copy index.html
     Cabal.installOrdinaryFile Cabal.normal
       (fromString $ libdir </> "template.html") (fromString htmlFile)
