@@ -42,10 +42,7 @@ allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
     makeObjs
       | csInlineAlloc s = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
           ccs <- costCentreStackLbl cc
-          let incrementCCAlloc = case ccs of
-                                   Nothing   -> mempty
-                                   Just ccsI -> [j| `ccsI`.lastAlloc++; |]
-          return $ incrementCCAlloc
+          return $ if csProf s then incrementCCAlloc else mempty
                 <> (i |= ValExpr (jhFromList $ [("f", f), ("d1", jnull), ("d2", jnull), ("m", ji 0)]
                                                ++ maybe [] (\(TxtI cid) -> [("cc", jsv cid)]) ccs))
       | otherwise       = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do

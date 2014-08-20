@@ -102,8 +102,8 @@ pushRestoreCCS = [j| h$pushRestoreCCS(); |]
 --------------------------------------------------------------------------------
 -- Incrementing allocation counts
 
-incrementCCAlloc :: ToJExpr e => e -> JStat
-incrementCCAlloc e = [j| `e`.lastAlloc++; |]
+incrementCCAlloc :: JStat
+incrementCCAlloc = [j| `jCurrentCCS`.lastAlloc++; |]
 
 --------------------------------------------------------------------------------
 -- Some cost-centre stacks to be used in generator
