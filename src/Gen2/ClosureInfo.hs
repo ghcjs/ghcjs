@@ -367,8 +367,8 @@ instance ToJExpr StaticLit where
   toJExpr (IntLit i)            = toJExpr i
   toJExpr NullLit               = jnull
   toJExpr (DoubleLit d)         = toJExpr (unSaneDouble d)
-  toJExpr (StringLit t)         = [je| h$str(`t`) |]                           -- fixme this duplicates the string!
-  toJExpr (BinLit b)            = [je| h$rstr(`map toInteger (B.unpack b)`) |] -- fixme this duplicates the string
+  toJExpr (StringLit t)         = [je| h$str(`t`)() |]                           -- fixme this duplicates the string!
+  toJExpr (BinLit b)            = [je| h$rstr(`map toInteger (B.unpack b)`)() |] -- fixme this duplicates the string
   toJExpr (LabelLit _isFun lbl) = [je| `JVar (TxtI lbl)` |]
 
 -- | declare and do first-pass init of a global object (create JS object for heap objects)
