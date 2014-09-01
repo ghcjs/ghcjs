@@ -167,11 +167,13 @@ Executable haddock-ghcjs
     Build-Depends:  base                >= 4    &&  < 5,
                     process,
                     ghc,
+                    transformers,
+                    transformers-compat,
                     containers,
                     directory,
                     filepath,
                     ghcjs,
-                    haddock-internal
+                    haddock-api >= 2.15
     GHC-Options:    -O -Wall
 
 Executable hsc2hs-ghcjs

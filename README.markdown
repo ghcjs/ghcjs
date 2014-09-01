@@ -66,18 +66,13 @@ compiler flags:
         --nhc98                         compile with NHC
     ...
 
-Next, install the `ghcjs-prim` and `haddock-internal` dependencies:
+Next, install `ghcjs` and its `ghcjs-prim` dependency:
 
     $ git clone https://github.com/ghcjs/ghcjs-prim.git
-    $ git clone https://github.com/ghcjs/haddock-internal.git
-    $ cabal install ./ghcjs-prim ./haddock-internal
-
-Now install `GHCJS` itself:
-
     $ git clone https://github.com/ghcjs/ghcjs.git
-    $ cabal install ./ghcjs
+    $ cabal install ./ghcjs ./ghcjs-prim
 
-If `cabal install ./ghcjs` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problms, since GHC ships with an older version. Try `--with-constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
+If `cabal install ./ghcjs ./ghcjs-prim` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problms, since GHC ships with an older version. Try `--with-constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
 
 Build the base libraries for `GHCJS`:
 
