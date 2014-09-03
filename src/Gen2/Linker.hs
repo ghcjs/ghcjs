@@ -326,19 +326,18 @@ combineFiles df fp = do
 -- | write the index.html file that loads the program if it does not exit
 writeHtml :: DynFlags -> FilePath -> IO ()
 writeHtml df out = do
+  let libdir = getLibDir df
+  -- copy polymer files
+  Cabal.installDirectoryContents Cabal.normal
+    (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
+    (fromString $ out </> "polymer-components")
+  -- copy ghcjs-gui
+  Cabal.installDirectoryContents Cabal.normal
+    (fromString $ libdir </> "shims" </> "lib" </> "ghcjs-gui")
+    (fromString $ out </> "ghcjs-gui")
+  -- copy index.html if it doesn't exist
   e <- doesFileExist htmlFile
-  unless e $ do
-    let libdir = getLibDir df
-    when ("-DGHCJS_PROF_GUI" `elem` opt_P df) $ do
-      -- copy polymer files
-      Cabal.installDirectoryContents Cabal.normal
-        (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
-        (fromString $ out </> "polymer-components")
-      -- copy ghcjs-gui
-      Cabal.installDirectoryContents Cabal.normal
-        (fromString $ libdir </> "shims" </> "lib" </> "ghcjs-gui")
-        (fromString $ out </> "ghcjs-gui")
-    -- copy index.html
+  unless e $
     Cabal.installOrdinaryFile Cabal.normal
       (fromString $ libdir </> "template.html") (fromString htmlFile)
   where
