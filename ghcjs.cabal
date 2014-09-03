@@ -25,6 +25,9 @@ data-files:     lib/cache/boot.tar
 extra-source-files:
                 utils/*.hs
                 utils/*.sh
+                include/prim/*.hs-incl
+                include/prim/*.txt
+                include/*.h
                 README.markdown
 
 source-repository head
