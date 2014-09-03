@@ -57,10 +57,12 @@ closureConstructors s =
     addCCArg as = map TxtI $ as ++ if prof then ["cc"] else []
     addCCArg' as = as ++ if prof then [TxtI "cc"] else []
     addCCField fs = jhFromList $ fs ++ if prof then [("cc", jsv "cc")] else []
+    setDefaultCC = [j| cc = cc || `jSystemCCS`; |]
 
     declClsConstr i as fs =
       i |= jfun (addCCArg as) [j| `checkC`;
-                                  `if prof then incrementCCAlloc (jvar "cc") else mempty`;
+                                  `if prof then setDefaultCC <> incrementCCAlloc (jvar "cc")
+                                           else mempty`;
                                   return `addCCField $ zip ["f", "d1", "d2", "m"] fs`;
                                 |]
 
