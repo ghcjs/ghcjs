@@ -72,7 +72,7 @@ Next, install `ghcjs` and its `ghcjs-prim` dependency:
     $ git clone https://github.com/ghcjs/ghcjs.git
     $ cabal install ./ghcjs ./ghcjs-prim
 
-If `cabal install ./ghcjs ./ghcjs-prim` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problms, since GHC ships with an older version. Try `--with-constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
+If `cabal install ./ghcjs ./ghcjs-prim` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problems, since GHC ships with an older version. Try `--constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
 
 Build the base libraries for `GHCJS`:
 
