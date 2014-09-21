@@ -53,11 +53,19 @@ import Numeric (readHex)
 
 -- | QuasiQuoter for a block of JMacro statements.
 jmacro :: QuasiQuoter
-jmacro = QuasiQuoter {quoteExp = quoteJMExp, quotePat = quoteJMPat}
+jmacro = QuasiQuoter { quoteExp  = quoteJMExp
+                     , quotePat  = quoteJMPat
+                     , quoteDec  = error "jmacro: quoteDec"
+                     , quoteType = error "jmacro: quoteType"
+                     }
 
 -- | QuasiQuoter for a JMacro expression.
 jmacroE :: QuasiQuoter
-jmacroE = QuasiQuoter {quoteExp = quoteJMExpE, quotePat = quoteJMPatE}
+jmacroE = QuasiQuoter { quoteExp = quoteJMExpE
+                      , quotePat = quoteJMPatE
+                      , quoteDec  = error "jmacroE: quoteDec"
+                      , quoteType = error "jmacroE: quoteType"
+                      }
 
 quoteJMPat :: String -> TH.PatQ
 quoteJMPat s = case parseJM s of

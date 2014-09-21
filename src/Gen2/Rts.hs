@@ -4,6 +4,8 @@ module Gen2.Rts where
 
 import           DynFlags
 
+import           Control.Lens                     hiding ((||=))
+
 import           Data.Array
 import           Data.Bits
 import           Data.Char                        (toLower, toUpper)
@@ -58,15 +60,24 @@ closureConstructors s =
     addCCArg' as = as ++ if prof then [TxtI "cc"] else []
     addCCField fs = jhFromList $ fs ++ if prof then [("cc", jsv "cc")] else []
 
-    declClsConstr i as fs =
-      i |= jfun (addCCArg as) [j| `checkC`; return `addCCField $ zip ["f", "d1", "d2", "m"] fs`; |]
+    declClsConstr i as fs = TxtI i ||= jfun (addCCArg as)
+            [j| `checkC`;
+                var x = `addCCField $ zip ["f", "d1", "d2", "m"] fs`;
+                `traceAlloc x`;
+                return x;
+              |]
+
+    traceAlloc x | csTraceRts s = [j| h$traceAlloc(`x`); |]
+                 | otherwise    = mempty
 
     -- only JSRef can typically contain undefined or null
     -- although it's possible (and legal) to make other Haskell types
     -- to contain JS refs directly
     -- this can cause false positives here
-    checkC | csAssertRts s =
-                     [j| if(arguments[0] !== h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e) {
+    checkC :: JStat
+    checkC {- | csAssertRts s =
+                     [j|
+                         if(arguments[0] !== h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e) {
                            for(var i=1;i<arguments.length;i++) {
                              if(arguments[i] === null || arguments[i] === undefined) {
                                var msg = "warning: undefined or null in argument: " 
@@ -76,7 +87,7 @@ closureConstructors s =
                              }
                            }
                          }
-                       |]
+                       |] -}
            | otherwise = mempty
 
     -- h$d is never used for JSRef (since it's only for constructors with
@@ -97,8 +108,10 @@ closureConstructors s =
                          fun    = JFunc vals funBod
                          funBod =
                            [j| `checkC`;
-                               return `addCCField [("f", jsv "f"), ("d1", jsv "x1"),
+                               var x = `addCCField [("f", jsv "f"), ("d1", jsv "x1"),
                                                    ("d2", toJExpr obj), ("m", ji 0)]`;
+                               `traceAlloc x`;
+                               return x;
                              |]
                          obj    = JHash . M.fromList . zip
                                     (map (T.pack . ('d':) . show) [(1::Int)..]) $
@@ -143,18 +156,55 @@ bitsIdx n | n < 0 = error "bitsIdx: negative"
     go m b | testBit m b = b : go (clearBit m b) (b+1)
            | otherwise   = go (clearBit m b) (b+1)
 
-bhStats :: CgSettings -> JStat
-bhStats s =
-  [j| `push' s [toJExpr R1, jsv "h$upd_frame"]`;
-      `R1`.f = h$blackhole;
-      `R1`.d1 = h$currentThread;
-      `R1`.d2 = null; // will be filled with waiters array
+bhStats :: CgSettings -> Bool -> JStat
+bhStats s pushUpd =
+  let u = if pushUpd then push' s [toJExpr R1, jsv "h$upd_frame"] else mempty
+  in  u <> [j|  `R1`.f  = h$blackhole;
+                `R1`.d1 = h$currentThread;
+                `R1`.d2 = null; // will be filled with waiters array
+             |]
+
+bhLneStats :: CgSettings -> JExpr -> JExpr -> JStat
+bhLneStats _s p frameSize =
+  [j| var v = `Stack`[`p`];
+      if(v) {
+        `Sp` -= `frameSize`;
+        if(v === h$blackhole) {
+          return h$throw(h$baseZCControlziExceptionziBasezinonTermination, false);
+        } else {
+          `R1` = v;
+          `Sp` -= `frameSize`;
+          return `Stack`[`Sp`];
+        }
+      } else {
+        `Stack`[`p`] = h$blackhole;
+        return null;
+      }
     |]
 
-updateThunk :: CgSettings -> JStat
-updateThunk s
-  | csInlineBlackhole s = bhStats s
-  | otherwise = [j| h$bh(); |]
+
+updateThunk' :: CgSettings -> JStat
+updateThunk' settings =
+  if csInlineBlackhole settings
+    then bhStats settings True
+    else [j| h$bh(); |]
+
+updateThunk :: C
+updateThunk = do
+  settings <- use gsSettings
+  adjPushStack 2 -- update frame size
+  return $ (updateThunk' settings)
+
+{-
+  Overwrite a single entry object with a special thunk that behaves like a black hole
+  (throws a JS exception when entered) but pretends to be a thunk. Useful for making
+  sure that the object is not accidentally entered multiple times
+ -}
+bhSingleEntry :: CgSettings -> JStat
+bhSingleEntry _settings = [j| `R1`.f  = h$blackholeTrap;
+                              `R1`.d1 = undefined;
+                              `R1`.d2 = undefined;
+                            |]
 
 -- fixme move somewhere else
 declRegs :: JStat
@@ -271,10 +321,16 @@ var !h$staticThunksArr = [];        // indices of updatable thunks in static hea
 `garbageCollector`;
 `stackManip`;
 
-fun h$bh { `bhStats s`; }
+fun h$bh { `bhStats s True`; }
+fun h$bh_lne x frameSize { `bhLneStats s x frameSize`; }
 
-fun h$blackhole { throw "<<loop>>"; return 0; }
+fun h$blackhole { throw "oops: entered black hole"; return 0; }
 `ClosureInfo "h$blackhole" (CIRegs 0 []) "blackhole" (CILayoutUnknown 2) CIBlackhole noStatic`;
+
+// a black hole that pretends to be a thunk. when compiled with assertions we overwrite
+// single entry thunks/functions with this, to trap multiple entry attempts
+fun h$blackholeTrap { throw "oops: entered multiple times"; return 0; }
+`ClosureInfo "h$blackholeTrap" (CIRegs 0 []) "blackhole" (CILayoutUnknown 2) CIThunk noStatic`;
 
 fun h$done o {
   h$finishThread(h$currentThread);
@@ -313,7 +369,7 @@ fun h$data2_e { return `Stack`[`Sp`]; }
 fun h$con_e { return `Stack`[`Sp`]; };
 
 fun h$catch a handler {
-  `adjSp 3`;
+  `adjSp' 3`;
   `Stack`[`Sp` - 2] = h$currentThread.mask;
   `Stack`[`Sp` - 1] = handler;
   `Stack`[`Sp`] = h$catch_e;
@@ -328,7 +384,7 @@ fun h$noop_e {
 var !h$noop = `ApplExpr (jsv "h$c0") $ [jsv "h$noop_e"] ++ if csProf s then [jSystemCCS] else []`;
 
 fun h$catch_e {
-  `adjSpN 3`;
+  `adjSpN' 3`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$catch_e" (CIRegs 0 [PtrV]) "exception handler" (CILayoutFixed 2 [PtrV,IntV]) CIStackFrame noStatic`;
@@ -379,7 +435,7 @@ fun h$ap3_e {
 // select first field
 fun h$select1_e {
   var t = `R1`.d1;
-  `adjSp 3`;
+  `adjSp' 3`;
   `Stack`[`Sp`-2] = `R1`;
   `Stack`[`Sp`-1] = h$upd_frame;
   `Stack`[`Sp`] = h$select1_ret;
@@ -393,7 +449,7 @@ fun h$select1_e {
 
 fun h$select1_ret {
   `R1` = `R1`.d1;
-  `adjSpN 1`;
+  `adjSpN' 1`;
   return h$ap_0_0_fast();
 }
 `ClosureInfo "h$select1_ret" (CIRegs 0 [PtrV]) "select1ret" (CILayoutFixed 0 []) CIStackFrame noStatic`;
@@ -401,7 +457,7 @@ fun h$select1_ret {
 // select second field of a two-field constructor
 fun h$select2_e {
   var t = `R1`.d1;
-  `adjSp 3`;
+  `adjSp' 3`;
   `Stack`[`Sp`-2] = `R1`;
   `Stack`[`Sp`-1] = h$upd_frame;
   `Stack`[`Sp`] = h$select2_ret;
@@ -415,7 +471,7 @@ fun h$select2_e {
 
 fun h$select2_ret {
   `R1` = `R1`.d2;
-  `adjSpN 1`;
+  `adjSpN' 1`;
   return h$ap_0_0_fast();
 }
 `ClosureInfo "h$select2_ret" (CIRegs 0 [PtrV]) "select2ret" (CILayoutFixed 0 []) CIStackFrame noStatic`;
@@ -468,16 +524,7 @@ fun h$throw e async {
       }
     }
     var size;
-    if(f === h$ap_gen) { // h$ap_gen is special
-      size = ((`Stack`[`Sp` - 1] >> 8) + 2);
-    } else {
-      var tag = f.size;
-      if(tag < 0) { // dynamic size
-        size = `Stack`[`Sp`-1];
-      } else {
-        size = (tag & 0xff) + 1;
-      }
-    }
+    `stackFrameSize size f`;
     `Sp` = `Sp` - size;
   }
   //h$log("unwound stack to: " + `Sp`);
@@ -487,19 +534,19 @@ fun h$throw e async {
     var handler = `Stack`[`Sp` - 1];
     if(f === h$catchStm_e) {
       h$currentThread.transaction = `Stack`[`Sp` - 3];
-      `adjSpN 4`;
+      `adjSpN' 4`;
     } else if(`Sp` > 3) { // don't pop the toplevel handler
-      `adjSpN 3`;
+      `adjSpN' 3`;
     }
     `R1` = handler;
     `R2` = e;
     if(f !== h$catchStm_e) {  // don't clobber mask in STM?
       if(maskStatus === 0 && `Stack`[`Sp`] !== h$maskFrame && `Stack`[`Sp`] !== h$maskUnintFrame) {
         `Stack`[`Sp`+1] = h$unmaskFrame;
-        `adjSp 1`;
+        `adjSp' 1`;
       } else if(maskStatus === 1) {
         `Stack`[`Sp`+1] = h$maskUnintFrame;
-        `adjSp 1`;
+        `adjSp' 1`;
       }
       h$currentThread.mask = 2;
     }
@@ -525,7 +572,7 @@ fun h$raiseAsync_e {
 // the scheduler when raising an async exception
 fun h$raiseAsync_frame {
   var ex = `Stack`[`Sp`-1];
-  `adjSpN 2`;
+  `adjSpN' 2`;
   return h$throw(ex,true);
 }
 `ClosureInfo "h$raiseAsync_frame" (CIRegs 0 []) "h$raiseAsync_frame" (CILayoutFixed 1 []) CIStackFrame noStatic`;
@@ -537,7 +584,7 @@ fun h$reduce {
   if(`isThunk (toJExpr R1)`) {
     return `R1`.f;
   } else {
-    `adjSpN 1`;
+    `adjSpN' 1`;
     return `Stack`[`Sp`];
   }
 }
@@ -688,10 +735,13 @@ fun h$runInitStatic {
   h$initStatic = [];
 }
 
-fun h$checkStack {
+fun h$checkStack f {
+  // some code doesn't write a stack frame header when called immediately
+  if(f.t === `StackFrame`) `Stack`[`Sp`] = f;
+
   var idx = `Sp`;
   while(idx >= 0) {
-    var f = `Stack`[idx];
+    f = `Stack`[idx];
     var size, offset;
     if(typeof(f) === 'function') {
       if(f === h$ap_gen) {
@@ -734,7 +784,7 @@ fun h$printReg r {
     } else if(r.f.t === `Blackhole` && r.x) {
       return ("blackhole: -> " + h$printReg({ f: r.x.x1, d: r.d1.x2 }) + ")");
     } else {
-      return (r.f.n + " (" + h$closureTypeName(r.f.t) + ", " + r.f.a + ")");
+      return ((r.alloc ? r.alloc + ': ' : '') + r.f.n + " (" + h$closureTypeName(r.f.t) + ", " + r.f.a + ")");
     }
   } else if(typeof r === 'object') {
     var res = h$collectProps(r);
@@ -833,7 +883,7 @@ fun h$dumpStackTop stack start sp {
                  if(s.f.t === `Blackhole` && s.d1 && s.d1.x1 && s.d1.x1.n) {
                    h$log("stack[" + i + "] = blackhole -> " + s.d1.x1.n);
                  } else {
-                   h$log("stack[" + i + "] = -> " + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
+                   h$log("stack[" + i + "] = -> " + (s.alloc ? s.alloc + ': ' : '') + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
                  }
                }
              } else if(h$isInstanceOf(s,h$MVar)) {
@@ -941,7 +991,7 @@ fun h$restoreThread {
 fun h$return {
   `R1` = `Stack`[`Sp`-1];
 //  h$log("h$return, returning: " + `R1`.f.n);
-  `adjSpN 2`;
+  `adjSpN' 2`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$return" (CIRegs 0 []) "return" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
@@ -950,7 +1000,7 @@ fun h$return {
 fun h$returnf {
   var r = `Stack`[`Sp`-1];
 //  h$log("h$returnf, returning: " + r.n);
-  `adjSpN 2`;
+  `adjSpN' 2`;
   return r;
 }
 // fixme, check that this is only used when R1 is active
@@ -970,13 +1020,16 @@ fun h$reschedule {
 fun h$suspendCurrentThread next {
   `assertRts s (next |!== (TxtI "h$reschedule")) ("suspend called with h$reschedule"::String)`;
   if(next === h$reschedule) { throw "suspend called with h$reschedule"; }
+  // some stack calls do not write the function to the stack top as an optimization
+  // do it here
+  if(next.t === `StackFrame`) `Stack`[`Sp`] = next;
   if(`Stack`[`Sp`] === h$restoreThread || next === h$return) {
     h$currentThread.sp = `Sp`;
     return;
   }
-   var nregs;
-   var skipregs = 0;
-   var t = next.t;
+  var nregs;
+  var skipregs = 0;
+  var t = next.t;
   // pap arity
   if(t === `Pap`) {
     nregs = ((`papArity (toJExpr R1)`) >> 8) + 1;
@@ -1014,7 +1067,7 @@ fun h$dumpRes {
     var re = new RegExp("([^\\n]+)\\n(.|\\n)*");
     h$log("function: " + (""+`R1`.f).substring(0,50).replace(re,"$1"));
   }
-  `adjSpN 2`;
+  `adjSpN' 2`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$dumpRes" (CIRegs 0 [PtrV]) "dumpRes" (CILayoutFixed 1 [ObjV]) CIThunk noStatic`;
@@ -1026,7 +1079,7 @@ fun h$resume_e {
   //h$logSched("resuming computation: " + `R1`.d2);
   //h$logStack();
   var ss = `R1`.d1;
-  `updateThunk s`;
+  `updateThunk' s`;
   for(var i=0;i<ss.length;i++) {
     `Stack`[`Sp`+1+i] = ss[i];
   }
@@ -1040,7 +1093,7 @@ fun h$resume_e {
 fun h$unmaskFrame {
   //log("h$unmaskFrame: " + h$threadString(h$currentThread));
   h$currentThread.mask = 0;
-  `adjSpN 1`;
+  `adjSpN' 1`;
   // back to scheduler to give us async exception if pending
   if(h$currentThread.excep.length > 0) {
     `push' s [toJExpr R1, jsv "h$return"]`;
@@ -1054,7 +1107,7 @@ fun h$unmaskFrame {
 fun h$maskFrame {
   //h$log("h$maskFrame: " + h$threadString(h$currentThread));
   h$currentThread.mask = 2;
-  `adjSpN 1`;
+  `adjSpN' 1`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$maskFrame" (CIRegs 0 [PtrV]) "mask" (CILayoutFixed 0 []) CIStackFrame noStatic`;
@@ -1062,7 +1115,7 @@ fun h$maskFrame {
 fun h$maskUnintFrame {
   //h$log("h$maskUnintFrame: " + h$threadString(h$currentThread));
   h$currentThread.mask = 1;
-  `adjSpN 1`;
+  `adjSpN' 1`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$maskUnintFrame" (CIRegs 0 [PtrV]) "maskUnint" (CILayoutFixed 0 []) CIStackFrame noStatic`;
@@ -1073,7 +1126,7 @@ fun h$unboxFFIResult {
   for(var i=0;i<d.length;i++) {
     h$setReg(i+1, d[i]);
   }
-  `adjSpN 1`;
+  `adjSpN' 1`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$unboxFFIResult" (CIRegs 0 [PtrV]) "unboxFFI" (CILayoutFixed 0 []) CIStackFrame noStatic`;
@@ -1089,7 +1142,7 @@ fun h$unbox_e {
 
 fun h$retryInterrupted {
   var a = `Stack`[`Sp`-1];
-  `adjSpN 2`;
+  `adjSpN' 2`;
   return a[0].apply(this, a.slice(1));
 }
 `ClosureInfo "h$retryInterrupted" (CIRegs 0 [ObjV]) "retry interrupted operation" (CILayoutFixed 1 [ObjV]) CIStackFrame noStatic`;
@@ -1099,7 +1152,7 @@ fun h$retryInterrupted {
 fun h$atomically_e {
   if(h$stmValidateTransaction()) {
     h$stmCommitTransaction();
-    `adjSpN 2`;
+    `adjSpN' 2`;
     return `Stack`[`Sp`];
   } else {
     `push' s [jsv "h$checkInvariants_e"]`;
@@ -1109,7 +1162,7 @@ fun h$atomically_e {
 `ClosureInfo "h$atomically_e" (CIRegs 0 [PtrV]) "atomic operation" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
 
 fun h$checkInvariants_e {
-  `adjSpN 1`;
+  `adjSpN' 1`;
   return h$stmCheckInvariants();
 }
 `ClosureInfo "h$checkInvariants_e" (CIRegs 0 [PtrV]) "check transaction invariants" (CILayoutFixed 0 []) CIStackFrame noStatic`;
@@ -1118,7 +1171,7 @@ fun h$stmCheckInvariantStart_e {
   var t   = `Stack`[`Sp`-2];
   var inv = `Stack`[`Sp`-1];
   var m   = h$currentThread.mask;
-  `adjSpN 3`;
+  `adjSpN' 3`;
   var t1 = new h$Transaction(inv.action, t);
   t1.checkRead = new h$Set();
   h$currentThread.transaction = t1;
@@ -1130,7 +1183,7 @@ fun h$stmCheckInvariantStart_e {
 
 fun h$stmCheckInvariantResult_e {
   var inv = `Stack`[`Sp`-1];
-  `adjSpN 2`;
+  `adjSpN' 2`;
   // add all variables read by the check to the tvars
   h$stmUpdateInvariantDependencies(inv);
   h$stmAbortTransaction();
@@ -1145,7 +1198,7 @@ fun h$stmInvariantViolatedHandler_e {
     throw "h$stmInvariantViolatedHandler_e: unexpected value on stack";
   }
   var inv = `Stack`[`Sp`-1];
-  `adjSpN 2`;
+  `adjSpN' 2`;
   h$stmUpdateInvariantDependencies(inv);
   h$stmAbortTransaction();
   return h$throw(`R2`, false);
@@ -1156,14 +1209,14 @@ var !h$stmInvariantViolatedHandler =
   `ApplExpr (jsv "h$c") $ [jsv "h$stmInvariantViolatedHandler_e"] ++ if csProf s then [jSystemCCS] else []`;
 
 fun h$stmCatchRetry_e {
-  `adjSpN 2`;
+  `adjSpN' 2`;
   h$stmCommitTransaction();
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$stmCatchRetry_e" (CIRegs 0 [PtrV]) "catch retry" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
 
 fun h$catchStm_e {
-  `adjSpN 4`;
+  `adjSpN' 4`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$catchStm_e" (CIRegs 0 [PtrV]) "STM catch" (CILayoutFixed 3 [ObjV,PtrV,ObjV]) CIStackFrame noStatic`;
@@ -1173,7 +1226,7 @@ fun h$stmResumeRetry_e {
     throw("h$stmResumeRetry_e: unexpected value on stack");
   }
   var blocked = `Stack`[`Sp`-1];
-  `adjSpN 2`;
+  `adjSpN' 2`;
   `push' s [jsv "h$checkInvariants_e"]`;
   h$stmRemoveBlockedThread(blocked, h$currentThread);
   return h$stmStartTransaction(`Stack`[`Sp`-2]);
@@ -1195,7 +1248,7 @@ fun h$lazy_e {
 
 fun h$setCcs_e {
   h$restoreCCS(`Stack`[`Sp`-1]);
-  `adjSpN 2`;
+  `adjSpN' 2`;
   return `Stack`[`Sp`];
 }
 `ClosureInfo "h$setCcs_e" (CIRegs 0 [PtrV]) "set cost centre stack" (CILayoutFixed 1 [ObjV]) CIStackFrame noStatic`;

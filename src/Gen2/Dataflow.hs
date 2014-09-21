@@ -344,7 +344,6 @@ toJIdent :: IntMap Ident -> Id -> Ident
 toJIdent m i = fromMaybe (error $ "toJIdent: unknown identifier: " ++ show i) (IM.lookup i m)
 
 type NodeId  = Int
-type Label = Text
 data Node a where
   SimpleNode   :: SimpleStat a -> Node a
   SequenceNode :: [NodeId] -> Node a
@@ -478,7 +477,7 @@ continueTo :: Maybe Text -> NodeId -> NodeId -> State (Graph a) NodeId
 continueTo lbl nid n
   | nid < 0 = error "continueTo: continuing to invalid node, not in a loop?"
   | otherwise = do
-      cnid <- newNode (ContinueNode lbl nid) n
+      _cnid <- newNode (ContinueNode lbl nid) n
       addArc (Arc n nid ContinueArc)
       return n
 
@@ -527,7 +526,7 @@ checkLabels = do
       checkValidLabelTarget ns l =
         case IM.lookup l ns of
           Just x | isLoop x -> return ()
-          Just x            -> error ("invalid label target: " ++ show l)
+          Just _            -> error ("invalid label target: " ++ show l)
           _                 -> error ("unknown label target: " ++ show l)
 
 -- | check that continue only jumps to loops, break to switch or loop
@@ -570,10 +569,10 @@ cfg toAExpr stat = execState buildGraph emptyGraph
       identsR .= m'
       return r'
     go :: JStat -> NodeId -> NodeId -> NodeId -> State (Graph a) NodeId
-    go (DeclStat i) lb lc n = do
+    go (DeclStat i) _lb _lc n = do
       i' <- ident i
       newSimpleNode (DeclS i') n
-    go (ReturnStat e) lb lc n = do
+    go (ReturnStat e) _lb _lc n = do
       e' <- expr e
       newNode (ReturnNode e') n
       return n
@@ -582,22 +581,22 @@ cfg toAExpr stat = execState buildGraph emptyGraph
       s2n <- go s2 lb lc =<< newNodeId
       e' <- expr e
       newNode (IfNode e' s1n s2n) n
-    go (WhileStat True e s1) lb lc n = do
+    go (WhileStat True e s1) _lb _lc n = do
       e' <- expr e
       loopOf s1 (DoWhileNode e') n
-    go (WhileStat False e s1) lb lc n = do
+    go (WhileStat False e s1) _lb _lc n = do
       e' <- expr e
       loopOf s1 (WhileNode e') n
-    go (ForInStat b i e s1) lb lc n = do
+    go (ForInStat b i e s1) _lb _lc n = do
       e' <- expr e
       i' <- ident i
       loopOf s1 (ForInNode b i' e') n
-    go (SwitchStat e es sd) lb lc n = do
+    go (SwitchStat e es sd) _lb lc n = do
       ns <- mapM (\(e',s') -> (,) <$> expr e' <*> (go s' n lc =<< newNodeId)) es
       sd' <- go sd n lc =<< newNodeId
       e' <- expr e
       newNode (SwitchNode e' ns sd') n
-    go s@(TryStat t i c f) lb lc n = do
+    go (TryStat t i c f) lb lc n = do
       tn <- go t lb lc =<< newNodeId
       cn <- go c lb lc =<< newNodeId
       fn <- go f lb lc =<< newNodeId
@@ -606,32 +605,32 @@ cfg toAExpr stat = execState buildGraph emptyGraph
     go (BlockStat ss)                    lb lc n = do
       ss' <- (SequenceNode <$> mapM (\s' -> go s' lb lc =<< newNodeId) ss)
       newNode ss' n
-    go (ApplStat e es)                   lb lc n = do
+    go (ApplStat e es)                   _lb _lc n = do
       e' <- expr (ApplExpr e es)
-      es' <- mapM expr es
+      _es' <- mapM expr es
       newSimpleNode (ExprS e') n
-    go (UOpStat op e)                    lb lc n = do
+    go (UOpStat op e)                    _lb _lc n = do
        e' <- expr (UOpExpr op e)
        newSimpleNode (ExprS e') n
-    go (AssignStat e1 e2)                lb lc n = do
+    go (AssignStat e1 e2)                _lb _lc n = do
        e1' <- expr e1
        e2' <- expr e2
        newSimpleNode (AssignS e1' e2') n
-    go (UnsatBlock{})                    lb lc n = error "cfg: unsaturated block"
-    go (AntiStat t)                      lb lc n = error ("cfg: antistat: " ++ T.unpack t)
+    go (UnsatBlock{})                    _lb _lc _n = error "cfg: unsaturated block"
+    go (AntiStat t)                      _lb _lc _n = error ("cfg: antistat: " ++ T.unpack t)
     go (LabelStat lbl s1)                lb lc n = do
       lid <- newNodeId
       newLabel lbl lid
       go s1                              lb lc lid
       newNode (LabelNode lbl lid) n
-    go (BreakStat lbl@(Just lbl'))       lb lc n = do
+    go (BreakStat lbl@(Just lbl'))       _lb _lc n = do
       ll <- lookupLabel lbl'
       breakTo lbl ll n
-    go (BreakStat lbl)                   lb lc n = breakTo lbl lb n
-    go (ContinueStat lbl@(Just lbl'))    lb lc n = do
+    go (BreakStat lbl)                   lb _lc n = breakTo lbl lb n
+    go (ContinueStat lbl@(Just lbl'))    _lb _lc n = do
       ll <- lookupLabel lbl'
       continueTo lbl ll n
-    go (ContinueStat lbl)                lb lc n = continueTo lbl lc n
+    go (ContinueStat lbl)                _lb lc n = continueTo lbl lc n
 
 
 unCfg :: forall a. Graph a -> JStat
@@ -714,8 +713,8 @@ constForward :: b -> Forward a b
 constForward z = Forward (const3 (z,z)) (const3 (z,z)) (const3 (z,z)) (const3 z)
                          (const2 z) (const2 z) (const3 z) (const2 (z,z,z)) (const5 (z,z)) (zSwitch z)
 
-c1tup :: a -> b -> (b, b)
-c1tup _ x = (x, x)
+-- c1tup :: a -> b -> (b, b)
+-- c1tup _ x = (x, x)
 
 c1tup3 :: a -> b -> (b, b, b)
 c1tup3 _ x = (x, x, x)
@@ -738,17 +737,17 @@ const2 x _ _ = x
 const3 :: a -> b -> c -> d -> a
 const3 x _ _ _ = x
 
-const4 :: a -> b -> c -> d -> e -> a
-const4 x _ _ _ _ = x
+-- const4 :: a -> b -> c -> d -> e -> a
+-- const4 x _ _ _ _ = x
 
 const5 :: a -> b -> c -> d -> e -> f -> a
 const5 x _ _ _ _ _ = x
 
-fconst3 :: a -> b -> c -> d -> d
-fconst3 _ _ _ x = x
+-- fconst3 :: a -> b -> c -> d -> d
+-- fconst3 _ _ _ x = x
 
-fconst4 :: a -> b -> c -> d -> e -> e
-fconst4 _ _ _ _ x = x
+-- fconst4 :: a -> b -> c -> d -> e -> e
+-- fconst4 _ _ _ _ x = x
 
 defSwitch :: a -> b -> [c] -> d -> ([d],d)
 defSwitch _ _ xs y = (replicate (length xs) y, y)
@@ -830,7 +829,7 @@ foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
       upd nid 0 x
       let (brks, conts) = getBreaksConts nid g
       x0 <- (x `c`) <$> fact nid 3
-      s0 <- go' s x0
+      _s0 <- go' s x0
       x1 <- combineWith 0 x0 conts
       upd nid 2 x1
       let (xt, xf) = fDoWhile f nid e x1
@@ -853,9 +852,9 @@ foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
     go nid (SwitchNode e ss s) x = do
       let (brks, _) = getBreaksConts nid g
           (xes,xd)       = fSwitch f nid e (map fst ss) x
-          go0 [] []             = return z
-          go0 [a] [(e,y)]       = go' y a
-          go0 (a:as) ((e,y):ys) = go' y a >> go0 as ys
+          go0 [] []              = return z
+          go0 [a] [(_e,y)]       = go' y a
+          go0 (a:as) ((_e,y):ys) = go' y a >> go0 as ys
           go0 _ _ = error "foldForward: unmatched list length for switch"
       upds nid [0,2] x
       s0 <- go0 xes ss
@@ -1048,7 +1047,7 @@ orderedNodes g = go (g ^. entry)
   where
     go nid = go' nid (lookupNode nid g)
     go' :: NodeId -> Node a -> [NodeId]
-    go' nid (SequenceNode xs)   = concatMap go xs
+    go' _   (SequenceNode xs)   = concatMap go xs
     go' nid (IfNode _ n1 n2)    = nid : go n1 ++ go n2
     go' nid (WhileNode _ n)     = nid : go n
     go' nid (DoWhileNode _ n)   = go n ++ [nid]

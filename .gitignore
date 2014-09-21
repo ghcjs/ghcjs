@@ -1,4 +1,5 @@
 /dist
+/utils/patch/dist
 /vendor/
 /GNUmakefile
 *.js_hi

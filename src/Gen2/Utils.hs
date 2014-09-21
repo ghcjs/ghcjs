@@ -106,7 +106,7 @@ showIndent x = unlines . runIndent 0 . map trim . lines . replaceParens . show $
                          | ")" `isPrefixOf` x  = indent (n-2) x : runIndent (n-2) xs
                          | all isSpace x    = runIndent n xs
                          | otherwise = indent n x : runIndent n xs
-      runIndent n [] = []
+      runIndent _ [] = []
 
 trim :: String -> String
 trim = let f = dropWhile isSpace . reverse in f . f

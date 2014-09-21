@@ -5,7 +5,7 @@ module Gen2.RtsAlloc where
 
 import           DynFlags
 
-import           Control.Lens
+import           Control.Lens hiding ((||=))
 
 import           Data.Array
 import           Data.Data.Lens
@@ -13,7 +13,6 @@ import qualified Data.Map as M
 import           Data.Monoid
 import qualified Data.Text as T
 
-import           Compiler.Settings
 import           Compiler.JMacro
 
 import           Gen2.ClosureInfo
@@ -40,13 +39,13 @@ allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
   where
     makeObjs :: G JStat
     makeObjs
-      | csInlineAlloc s = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
+      | csInlineAlloc s = mconcat $ flip map cls $ \(i,f,_,cc) -> do
           ccs <- costCentreStackLbl cc
-          return $ i |= ValExpr (jhFromList $ [("f", f), ("d1", jnull), ("d2", jnull), ("m", ji 0)]
-                                              ++ maybe [] (\(TxtI cid) -> [("cc", jsv cid)]) ccs)
-      | otherwise       = mconcat $ flip map cls $ \(TxtI i,f,_,cc) -> do
+          return $ dec i <> i |= (ValExpr (jhFromList $ [("f", f), ("d1", jnull), ("d2", jnull), ("m", ji 0)]
+                                              ++ maybe [] (\(TxtI cid) -> [("cc", jsv cid)]) ccs))
+      | otherwise       = mconcat $ flip map cls $ \(i,f,_,cc) -> do
           ccs <- costCentreStackLbl cc
-          return $ i |= ("h$c" |^^ ([f] ++ maybe [] (\(TxtI cid) -> [jsv cid]) ccs))
+          return $ dec i <> i |= ("h$c" |^^ ([f] ++ maybe [] (\(TxtI cid) -> [jsv cid]) ccs))
 
     fillObjs = mconcat $ map fillObj cls
     fillObj (i,_,es,_)

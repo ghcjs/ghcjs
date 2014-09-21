@@ -63,6 +63,8 @@ import           Filesystem                      (getWorkingDirectory, getModifi
 import           Filesystem.Path                 hiding ((<.>), (</>), null, concat)
 import           Filesystem.Path.CurrentOS       (encodeString)
 
+import           GHC.IO.Encoding                 (setLocaleEncoding, setForeignEncoding, utf8)
+
 import qualified Network.Browser                 as Br
 import           Network.HTTP                    (mkRequest, RequestMethod(..), Response(..))
 import           Network.URI                     (parseURI, URI(..))
@@ -266,6 +268,8 @@ main = do
     whenM ((==["--init"]) <$> getArgs) (putStrLn "ghcjs-boot has been updated. see README.\nUse `ghcjs-boot --dev' for a development build (if you installed GHCJS from a Git repo) or `ghcjs-boot' for a release build" >> exitFailure)
     settings <- adjustDefaultSettings <$> execParser optParser'
     when (settings ^. bsShowVersion) (printVersion >> exitSuccess)
+    setLocaleEncoding utf8
+    setForeignEncoding utf8
     env <- initBootEnv settings
     printBootEnvSummary False env
     r <- Sh.shelly $ runReaderT ((actions >> pure Nothing) `catchAny` (pure . Just)) env
@@ -1342,7 +1346,7 @@ checkProgramVersions bs pgms = do
       return $ (if update then (l . pgmVersion .~ Just res) else id) ps
     verifyNodeVersion pgms = do
       let verTxt = fromMaybe "-" (pgms ^. bpNode . pgmVersion)
-          v      = mapM (readMaybe . T.unpack . T.dropWhile (== 'v')) . T.splitOn "." $ verTxt :: Maybe [Integer]
+          v      = mapM (readMaybe . T.unpack . T.dropWhile (== 'v')) . T.splitOn "." . T.takeWhile (/='-') $ verTxt :: Maybe [Integer]
       case v of
         Just (x:y:z:_)
           | x > 0 || y > 10 || (y == 10 && z >= 28) -> return pgms

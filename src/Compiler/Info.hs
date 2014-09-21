@@ -3,7 +3,6 @@ module Compiler.Info where
 
 import           Control.Applicative
 import qualified Control.Exception as E
-import           Control.Monad
 
 import           Data.Function      (on)
 import           Data.List          (nubBy)
@@ -16,9 +15,6 @@ import           System.Info
 
 import           Config             (cProjectVersion)
 import           DynFlags
-
-import           GHC
-import qualified GHC.Paths
 
 #ifdef WINDOWS
 import           Control.Lens hiding ((<.>))

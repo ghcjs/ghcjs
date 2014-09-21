@@ -39,13 +39,11 @@ sinkPgm :: Module                         -- ^ the module, since we treat defini
                                           --   and the new bindings
 sinkPgm m pgm =
   let usedOnce = collectUsedOnce pgm
-      as = concatMap alwaysSinkable pgm
-      os = concatMap (onceSinkable m) pgm
       sinkables = listToUFM $
           concatMap alwaysSinkable pgm ++
           filter ((`elementOfUniqSet` usedOnce) . fst) (concatMap (onceSinkable m) pgm)
-      isSunkBind (StgNonRec b e) | elemUFM b sinkables = True
-      isSunkBind _                                     = False
+      isSunkBind (StgNonRec b _e) | elemUFM b sinkables = True
+      isSunkBind _                                      = False
   in (sinkables, filter (not . isSunkBind) $ topSortDecls m pgm)
 
 {- |
@@ -72,7 +70,7 @@ isSmallSinkableLit _            = False
    once sinkable: may be sunk, but duplication is not ok
 -}
 onceSinkable :: Module -> StgBinding -> [(Id, StgExpr)]
-onceSinkable m (StgNonRec b rhs)
+onceSinkable _m (StgNonRec b rhs)
   | Just e <- getSinkable rhs, isLocal b = [(b,e)]
   where
     getSinkable (StgRhsCon _ccs dc args)
@@ -132,7 +130,7 @@ foldArgsE f (StgLet b e)               = StgLet <$> foldArgs f b <*> foldArgsE f
 foldArgsE f (StgLetNoEscape l1 l2 b e) = StgLetNoEscape l1 l2 <$> foldArgs f b <*> foldArgsE f e
 foldArgsE f (StgSCC cc b1 b2 e)        = StgSCC cc b1 b2 <$> foldArgsE f e
 foldArgsE f (StgTick m i e)            = StgTick m i <$> foldArgsE f e
-foldArgsE f e                          = pure e
+foldArgsE _ e                          = pure e
 
 foldArgsA :: Fold StgArg Id
 foldArgsA f (StgVarArg i) = StgVarArg <$> f i
@@ -145,7 +143,7 @@ isLocal i = isNothing (nameModule_maybe . idName $ i) && not (isExportedId i)
      topsort the non-recursive constructor bindings
  -}
 topSortDecls :: Module -> [StgBinding] -> [StgBinding]
-topSortDecls m binds = rest ++ nr'
+topSortDecls _m binds = rest ++ nr'
   where
     (nr, rest) = partition isNonRec binds
     isNonRec (StgNonRec {}) = True
@@ -154,7 +152,7 @@ topSortDecls m binds = rest ++ nr'
     keys = mkUniqSet (map snd vs)
     getV e@(StgNonRec b _) = (e, b)
     getV _                 = error "topSortDecls: getV, unexpected binding"
-    collectDeps (StgNonRec b (StgRhsCon _ dc args)) =
+    collectDeps (StgNonRec b (StgRhsCon _ _dc args)) =
       [ (i, b) | StgVarArg i <- args, i `elementOfUniqSet` keys ]
     collectDeps _ = []
     g = graphFromVerticesAndAdjacency vs (concatMap collectDeps nr)

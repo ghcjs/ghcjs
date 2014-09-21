@@ -232,5 +232,5 @@ substPatterns single double = unmatched
     substDouble (var, val) = T.replace ("{{"<>var<>"}}") val
     unmatched l | T.null b || T.null d = l
                 | otherwise            = a <> unmatched d
-          where (a,b) = T.breakOn "{{" l
-                (c,d) = T.breakOn "}}" b
+          where (a,b)  = T.breakOn "{{" l
+                (_c,d) = T.breakOn "}}" b

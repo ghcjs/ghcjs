@@ -22,8 +22,6 @@ import           Control.Applicative
 import           Control.Lens
 import           Control.Monad.State.Strict
 
-import           Data.Array
-import qualified Data.Binary as DB
 import qualified Data.Binary.Get as DB
 import qualified Data.Binary.Put as DB
 import           Data.Bits
@@ -35,12 +33,8 @@ import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import           Data.Int
 import           Data.List
-import           Data.Map (Map)
-import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Monoid
-import           Data.Set (Set)
-import qualified Data.Set as S
 import           Data.Text (Text)
 import qualified Data.Text as T
 
@@ -49,8 +43,6 @@ import           Compiler.Settings
 
 import           Gen2.Base
 import           Gen2.ClosureInfo
-import qualified Gen2.Object    as Object
-import qualified Gen2.Optimizer as Optimizer
 import           Gen2.Utils (buildingProf, buildingDebug)
 
 -- | collect global objects (data / CAFs). rename them and add them to the table
@@ -59,14 +51,14 @@ collectGlobals :: [StaticInfo]
 collectGlobals = mapM_ (\(StaticInfo i _ _) -> renameObj i)
 
 debugShowStat :: (JStat, [ClosureInfo], [StaticInfo]) -> String
-debugShowStat (s, cis, sis) = "closures:\n" ++ unlines (map show cis) ++ "\nstatics:" ++ unlines (map show sis) ++ "\n\n"
+debugShowStat (_s, cis, sis) = "closures:\n" ++ unlines (map show cis) ++ "\nstatics:" ++ unlines (map show sis) ++ "\n\n"
 
 renameInternals :: GhcjsSettings
                 -> DynFlags
                 -> CompactorState
                 -> [(JStat, [ClosureInfo], [StaticInfo])]
                 -> (CompactorState, [JStat], JStat)
-renameInternals settings dflags cs0 stats0 = (cs, stats, meta)
+renameInternals _settings dflags cs0 stats0 = (cs, stats, meta)
   where
     ((stats, meta), cs) = runState renamed cs0
     renamed :: State CompactorState ([JStat], JStat)
@@ -269,34 +261,34 @@ labelIdx msg cs l = fromMaybe lookupParent (HM.lookup l (cs ^. labels))
 encodeInfo :: CompactorState
            -> ClosureInfo  -- ^ information to encode
            -> [Int]
-encodeInfo cs (ClosureInfo var regs name layout typ static)
-  | CIThunk             <- typ = [0] ++ ls
-  | (CIFun arity regs0) <- typ, regs0 /= argSize regs
+encodeInfo cs (ClosureInfo _var regs name layout typ static)
+  | CIThunk              <- typ = [0] ++ ls
+  | (CIFun _arity regs0) <- typ, regs0 /= argSize regs
      = error ("encodeInfo: inconsistent register metadata for " ++ T.unpack name)
-  | (CIFun arity regs0) <- typ = [1, arity, encodeRegs regs] ++ ls
-  | (CICon tag)         <- typ = [2, tag] ++ ls
-  | CIStackFrame        <- typ = [3, encodeRegs regs] ++ ls
+  | (CIFun arity _regs0) <- typ = [1, arity, encodeRegs regs] ++ ls
+  | (CICon tag)          <- typ = [2, tag] ++ ls
+  | CIStackFrame         <- typ = [3, encodeRegs regs] ++ ls
 -- (CIPap ar)         <- typ = [4, ar] ++ ls  -- these should only appear during runtime
   | otherwise                  = error ("encodeInfo, unexpected closure type: " ++ show typ)
   where
     ls         = encodeLayout layout ++ encodeSrt static
-    encodeLayout CILayoutVariable     = [0]
-    encodeLayout (CILayoutUnknown s)  = [s+1]
-    encodeLayout (CILayoutFixed s vs) = [s+1]
+    encodeLayout CILayoutVariable      = [0]
+    encodeLayout (CILayoutUnknown s)   = [s+1]
+    encodeLayout (CILayoutFixed s _vs) = [s+1]
     encodeSrt (CIStaticRefs rs) = length rs : map (objectIdx "encodeInfo" cs) rs
     encodeRegs CIRegsUnknown = 0
     encodeRegs (CIRegs skip regTypes) = let nregs = sum (map varSize regTypes)
                                         in  encodeRegsTag skip nregs
     encodeRegsTag skip nregs
       | skip < 0 || skip > 1 = error "encodeRegsTag: unexpected skip"
-      | otherwise            = (nregs `shiftL` 1) + skip
+      | otherwise            = 1 + (nregs `shiftL` 1) + skip
     argSize (CIRegs skip regTypes) = sum (map varSize regTypes) - 1 + skip
     argSize _ = 0
 
 encodeStatic :: CompactorState
              -> StaticInfo
              -> [Int]
-encodeStatic cs (StaticInfo to sv _)
+encodeStatic cs (StaticInfo _to sv _)
     | StaticFun f <- sv                           = [1, entry f]
     | StaticThunk (Just t) <- sv                  = [2, entry t]
     | StaticThunk Nothing <- sv                   = [0]
@@ -325,7 +317,7 @@ encodeStatic cs (StaticInfo to sv _)
     encodeArg (StaticLitArg (LabelLit b l)) = [9, fromEnum b, lbl l]
     encodeArg (StaticConArg con args)       = [10, entry con, length args] ++ concatMap encodeArg args
     encodeArg (StaticObjArg t)              = [11 + obj t]
-    encodeArg x                             = error ("encodeArg: unexpected: " ++ show x)
+    -- encodeArg x                             = error ("encodeArg: unexpected: " ++ show x)
     encodeChar = ord -- fixme make characters more readable
 
 encodeString :: Text -> [Int]
@@ -357,18 +349,18 @@ encodeBinary bs = BS.length bs : go bs
 encodeInt :: Integer -> [Int]
 encodeInt i
   | i >= -10 && i < encodeMax - 11 = [fromIntegral i + 12]
-  | i > 2^31-1 || i < -2^31        = error "encodeInt: integer outside 32 bit range"
-  | otherwise                      = let i' :: Int32 = fromIntegral i
-                                     in [0, fromIntegral ((i' `shiftR` 16) .&. 0xffff), fromIntegral (i' .&. 0xffff)]
+  | i > 2^(31::Int)-1 || i < -2^(31::Int) = error "encodeInt: integer outside 32 bit range"
+  | otherwise = let i' :: Int32 = fromIntegral i
+                in [0, fromIntegral ((i' `shiftR` 16) .&. 0xffff), fromIntegral (i' .&. 0xffff)]
 
 -- encode a possibly 53 bit int
 encodeSignificand :: Integer -> [Int]
 encodeSignificand i
-  | i >= -10 && i < encodeMax - 11 = [fromIntegral i + 12]
-  | i > 2^53 || i < -2^53          = error ("encodeInt: integer outside 53 bit range: " ++ show i)
-  | otherwise                      = let i' = abs i
-                                     in  [if i < 0 then 0 else 1] ++
-                                           map (\r -> fromIntegral ((i' `shiftR` r) .&. 0xffff)) [48,32,16,0]
+  | i >= -10 && i < encodeMax - 11      = [fromIntegral i + 12]
+  | i > 2^(53::Int) || i < -2^(53::Int) = error ("encodeInt: integer outside 53 bit range: " ++ show i)
+  | otherwise = let i' = abs i
+                in  [if i < 0 then 0 else 1] ++
+                    map (\r -> fromIntegral ((i' `shiftR` r) .&. 0xffff)) [48,32,16,0]
 
 encodeDouble :: SaneDouble -> [Int]
 encodeDouble (SaneDouble d)
@@ -421,11 +413,11 @@ identsS f (BlockStat xs)       = BlockStat   <$> (traverse . identsS) f xs
 identsS f (ApplStat e es)      = ApplStat    <$> identsE f e <*> (traverse . identsE) f es
 identsS f (UOpStat op e)       = UOpStat op  <$> identsE f e
 identsS f (AssignStat e1 e2)   = AssignStat  <$> identsE f e1 <*> identsE f e2
-identsS f (UnsatBlock{})       = error "identsS: UnsatBlock"
-identsS f (AntiStat{})         = error "identsS: AntiStat"
+identsS _ (UnsatBlock{})       = error "identsS: UnsatBlock"
+identsS _ (AntiStat{})         = error "identsS: AntiStat"
 identsS f (LabelStat l s)      = LabelStat l <$> identsS f s
-identsS f b@(BreakStat{})      = pure b
-identsS f c@(ContinueStat{})   = pure c
+identsS _ b@(BreakStat{})      = pure b
+identsS _ c@(ContinueStat{})   = pure c
 
 {-# INLINE identsE #-}
 identsE :: Traversal' JExpr Ident
@@ -436,8 +428,8 @@ identsE f (InfixExpr s e1 e2) = InfixExpr s <$> identsE f e1 <*> identsE f e2
 identsE f (UOpExpr o e)       = UOpExpr o   <$> identsE f e
 identsE f (IfExpr e1 e2 e3)   = IfExpr      <$> identsE f e1 <*> identsE f e2 <*> identsE f e3
 identsE f (ApplExpr e es)     = ApplExpr    <$> identsE f e <*> (traverse . identsE) f es
-identsE f (UnsatExpr{})       = error "identsE: UnsatExpr"
-identsE f (AntiExpr{})        = error "identsE: AntiExpr"
+identsE _ (UnsatExpr{})       = error "identsE: UnsatExpr"
+identsE _ (AntiExpr{})        = error "identsE: AntiExpr"
 
 {-# INLINE identsV #-}
 identsV :: Traversal' JVal Ident

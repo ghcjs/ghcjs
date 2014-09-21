@@ -585,8 +585,8 @@ defRenderJsS r (WhileStat False p b)  = text "while" <> parens (jsToDocR r p) $$
 defRenderJsS r (WhileStat True  p b)  = (text "do" $$ braceNest' (jsToDocR r b)) $+$ text "while" <+> parens (jsToDocR r p)
 defRenderJsS r (UnsatBlock e) = jsToDocR r $ sat_ e
 
-defRenderJsS r (BreakStat l) = maybe (text "break") (((<+>) `on` text) "break" . TL.fromStrict) l
-defRenderJsS r (ContinueStat l) = maybe (text "continue") (((<+>) `on` text) "continue" . TL.fromStrict) l
+defRenderJsS _ (BreakStat l) = maybe (text "break") (((<+>) `on` text) "break" . TL.fromStrict) l
+defRenderJsS _ (ContinueStat l) = maybe (text "continue") (((<+>) `on` text) "continue" . TL.fromStrict) l
 defRenderJsS r (LabelStat l s) = text (TL.fromStrict l) <> char ':' $$ printBS s
         where
           printBS (BlockStat ss) = vcat $ interSemi $ flattenBlocks ss
@@ -613,7 +613,7 @@ defRenderJsS r (UOpStat op x)
         | isPre op && isAlphaOp op = text (uOpText op) <+> optParens r x
         | isPre op = text (uOpText op) <> optParens r x
         | otherwise = optParens r x <> text (uOpText op)
-defRenderJsS r (AntiStat s) = error "defRenderJsS: AntiStat"
+defRenderJsS _ (AntiStat{}) = error "defRenderJsS: AntiStat"
 defRenderJsS r (BlockStat xs) = jsToDocR r (flattenBlocks xs)
 
 flattenBlocks :: [JStat] -> [JStat]
@@ -637,20 +637,20 @@ defRenderJsE r (UOpExpr op x)
         | isPre op = text (uOpText op) <> optParens r x
         | otherwise = optParens r x <> text (uOpText op)
 defRenderJsE r (ApplExpr je xs) = jsToDocR r je <> (parens . fillSep . punctuate comma $ map (jsToDocR r) xs)
-defRenderJsE r (AntiExpr s) = error "defRenderJsE: AntiExpr" -- text . TL.fromChunks $ ["`(", s, ")`"]
+defRenderJsE _ (AntiExpr{}) = error "defRenderJsE: AntiExpr" -- text . TL.fromChunks $ ["`(", s, ")`"]
 
 defRenderJsE r (UnsatExpr e) = jsToDocR r $ sat_ e
 
 defRenderJsV :: RenderJs -> JVal -> Doc
 defRenderJsV r (JVar i) = jsToDocR r i
 defRenderJsV r (JList xs) = brackets . fillSep . punctuate comma $ map (jsToDocR r) xs
-defRenderJsV r (JDouble (SaneDouble d))
+defRenderJsV _ (JDouble (SaneDouble d))
                      | d < 0 || isNegativeZero d = parens (double d)
                      | otherwise                 = double d
-defRenderJsV r (JInt i) | i < 0     = parens (integer i)
+defRenderJsV _ (JInt i) | i < 0     = parens (integer i)
                      | otherwise = integer i
-defRenderJsV r (JStr s) = text . TL.fromChunks $ ["\"",encodeJson s,"\""]
-defRenderJsV r (JRegEx s) = text . TL.fromChunks $ ["/",s,"/"]
+defRenderJsV _ (JStr s) = text . TL.fromChunks $ ["\"",encodeJson s,"\""]
+defRenderJsV _ (JRegEx s) = text . TL.fromChunks $ ["/",s,"/"]
 defRenderJsV r (JHash m)
             | M.null m = text "{}"
             | otherwise = braceNest . fillSep . punctuate comma .
@@ -659,7 +659,7 @@ defRenderJsV r (JFunc is b) = parens $ text "function" <> parens (fillSep . punc
 defRenderJsV r (UnsatVal f) = jsToDocR r $ sat_ f
 
 defRenderJsI :: RenderJs -> Ident -> Doc
-defRenderJsI r (TxtI t) = text (TL.fromStrict t)
+defRenderJsI _ (TxtI t) = text (TL.fromStrict t)
 
 {--------------------------------------------------------------------
   ToJExpr Class

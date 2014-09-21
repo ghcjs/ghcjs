@@ -47,7 +47,6 @@ import Panic
 import Outputable
 import Maybes
 
-import System.Environment ( getEnv )
 import Distribution.InstalledPackageInfo
 import Distribution.InstalledPackageInfo.Binary
 import Distribution.Package hiding (PackageId,depends)
@@ -135,7 +134,7 @@ data PackageState = PackageState {
 -- | A PackageConfigMap maps a 'PackageId' to a 'PackageConfig'
 type PackageConfigMap = UniqFM PackageConfig
 
-type InstalledPackageIdMap = Map InstalledPackageId PackageId
+-- type InstalledPackageIdMap = Map InstalledPackageId PackageId
 
 type InstalledPackageIndex = Map InstalledPackageId PackageConfig
 

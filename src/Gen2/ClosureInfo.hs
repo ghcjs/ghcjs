@@ -19,7 +19,6 @@ import           Compiler.JMacro
 import           Gen2.StgAst ()
 import           Gen2.Utils
 
-import           Module
 import           DynFlags
 import           StgSyn
 import           DataCon
@@ -196,7 +195,6 @@ data CIType = CIFun { citArity :: Int  -- ^ function arity
             | CIPap
             | CIBlackhole
             | CIStackFrame
-  --          | CIInd
   deriving (Eq, Ord, Show)
 
 data CIRegs = CIRegsUnknown
@@ -228,7 +226,8 @@ data CILayout = CILayoutVariable            -- layout stored in object itself, f
                   }
   deriving (Eq, Ord, Show)
 
--- standard fixed layout: payload size
+-- standard fixed layout: payload types
+-- payload starts at .d1 for heap objects, entry closest to Sp for stack frames
 fixedLayout :: [VarType] -> CILayout
 fixedLayout vts = CILayoutFixed (sum (map varSize vts)) vts
 
@@ -293,7 +292,6 @@ setObjInfoL debug obj rs CILayoutVariable t n a =
 setObjInfoL debug obj rs (CILayoutUnknown size) t n a =
   setObjInfo debug obj t n xs a size rs
     where
-      tag = toJExpr size
       xs  = toTypeList (replicate size ObjV)
 setObjInfoL debug obj rs (CILayoutFixed size layout) t n a =
   setObjInfo debug obj t n xs a size rs
@@ -317,7 +315,7 @@ setObjInfo debug obj t name fields a size regs static
    | debug     = [j| h$setObjInfo(`TxtI obj`, `t`, `name`, `fields`, `a`, `size`, `regTag regs`, `static`); |]
    | otherwise = [j| h$o(`TxtI obj`,`t`,`a`,`size`,`regTag regs`,`static`); |]
   where
-    regTag CIRegsUnknown            = -1
+    regTag CIRegsUnknown       = -1
     regTag (CIRegs skip types) =
       let nregs = sum $ map varSize types
       in  skip + (nregs `shiftL` 8)
@@ -390,7 +388,7 @@ staticDeclStat (StaticInfo si sv _) =
 staticInitStat :: Bool         -- ^ profiling enabled
                -> StaticInfo
                -> JStat
-staticInitStat prof (StaticInfo i sv cc) =
+staticInitStat _prof (StaticInfo i sv cc) =
   case sv of
     StaticData con args  -> ApplStat (jvar "h$sti") $ [jvar i, jvar con, toJExpr args] ++ ccArg
     StaticFun f          -> ApplStat (jvar "h$sti") $ [jvar i, jvar f, [je| [] |]] ++ ccArg

@@ -119,7 +119,7 @@ genericStackApply dflags s =
       `ClosureInfo "h$ap_gen" (CIRegs 0 [PtrV]) "h$ap_gen" CILayoutVariable CIStackFrame noStatic`;
     |]
   where
-    funCase c arity = withIdent $ \pap ->
+    funCase c arity =
       [j| var myArity = `Stack`[`Sp`-1];
           var ar = `arity` & 0xFF;
           var myAr = myArity & 0xFF;
@@ -202,7 +202,7 @@ genericFastApply dflags s =
   where
      -- thunk: push everything to stack frame, enter thunk first
     pushStackApply :: JExpr -> JExpr -> JStat
-    pushStackApply c tag =
+    pushStackApply _c tag =
       [j| `pushAllRegs tag`;
           var ap = h$apply[`tag`];
           if(ap === h$ap_gen) {
@@ -389,15 +389,10 @@ fastApply dflags s r n =
 
       myFunArgs = []
 
-      loadArgs = zipWith (\r n -> [j| `r` = `Stack`[`Sp`-`n-1`] |]) (enumFrom R2) [1..r]
-
       regArgs = take r (enumFrom R2)
 
       mkAp :: Int -> Int -> [JExpr]
       mkAp n' r' = [ jsv . T.pack $ "h$ap_" ++ show n' ++ "_" ++ show r' ]
-
-      regsTo :: Int -> [JExpr]
-      regsTo m = map (toJExpr . numReg) (reverse [m..r+1])
 
       body = [j| var c = `R1`.f;
                  `traceRts s $ (funName <> ": sp ") |+ Sp`;
@@ -459,7 +454,7 @@ fastApply dflags s r n =
 zeroApply :: CgSettings -> JStat
 zeroApply s =
             [j| fun h$ap_0_0_fast { `enter s (toJExpr R1)`; }
-                fun h$ap_0_0 { `adjSpN 1`; `enter s (toJExpr R1)`; }
+                fun h$ap_0_0 { `adjSpN' 1`; `enter s (toJExpr R1)`; }
                 `ClosureInfo "h$ap_0_0" (CIRegs 0 [PtrV]) "h$ap_0_0" (CILayoutFixed 0 []) CIStackFrame noStatic`;
 
                 fun h$ap_1_0 x {
@@ -472,7 +467,7 @@ zeroApply s =
                     `push' s [toJExpr R1, jsv "h$return"]`;
                     return h$blockOnBlackhole(`R1`);
                   } else {
-                    `adjSpN 1`;
+                    `adjSpN' 1`;
                     return c;
                   }
                 }
@@ -511,7 +506,7 @@ enter s e =
             |]
 
 updates :: DynFlags -> CgSettings -> JStat
-updates dflags s =
+updates _dflags s =
   [j|
       fun h$upd_frame {
         var updatee = `Stack`[`Sp` - 1];
@@ -537,11 +532,21 @@ updates dflags s =
           updatee.m  = 0;
           `profStat s (updateCC updatee)`;
         }
-        `adjSpN 2`;
+        `adjSpN' 2`;
         `traceRts s $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
         return `Stack`[`Sp`];
       };
       `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
+
+      // assumes lne thunks do not leak to other threads, there is no list of blocked threads in the black hole
+      fun h$upd_frame_lne {
+         var updateePos = `Stack`[`Sp` - 1];
+         `Stack`[updateePos] = `R1`;
+         `adjSpN' 2`;
+         `traceRts s $ t"h$upd_frame_lne: updating: " |+ updateePos |+ t" -> " |+ R1`;
+         return `Stack`[`Sp`];
+      }
+      `ClosureInfo "h$upd_frame_lne" (CIRegs 0 [PtrV]) "h$upd_frame_lne" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]
   where
     updateCC updatee = [j| `updatee`.cc = `jCurrentCCS`; |]
@@ -564,7 +569,7 @@ mkPap :: DynFlags
       -> JExpr   -- ^ number of arguments in pap
       -> [JExpr] -- ^ values for the supplied arguments
       -> JStat
-mkPap dflags s tgt fun n values =
+mkPap _dflags s tgt fun n values =
       traceRts s ("making pap with: " ++ show (length values) ++ " items") <>
       allocDynamic s True tgt (iex entry) (fun:papAr:map toJExpr values')
         (if csProf s then Just jCurrentCCS else Nothing)
@@ -587,7 +592,7 @@ pap :: DynFlags
     -> CgSettings
     -> Int
     -> JStat
-pap dflags s r =
+pap _dflags s r =
          [j| `decl func`;
              `iex func` = `JFunc [] body`;
              `ClosureInfo funcName CIRegsUnknown funcName (CILayoutUnknown (r+2)) CIPap noStatic`;
@@ -617,7 +622,7 @@ pap dflags s r =
 
 -- generic pap
 papGen :: DynFlags -> CgSettings -> JStat
-papGen dflags s =
+papGen _dflags s =
          [j| fun h$pap_gen {
                var c = `R1`.d1;
                var f = c.f;
@@ -661,5 +666,5 @@ moveRegs2 = [j| fun h$moveRegs2 n m {
                             h$setReg(i+1+`m`, h$getReg(i+1));
                           }
                         |]
-    moveReg n m = [j| h$setReg(`n+m`, h$getReg(`n`)); |]
+    -- moveReg n m = [j| h$setReg(`n+m`, h$getReg(`n`)); |]
 

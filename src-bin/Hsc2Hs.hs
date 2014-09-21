@@ -15,6 +15,7 @@ import qualified System.Info as Info
 
 import           Compiler.Info (getFullArguments)
 
+main :: IO ()
 main = do
   args <- getFullArguments
   exitWith =<< rawSystem "hsc2hs" (filter (\x -> isELF Info.os || not (isELFArg x)) args)

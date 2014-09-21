@@ -30,7 +30,6 @@ import DynamicLoading
 import Module
 import SrcLoc
 import CoreSyn
-import CorePrep
 import BasicTypes
 import SimplCore
 import CoreTidy
@@ -460,8 +459,9 @@ ghcjsDoLink dflags stop_phase o_files
 -- make sure we use our modified linker to load the correct shared libraries
 
 ghcjsCompileCoreExpr :: HscEnv -> SrcSpan -> CoreExpr -> IO HValue
-ghcjsCompileCoreExpr hsc_env srcspan ds_expr
-    | rtsIsProfiled
+ghcjsCompileCoreExpr hsc_env srcspan ds_expr = error "ghcjsCompileCoreExpr"
+{-
+  | rtsIsProfiled
     = throwIO (InstallationError "You can't call hscCompileCoreExpr in a profiled compiler")
             -- Otherwise you get a seg-fault when you run it
     | otherwise
@@ -479,6 +479,7 @@ ghcjsCompileCoreExpr hsc_env srcspan ds_expr
            {- link it -}
          ; hval <- linkExpr hsc_env srcspan bcos
          ; return hval }
+-}
 
 -------------------------------------------------------------------------------------------
 -- used for loading values when running TH

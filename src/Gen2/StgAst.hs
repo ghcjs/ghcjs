@@ -9,19 +9,18 @@
 
 module Gen2.StgAst where
 
-import           BasicTypes
-import           Control.Lens
-import           CoreSyn
-import           CostCentre
-import           Data.Array
-import           Data.Char (isSpace)
+import           Data.Char     (isSpace)
 import qualified Data.Foldable as F
-import qualified Data.List      as L
 import           Data.Monoid
 import           Data.Set      (Set)
 import qualified Data.Set      as S
 import           DataCon
 import           DynFlags
+
+import           BasicTypes
+import           Control.Lens
+import           CoreSyn
+import           CostCentre
 import           ForeignCall
 import           Id
 import           Literal
@@ -30,17 +29,12 @@ import           Name
 import           Outputable    hiding ((<>))
 import           PrimOp
 import           StgSyn
-import           SysTools (initSysTools)
 import           TyCon
 import           Type
 import           Unique
 import           UniqFM
 import           UniqSet
 import qualified Var
-
-import           Control.Monad
-import           System.Environment (getArgs)
-import           System.IO.Unsafe
 
 import           Gen2.Utils
 
@@ -69,7 +63,7 @@ instance Show TyCon where show = show . tyConName
 instance Show SRT where
   show NoSRT = "SRT:NO"
   show (SRTEntries e) = "SRT:" ++ show e
-  show (SRT i j b) = "SRT:BMP" ++ show [i,j]
+  show (SRT i j _b) = "SRT:BMP" ++ show [i,j]
 instance Show PackageId where show = packageIdString
 instance Show Name where
   show n = case nameModule_maybe n of
@@ -123,8 +117,8 @@ exprRefs :: UniqFM StgExpr -> StgExpr -> Set Id
 exprRefs u (StgApp f args) = s f <> l (argRefs u) args
 exprRefs u (StgConApp d args) = l s (dataConImplicitIds d) <> l (argRefs u) args
 exprRefs u (StgOpApp _ args _) = l (argRefs u) args
-exprRefs u (StgLit {}) = mempty
-exprRefs u (StgLam {}) = mempty
+exprRefs _ (StgLit {}) = mempty
+exprRefs _ (StgLam {}) = mempty
 exprRefs u (StgCase expr _ _ _ _ _ alts) = exprRefs u expr <> alts^.folded._4.to (exprRefs u)
 exprRefs u (StgLet bnd expr) = bindingRefs u bnd <> exprRefs u expr
 exprRefs u (StgLetNoEscape _ _ bnd expr) = bindingRefs u bnd <> exprRefs u expr
@@ -135,5 +129,5 @@ argRefs :: UniqFM StgExpr -> StgArg -> Set Id
 argRefs u (StgVarArg id)
   | Just e <- lookupUFM u id = exprRefs u e
   | otherwise                = s id
-argRefs u _ = mempty
+argRefs _ _ = mempty
 

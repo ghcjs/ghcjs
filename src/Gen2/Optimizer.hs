@@ -39,9 +39,11 @@ import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Monoid
 import qualified Data.Set as S
-import qualified Data.HashSet as HS
+
 import qualified Data.Text as T
 import           Data.Word
+
+import           Panic
 
 import           Compiler.JMacro
 
@@ -109,9 +111,9 @@ thisFunction f s = f s
 localVars :: JStat -> [Ident]
 localVars = universeOf subStats >=> getLocals
   where
-    getLocals (DeclStat i) = [i]
+    getLocals (DeclStat i)        = [i]
     getLocals (ForInStat _ i _ _) = [i] -- remove ident?
-    getLocals (TryStat _ i _ _) = []  -- is this correct?
+    getLocals (TryStat _ _i _ _)  = []  -- is this correct?
     getLocals _ = []
 
 localIdents :: Traversal' JStat Ident
@@ -120,6 +122,8 @@ localIdents = template . localFunctionVals . _JVar
 allIdents :: Traversal' JStat Ident
 allIdents = template . functionVals . _JVar
 
+nestedFuns :: (Applicative f, Data s)
+           => (([Ident], JStat) -> f ([Ident], JStat)) -> s -> f s
 nestedFuns = template . localFunctionVals . _JFunc
 
 -- all idents not in expressions in this function, including in declarations
@@ -139,13 +143,13 @@ nonExprLocalIdents f (TryStat s1 i s2 s3) = TryStat <$> nonExprLocalIdents f s1
                                                     <*> nonExprLocalIdents f s3
 nonExprLocalIdents f (BlockStat ss) = BlockStat <$> (traverse . nonExprLocalIdents) f ss
 nonExprLocalIdents f (LabelStat l s) = LabelStat l <$> nonExprLocalIdents f s
-nonExprLocalIdents f s = pure s
+nonExprLocalIdents _ s = pure s
 
 functionVals :: Traversal' JVal JVal
-functionVals f (JList es)      = JList <$> template (functionVals f) es
-functionVals f (JHash m)       = JHash <$> tinplate (functionVals f) m
-functionVals f v@(JFunc as es) = JFunc as <$> template (functionVals f) es
-functionVals f v               = f v
+functionVals f (JList es)    = JList <$> template (functionVals f) es
+functionVals f (JHash m)     = JHash <$> tinplate (functionVals f) m
+functionVals f (JFunc as es) = JFunc as <$> template (functionVals f) es
+functionVals f v             = f v
 
 localFunctionVals :: Traversal' JVal JVal
 localFunctionVals f (JList es)   = JList <$> template (localFunctionVals f) es
@@ -203,7 +207,7 @@ liveVarsS f s = (statExprs . liveVarsE) f s
 
 liveVarsE :: Traversal' JExpr Ident
 liveVarsE f (ValExpr (JVar i))     = ValExpr . JVar <$> f i
-liveVarsE f v@(ValExpr (JFunc {})) = pure v
+liveVarsE _ v@(ValExpr (JFunc {})) = pure v
 liveVarsE f e                      = template (liveVarsE f) e
 
 ----------------------------------------------------------
@@ -406,11 +410,11 @@ constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
         s  = mightHaveSideeffects' e'
         c  = exprCond' e'
         e' = propagateExpr (nodeFact nid) True e
-    rewriteNode nid (WhileNode e s1)  -- loop body unreachable
+    rewriteNode nid (WhileNode e _s1)  -- loop body unreachable
       | Just False <- exprCond' e', not (mightHaveSideeffects' e') = SequenceNode []
       where
         e' = propagateExpr (nodeFact nid) True e
-    rewriteNode nid n@(SimpleNode (AssignS e1 e2))
+    rewriteNode nid (SimpleNode (AssignS e1 e2))
       | (ValE (Var x)) <- fromA e1, (ValE (Var y)) <- fromA e2, x == y
           = SequenceNode []
       | (ValE (Var x)) <- fromA e1, not (live x (lookupFact def nid 0 lfs))
@@ -427,7 +431,7 @@ constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
 
     -- apply our facts to an expression
     propagateExpr :: CVals -> Bool -> AExpr' -> AExpr'
-    propagateExpr CUnreached isCond ae = ae
+    propagateExpr CUnreached _isCond ae = ae
     propagateExpr cv@(CReached{}) isCond ae
       | not hasKnownDeps = ae
       | e@(ApplE (ValE _) args) <- fromA ae = annotate c . normalize isCond c g $
@@ -444,7 +448,8 @@ constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
         f :: Expr -> Expr
         f (ValE (Var i)) | Just (CKnown ae _) <- IM.lookup i cv = fromA ae
         f x = x
-        p e' = "propagating:\n" ++ show e ++ "\n" ++ show (e'::Expr)
+        --p e' = "propagating:\n" ++ show e ++ "\n" ++ show (e'::Expr)
+    propagateExpr' _ _ = panic "propagateExpr'"
 
 -- set of identifiers with known values
 knownValues :: CVals -> IdSet
@@ -472,9 +477,9 @@ constantsFacts lfs c g = {- dumpFacts g $ -} foldForward combineConstants f0 (CR
     switched :: NodeId -> AExpr' -> [AExpr'] -> CVals -> ([CVals], CVals)
     switched _ e es m = let m' = removeMutated e m in (replicate (length es) m', m')
     simple :: NodeId -> SimpleStat' -> CVals -> CVals
-    simple nid _ CUnreached = CUnreached
-    simple nid (DeclS{}) m = m
-    simple nid (ExprS e) m = removeMutated e m
+    simple _ _ CUnreached = CUnreached
+    simple _   (DeclS{}) m = m
+    simple _   (ExprS e) m = removeMutated e m
     simple nid (AssignS e1 e2) m
        | (ValE (Var i)) <- fromA e1, (ValE (IntV _))                <- fromA e2 = IM.insert i (CKnown e2 True) %% dc i m'
        | (ValE (Var i)) <- fromA e1, (ValE (DoubleV _))             <- fromA e2 = IM.insert i (CKnown e2 True) %% dc i m'
@@ -488,11 +493,11 @@ constantsFacts lfs c g = {- dumpFacts g $ -} foldForward combineConstants f0 (CR
            && usedOnce nid i && i `IS.notMember` (IS.unions $ map exprDeps' args) = IM.insert i (CKnown e2 False) %% dc i m'
        | (ValE (Var i)) <- fromA e1, not (mightHaveSideeffects' e2)
            && usedOnce nid i && i `IS.notMember` exprDeps e2                    = IM.insert i (CKnown e2 False) %% dc i m'
-       | (ValE (Var i)) <- fromA e1, (SelE (ValE (Var j)) field) <- fromA e2,
+       | (ValE (Var i)) <- fromA e1, (SelE (ValE (Var _)) _field) <- fromA e2,
            not (mightHaveSideeffects' e2) && usedOnce nid i                     = IM.insert i (CKnown e1 False) %% dc i m'
        | (ValE (Var i)) <- fromA e1                                             = dc i m'
-       | (IdxE (ValE (Var i)) _) <- fromA e1                                    = dc i m'
-       | (SelE (ValE (Var i)) _) <- fromA e1                                    = dc i m'
+--       | (IdxE (ValE (Var i)) _) <- fromA e1                                    = dc i m'
+--       | (SelE (ValE (Var i)) _) <- fromA e1                                    = dc i m'
        | otherwise = removeMutated e1 m'
        where m' = removeMutated e2 m
              vfact v = case m' of
@@ -514,7 +519,7 @@ constantsFacts lfs c g = {- dumpFacts g $ -} foldForward combineConstants f0 (CR
     combineConstants (CReached m1) (CReached m2) =
       CReached (IM.mergeWithKey f (const IM.empty) (const IM.empty) m1 m2)
         where
-          f k (CKnown x dx)  (CKnown y dy) | x == y    = Just (CKnown x (dx || dy))
+          f _ (CKnown x dx)  (CKnown y dy) | x == y    = Just (CKnown x (dx || dy))
                   | otherwise = Nothing
     combineConstants CUnreached x = x
     combineConstants x          _ = x
@@ -547,9 +552,9 @@ mutated c expr = foldl' f (Just IS.empty) (universeOf tinplate expr)
       | otherwise                  = s
     f s (ApplE (ValE (Var i)) _)
       | Just m <- knownMutated i   = IS.union m <$> s
-    f s (SelE {})                  = s -- fixme might not be true with properties
-    f s (BOpE{})                   = s
-    f s (IdxE{})                   = s
+    -- f s (SelE {})                  = s -- fixme might not be true with properties
+    -- f s (BOpE{})                   = s
+    -- f s (IdxE{})                   = s
     f s (ValE{})                   = s
     f _ _                          = Nothing
     knownMutated i
@@ -609,7 +614,7 @@ mightHaveSideeffects c e = any f (universeOf template e)
 
 -- constant folding and other bottom up rewrites
 foldExpr :: Cache -> Expr -> Expr
-foldExpr c = transformOf template f
+foldExpr _c = transformOf template f
   where
     f (BOpE LOrOp v1 v2) = lorOp v1 v2
     f (BOpE LAndOp v1 v2) = landOp v1 v2
@@ -836,7 +841,7 @@ sfUnknown :: StackFacts -> Bool
 sfUnknown = not . sfKnown
 
 propagateStack :: IdSet -> IdSet -> Cache -> Graph' -> Graph'
-propagateStack args locals c g
+propagateStack _args _locals c g
   | nrets > 4 || stackAccess < nrets - 1 || stackAccess == 0 = g
   | otherwise                                                = g'
   where
@@ -868,7 +873,7 @@ propagateStack args locals c g
       | known nid = replace nid e g
     updNode nid e@(SimpleNode{}) g
       | known nid && sfUnknown (lookupFact SFUnknownB nid 1 sf) = replace nid e g -- fixme is this right?
-    updNode nid e@(SimpleNode{}) g
+    updNode nid   (SimpleNode{}) g
       | SFOffset x <- lookupFact SFUnknownB nid 0 sf,
         SFOffset y <- lookupFact SFUnknownB nid 1 sf,
          x /= y = nodes %~ IM.insert nid (SequenceNode []) $ g
@@ -910,7 +915,7 @@ propagateStack args locals c g
 stackFacts :: Cache -> Graph' -> Facts StackFacts
 stackFacts c g = foldForward combineStack f0 (SFOffset 0) SFUnknownB g
   where
-    stackI = fromMaybe (-1) (lookupId g (TxtI "h$stack"))
+    -- stackI = fromMaybe (-1) (lookupId g (TxtI "h$stack"))
     spI    = fromMaybe (-2) (lookupId g (TxtI "h$sp"))
     f0 = def { fIf      = updSfT
              , fWhile   = updSfT
@@ -956,13 +961,13 @@ stackFacts c g = foldForward combineStack f0 (SFOffset 0) SFUnknownB g
                 | otherwise = SFUnknownT
 
     simple :: NodeId -> SimpleStat' -> StackFacts -> StackFacts
-    simple nid (ExprS (AExpr _ (UOpE op (ValE (Var i)))))
-      | i == spI && op == PreInc                               = adjSf 1
-      | i == spI && op == PreDec                               = adjSf (-1)
-      | i == spI && op == PostInc                              = adjSf 1
-      | i == spI && op == PostDec                              = adjSf (-1)
-    simple nid (AssignS (AExpr _ (ValE (Var i))) e) | i == spI = adjSfE e
-    simple nid s                                               = updSf' s
+    simple _nid (ExprS (AExpr _ (UOpE op (ValE (Var i)))))
+      | i == spI && op == PreInc                                = adjSf 1
+      | i == spI && op == PreDec                                = adjSf (-1)
+      | i == spI && op == PostInc                               = adjSf 1
+      | i == spI && op == PostDec                               = adjSf (-1)
+    simple _nid (AssignS (AExpr _ (ValE (Var i))) e) | i == spI = adjSfE e
+    simple _nid s                                               = updSf' s
 
     combineStack :: StackFacts -> StackFacts -> StackFacts
     combineStack SFUnknownT _ = SFUnknownT
@@ -1018,7 +1023,7 @@ optimizeSequences c g0 = foldl' transformNodes g (IM.elems $ g ^. nodes)
     regBetween x y r = maybe False (\n -> n >= x && n <= y) (IM.lookup r regN)
 
     f :: [Node'] -> [Node']
-    f (x@(SimpleNode (AssignS ae@(AExpr _ (ValE (Var r))) e)):xs)
+    f (x@(SimpleNode (AssignS (AExpr _ (ValE (Var r))) e)):xs)
       | Just n <- reg r, n > 1 && not (mightHaveSideeffects' e) = f' (n-1) n [(fromA e,x)] xs
     f (x:xs) = x : f xs
     f [] = []
@@ -1029,7 +1034,7 @@ optimizeSequences c g0 = foldl' transformNodes g (IM.elems $ g ^. nodes)
        |  Just k <- reg r, k == n && not (mightHaveSideeffects' e)
               && not (F.any (regBetween (k+1) start) (IS.toList $ exprDeps ae))
            = f' (n-1) start ((fromA e,x):exprs) xs
-    f' n start exprs xs = map snd (reverse exprs) ++ f xs
+    f' _ _start exprs xs = map snd (reverse exprs) ++ f xs
 
     mkAssign :: [(Expr, Node')] -> Node'
     mkAssign xs = SimpleNode (ExprS . annotate c $ ApplE (ValE (Var i)) (reverse $ map fst xs))

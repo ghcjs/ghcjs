@@ -261,7 +261,7 @@ genPrim _ _ ThawArrayOp         [r] [a,start,n] =
   PrimInline [j| `r` = h$sliceArray(`a`,`start`,`n`); |]
 genPrim _ _ NewByteArrayOp_Char [r] [l] = PrimInline (newByteArray r l)
 genPrim _ _ NewPinnedByteArrayOp_Char [r] [l] = PrimInline (newByteArray r l)
-genPrim _ _ NewAlignedPinnedByteArrayOp_Char [r] [l,align] = PrimInline (newByteArray r l)
+genPrim _ _ NewAlignedPinnedByteArrayOp_Char [r] [l,_align] = PrimInline (newByteArray r l)
 genPrim _ _ ByteArrayContents_Char [a,o] [b] = PrimInline [j| `a` = `b`; `o` = 0; |]
 genPrim _ _ SameMutableByteArrayOp [r] [a,b] = PrimInline [j| `r` = (`a` === `b`) ? 1 : 0 |]
 genPrim _ _ UnsafeFreezeByteArrayOp [a] [b] = PrimInline [j| `a` = `b`; |]
@@ -356,7 +356,7 @@ genPrim _ _ CopyByteArrayOp [] [a1,o1,a2,o2,n] =
                    `a2`.u8[i+`o2`] = `a1`.u8[i+`o1`];
                  }
                |]
-genPrim d t CopyMutableByteArrayOp [] xs@[a1,o1,a2,o2,n] = genPrim d t CopyByteArrayOp [] xs
+genPrim d t CopyMutableByteArrayOp [] xs@[_a1,_o1,_a2,_o2,_n] = genPrim d t CopyByteArrayOp [] xs
 genPrim _ _ SetByteArrayOp [] [a,o,n,v] =
   PrimInline [j| for(var i=0;i<`n`;i++) {
                    `a`.u8[`o`+i] = `v`;
@@ -382,17 +382,17 @@ genPrim _ _ CopyArrayArrayOp [] [a1,o1,a2,o2,n] =
 genPrim _ _ CopyMutableArrayArrayOp [] [a1,o1,a2,o2,n] =
   PrimInline [j| for(var i=0;i<`n`;i++) { `a2`[i+`o2`]=`a1`[i+`o1`]; } |]
 
-genPrim _ _ AddrAddOp  [a',o'] [a,o,i]   = PrimInline [j| `a'` = `a`; `o'` = `o` + `i`;|]
-genPrim _ _ AddrSubOp  [i] [a1,o1,a2,o2] = PrimInline [j| `i` = `o1` - `o2` |]
-genPrim _ _ AddrRemOp  [r] [a,o,i]   = PrimInline [j| `r` = `o` % `i` |]
-genPrim _ _ Addr2IntOp [i]     [a,o]     = PrimInline [j| `i` = `o`; |] -- only usable for comparisons within one range
-genPrim _ _ Int2AddrOp [a,o]   [i]       = PrimInline [j| `a` = []; `o` = `i`; |] -- unsupported
-genPrim _ _ AddrGtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >  `o2`) ? 1 : 0; |]
-genPrim _ _ AddrGeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` >= `o2`) ? 1 : 0; |]
-genPrim _ _ AddrEqOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 1 : 0; |]
-genPrim _ _ AddrNeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 1 : 0; |]
-genPrim _ _ AddrLtOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <  `o2`) ? 1 : 0; |]
-genPrim _ _ AddrLeOp   [r] [a1,o1,a2,o2] = PrimInline [j| `r` = (`o1` <= `o2`) ? 1 : 0; |]
+genPrim _ _ AddrAddOp  [a',o'] [a,o,i]     = PrimInline [j| `a'` = `a`; `o'` = `o` + `i`;|]
+genPrim _ _ AddrSubOp  [i] [_a1,o1,_a2,o2] = PrimInline [j| `i` = `o1` - `o2` |]
+genPrim _ _ AddrRemOp  [r] [_a,o,i]        = PrimInline [j| `r` = `o` % `i` |]
+genPrim _ _ Addr2IntOp [i]     [_a,o]      = PrimInline [j| `i` = `o`; |] -- only usable for comparisons within one range
+genPrim _ _ Int2AddrOp [a,o]   [i]         = PrimInline [j| `a` = []; `o` = `i`; |] -- unsupported
+genPrim _ _ AddrGtOp   [r] [_a1,o1,_a2,o2] = PrimInline [j| `r` = (`o1` >  `o2`) ? 1 : 0; |]
+genPrim _ _ AddrGeOp   [r] [_a1,o1,_a2,o2] = PrimInline [j| `r` = (`o1` >= `o2`) ? 1 : 0; |]
+genPrim _ _ AddrEqOp   [r] [a1,o1,a2,o2]   = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 1 : 0; |]
+genPrim _ _ AddrNeOp   [r] [a1,o1,a2,o2]   = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 1 : 0; |]
+genPrim _ _ AddrLtOp   [r] [_a1,o1,_a2,o2] = PrimInline [j| `r` = (`o1` <  `o2`) ? 1 : 0; |]
+genPrim _ _ AddrLeOp   [r] [_a1,o1,_a2,o2] = PrimInline [j| `r` = (`o1` <= `o2`) ? 1 : 0; |]
 
 -- addr indexing: unboxed arrays
 genPrim _ _ IndexOffAddrOp_Char [c] [a,o,i] = PrimInline [j| `c` = `a`.u8[`o`+`i`]; |]
@@ -497,24 +497,24 @@ genPrim _ _ CasMutVarOp [status,r] [mv,o,n] =
                     `r` = `mv`.val;
                  }
                |]
-genPrim _ _ CatchOp [r] [a,handler] = PRPrimCall
+genPrim _ _ CatchOp [_r] [a,handler] = PRPrimCall
   [j| return h$catch(`a`, `handler`); |]
-genPrim _ _ RaiseOp         [b] [a] = PRPrimCall [j| return h$throw(`a`,false); |]
-genPrim _ _ RaiseIOOp       [b] [a] = PRPrimCall [j| return h$throw(`a`,false); |]
+genPrim _ _ RaiseOp         [_r] [a] = PRPrimCall [j| return h$throw(`a`,false); |]
+genPrim _ _ RaiseIOOp       [_r] [a] = PRPrimCall [j| return h$throw(`a`,false); |]
 
-genPrim _ _ MaskAsyncExceptionsOp [r] [a] =
+genPrim _ _ MaskAsyncExceptionsOp [_r] [a] =
   PRPrimCall [j| return h$maskAsync(`a`); |]
-genPrim _ _ MaskUninterruptibleOp [r] [a] =
+genPrim _ _ MaskUninterruptibleOp [_r] [a] =
   PRPrimCall [j| return h$maskUnintAsync(`a`); |]
-genPrim _ _ UnmaskAsyncExceptionsOp [r] [a] =
+genPrim _ _ UnmaskAsyncExceptionsOp [_r] [a] =
   PRPrimCall [j| return h$unmaskAsync(`a`); |]
 
 genPrim _ _ MaskStatus [r] [] = PrimInline [j| `r` = h$maskStatus(); |]
 
-genPrim _ _ AtomicallyOp [r] [a] = PRPrimCall [j| return h$atomically(`a`); |]
-genPrim _ _ RetryOp [r] [] = PRPrimCall [j| return h$stmRetry(); |]
-genPrim _ _ CatchRetryOp [r] [a,b] = PRPrimCall [j| return h$stmCatchRetry(`a`,`b`); |]
-genPrim _ _ CatchSTMOp [r] [a,h] = PRPrimCall [j| return h$catchStm(`a`,`h`); |]
+genPrim _ _ AtomicallyOp [_r] [a] = PRPrimCall [j| return h$atomically(`a`); |]
+genPrim _ _ RetryOp [_r] [] = PRPrimCall [j| return h$stmRetry(); |]
+genPrim _ _ CatchRetryOp [_r] [a,b] = PRPrimCall [j| return h$stmCatchRetry(`a`,`b`); |]
+genPrim _ _ CatchSTMOp [_r] [a,h] = PRPrimCall [j| return h$catchStm(`a`,`h`); |]
 genPrim _ _ Check [r] [a] = PrimInline [j| `r` = h$stmCheck(`a`); |]
 genPrim _ _ NewTVarOp [tv] [v] = PrimInline [j| `tv` = h$newTVar(`v`); |]
 genPrim _ _ ReadTVarOp [r] [tv] = PrimInline [j| `r` = h$readTVar(`tv`); |]
@@ -523,13 +523,13 @@ genPrim _ _ WriteTVarOp [] [tv,v] = PrimInline [j| h$writeTVar(`tv`,`v`); |]
 genPrim _ _ SameTVarOp [r] [tv1,tv2] = PrimInline [j| `r` = h$sameTVar(`tv1`,`tv2`) ? 1 : 0; |]
 
 genPrim _ _ NewMVarOp [r] []   = PrimInline [j| `r` = new h$MVar(); |]
-genPrim _ _ TakeMVarOp [r] [m] = PRPrimCall [j| return h$takeMVar(`m`); |]
+genPrim _ _ TakeMVarOp [_r] [m] = PRPrimCall [j| return h$takeMVar(`m`); |]
 genPrim _ _ TryTakeMVarOp [r,v] [m] = PrimInline [j| `r` = h$tryTakeMVar(`m`);
                                                      `v` = `Ret1`;
                                                    |]
 genPrim _ _ PutMVarOp [] [m,v] = PRPrimCall [j| return h$putMVar(`m`,`v`); |]
 genPrim _ _ TryPutMVarOp [r] [m,v] = PrimInline [j| `r` = h$tryPutMVar(`m`,`v`) |]
-genPrim _ _ ReadMVarOp [r] [m] = PRPrimCall [j| return h$readMVar(`m`); |]
+genPrim _ _ ReadMVarOp [_r] [m] = PRPrimCall [j| return h$readMVar(`m`); |]
 genPrim _ _ TryReadMVarOp [r,v] [m] = PrimInline [j| `v` = `m`.val;
                                                      `r` = (`v`===null) ? 0 : 1;
                                                    |]
@@ -542,12 +542,12 @@ genPrim _ _ DelayOp [] [t] = PRPrimCall [j| return h$delayThread(`t`); |]
 genPrim _ _ WaitReadOp [] [fd] = PRPrimCall [j| return h$waitRead(`fd`); |]
 genPrim _ _ WaitWriteOp [] [fd] = PRPrimCall [j| return h$waitWrite(`fd`); |]
 genPrim _ _ ForkOp [tid] [x] = PrimInline [j| `tid` = h$fork(`x`, true); |]
-genPrim _ _ ForkOnOp [tid] [p,x] = PrimInline [j| `tid` = h$fork(`x`, true); |] -- ignore processor argument
+genPrim _ _ ForkOnOp [tid] [_p,x] = PrimInline [j| `tid` = h$fork(`x`, true); |] -- ignore processor argument
 genPrim _ _ KillThreadOp [] [tid,ex] =
   PRPrimCall [j| return h$killThread(`tid`,`ex`); |]
 genPrim _ _ YieldOp [] [] = PRPrimCall [j| return h$yield(); |]
 genPrim _ _ MyThreadIdOp [r] [] = PrimInline [j| `r` = h$currentThread; |]
-genPrim _ _ LabelThreadOp [] [t,la,lo] = PrimInline [j| `t`.label = [la,lo]; |]
+genPrim _ _ LabelThreadOp [] [t,la,lo] = PrimInline [j| `t`.label = [`la`,`lo`]; |]
 genPrim _ _ IsCurrentThreadBoundOp [r] [] = PrimInline [j| `r` = 1; |]
 genPrim _ _ NoDuplicateOp [] [] = PrimInline mempty -- don't need to do anything as long as we have eager blackholing
 genPrim _ _ ThreadStatusOp [stat,cap,locked] [tid] = PrimInline
@@ -557,7 +557,7 @@ genPrim _ _ ThreadStatusOp [stat,cap,locked] [tid] = PrimInline
     |]
 genPrim _ _ MkWeakOp [r] [o,b,c] = PrimInline [j| `r` = h$makeWeak(`o`,`b`,`c`); |]
 genPrim _ _ MkWeakNoFinalizerOp [r] [o,b] = PrimInline [j| `r` = h$makeWeakNoFinalizer(`o`,`b`); |]
-genPrim _ _ AddCFinalizerToWeakOp [r] [a1,a1o,a2,a2o,i,a3,a3o,w] =
+genPrim _ _ AddCFinalizerToWeakOp [r] [_a1,_a1o,_a2,_a2o,_i,_a3,_a3o,_w] =
   PrimInline [j| `r` = 1; |]
 genPrim _ _ DeRefWeakOp        [f,v] [w] = PrimInline [j| `v` = `w`.val;
                                                           `f` = (`v`===null) ? 0 : 1;
@@ -566,7 +566,7 @@ genPrim _ _ FinalizeWeakOp     [fl,fin] [w] =
   PrimInline [j| `fin` = h$finalizeWeak(`w`);
                  `fl`  = `Ret1`;
                |]
-genPrim _ _ TouchOp [] [e] = PrimInline mempty -- fixme what to do?
+genPrim _ _ TouchOp [] [_e] = PrimInline mempty -- fixme what to do?
 
 genPrim _ _ MakeStablePtrOp [s1,s2] [a] = PrimInline [j| `s1` = h$makeStablePtr(`a`); `s2` = `Ret1`; |]
 genPrim _ _ DeRefStablePtrOp [r] [s1,s2] = PrimInline [j| `r` = `s1`.arr[`s2`]; |]
@@ -577,11 +577,11 @@ genPrim _ _ EqStableNameOp [r] [s1,s2] = PrimInline [j| `r` = h$eqStableName(`s1
 genPrim _ _ StableNameToIntOp [r] [s] = PrimInline [j| `r` = h$stableNameInt(`s`); |]
 
 genPrim _ _ ReallyUnsafePtrEqualityOp [r] [p1,p2] = PrimInline [j| `r` = `p1`===`p2`?1:0; |]
-genPrim _ _ ParOp [r] [a] = PrimInline [j| `r` = 0; |]
+genPrim _ _ ParOp [r] [_a] = PrimInline [j| `r` = 0; |]
 {-
 SparkOp
 -}
-genPrim _ _ SeqOp [r] [e] = PRPrimCall [j| return h$e(`e`); |]
+genPrim _ _ SeqOp [_r] [e] = PRPrimCall [j| return h$e(`e`); |]
 {-
 GetSparkOp
 -}

@@ -2,37 +2,21 @@
 
 module Compiler.Settings where
 
-import           Compiler.JMacro
-
 import           Gen2.Base
 
 import           Control.Applicative
 import           Control.Concurrent.MVar
-import           Control.Lens
 import           Control.Monad
 
-import           Data.Array
-import qualified Data.Binary         as DB
-import qualified Data.Binary.Get     as DB
-import qualified Data.Binary.Put     as DB
 import           Data.ByteString        (ByteString)
-import           Data.Function          (on)
-import           Data.HashMap.Strict    (HashMap)
-import qualified Data.HashMap.Strict as HM
-import           Data.List              (nubBy)
 import           Data.Map               (Map)
 import qualified Data.Map            as M
 import           Data.Monoid
-import           Data.Set               (Set)
-import qualified Data.Set            as S
-import           Data.Text              (Text)
 
 import           System.IO
 import           System.Process
 
 import           Module
-import           DynFlags
-import qualified DynFlags
 
 {- | We can link incrementally against a base bundle, where we assume
      that the symbols from the bundle and their dependencies have already

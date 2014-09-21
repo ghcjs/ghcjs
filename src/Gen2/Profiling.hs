@@ -20,24 +20,19 @@ module Gen2.Profiling
   , enterCostCentreThunk
   ) where
 
-import           CLabel
+
 import           CostCentre
-import           DynFlags
 import           Encoding
-import           FastString
-import           Id
 import           Module
 import           Outputable           hiding ((<>))
-import           SrcLoc
 
 import           Control.Applicative
 import           Control.Lens
+
 import           Data.Monoid
 import qualified Data.Text            as T
 
 import           Compiler.JMacro
-import           Compiler.JMacro.Base
-import           Compiler.Settings
 
 import           Gen2.ClosureInfo
 import           Gen2.RtsTypes
@@ -90,7 +85,7 @@ enterCostCentreThunk = [j| h$enterThunkCCS(`R1`.cc); |]
 setCC :: CostCentre -> Bool -> Bool -> G JStat
 -- FIXME: ignoring tick flags for now
 setCC cc _tick True = do
-    ccI@(TxtI ccLbl) <- costCentreLbl cc
+    ccI@(TxtI _ccLbl) <- costCentreLbl cc
     addDependency $ OtherSymb (cc_mod cc) (moduleGlobalSymbol $ cc_mod cc)
     return [j| `jCurrentCCS` = h$pushCostCentre(`jCurrentCCS`, `ccI`); |]
 setCC _cc _tick _push = return mempty

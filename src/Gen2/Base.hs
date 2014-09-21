@@ -21,7 +21,6 @@ import           Data.Array
 import qualified Data.Binary          as DB
 import qualified Data.Binary.Get      as DB
 import qualified Data.Binary.Put      as DB
-import qualified Data.ByteString.Lazy as BL
 import           Data.HashMap.Strict  (HashMap)
 import qualified Data.HashMap.Strict  as HM
 import qualified Data.HashSet         as HS

@@ -2,6 +2,8 @@
 module Compiler.GhcjsHooks where
 
 import           CorePrep             (corePrepPgm)
+-- import           Gen2.GHC.CorePrep    (corePrepPgm) -- customized to not float new toplevel binds
+import           CoreToStg            (coreToStg)
 import           DriverPipeline
 import           DriverPhases
 import           DynFlags
@@ -29,12 +31,11 @@ import           Compiler.Variants
 
 import qualified Gen2.DynamicLinking  as Gen2
 import qualified Gen2.Foreign         as Gen2
-import           Gen2.GHC.CoreToStg   (coreToStg) -- version that does not generate StgLetNoEscape
+
 import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.TH              as Gen2TH
 
 import           System.IO.Error
-import           System.Environment
 
 installGhcjsHooks :: GhcjsEnv
                   -> GhcjsSettings
@@ -80,7 +81,7 @@ runGhcjsPhase :: GhcjsSettings
               -> PhasePlus -> FilePath -> DynFlags
               -> CompPipeline (PhasePlus, FilePath)
 
-runGhcjsPhase settings env (RealPhase (Cpp sf)) input_fn dflags0
+runGhcjsPhase _settings _env (RealPhase (Cpp sf)) input_fn dflags0
   = do
        src_opts <- liftIO $ getOptionsFromFile dflags0 input_fn
        (dflags1, unhandled_flags, warns)
@@ -149,7 +150,7 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
 
                     return (RealPhase next_phase, outputFilename)
 -- skip these, but copy the result
-runGhcjsPhase _ _ (RealPhase ph) input dflags
+runGhcjsPhase _ _ (RealPhase ph) input _dflags
   | Just next <- lookup ph skipPhases = do
     output <- phaseOutputFilename next
     liftIO (copyFile input output `catchIOError` \_ -> return ())

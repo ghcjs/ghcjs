@@ -123,7 +123,7 @@ isGlobalUnit :: Int -> Bool
 isGlobalUnit n = n == 0
 
 instance NFData ExpFun where
-  rnf (ExpFun x as r) = rnf as `seq` ()
+  rnf (ExpFun _x as _r) = rnf as `seq` ()
 
 instance NFData JSFFIType where
   rnf x = x `seq` ()
@@ -165,9 +165,6 @@ data SymbolTable  = SymbolTable !Int !(HashMap Text Int)
 
 emptySymbolTable :: SymbolTable
 emptySymbolTable = SymbolTable 0 HM.empty
-
-lookupSymbol :: Text -> SymbolTable -> Maybe Int
-lookupSymbol s (SymbolTable _ t) = HM.lookup s t
 
 insertSymbol :: Text -> SymbolTable -> (SymbolTable, Int)
 insertSymbol s st@(SymbolTable n t) =

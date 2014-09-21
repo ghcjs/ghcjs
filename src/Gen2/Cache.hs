@@ -50,7 +50,7 @@ cacheFileName :: DynFlags
               -> Text
               -> Text
               -> IO (Maybe FilePath)
-cacheFileName dflags prefix key = do
+cacheFileName _dflags prefix key = do
   let b = prefix <> "-" <> (T.decodeUtf8 . B16.encode . SHA1.hash . T.encodeUtf8 $ key)
   Info.getUserCacheDir >>= \case
     Nothing   -> return Nothing

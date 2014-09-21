@@ -39,7 +39,6 @@ import           Data.Maybe (catMaybes)
 import           Data.Monoid
 import qualified Data.Set        as S
 import qualified Data.Text       as T
-import qualified Data.Text.IO    as T
 import           Data.Text (Text)
 import           Data.Aeson
 import qualified Data.Yaml       as Yaml
@@ -50,7 +49,6 @@ import           System.Directory (doesFileExist, canonicalizePath)
 import           Text.Parsec
 import           Text.Parsec.Text ()
 
-import           Compiler.Settings
 import qualified Compiler.Utils  as Utils
 
 type Pkg     = Text

@@ -29,21 +29,19 @@ import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Char                (toLower)
 import           Data.Function            (on)
-import           Data.HashMap.Strict      (HashMap)
 import qualified Data.HashMap.Strict      as HM
 import           Data.Int
 import qualified Data.IntSet              as IS
-import           Data.List                (partition, isPrefixOf, isSuffixOf, nub, foldl'
-                                          ,intercalate, group, sort, groupBy, find, isInfixOf)
+import           Data.List                (partition, nub, foldl'
+                                          ,intercalate, group, sort, groupBy, find)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
-import           Data.Maybe               (fromMaybe, isJust, isNothing)
+import           Data.Maybe               (fromMaybe, isJust)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
 import           Data.Text                (Text)
 import qualified Data.Text                as T
-import qualified Data.Text.IO             as T
 import qualified Data.Text.Lazy           as TL
 import qualified Data.Text.Lazy.IO        as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
@@ -74,7 +72,6 @@ import           Gen2.ClosureInfo         hiding (Fun)
 import qualified Gen2.Compactor           as Compactor
 import           Gen2.Object
 import           Gen2.Printer             (pretty)
-import           Gen2.Utils
 import           Gen2.Rts                 (rtsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
@@ -147,7 +144,7 @@ link' :: DynFlags
       -> IO LinkResult
 link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
       objDeps <- mapM readDepsFile' objFiles
-      let debug = buildingDebug dflags
+      let -- debug = buildingDebug dflags
           rootSelector | Just baseMod <- gsGenBase settings =
                            \(Fun p m s) -> m == T.pack baseMod
                        | otherwise = isRootFun
@@ -349,7 +346,7 @@ splitVersion :: Text -> (Text, Text)
 splitVersion t
   | T.null ver || T.null name  = (t, mempty)
   | not (validVer ver) =
-      let vn@(ver', name') = T.break (=='-') name
+      let (ver', name') = T.break (=='-') name
       in if validVer ver' && not (T.null name)
            then (T.reverse (T.tail name'), T.reverse ver')
            else (t, mempty)
@@ -360,7 +357,7 @@ splitVersion t
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
-modFuns (Deps p m e a d) = map fst (M.toList d)
+modFuns (Deps _p _m _e _a d) = map fst (M.toList d)
 
 -- | get all dependencies for a given set of roots
 getDeps :: (Package -> Module -> IO LinkedObj)
@@ -392,7 +389,7 @@ getDeps lookup base fun = go' S.empty M.empty [] $ S.toList fun
         in  case M.lookup key deps of
             Nothing -> lookup (funPackage f) (funModule f) >>= readDepsFile' >>=
                            \d -> go' result (M.insert key d deps) open ffs
-            Just (Deps p m e a d) ->
+            Just (Deps p m _e _a d) ->
                let lu = maybe err (p,m,) (M.lookup f d)
                    -- fixme, deps include nonexported symbols,
                    -- add error again when those have been removed
@@ -506,7 +503,7 @@ readSystemDeps depsName requiredFor file df = do
     Left err -> error ("could not read " ++ depsName ++ " dependencies from " ++ file ++ ":\n" ++ err)
     Right sdeps -> return (depsPkgs sdeps, staticDeps' sdeps)
   where
-    depsFile = getLibDir df </> file
+    -- depsFile = getLibDir df </> file
     depsPkgs s = map head . group . sort $ map (^._1) (unStaticDeps s)
     staticDeps' s pkgs
       | StaticDeps ((p,_,_):_) <- unresolved =

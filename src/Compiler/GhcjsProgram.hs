@@ -17,7 +17,6 @@ import           PrelInfo
 import           IfaceEnv
 import           HscTypes
 import           DsMeta
-import           LoadIface
 import           ErrUtils (fatalErrorMsg'')
 import           Panic (handleGhcException)
 import           Exception
@@ -29,7 +28,7 @@ import           Control.Monad.IO.Class
 
 import qualified Data.ByteString as B
 import           Data.IORef
-import           Data.List (isSuffixOf, isPrefixOf, partition)
+import           Data.List (isPrefixOf, partition)
 import qualified Data.List as L
 import qualified Data.Map as M
 import           Data.Maybe
@@ -67,7 +66,6 @@ import qualified Gen2.ClosureInfo as Gen2
 import qualified Gen2.PrimIface   as Gen2
 import qualified Gen2.Shim        as Gen2
 import qualified Gen2.Rts         as Gen2
-import qualified Gen2.RtsTypes    as Gen2
 import qualified Gen2.TH          as Gen2
 
 -- workaround for platform dependence bugs
@@ -217,7 +215,7 @@ bootstrapFallback = do
       ghcArgs args = filter (not . ignoreArg) args ++ ["-threaded"]
       getOutput []         = Nothing
       getOutput ("-o":x:_) = Just x
-      getOutput (x:xs)     = getOutput xs
+      getOutput (_:xs)     = getOutput xs
 
 installExecutable :: DynFlags -> GhcjsSettings -> [String] -> IO ()
 installExecutable dflags settings srcs = do
@@ -249,7 +247,7 @@ installExecutable dflags settings srcs = do
  -}
 
 generateLib :: GhcjsSettings -> Ghc ()
-generateLib settings = do
+generateLib _settings = do
   dflags1 <- getSessionDynFlags
   liftIO $ do
     (dflags2, _) <- initPackages dflags1
@@ -428,3 +426,9 @@ getArgsTopDir xs
   where
     minusB_args = filter ("-B" `isPrefixOf`) xs
 
+buildJsLibrary :: DynFlags -> [FilePath] -> [FilePath] -> [FilePath] -> IO ()
+buildJsLibrary _dflags srcs js_objs objs = do
+  print srcs
+  print js_objs
+  print objs
+  exitFailure

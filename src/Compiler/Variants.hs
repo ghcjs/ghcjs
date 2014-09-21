@@ -15,7 +15,6 @@ import qualified Gen2.Object           as Gen2
 
 import           CostCentre            (CollectedCCs)
 import           DynFlags              (DynFlags)
-import           HscTypes              (CgGuts)
 import           Module                (Module (..), PackageId)
 import           StgSyn                (StgBinding)
 

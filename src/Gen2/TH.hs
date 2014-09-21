@@ -8,7 +8,7 @@ module Gen2.TH where
 
 import           Compiler.Settings
 
-import qualified Gen2.GHC.CoreToStg  as Gen2 -- version that does not generate StgLetNoEscape
+-- import qualified Gen2.GHC.CorePrep   as Gen2
 import qualified Gen2.Generator      as Gen2
 import qualified Gen2.Linker         as Gen2
 import qualified Gen2.ClosureInfo    as Gen2
@@ -16,6 +16,7 @@ import qualified Gen2.Shim           as Gen2
 import qualified Gen2.Object         as Gen2
 import qualified Gen2.Cache          as Gen2
 
+import           CoreToStg
 import           CoreUtils
 import           CorePrep
 import           BasicTypes
@@ -28,8 +29,6 @@ import           Module
 import           DynFlags
 import           TcRnMonad
 import           HscTypes
-import           GhcMonad            hiding (logWarnings)
-import           TysWiredIn
 import           Packages
 import           Unique
 import           Type
@@ -45,13 +44,12 @@ import           FastString
 import           RdrName
 
 import           Control.Concurrent
-import           Control.Concurrent.MVar
 import           Control.Lens
 import           Control.Monad
 
 import           Data.Data.Lens
 import qualified Data.Map                       as M
-import           Data.Maybe
+
 import           Data.Text                      (Text)
 import           Data.Binary
 import           Data.Binary.Get
@@ -68,20 +66,18 @@ import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as T
 import qualified Data.Text.IO                   as T
 import qualified Data.Text.Lazy.Encoding        as TL
-import qualified Data.Text.Lazy                 as TL
 
 import           Distribution.Package (InstalledPackageId(..))
 
 import           GHC.Desugar
 
-import qualified GHCJS.Prim.TH.Serialized       as TH
 import qualified GHCJS.Prim.TH.Types            as TH
 
 import qualified Language.Haskell.TH            as TH
 import           Language.Haskell.TH.Syntax     (Quasi)
 import qualified Language.Haskell.TH.Syntax     as TH
 
-import           System.Process                 (runInteractiveProcess, ProcessHandle
+import           System.Process                 (runInteractiveProcess
                                                 ,terminateProcess, waitForProcess)
 import           System.FilePath
 import           System.IO
@@ -110,7 +106,7 @@ runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
       sty = show ty
       toHv :: Show a => Get a -> ByteString -> m HValue
       toHv g b = let h = runGet g (BL.fromStrict b)
-                 in  {- TH.qRunIO (print h) >> -} return (unsafeCoerce h)
+                 in  TH.qRunIO (print h) >> return (unsafeCoerce h)
       getAnnWrapper :: ByteString -> m HValue
       getAnnWrapper bs = return (unsafeCoerce $ AnnotationWrapper (B.unpack bs))
       convert
@@ -226,8 +222,8 @@ ghcjsCompileCoreExpr js_env settings hsc_env srcspan ds_expr = do
   prep_expr <- corePrepExpr dflags hsc_env ds_expr
   n <- modifyMVar (thSplice js_env) (\n -> let n' = n+1 in pure (n',n'))
   let bs = [bind n prep_expr]
-      cg = CgGuts (mod n) [] bs NoStubs [] (NoHpcInfo False) emptyModBreaks
-  stg_pgm0      <- Gen2.coreToStg dflags (mod n) bs
+      -- cg = CgGuts (mod n) [] bs NoStubs [] (NoHpcInfo False) emptyModBreaks
+  stg_pgm0      <- coreToStg dflags (mod n) bs
   (stg_pgm1, c) <- stg2stg dflags (mod n) stg_pgm0
   let bs = Gen2.generate settings dflags (mod n) stg_pgm1 c
       r  = TH.Q (runTh isNonQ js_env hsc_env dflags (eDeps prep_expr) ty bs (symb n))
@@ -276,7 +272,7 @@ linkTh settings js_files dflags expr_pkgs hpt code = do
       th_deps'  = T.pack $ (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++ show (ways dflags')
       deps      = map (\pkg -> (pkg, packageLibPaths pkg)) pkg_deps'
       is_root   = const True
-      pkgs      = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
+      -- pkgs      = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
       link      = Gen2.link' dflags' settings "template haskell" [] deps obj_files js_files is_root th_deps
   if isJust code
      then link
@@ -335,7 +331,7 @@ ghcjsGetValueSafely :: GhcjsSettings
                     -> Name
                     -> Type
                     -> IO (Maybe HValue)
-ghcjsGetValueSafely settings hsc_env name t = do
+ghcjsGetValueSafely _settings _hsc_env _name _t = do
   return Nothing -- fixme
 
 -- for some reason this doesn't work, although it seems to do the same as the code below

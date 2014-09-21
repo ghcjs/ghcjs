@@ -7,7 +7,6 @@
 
 module Gen2.RtsTypes where
 
-import           CostCentre
 import           DynFlags
 import           Encoding
 import           Id
@@ -17,8 +16,6 @@ import           Outputable hiding ((<>))
 import           StgSyn
 import           Unique
 import           UniqFM
-import           VarSet
-import           UniqSet
 import           SrcLoc
 
 import           Control.Applicative
@@ -41,7 +38,6 @@ import           Data.Text    (Text)
 import qualified Data.Text    as T
 
 import           Compiler.JMacro
-import           Compiler.Settings
 import           Compiler.Utils
 
 import           Gen2.ClosureInfo
@@ -112,9 +108,13 @@ infixl 2 |!!
 (|!==) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
 (|!==) a b = [je| `a` !== `b` |]
 
-infix 1 |=
-(|=) :: ToJExpr a => Text -> a -> JStat
-(|=) i b = decls i <> AssignStat (jsv i) (toJExpr b)
+infix 7 |=
+(|=) :: ToJExpr a => Ident -> a -> JStat
+(|=) i b = AssignStat (toJExpr i) (toJExpr b)
+
+infix 7 ||=
+(||=) :: ToJExpr a => Ident -> a -> JStat
+(||=) i b = decl i <> i |= b
 
 showPpr' :: Outputable a => a -> G String
 showPpr' a = do
@@ -217,11 +217,12 @@ data GenGroupState = GenGroupState
   , _ggsClosureInfo   :: [ClosureInfo]  -- ^ closure metadata (info tables) for the binding group
   , _ggsStatic        :: [StaticInfo]   -- ^ static (CAF) data in our binding group
   , _ggsStack         :: [StackSlot]    -- ^ stack info for the current expression
+  , _ggsStackDepth    :: Int            -- ^ current stack depth
   , _ggsExtraDeps     :: Set OtherSymb  -- ^ extra dependencies for the linkable unit that contains this group
   }
 
 instance Default GenGroupState where
-  def = GenGroupState [] [] [] [] S.empty
+  def = GenGroupState [] [] [] [] 0 S.empty
 
 type C = State GenState JStat
 type G = State GenState
@@ -232,6 +233,11 @@ data StackSlot = SlotId Id Int
 
 makeLenses ''GenGroupState
 makeLenses ''GenState
+
+assertRtsStat :: C -> C
+assertRtsStat stat = do
+  s <- use gsSettings
+  if csAssertRts s then stat else mempty
 
 -- | emit a global (for the current module) toplevel statement
 emitGlobal :: JStat -> G ()
@@ -259,6 +265,11 @@ emitClosureInfo ci = gsGroup . ggsClosureInfo %= (ci:)
 emitStatic :: Text -> StaticVal -> Maybe Ident -> G ()
 emitStatic ident val cc = gsGroup . ggsStatic %= (StaticInfo ident val cc :)
 
+adjPushStack :: Int -> G ()
+adjPushStack n = do
+  stackDepth += n
+  dropSlots n
+
 dropSlots :: Int -> G ()
 dropSlots n = gsGroup . ggsStack %= drop n
 
@@ -266,21 +277,28 @@ dropSlots n = gsGroup . ggsStack %= drop n
 addSlots :: [StackSlot] -> G ()
 addSlots xs = gsGroup . ggsStack %= (xs++)
 
+stackDepth :: Lens' GenState Int
+stackDepth = gsGroup . ggsStackDepth
+
 -- | run the action with no stack info
 resetSlots :: G a -> G a
 resetSlots m = do
   s <- getSlots
+  d <- use stackDepth
   setSlots []
   a <- m
   setSlots s
+  stackDepth .= d
   return a
 
 -- | run the action with current stack info, but don't let modifications propagate
 isolateSlots :: G a -> G a
 isolateSlots m = do
   s <- getSlots
+  d <- use stackDepth
   a <- m
   setSlots s
+  stackDepth .= d
   return a
 
 -- | overwrite our stack knowledge
@@ -294,14 +312,6 @@ getSlots = use (gsGroup . ggsStack)
 -- | add `n` unknown slots to our stack knowledge
 addUnknownSlots :: Int -> G ()
 addUnknownSlots n = addSlots (replicate n SlotUnknown)
-
--- | run the computation with the current stack slots, restore stack slots afterwards
-withStack :: G a -> G a
-withStack m = do
-  s <- getSlots
-  r <- m
-  setSlots s
-  return r
 
 throwSimpleSrcErr :: DynFlags -> SrcSpan -> String -> G a
 throwSimpleSrcErr df span msg = return $! Ex.throw (simpleSrcErr df span msg)
@@ -325,11 +335,21 @@ instance ToJExpr Special where
   toJExpr Stack  = [je| h$stack |]
   toJExpr Sp     = [je| h$sp    |]
 
-adjSp :: Int -> JStat
-adjSp e = [j| h$sp = h$sp + `e`; |]
+adjSp' :: Int -> JStat
+adjSp' 0 = mempty
+adjSp' e = [j| `Sp` = `Sp` + `e`; |]
 
-adjSpN :: Int -> JStat
-adjSpN e = [j| h$sp = h$sp  - `e`; |]
+adjSpN' :: Int -> JStat
+adjSpN' 0 = mempty
+adjSpN' e = [j| `Sp` = `Sp`  - `e`; |]
+
+adjSp :: Int -> C
+adjSp 0 = return mempty
+adjSp e = stackDepth += e >> return [j| `Sp` = `Sp` + `e`; |]
+
+adjSpN :: Int -> C
+adjSpN 0 = return mempty
+adjSpN e = stackDepth -= e >> return [j| `Sp` = `Sp`  - `e`; |]
 
 pushN :: Array Int Ident
 pushN = listArray (1,32) $ map (TxtI . T.pack . ("h$p"++) . show) [(1::Int)..32]
@@ -343,6 +363,15 @@ pushNN = listArray (1,255) $ map (TxtI . T.pack . ("h$pp"++) . show) [(1::Int)..
 pushNN' :: Array Integer JExpr
 pushNN' = fmap (ValExpr . JVar) pushNN
 
+pushOptimized' :: [(Id,Int)]
+               -> C
+pushOptimized' xs = do
+  slots  <- getSlots
+  pushOptimized =<< (sequence $ zipWith f xs (slots++repeat SlotUnknown))
+  where
+    f (i1,n1) (SlotId i2 n2) = (,i1==i2&&n1==n2) <$> genIdsN i1 n1
+    f (i1,n1) _              = (,False)          <$> genIdsN i1 n1
+
 {- |  optimized push that reuses existing values on stack
       automatically chooses an optimized partial push (h$ppN)
       function when possible.
@@ -352,11 +381,12 @@ pushOptimized :: [(JExpr,Bool)] -- ^ contents of the slots, True if same value i
 pushOptimized [] = return mempty
 pushOptimized xs = do
   dropSlots l
+  stackDepth += length xs
   go .  csInlinePush <$> use gsSettings
   where
     go True = inlinePush
     go _
-     | all snd xs                  = adjSp l
+     | all snd xs                  = adjSp' l
      | all (not.snd) xs && l <= 32 =
         ApplStat (pushN' ! l) (map fst xs)
      | l <= 8 && not (snd $ last xs) =
@@ -364,8 +394,8 @@ pushOptimized xs = do
      | otherwise = inlinePush
     l   = length xs
     sig :: Integer
-    sig = L.foldl1' (.|.) $ zipWith (\(e,b) i -> if not b then bit i else 0) xs [0..]
-    inlinePush = adjSp l <> mconcat (zipWith pushSlot [1..] xs)
+    sig = L.foldl1' (.|.) $ zipWith (\(_e,b) i -> if not b then bit i else 0) xs [0..]
+    inlinePush = adjSp' l <> mconcat (zipWith pushSlot [1..] xs)
     pushSlot i (e,False) = [j| `Stack`[`offset i`] = `e` |]
     pushSlot _ _         = mempty
     offset i | i == l    = [je| `Sp` |]
@@ -374,12 +404,13 @@ pushOptimized xs = do
 push :: [JExpr] -> C
 push xs = do
   dropSlots (length xs)
+  stackDepth += length xs
   flip push' xs <$> use gsSettings
 
 push' :: CgSettings -> [JExpr] -> JStat
 push' _ [] = mempty
 push' cs xs
-   | csInlinePush cs || l > 32 || l < 2 = adjSp l <> mconcat items
+   | csInlinePush cs || l > 32 || l < 2 = adjSp' l <> mconcat items
    | otherwise                          = ApplStat (toJExpr $ pushN ! l) xs
   where
     items = zipWith (\i e -> [j| `Stack`[`offset i`] = `e`; |]) [(1::Int)..] xs
@@ -399,50 +430,59 @@ pop = popSkip 0
 -- | pop the expressions, but ignore the top n elements of the stack
 popSkip :: Int -> [(JExpr,StackSlot)] -> C
 popSkip 0 [] = mempty
-popSkip n [] = addUnknownSlots n >> return (adjSpN n)
+popSkip n [] = addUnknownSlots n >> adjSpN n
 popSkip n xs = do
   addUnknownSlots n
   addSlots (map snd xs)
-  return (loadSkip n (map fst xs) <> adjSpN (length xs + n))
+  a <- adjSpN (length xs + n)
+  return (loadSkip n (map fst xs) <> a)
 
 -- | pop things, don't upstate stack knowledge
 popSkip' :: Int     -- ^ number of slots to skip
          -> [JExpr] -- ^ assign stack slot values to these
          -> JStat
 popSkip' 0 []  = mempty
-popSkip' n []  = adjSpN n
-popSkip' n tgt = loadSkip n tgt <> adjSpN (length tgt + n)
+popSkip' n []  = adjSpN' n
+popSkip' n tgt = loadSkip n tgt <> adjSpN' (length tgt + n)
 
 -- | like popSkip, but without modifying the stack pointer
 loadSkip :: Int -> [JExpr] -> JStat
-loadSkip n xs = mconcat items
+loadSkip = loadSkipFrom (toJExpr Sp)
+
+loadSkipFrom :: JExpr -> Int -> [JExpr] -> JStat
+loadSkipFrom fr n xs = mconcat items
     where
       items = reverse $ zipWith (\i e -> [j| `e` = `Stack`[`offset (i+n)`]; |]) [(0::Int)..] (reverse xs)
-      offset 0 = [je| `Sp` |]
-      offset n = [je| `Sp` - `n` |]
+      offset 0 = [je| `fr` |]
+      offset n = [je| `fr` - `n` |]
+
 
 -- declare and pop
 popSkipI :: Int -> [(Ident,StackSlot)] -> C
 popSkipI 0 [] = mempty
-popSkipI n [] = return (adjSpN n)
+popSkipI n [] = adjSpN n
 popSkipI n xs = do
   addUnknownSlots n
   addSlots (map snd xs)
-  return (loadSkipI n (map fst xs) <> adjSpN (length xs + n))
+  a <- adjSpN (length xs + n)
+  return (loadSkipI n (map fst xs) <> a)
 
 -- like popSkip, but without modifying sp
 loadSkipI :: Int -> [Ident] -> JStat
-loadSkipI n xs = mconcat items
+loadSkipI = loadSkipIFrom (toJExpr Sp)
+
+loadSkipIFrom :: JExpr -> Int -> [Ident] -> JStat
+loadSkipIFrom fr n xs = mconcat items
     where
       items = reverse $ zipWith f [(0::Int)..] (reverse xs)
-      offset 0 = [je| `Sp` |]
-      offset n = [je| `Sp` - `n` |]
+      offset 0 = fr
+      offset n = [je| `fr` - `n` |]
       f i e = [j| `decl e`;
                   `e` = `Stack`[`offset (i+n)`];
                 |]
 
 popn :: Int -> C
-popn n = addUnknownSlots n >> return (adjSpN n)
+popn n = addUnknownSlots n >> adjSpN n
 
 -- below: c argument is closure entry, p argument is (heap) pointer to entry
 
@@ -501,6 +541,32 @@ funOrPapArity c Nothing =
   [je| `isFun c` ? `funArity c` : `papArity c` |]
 funOrPapArity c (Just f) =
   [je| `isFun' f` ? `funArity' f` : `papArity c` |]
+
+{-
+  Most stack frames have a static size, stored in f.size, but there
+  are two exceptions:
+
+   - dynamically sized stack frames (f.size === -1) have the size
+     stored in the stack slot below the header
+   - h$ap_gen is special
+
+ -}
+
+stackFrameSize :: JExpr -- ^ assign frame size to this
+               -> JExpr -- ^ stack frame header function
+               -> JStat -- ^ size of the frame, including header
+stackFrameSize tgt f =
+  [j| if(`f` === h$ap_gen) { // h$ap_gen is special
+        `tgt` = (`Stack`[`Sp`-1] >> 8) + 2;
+      } else {
+        var tag = `f`.size;
+        if(tag < 0) { // dynamic size
+          `tgt` = `Stack`[`Sp`-1];
+        } else {
+          `tgt` = (tag & 0xff) + 1;
+        }
+      }
+    |]
 
 -- some utilities do do something with a range of regs
 -- start or end possibly supplied as javascript expr
@@ -637,6 +703,11 @@ genIds i
   where
     s  = typeSize (idType i)
 
+genIdsN :: Id -> Int -> G JExpr
+genIdsN i n = do
+  xs <- genIds i
+  return $ xs !! (n-1)
+
 -- | get all idents for an id
 genIdsI :: Id -> G [Ident]
 genIdsI i
@@ -644,6 +715,11 @@ genIdsI i
   | otherwise = mapM (jsIdIN i) [1..s]
         where
           s = typeSize (idType i)
+
+genIdsIN :: Id -> Int -> G Ident
+genIdsIN i n = do
+  xs <- genIdsI i
+  return $ xs !! (n-1)
 
 -- | declare all js vars for the id
 declIds :: Id -> C

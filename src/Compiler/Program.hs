@@ -64,7 +64,6 @@ import Binary              ( openBinMem, put_, fingerprintBinMem )
 
 -- Standard Haskell libraries
 import System.IO
-import System.Environment
 import System.Exit
 import System.FilePath
 import Control.Monad
@@ -295,6 +294,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings $ map fst srcs) >> return True
        DoPrintObj obj         -> liftIO (Ghcjs.printObj obj) >> return True
        DoPrintDeps obj        -> liftIO (Ghcjs.printDeps obj) >> return True
+       DoBuildJsLibrary       -> liftIO (Ghcjs.buildJsLibrary dflags6 (map fst srcs) js_objs objs) >> return True
 
   liftIO $ dumpFinalStats dflags6
   return (skipJs || buildingSetup)
@@ -522,10 +522,12 @@ data PostLoadMode
   | DoInstallExecutable                   -- ghcjs --install-executable ? -o ?
   | DoPrintObj FilePath                   -- ghcjs --print-obj file
   | DoPrintDeps FilePath                  -- ghcjs --print-deps file
+  | DoBuildJsLibrary                      -- ghcjs --build-js-library
 
-doGenerateLib, doPrintRts :: Mode
+doGenerateLib, doPrintRts, doBuildJsLibrary :: Mode
 doGenerateLib = mkPostLoadMode DoGenerateLib
 doPrintRts = mkPostLoadMode DoPrintRts
+doBuildJsLibrary = mkPostLoadMode DoBuildJsLibrary
 
 doInstallExecutable :: Mode
 doInstallExecutable = mkPostLoadMode DoInstallExecutable
@@ -689,6 +691,7 @@ mode_flags =
   , Flag "-print-rts"              (PassFlag (setMode doPrintRts))
   , Flag "-numeric-ghc-version"    (PassFlag (setMode (showNumGhcVersionMode)))
   , Flag "-numeric-ghcjs-version"  (PassFlag (setMode (showNumVersionMode)))
+  , Flag "-build-js-library"       (PassFlag (setMode doBuildJsLibrary))
   ]
 
 setMode :: Mode -> String -> EwM ModeM ()
