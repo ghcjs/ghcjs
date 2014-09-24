@@ -57,9 +57,14 @@ closureConstructors s =
     addCCArg as = map TxtI $ as ++ if prof then ["cc"] else []
     addCCArg' as = as ++ if prof then [TxtI "cc"] else []
     addCCField fs = jhFromList $ fs ++ if prof then [("cc", jsv "cc")] else []
+    setDefaultCC = [j| cc = cc || `jSystemCCS`; |]
 
     declClsConstr i as fs =
-      i |= jfun (addCCArg as) [j| `checkC`; return `addCCField $ zip ["f", "d1", "d2", "m"] fs`; |]
+      i |= jfun (addCCArg as) [j| `checkC`;
+                                  `if prof then setDefaultCC <> incrementCCAlloc (jvar "cc")
+                                           else mempty`;
+                                  return `addCCField $ zip ["f", "d1", "d2", "m"] fs`;
+                                |]
 
     -- only JSRef can typically contain undefined or null
     -- although it's possible (and legal) to make other Haskell types
@@ -97,6 +102,7 @@ closureConstructors s =
                          fun    = JFunc vals funBod
                          funBod =
                            [j| `checkC`;
+                               `if prof then incrementCCAlloc (jvar "cc") else mempty`;
                                return `addCCField [("f", jsv "f"), ("d1", jsv "x1"),
                                                    ("d2", toJExpr obj), ("m", ji 0)]`;
                              |]
@@ -645,6 +651,7 @@ fun h$printcl i {
 
 fun h$init_closure c xs {
   c.m = 0;
+  `profStat s $ incrementCCAlloc (SelExpr c $ TxtI "cc")`;
   switch(xs.length) {
     case 0:
       c.d1 = null; c.d2 = null;

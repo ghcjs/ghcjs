@@ -41,6 +41,7 @@ import           Data.Maybe               (fromMaybe, isJust, isNothing)
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
+import           Data.String              (fromString)
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.IO             as T
@@ -53,6 +54,7 @@ import           Data.Yaml                (FromJSON(..), Value(..))
 import qualified Data.Yaml                as Yaml
 
 import qualified Distribution.Simple.Utils as Cabal
+import qualified Distribution.Verbosity    as Cabal
 
 import           GHC.Generics
 
@@ -324,9 +326,20 @@ combineFiles df fp = do
 -- | write the index.html file that loads the program if it does not exit
 writeHtml :: DynFlags -> FilePath -> IO ()
 writeHtml df out = do
+  let libdir = getLibDir df
+  -- copy polymer files
+  Cabal.installDirectoryContents Cabal.normal
+    (fromString $ libdir </> "shims" </> "lib" </> "polymer-components")
+    (fromString $ out </> "polymer-components")
+  -- copy ghcjs-gui
+  Cabal.installDirectoryContents Cabal.normal
+    (fromString $ libdir </> "shims" </> "lib" </> "ghcjs-gui")
+    (fromString $ out </> "ghcjs-gui")
+  -- copy index.html if it doesn't exist
   e <- doesFileExist htmlFile
-  when (not e) $
-    B.readFile (getLibDir df </>"template.html") >>= B.writeFile htmlFile
+  unless e $
+    Cabal.installOrdinaryFile Cabal.normal
+      (fromString $ libdir </> "template.html") (fromString htmlFile)
   where
     htmlFile = out </> "index.html"
 
