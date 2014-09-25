@@ -693,9 +693,12 @@ genEntryLne ctx i (StgRhsClosure _cc _bi _live2 update srt args body) = resetSlo
                 CIStackFrame
                 sr
   emitToplevel (ei ||= f)
-genEntryLne _ _ rhs =
-  panic $ "genEntryLne: invalid let-no-escape entry: " ++ show rhs
-
+genEntryLne ctx i (StgRhsCon _cc con _args) = resetSlots $ do
+  let payloadSize = length (ctx ^. ctxLneFrame)
+  ei <- jsEntryIdI i
+  di <- enterDataCon con
+  p  <- popLneFrame True payloadSize ctx
+  emitToplevel (ei ||= JFunc [] (p <> [j| return `di`; |]))
 
 -- generate the entry function for a local closure
 genEntry :: ExprCtx -> Id -> StgRhs -> G ()

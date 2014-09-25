@@ -106,7 +106,7 @@ runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
       sty = show ty
       toHv :: Show a => Get a -> ByteString -> m HValue
       toHv g b = let h = runGet g (BL.fromStrict b)
-                 in  TH.qRunIO (print h) >> return (unsafeCoerce h)
+                 in  {- TH.qRunIO (print h) >> -} return (unsafeCoerce h)
       getAnnWrapper :: ByteString -> m HValue
       getAnnWrapper bs = return (unsafeCoerce $ AnnotationWrapper (B.unpack bs))
       convert
