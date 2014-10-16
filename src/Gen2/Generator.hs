@@ -367,14 +367,16 @@ genToplevelRhs :: Id
                -> StgRhs
                -> C
 -- special cases
-genToplevelRhs i (StgRhsClosure cc _bi _ _ _ _ body)
+genToplevelRhs i (StgRhsClosure cc _bi _ upd _ args body)
   -- foreign exports
   | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget t _ _) _ _)) _)
      [StgLitArg (MachInt _is_js_conv), StgLitArg (MachStr _js_name), StgVarArg _tgt] _) <- body,
      t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
   -- top-level strings
-  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey     = genStrThunk i False bs cc
-  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey = genStrThunk i True bs cc
+  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey
+     && isUpdatable upd && null args = genStrThunk i False bs cc
+  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey
+     && isUpdatable upd && null args = genStrThunk i True bs cc
 -- general cases:
 genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
