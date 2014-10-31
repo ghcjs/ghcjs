@@ -116,9 +116,9 @@ Library
                    bytestring     >= 0.10     && < 0.11,
                    attoparsec     >= 0.12     && < 0.13,
                    aeson          >= 0.7      && < 0.9,
-                   text           >= 0.11     && < 1.2,
+                   text           >= 0.11     && < 1.3,
                    wl-pprint-text >= 1.1      && < 1.2,
-                   lens           >= 4.0      && < 4.5,
+                   lens           >= 4.0      && < 4.6,
                    yaml           >= 0.8      && < 0.9,
                    time,
                    system-filepath,
@@ -135,14 +135,14 @@ Library
                    cryptohash     >= 0.11     && < 0.12,
                    hashable,
                    unordered-containers,
-                   optparse-applicative       >= 0.9 && < 0.10,
+                   optparse-applicative       >= 0.11 && < 0.12,
                    stringsearch               >= 0.3 && < 0.4,
                    base16-bytestring          >= 0.1 && < 0.2,
                    -- for JMacro
                    regex-posix                >= 0.90 && < 0.100,
                    safe                       >= 0.3  && < 0.4,
                    parsec                     >= 3.1  && < 3.2,
-                   haskell-src-exts           >= 1.15 && < 1.16,
+                   haskell-src-exts           >= 1.16 && < 1.17,
                    haskell-src-meta           >= 0.6.0.3  && < 0.7
     -- we need the transformers version that comes with GHC.
     -- this is a hack to (hopefully) help cabal solve the dependencies
@@ -242,20 +242,19 @@ Executable ghcjs-boot
                       system-filepath      >= 0.4    && < 0.5,
                       shelly               >= 1.5    && < 1.6,
                       system-fileio        >= 0.3    && < 0.4,
-                      optparse-applicative >= 0.9    && < 0.10,
+                      optparse-applicative >= 0.11   && < 0.12,
                       tar                  >= 0.4    && < 0.5,
                       HTTP                 >= 4000.2 && < 5000,
                       yaml                 >= 0.8    && < 0.9,
                       process              >= 1.2    && < 1.3,
-                      time                 >= 1.4    && < 1.5,
+                      time                 >= 1.4    && < 1.6,
                       unix-compat          >= 0.4    && < 0.5,
                       executable-path      >= 0      && < 0.1
 
     if flag(network-uri)
-      Build-Depends: network-uri >= 2.6,
-                     network     >  2.6 
+      build-depends: network-uri >= 2.6, network >= 2.6
     else
-      Build-Depends: network < 2.6
+       build-depends: network-uri < 2.6, network < 2.6
 
 Executable ghcjs-run
     if flag(compiler-only)

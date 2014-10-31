@@ -78,7 +78,7 @@ getGhcjsSettings :: [Located String] -> IO ([Located String], GhcjsSettings)
 getGhcjsSettings args =
   case p of
     Failure failure -> do
-      let (msg, code) = execFailure failure "ghcjs"
+      let (msg, code) = renderFailure failure "ghcjs"
       hPutStrLn stderr msg
       exitWith code
     Success gs1 -> do
@@ -132,8 +132,8 @@ optParser = GhcjsSettings
             <*> optStr ( long "generate-base" )
             <*> (maybe NoBase BaseFile <$> optStr ( long "use-base" ))
 
-optStr :: Mod OptionFields (Maybe String) -> Parser (Maybe String)
-optStr m = nullOption $ value Nothing <> reader (pure . str)  <> m
+optStr :: Mod OptionFields String -> Parser (Maybe String)
+optStr = optional . option str
 
 printVersion :: IO ()
 printVersion = putStrLn $

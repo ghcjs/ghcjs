@@ -452,7 +452,7 @@ optParser = BootSettings
                   help "quick boot (no Cabal or ghcjs-base, but enough to compile basic tests)" )
             <*> switch ( long "dev"       <> short 'd' <>
                   help "fetch development sources (requires more build tools)" )
-            <*> (optional . option) ( long "jobs"   <> short 'j' <> metavar "JOBS" <>
+            <*> (optional . option auto) ( long "jobs"   <> short 'j' <> metavar "JOBS" <>
                   help "number of jobs to run in parallel" )
             <*> switch ( long "debug"   <> short 'd' <>
                   help "build debug libraries with extra checks" )
@@ -460,7 +460,7 @@ optParser = BootSettings
                   help "don't generate profiling version of the libraries" ))
             <*> fmap not (switch ( long "no-haddock" <>
                   help "don't generate documentation" ))
-            <*> (fmap Verbosity . option) ( long "verbosity"   <> short 'v' <> value 2 <>
+            <*> (fmap Verbosity . option auto) ( long "verbosity"   <> short 'v' <> value 2 <>
                   help "verbose output" )
             <*> (optional . fmap T.pack . strOption) ( long "with-iconv-includes" <> metavar "DIR" <>
                   help "directory containing iconv.h" )
