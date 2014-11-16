@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-|
   ghcjs builds for a strange platform: like 32 bit
   instead of letting autoconf doing the defines, we override them here
@@ -35,6 +36,10 @@ setGhcjsPlatform set js_env js_objs basePath df
   where
     settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
                               , sPlatformConstants = ghcjsPlatformConstants
+#if __GLASGOW_HASKELL__ >= 709
+                              , sProgramName       = "ghcjs"
+                              , sProjectVersion    = Info.getFullCompilerVersion 
+#endif
                               }
     ghcjsPlatform = (sTargetPlatform (settings df))
        { platformArch     = ArchJavaScript

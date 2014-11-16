@@ -33,6 +33,7 @@ import           Control.Applicative hiding ((<|>))
 import           Control.Monad
 
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Foldable   as F
 import qualified Data.List       as L
 import           Data.Maybe (catMaybes)
@@ -49,10 +50,12 @@ import           System.Directory (doesFileExist, canonicalizePath)
 import           Text.Parsec
 import           Text.Parsec.Text ()
 
+import           Compiler.Compat
 import qualified Compiler.Utils  as Utils
 
-type Pkg     = Text
-type Version = [Integer]
+import qualified Gen2.Archive    as Ar
+
+type Pkg = Text
 
 data Shim = Shim { versionRange   :: VersionRange
                  , dependencies   :: [FilePath]
@@ -113,15 +116,37 @@ tryReadShimFile dflags file = do
     then putStrLn ("warning: " <> file <> " does not exist") >> return mempty
     else do
       let s = settings dflags
-          -- suppress line numbers and enable extended syntax
-          cppOpts opts = (Option "-P") : filter (/=(Option "-traditional")) opts
-          s1 = s { sPgm_P = (fst (sPgm_P s), cppOpts (snd $ sPgm_P s))
-                 , sOpt_P = filter (/="-traditional") (sOpt_P s)
+          s1 = s { sPgm_P = (fst (sPgm_P s), jsCppPgmOpts (snd $ sPgm_P s))
+                 , sOpt_P = jsCppOpts (sOpt_P s)
                  }
           dflags1 = dflags { settings = s1 }
       outfile <- SysTools.newTempName dflags "jspp"
       Utils.doCpp dflags1 True False file outfile
       B.readFile outfile
+
+-- suppress line numbers and enable extended syntax
+jsCppPgmOpts :: [Option] -> [Option]
+jsCppPgmOpts opts = (Option "-P") : filter (/=(Option "-traditional")) opts
+
+jsCppOpts :: [String] -> [String]
+jsCppOpts opts = filter (/="-traditional") opts
+
+readShimsArchive :: DynFlags -> FilePath -> IO B.ByteString
+readShimsArchive dflags archive = do
+  meta <- Ar.readMeta archive
+  srcs <- Ar.readAllSources archive
+  let s       = settings dflags
+      s1      = s { sPgm_P = (fst (sPgm_P s), jsCppPgmOpts (snd $ sPgm_P s))
+                  , sOpt_P = jsCppOpts (Ar.metaCppOptions meta ++ sOpt_P s)
+                  }
+      dflags1 = dflags { settings = s1 }
+  srcs' <- forM srcs $ \(_filename, b) -> do
+    infile  <- SysTools.newTempName dflags "jspp"
+    outfile <- SysTools.newTempName dflags "jspp"
+    BL.writeFile infile b
+    Utils.doCpp dflags1 True False infile outfile
+    B.readFile outfile
+  return (mconcat srcs')
 
 readShim :: FilePath -> (Pkg, Version) -> IO (Maybe Shim)
 readShim base (pkgName, pkgVer) = do
@@ -151,14 +176,15 @@ checkShimsInstallation base = do
 
 foldShim :: Pkg -> Version -> Shim -> [FilePath]
 foldShim pkg ver sh
-  | inRange ver sh || null ver = dependencies sh ++ concatMap (foldShim pkg ver) (subs sh)
-  | otherwise      = []
+  | inRange ver sh || isEmptyVersion ver =
+      dependencies sh ++ concatMap (foldShim pkg ver) (subs sh)
+  | otherwise = []
 
 parseVersion :: Text -> Maybe Version
 parseVersion tv = either (const Nothing) Just $ parse version "" (T.strip tv)
 
 version :: Stream s m Char => ParsecT s u m Version
-version = integer `sepBy1` char '.'
+version = Version <$> integer `sepBy1` char '.'
 
 integer :: Stream s m Char => ParsecT s u m Integer
 integer = read <$> many1 digit
@@ -197,9 +223,10 @@ parseVersionRange tv = either (const Nothing) Just $
 
 -- 1.2.* -> (Interval (Just [1,2]) (Just [1,3]))
 wildcardRange :: Version -> VersionRange
-wildcardRange xs
-  | (y:ys) <- reverse xs = Interval (Just xs) (Just . reverse $ (y+1):ys)
-  | otherwise = SingleVersion []
+wildcardRange v@(Version xs)
+  | (y:ys) <- reverse xs = Interval (Just v)
+                                    (Just . Version . reverse $ (y+1):ys)
+  | otherwise = SingleVersion (Version [])
 
 versionRangeToBuildDep :: VersionRange -> Text
 versionRangeToBuildDep (SingleVersion ver) = "== " <> showVersion ver
@@ -207,5 +234,4 @@ versionRangeToBuildDep (Interval lo hi) = T.intercalate " && " $ catMaybes
                                                     [((">= " <>) . showVersion) <$> lo,
                                                      (("< "  <>) . showVersion) <$> hi]
 
-showVersion :: Version -> Text
-showVersion = T.intercalate "." . map (T.pack . show)
+

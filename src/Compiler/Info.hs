@@ -85,8 +85,11 @@ getGlobalPackageDB :: FilePath
 getGlobalPackageDB libDir = libDir </> "package.conf.d"
 
 getUserTopDir :: IO (Maybe FilePath)
-getUserTopDir =  (Just . (</> subdir) <$> getAppUserDataDirectory "ghcjs") `E.catch`
+getUserTopDir = fmap Just getUserTopDir' `E.catch` 
                    \(E.SomeException _) -> return Nothing
+
+getUserTopDir' :: IO FilePath -- (Maybe FilePath)
+getUserTopDir' =  (</> subdir) <$> getAppUserDataDirectory "ghcjs"
   where
     targetARCH = arch
     targetOS   = os
@@ -95,6 +98,9 @@ getUserTopDir =  (Just . (</> subdir) <$> getAppUserDataDirectory "ghcjs") `E.ca
 -- | find location of the user package database
 getUserPackageDir :: IO (Maybe FilePath)
 getUserPackageDir = getUserTopDir
+
+getUserPackageDir' :: IO FilePath
+getUserPackageDir' = getUserTopDir'
 
 getUserCacheDir :: IO (Maybe FilePath)
 getUserCacheDir = fmap (</> "cache") <$> getUserTopDir

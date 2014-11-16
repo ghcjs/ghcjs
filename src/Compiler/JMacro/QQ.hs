@@ -14,7 +14,7 @@ Simple EDSL for lightweight (untyped) programmatic generation of Javascript.
 
 module Compiler.JMacro.QQ (jmacro, jmacroE, parseJM, parseJME, expr2ident) where
 
-import Prelude hiding (tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
+import Prelude hiding ((<*), tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
 import Control.Applicative hiding ((<|>), many, optional, (<*))
 import Control.Arrow (first)
 import Control.Lens ((^..))

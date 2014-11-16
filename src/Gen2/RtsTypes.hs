@@ -1,4 +1,5 @@
-{-# LANGUAGE QuasiQuotes,
+{-# LANGUAGE CPP,
+             QuasiQuotes,
              TemplateHaskell,
              TypeSynonymInstances,
              FlexibleInstances,
@@ -37,6 +38,7 @@ import qualified Data.Set     as S
 import           Data.Text    (Text)
 import qualified Data.Text    as T
 
+import           Compiler.Compat
 import           Compiler.JMacro
 import           Compiler.Utils
 
@@ -194,7 +196,7 @@ data IdType = IdPlain | IdEntry | IdConEntry deriving (Enum, Eq, Ord, Show)
 data IdKey = IdKey !Int !Int !IdType deriving (Eq, Ord)
 newtype IdCache = IdCache (M.Map IdKey Ident)
 
-data OtherSymb = OtherSymb Module Text
+data OtherSymb = OtherSymb !Module !Text
   deriving (Ord, Eq, Show)
 
 emptyIdCache :: IdCache
@@ -202,11 +204,11 @@ emptyIdCache = IdCache M.empty
 
 data GenState = GenState
   { _gsSettings      :: CgSettings     -- ^ codegen settings, read-only
-  , _gsModule        :: Module         -- ^ current module
+  , _gsModule        :: !Module         -- ^ current module
   , _gsDynFlags      :: DynFlags       -- ^ dynamic flags
-  , _gsId            :: Int            -- ^ unique number for the id generator
-  , _gsIdents        :: IdCache        -- ^ hash consing for identifiers from a Unique
-  , _gsUnfloated     :: UniqFM StgExpr -- ^ unfloated arguments
+  , _gsId            :: !Int            -- ^ unique number for the id generator
+  , _gsIdents        :: !IdCache        -- ^ hash consing for identifiers from a Unique
+  , _gsUnfloated     :: !(UniqFM StgExpr) -- ^ unfloated arguments
   , _gsGroup         :: GenGroupState  -- ^ state for the current binding group
   , _gsGlobal        :: [JStat]        -- ^ global (per module) statements (gets included when anything else from the module is used)
   }
@@ -227,7 +229,7 @@ instance Default GenGroupState where
 type C = State GenState JStat
 type G = State GenState
 
-data StackSlot = SlotId Id Int
+data StackSlot = SlotId !Id !Int
                | SlotUnknown
   deriving (Eq, Ord, Show)
 
@@ -597,8 +599,11 @@ withRegsRE start end max fallthrough f =
 
 -- | the global linkable unit of a module exports this symbol, depend on it to include that unit
 --   (used for cost centres)
-moduleGlobalSymbol :: Module -> Text
-moduleGlobalSymbol m = "h$" <> T.pack (zEncodeString $ showModule m) <> "_<global>"
+moduleGlobalSymbol :: DynFlags -> Module -> Text
+moduleGlobalSymbol dflags m
+  = "h$" <>
+    T.pack (zEncodeString $ showModule dflags m) <>
+    "_<global>"
 
 jsIdIdent :: Id -> Maybe Int -> IdType -> G Ident
 jsIdIdent i mi suffix = do
@@ -608,45 +613,71 @@ jsIdIdent i mi suffix = do
     Just ident -> return ident
     Nothing -> do
       ident <- jsIdIdent' i mi suffix
-      gsIdents .= IdCache (M.insert key ident cache)
-      return ident
+      let cache' = key `seq` ident `seq` IdCache (M.insert key ident cache)
+      gsIdents .= cache'
+      cache' `seq` return ident
 
 jsIdIdent' :: Id -> Maybe Int -> IdType -> G Ident
 jsIdIdent' i mn suffix0 = do
-  (prefix, u) <- mkPrefixU
+  dflags      <- use gsDynFlags
+  (prefix, u) <- mkPrefixU dflags
   i' <- (\x -> T.pack $ "h$"++prefix++x++mns++suffix++u) . zEncodeString <$> name
   i' `seq` return (TxtI i')
     where
       suffix = idTypeSuffix suffix0
       mns = maybe "" (('_':).show) mn
       name = fmap ('.':) . showPpr' . localiseName . getName $ i
-      mkPrefixU
+      mkPrefixU :: DynFlags -> G (String, String)
+      mkPrefixU dflags
         | isExportedId i, Just x <- (nameModule_maybe . getName) i = do
-           let xstr = showModule x
+           let xstr = showModule dflags x
            return (zEncodeString xstr, "")
         | otherwise = (,('_':) . encodeUnique . getKey . getUnique $ i) . ('$':)
-                    . zEncodeString . showModule <$> use gsModule
+                    . zEncodeString . showModule dflags <$> use gsModule
 
-showModule :: Module -> String
-showModule m
-        | any (`L.isPrefixOf` pkg) wiredInPackages = dropVersion pkg ++ ":" ++ modName
-        | otherwise                                = pkg ++ ":" ++ modName
-        where
-          modName     = moduleNameString (moduleName m)
-          pkg         = packageIdString (modulePackageId m)
-          dropVersion = reverse . drop 1 . dropWhile (/='-') . reverse
+showModule :: DynFlags -> Module -> String
+showModule dflags m = pkg ++ ":" ++ modName
+  where
+    modName     = moduleNameString (moduleName m)
+    pkg         = encodePackageKey dflags (modulePackageKey m)
+
+encodePackageKey :: DynFlags -> PackageKey -> String
+encodePackageKey dflags k
+  | isGhcjsPrimPackage dflags k = "ghcjs-prim"
+  | otherwise                   = packageKeyString k
+  where
+    n = getPackageName dflags k
 
 {-
    some packages are wired into GHCJS, but not GHC
    make sure we don't version them in the output
    since the RTS uses thins from them
 -}
+
+isGhcjsPrimPackage :: DynFlags -> PackageKey -> Bool
+isGhcjsPrimPackage dflags pkgKey
+  =  pn == "ghcjs-prim" ||
+     (null pn && pkgKey == thisPackage dflags && 
+      any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
+  where
+    pn = getPackageName dflags pkgKey
+
+ghcjsPrimPackage :: DynFlags -> PackageKey
+ghcjsPrimPackage dflags =
+  case prims of
+    ((_,k):_) -> k
+    _         -> error "Package `ghcjs-prim' is required to link executables"
+  where
+    prims = filter ((=="ghcjs-prim").fst)
+                   (searchModule dflags (mkModuleName "GHCJS.Prim"))
+
+{-
 wiredInPackages :: [String]
 wiredInPackages = [ "ghcjs-prim" ]
 
-isWiredInPackage :: String -> Bool
-isWiredInPackage pkg = any (`L.isPrefixOf` pkg) wiredInPackages
-
+isWiredInPackage :: DynFlags -> PackageKey -> Bool
+isWiredInPackage pkg = pkg `elem` wiredInPackages
+-}
 idTypeSuffix :: IdType -> String
 idTypeSuffix IdPlain = ""
 idTypeSuffix IdEntry = "_e"

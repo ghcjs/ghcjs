@@ -32,6 +32,7 @@ module Gen2.Object ( object
                    , object'
                    , showDeps
                    , readDepsFile
+                   , hReadDeps
                    , readDeps
                    , showObject
                    , readObjectFile
@@ -46,6 +47,7 @@ module Gen2.Object ( object
                    , Deps (..)
                    , Fun (..), showFun
                    , Package (..), showPkg
+                   , versionTag, versionTagLength
                    ) where
 
 import           Control.Applicative
@@ -85,7 +87,7 @@ import           Data.Word
 
 import           GHC.Generics
 
-import           System.IO (openBinaryFile, hClose, hSeek, SeekMode(..), IOMode(..) )
+import           System.IO (openBinaryFile, withFile, Handle, hClose, hSeek, SeekMode(..), IOMode(..) )
 
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
@@ -155,9 +157,13 @@ data Fun = Fun { funPackage :: !Package
 
 instance NFData Fun where rnf x = x `seq` ()
 
+{-
 data Package = Package { packageName    :: !Text
                        , packageVersion :: !Text
-                       } deriving (Eq, Ord, Show, Generic)
+                       }
+-} 
+newtype Package = Package { unPackage :: Text }
+  deriving (Eq, Ord, Show, Generic)
 instance DB.Binary Package
 
 -- we need to store the size separately, since getting a HashMap's size is O(n)
@@ -306,14 +312,17 @@ instance Objectable ExpFun where
 -- | reads only the part necessary to get the dependencies
 --   so it's potentially more efficient than readDeps <$> B.readFile file
 readDepsFile :: FilePath -> IO Deps
-readDepsFile file = bracket (openBinaryFile file ReadMode) hClose $ \h -> do
+readDepsFile file = withFile file ReadMode (hReadDeps file)
+
+hReadDeps :: String -> Handle -> IO Deps
+hReadDeps name h = do
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
-    Left err -> error ("readDepsFile: not a valid GHCJS object: " ++ file ++ "\n    " ++ err)
+    Left err -> error ("readDepsFile: not a valid GHCJS object: " ++ name ++ "\n    " ++ err)
     Right hdr -> do
       bs <- B.hGet h (fromIntegral $ symbsLen hdr + depsLen hdr)
       let symbs = getSymbolTable bs
-          deps  = getDeps file symbs (B.drop (fromIntegral (symbsLen hdr)) bs)
+          deps  = getDeps name symbs (B.drop (fromIntegral (symbsLen hdr)) bs)
       return deps
 
 -- | call with contents of the file
@@ -446,11 +455,8 @@ showDeps (Deps p m e a d) =
       F.foldMap (\(Fun fp fm fs) -> "   "
       <> showPkg fp <> ":" <> TL.fromStrict fm <> "." <> TL.fromStrict fs <> "\n") (a ! n)
 
-
 showPkg :: Package -> TL.Text
-showPkg (Package name ver)
-  | T.null ver = TL.fromStrict name
-  | otherwise  = TL.fromStrict name <> "-" <> TL.fromStrict ver
+showPkg = TL.fromStrict . unPackage
 
 showFun :: Fun -> String
 showFun (Fun p m s) = TL.unpack (showPkg p) ++ ":" ++ T.unpack m ++ "." ++ T.unpack s
@@ -711,8 +717,8 @@ instance Objectable Fun where
   get = Fun <$> get <*> get <*> get
 
 instance Objectable Package where
-  put (Package name version) = put name >> put version
-  get = Package <$> get <*> get
+  put (Package k) = put k
+  get = Package <$> get
 
 putEnum :: Enum a => a -> PutS
 putEnum x | n > 65535 = error ("putEnum: out of range: " ++ show n)

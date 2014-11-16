@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, OverloadedStrings, TupleSections #-}
+{-# LANGUAGE CPP, GADTs, ScopedTypeVariables, ImpredicativeTypes, OverloadedStrings, TupleSections #-}
 module Compiler.GhcjsHooks where
 
 import           CorePrep             (corePrepPgm)
@@ -37,6 +37,8 @@ import qualified Gen2.TH              as Gen2TH
 
 import           System.IO.Error
 
+import           TcRnTypes
+
 installGhcjsHooks :: GhcjsEnv
                   -> GhcjsSettings
                   -> [FilePath]  -- ^ JS objects
@@ -44,28 +46,35 @@ installGhcjsHooks :: GhcjsEnv
 installGhcjsHooks env settings js_objs dflags =
   Gen2.installForeignHooks True $ dflags { hooks = addHooks (hooks dflags) }
     where
-      addHooks h = h { linkHook               = Just (Gen2.ghcjsLink settings js_objs True)
-                     , getValueSafelyHook     = Just (Gen2TH.ghcjsGetValueSafely settings)
-                     , hscCompileCoreExprHook = Just (Gen2TH.ghcjsCompileCoreExpr env settings)
-                     }
+      addHooks h = h
+        { linkHook               = Just (Gen2.ghcjsLink settings js_objs True)
+        , getValueSafelyHook     = Just (Gen2TH.ghcjsGetValueSafely settings)
+#if __GLASGOW_HASKELL__ >= 709
+        , runMetaHook            = Just (Gen2TH.ghcjsRunMeta env settings)
+#else
+        , hscCompileCoreExprHook = Just (Gen2TH.ghcjsCompileCoreExpr env settings)
+#endif
+        }
 
 installNativeHooks :: GhcjsSettings -> DynFlags -> DynFlags
 installNativeHooks settings dflags =
   Gen2.installForeignHooks False $ dflags { hooks = addHooks (hooks dflags) }
     where
       addHooks h = h { linkHook               = Just (Gen2.ghcjsLink settings [] False)
+#if !(__GLASGOW_HASKELL__ >= 709)
                      , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
                      , hscCompileCoreExprHook = Just Gen2.ghcjsCompileCoreExpr
+#endif
                      }
 
 --------------------------------------------------
 -- One shot replacement (the oneShot in DriverPipeline
 -- always uses the unhooked linker)
 
-ghcjsOneShot :: HscEnv -> Phase -> [(String, Maybe Phase)] -> IO ()
-ghcjsOneShot hsc_env stop_phase srcs = do
+ghcjsOneShot :: GhcjsSettings -> Bool -> HscEnv -> Phase -> [(String, Maybe Phase)] -> IO ()
+ghcjsOneShot settings native hsc_env stop_phase srcs = do
   o_files <- mapM (compileFile hsc_env stop_phase) srcs
-  Gen2.ghcjsDoLink (hsc_dflags hsc_env) stop_phase o_files
+  Gen2.ghcjsDoLink settings native (hsc_dflags hsc_env) stop_phase o_files
 
 --------------------------------------------------
 -- Driver hooks

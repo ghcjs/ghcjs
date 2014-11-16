@@ -10,7 +10,7 @@ module Compiler.GhcjsProgram where
 import           GHC hiding (setSessionDynFlags)
 import           GhcMonad
 import           DynFlags
-import           PackageConfig
+import           PackageConfig hiding (Version)
 import           UniqFM
 import           PrimOp
 import           PrelInfo
@@ -20,6 +20,11 @@ import           DsMeta
 import           ErrUtils (fatalErrorMsg'')
 import           Panic (handleGhcException)
 import           Exception
+#if __GLASGOW_HASKELL__ >= 709
+import           Packages (initPackages)
+#else
+import           Gen2.GHC.Packages (initPackages)
+#endif
 
 import           Control.Applicative
 import           Control.Concurrent.MVar (readMVar)
@@ -40,7 +45,6 @@ import           Data.Time.Clock
 
 import           Distribution.System (buildOS, OS(..))
 import           Distribution.Verbosity (deafening, intToVerbosity)
-import           Distribution.Package (PackageName(..))
 import           Distribution.Simple.BuildPaths (exeExtension)
 import           Distribution.Simple.Utils (installExecutableFile, installDirectoryContents)
 import           Distribution.Simple.Program (runProgramInvocation, simpleProgramInvocation)
@@ -55,6 +59,7 @@ import           System.IO
 import           System.Process
 import           System.Timeout
 
+import           Compiler.Compat
 import           Compiler.GhcjsPlatform
 import           Compiler.Info
 import           Compiler.Settings
@@ -72,10 +77,10 @@ import qualified Gen2.TH          as Gen2
 import           Rules (mkRuleBase)
 import qualified Gen2.GHC.PrelRules
 
-import           Gen2.GHC.Packages
-
 getGhcjsSettings :: [Located String] -> IO ([Located String], GhcjsSettings)
 getGhcjsSettings args =
+  --when (any (("building" `L.isInfixOf`) . unLoc) args) $
+  --  print (map unLoc ga,map unLoc args')
   case p of
     Failure failure -> do
       let (msg, code) = renderFailure failure "ghcjs"
@@ -86,21 +91,35 @@ getGhcjsSettings args =
       return (args', gs1 <> gs2)
     CompletionInvoked _ -> exitWith (ExitFailure 1)
   where
-    (ga,args') = partition (\a -> any (`isPrefixOf` unLoc a) as) args
-    p = execParserPure (prefs mempty) optParser' (map unLoc ga)
-    as = [ "--native-executables"
-         , "--native-too"
-         , "--building-cabal-setup"
-         , "--no-js-executables"
-         , "--strip-program="
-         , "--log-commandline="
-         , "--with-ghc="
-         , "--only-out"
-         , "--no-rts"
-         , "--no-stats"
-         , "--generate-base="
-         , "--use-base="
-         ]
+    (ga,args') = partArgs args -- partition (\a -> any (`isPrefixOf` unLoc a) as) args
+    p = execParserPure (prefs mempty) optParser' ga
+    partArgs :: [Located String] -> ([String], [Located String])
+    partArgs [] = ([],[])
+    partArgs (x:xs)
+      | unLoc x `elem` ghcjsFlags =
+       let (g,o) = partArgs xs in (('-':unLoc x):g,o)
+    partArgs (x1:x2:xs) | unLoc x1 `elem` ghcjsOpts =
+       let (g,o) = partArgs xs in (('-':unLoc x1++"="++unLoc x2):g,o)
+    partArgs (x:xs) =
+       let (g,o) = partArgs xs in (g,x:o)
+
+    ghcjsFlags = [ "-native-executables"
+                 , "-native-too"
+                 , "-build-runner"
+                 , "-no-js-executables"
+                 , "-only-out"
+                 , "-no-rts"
+                 , "-no-stats"
+                 ]
+    ghcjsOpts = [ "-strip-program"
+                , "-log-commandline"
+                , "-with-ghc"
+                , "-generate-base"
+                , "-use-base"
+                , "-link-js-lib"
+                , "-js-lib-outputdir"
+                , "-js-lib-src"
+                ]
     envSettings = GhcjsSettings <$> getEnvOpt "GHCJS_NATIVE_EXECUTABLES"
                                 <*> getEnvOpt "GHCJS_NATIVE_TOO"
                                 <*> pure False
@@ -113,6 +132,9 @@ getGhcjsSettings args =
                                 <*> pure False
                                 <*> pure Nothing
                                 <*> pure NoBase
+                                <*> pure Nothing
+                                <*> pure Nothing
+                                <*> pure []
 
 optParser' :: ParserInfo GhcjsSettings
 optParser' = info (helper <*> optParser) fullDesc
@@ -121,7 +143,7 @@ optParser :: Parser GhcjsSettings
 optParser = GhcjsSettings
             <$> switch ( long "native-executables" )
             <*> switch ( long "native-too" )
-            <*> switch ( long "building-cabal-setup" )
+            <*> switch ( long "build-runner" )
             <*> switch ( long "no-js-executables" )
             <*> optStr ( long "strip-program" )
             <*> optStr ( long "log-commandline" )
@@ -131,6 +153,9 @@ optParser = GhcjsSettings
             <*> switch ( long "no-stats" )
             <*> optStr ( long "generate-base" )
             <*> (maybe NoBase BaseFile <$> optStr ( long "use-base" ))
+            <*> optStr ( long "link-js-lib" )
+            <*> optStr ( long "js-lib-outputdir" )
+            <*> (maybe [] (:[]) <$> optStr ( long "js-lib-src" )) -- fixme!
 
 optStr :: Mod OptionFields String -> Parser (Maybe String)
 optStr = optional . option str
@@ -211,7 +236,7 @@ bootstrapFallback = do
       _ -> return ()
     exitWith e
     where
-      ignoreArg a  = "-B" `isPrefixOf` a || a == "--building-cabal-setup"
+      ignoreArg a  = "-B" `isPrefixOf` a || a == "-build-runner"
       ghcArgs args = filter (not . ignoreArg) args ++ ["-threaded"]
       getOutput []         = Nothing
       getOutput ("-o":x:_) = Just x
@@ -250,19 +275,19 @@ generateLib :: GhcjsSettings -> Ghc ()
 generateLib _settings = do
   dflags1 <- getSessionDynFlags
   liftIO $ do
-    (dflags2, _) <- initPackages dflags1
-    let pkgs =  map sourcePackageId . eltsUFM . pkgIdMap . pkgState $ dflags2
+    (dflags2, pkgs0) <- initPackages dflags1
+    let pkgs = catMaybes $ map (\p -> fmap (T.pack (getPackageName dflags2 p),)
+                                           (getPackageVersion dflags2 p))
+                               pkgs0
         base = getDataDir (getLibDir dflags2) </> "shims"
-        convertPkg p = let PackageName n = pkgName p
-                           v = map fromIntegral (versionBranch $ pkgVersion p)
-                       in (T.pack n, v)
-        pkgs' = M.toList $ M.fromListWith max (map convertPkg pkgs)
+        pkgs' :: [(T.Text, Version)]
+        pkgs' = M.toList $ M.fromListWith max pkgs
     (beforeFiles, afterFiles) <- Gen2.collectShims base pkgs'
     B.writeFile "lib.js"  . mconcat =<< mapM B.readFile beforeFiles
     B.writeFile "lib1.js" . mconcat =<< mapM B.readFile afterFiles
     putStrLn "generated lib.js and lib1.js for:"
     mapM_ (\(p,v) -> putStrLn $ "    " ++ T.unpack p ++
-      if null v then "" else ("-" ++ L.intercalate "." (map show v))) pkgs'
+      if isEmptyVersion v then "" else ("-" ++ T.unpack (showVersion v))) pkgs'
 
 setGhcjsSuffixes :: Bool     -- oneshot option, -c
                  -> DynFlags
@@ -329,7 +354,8 @@ ghcjsShowException e = case fromException e of
                   ++ s ++ "\n"
   _ -> show e
 
-ghcjsCleanupHandler :: (ExceptionMonad m, MonadIO m) => DynFlags -> GhcjsEnv -> m a -> m a
+ghcjsCleanupHandler :: (ExceptionMonad m, MonadIO m)
+                    => DynFlags -> GhcjsEnv -> m a -> m a
 ghcjsCleanupHandler dflags env inner =
       defaultCleanupHandler dflags inner `gfinally`
           (liftIO $ do
@@ -338,8 +364,15 @@ ghcjsCleanupHandler dflags env inner =
                 getProcessExitCode (thrProcess r) >>= \case
                   Just _ -> return ()
                   Nothing ->
-                    (timeout 2000000 (Gen2.finishTh True env m r) >>= maybe (terminate r) return)
+#if __GLASGOW_HASKELL__ >= 709
+                    (timeout 2000000 (Gen2.finishTh env m r) >>=
+                      maybe (terminate r) return)
                       `catch` \(_::SomeException) -> terminate r
+#else
+                    (timeout 2000000 (Gen2.finishTh True env m r) >>=
+                      maybe (terminate r) return)
+                      `catch` \(_::SomeException) -> terminate r
+#endif
           )
   where
     terminate r = terminateProcess (thrProcess r) `catch` \(_::SomeException) -> return ()
@@ -360,8 +393,7 @@ runGhcjsSession mbMinusB settings m = runGhc mbMinusB $ do
     fixNameCache
     m
 
-
-setSessionDynFlags :: GhcMonad m => DynFlags -> m [PackageId]
+setSessionDynFlags :: GhcMonad m => DynFlags -> m [PackageKey]
 setSessionDynFlags dflags = do
   (dflags', preload) <- liftIO $ initPackages dflags -- this is Gen2.GHC.Packages.initPackages
   modifySession $ \h -> h{ hsc_dflags = dflags'

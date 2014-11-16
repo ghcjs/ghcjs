@@ -86,7 +86,9 @@ setCC :: CostCentre -> Bool -> Bool -> G JStat
 -- FIXME: ignoring tick flags for now
 setCC cc _tick True = do
     ccI@(TxtI _ccLbl) <- costCentreLbl cc
-    addDependency $ OtherSymb (cc_mod cc) (moduleGlobalSymbol $ cc_mod cc)
+    dflags <- use gsDynFlags
+    addDependency $ OtherSymb (cc_mod cc)
+                              (moduleGlobalSymbol dflags $ cc_mod cc)
     return [j| `jCurrentCCS` = h$pushCostCentre(`jCurrentCCS`, `ccI`); |]
 setCC _cc _tick _push = return mempty
 

@@ -72,8 +72,17 @@ makeLenses ''CompactorState
 emptyCompactorState :: CompactorState
 emptyCompactorState = CompactorState renamedVars HM.empty HM.empty 0 HM.empty 0 HM.empty 0 HM.empty HM.empty HM.empty
 
+showBase :: Base -> String
+showBase b = unlines
+  [ "Base:"
+  , "  packages: " ++ show (basePkgs b)
+  , "  number of units: " ++ show (S.size $ baseUnits b)
+  , "  renaming table size: " ++
+    show (baseCompactorState b ^. nameMap . to HM.size)
+  ]
+
 data Base = Base { baseCompactorState :: CompactorState
-                 , basePkgs           :: [Text]
+                 , basePkgs           :: [Object.Package]
                  , baseUnits          :: Set (Object.Package, Text, Int)
                  }
 
@@ -109,7 +118,7 @@ putBase (Base cs packages funs) = do
       DB.put (HM.toList pes)
       DB.put (HM.toList pss)
       DB.put (HM.toList pls)
-    putPkg (Object.Package n v) = DB.put n >> DB.put v
+    putPkg (Object.Package k) = DB.put k
     -- fixme group things first
     putFun (p,m,s) = pi (pkgsM M.! p) >> pi (modsM M.! m) >> DB.put s
 
@@ -121,7 +130,7 @@ getBase = getBase'
     getList f = DB.getWord32le >>= \n -> replicateM (fromIntegral n) f
     getFun ps ms = (,,) <$> ((ps!) <$> gi) <*> ((ms!) <$> gi) <*> DB.get
     la xs = listArray (0, length xs - 1) xs
-    getPkg = Object.Package <$> DB.get <*> DB.get
+    getPkg = Object.Package <$> DB.get
     getCs = do
       n   <- DB.get
       nm  <- HM.fromList <$> DB.get

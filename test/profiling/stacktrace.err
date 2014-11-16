@@ -1,12 +1,13 @@
 --- a
 Stack trace:
-  Main.errorM.\ (stacktrace.hs:13:22-54)
-  Main.errorM (stacktrace.hs:13:1-54)
-  Main.foo.\.\ (stacktrace.hs:27:23-30)
-  Main.foo.\ (stacktrace.hs:27:16-33)
-  Main.foo (stacktrace.hs:27:1-36)
-  Main.bar (stacktrace.hs:24:1-20)
-  Main.runM.(...) (stacktrace.hs:16:20-31)
-  Main.runM (stacktrace.hs:16:1-36)
-  Main.main (stacktrace.hs:(29,1)-(37,36))
+  Main.errorM.\ (stacktrace.hs:24:22-54)
+  Main.errorM (stacktrace.hs:24:1-54)
+  Main.foo.\.\ (stacktrace.hs:39:23-30)
+  Main.foo.\ (stacktrace.hs:39:16-33)
+  Main.foo (stacktrace.hs:39:1-36)
+  Main.bar (stacktrace.hs:36:1-20)
+  Main.runM.(...) (stacktrace.hs:27:20-31)
+  Main.runM (stacktrace.hs:27:1-36)
+  Main.main (stacktrace.hs:(42,1)-(50,36))
   Main.CAF (<entire-module>)
+

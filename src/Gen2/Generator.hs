@@ -63,6 +63,7 @@ import           Data.Text (Text)
 import           Compiler.JMacro
 import qualified Text.Parsec as P
 
+import           Compiler.Compat
 import           Compiler.Settings
 
 import           Gen2.Base
@@ -81,9 +82,9 @@ import           Gen2.Sinker
 import           Gen2.Profiling
 
 data DependencyDataCache = DDC
-         { _ddcModule :: IM.IntMap       Object.Package  -- Unique Module -> Object.Package
-         , _ddcId     :: IM.IntMap       Object.Fun      -- Unique Id     -> Object.Fun
-         , _ddcOther  :: M.Map OtherSymb Object.Fun
+         { _ddcModule :: !(IM.IntMap       Object.Package)  -- Unique Module -> Object.Package
+         , _ddcId     :: !(IM.IntMap       Object.Fun)      -- Unique Id     -> Object.Fun
+         , _ddcOther  :: !(M.Map OtherSymb Object.Fun)
          }
 
 makeLenses ''DependencyDataCache
@@ -131,7 +132,7 @@ generate settings df m s cccs =
         p <- forM lus $ \u -> mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
                                 \ts -> return (ts ++ luOtherExports u, luStat u)
         let (st', dbg) = dumpAst st settings df s'
-        deps <- genDependencyData lus
+        deps <- genDependencyData df lus
         return . BL.toStrict $
           Object.object' st' deps (p ++ dbg) -- p first, so numbering of linkable units lines up
 
@@ -173,7 +174,7 @@ genUnits :: DynFlags
          -> Module
          -> StgPgm
          -> G (Object.SymbolTable, [LinkableUnit]) -- ^ the final symbol table and the linkable units
-genUnits _df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
+genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
     where
       go :: Int                 -- ^ the block we're generating (block 0 is the global unit for the module)
          -> Object.SymbolTable  -- ^ the shared symbol table
@@ -196,7 +197,7 @@ genUnits _df m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
                          . O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
                          $ mconcat (reverse glbl)
-        return (st', LinkableUnit bs [] [moduleGlobalSymbol m] [] [] : lus)
+        return (st', LinkableUnit bs [] [moduleGlobalSymbol dflags m] [] [] : lus)
 
       -- | Generate the linkable unit for one binding or group of
       --   mutually recursive bindings
@@ -241,25 +242,28 @@ serializeLinkableUnit _m st i ci si stat = do
 
 collectTopIds :: StgBinding -> [Id]
 collectTopIds (StgNonRec b _) = [b]
-collectTopIds (StgRec bs) = map fst bs
+collectTopIds (StgRec bs) = let xs = map (zapFragileIdInfo . fst) bs
+                            in  seqList xs `seq` xs
 
 collectIds :: UniqFM StgExpr -> StgBinding -> [Id]
-collectIds unfloated b = filter acceptId $ S.toList (bindingRefs unfloated b)
+collectIds unfloated b =
+  let xs = map zapFragileIdInfo . filter acceptId $ S.toList (bindingRefs unfloated b)
+  in  seqList xs `seq` xs
   where
     acceptId i = all ($ i) [not . isForbidden] -- fixme test this: [isExported[isGlobalId, not.isForbidden]
     -- the GHC.Prim module has no js source file
     isForbidden i
       | Just m <- nameModule_maybe (getName i) =
-                    moduleNameText m    == T.pack "GHC.Prim" &&
-                    Object.packageName (modulePackageText m) == T.pack "ghc-prim"
+                    moduleNameText m   == T.pack "GHC.Prim" &&
+                    modulePackageKey m == primPackageKey
       | otherwise = False
 
 {- |
      generate the object's dependy data, taking care that package and module names
      are only stored once
  -}
-genDependencyData :: [LinkableUnit] -> G Object.Deps
-genDependencyData units = do
+genDependencyData :: DynFlags -> [LinkableUnit] -> G Object.Deps
+genDependencyData dflags units = do
   m <- use gsModule
   (ds, DDC _pkgs _funs1 _funs2) <- runStateT (sequence (zipWith (oneDep m) units [0..]))
                                      (DDC IM.empty IM.empty M.empty)
@@ -267,7 +271,7 @@ genDependencyData units = do
       ba = listArray (0, length blocks - 1) blocks
       dm = M.fromList (concat dl)
       es = M.empty -- fixme implement foreign exports
-  return $ Object.Deps (modulePackageText m) (moduleNameText m) es ba dm
+  return $ Object.Deps (Linker.mkPackage (modulePackageKey m)) (moduleNameText m) es ba dm
     where
       -- generate the list of exports and set of dependencies for one unit
       oneDep :: Module
@@ -304,10 +308,12 @@ genDependencyData units = do
       lookupFun :: Maybe Int -> OtherSymb -> StateT DependencyDataCache G Object.Fun
       lookupFun mbIdKey od@(OtherSymb mod idTxt) = do
         let mk        = getKey . getUnique $ mod
-            mpt       = modulePackageText mod
+            mpt       = Linker.mkPackage (modulePackageKey mod)
             inCache p = Object.Fun p (moduleNameText mod) idTxt
-            addCache  = ddcModule %= IM.insert mk mpt >>
-                        return (Object.Fun mpt (moduleNameText mod) idTxt)
+            addCache  = do
+              let cache' = IM.insert mk mpt
+              ddcModule %= cache'
+              cache' `seq` return (Object.Fun mpt (moduleNameText mod) idTxt)
         f <- maybe addCache (return . inCache) =<< use (ddcModule . to (IM.lookup mk))
         maybe (ddcOther %= M.insert od f) (\k -> ddcId %= IM.insert k f) mbIdKey
         return f
@@ -317,15 +323,15 @@ moduleNameText m
   | xs == ":Main" = T.pack "Main"
   | otherwise     = T.pack xs
     where xs      = moduleNameString . moduleName $ m
-
+{-
 modulePackageText :: Module -> Object.Package
 modulePackageText m
   | isWiredInPackage pkgStr = Object.Package n ""
   | otherwise               = Object.Package n v
   where
-    pkgStr = packageIdString (modulePackageId m)
-    (n, v) = Linker.splitVersion . T.pack . packageIdString . modulePackageId $ m
-
+    pkgStr = packageKeyString (modulePackageKey m)
+    (n, v) = Linker.splitVersion . T.pack . packageKeyString . modulePackageKey $ m
+-}
 genToplevel :: StgBinding -> C
 genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs
 genToplevel (StgRec bs)          =

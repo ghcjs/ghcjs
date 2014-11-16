@@ -1,4 +1,4 @@
-{-# LANGUAGE NondecreasingIndentation #-}
+{-# LANGUAGE CPP, NondecreasingIndentation, TupleSections #-}
 {-
   Various utilities for building and loading dynamic libraries, to make Template Haskell
   work in GHCJS
@@ -14,7 +14,7 @@ module Gen2.DynamicLinking ( ghcjsLink
 
 import Id
 import Name
-import Outputable
+import Outputable hiding ((<>))
 import FastString
 import HscTypes
 import ByteCodeGen
@@ -41,20 +41,36 @@ import DriverPipeline hiding ( linkingNeeded )
 import UniqFM
 import Maybes hiding ( Succeeded )
 
+import           Control.Applicative
 import           Control.Monad
 
-import           Data.List ( isPrefixOf, sort )
+import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString as BS
+import           Data.List ( isPrefixOf, sort, nub )
+import           Data.Monoid
 import qualified Data.Set as S
+import qualified Data.Map as M
+import qualified Data.Text as T
 
 import           System.Directory
 import           System.FilePath
 
+import           Compiler.Compat
 import           Compiler.Settings
 import           Compiler.Variants
 import qualified Compiler.Utils as Utils
 
+#if __GLASGOW_HASKELL__ >= 709
+import           SysTools
+import           Linker
+#else
 import           Gen2.GHC.Linker -- use our own version!
 import           Gen2.GHC.SysTools ( ghcjsPackageHsLibs, linkDynLib )
+#endif
+
+import qualified Data.Yaml                as Yaml
+import Compiler.Info (getLibDir)
+import Gen2.Archive
 
 
 -------------------------------------------------------------------------------------------
@@ -68,42 +84,92 @@ ghcjsLink :: GhcjsSettings
           -> Bool
           -> HomePackageTable
           -> IO SuccessFlag
-ghcjsLink _ _ _ LinkInMemory _ _ _     = return Succeeded
-ghcjsLink _ _ _ NoLink _ _ _           = return Succeeded
-ghcjsLink _ _ True LinkStaticLib _ _ _ = return Succeeded
-ghcjsLink _ _ True LinkDynLib _ _ _    = return Succeeded
-ghcjsLink settings extraJs buildJs _ dflags batch_attempt_linking pt =
-  link' settings extraJs buildJs dflags batch_attempt_linking pt
+ghcjsLink settings extraJs buildJs ghcLink dflags batch_attempt_linking pt
+  | ghcLink == LinkInMemory || ghcLink == NoLink =
+      return Succeeded
+  | ghcLink == LinkStaticLib || ghcLink == LinkDynLib =
+      if buildJs && isJust (gsLinkJsLib settings)
+         then ghcjsLinkJsLib settings extraJs dflags pt
+         else return Succeeded
+  | otherwise = do
+      when (buildJs && isJust (gsLinkJsLib settings))
+        (void $ ghcjsLinkJsLib settings extraJs dflags pt) -- fixme use return value
+      link' settings extraJs buildJs dflags batch_attempt_linking pt
 
+ghcjsLinkJsLib :: GhcjsSettings
+               -> [FilePath] -- ^ extra JS files
+               -> DynFlags
+               -> HomePackageTable
+               -> IO SuccessFlag
+ghcjsLinkJsLib settings jsFiles dflags hpt
+  | Just jsLib <- gsLinkJsLib settings = do
+      -- putStrLn "linking js lib"
+      let profSuff | WayProf `elem` ways dflags = "_p"
+                   | otherwise                  = ""
+          libFileName = ("lib" ++ jsLib ++ profSuff) <.> "js_a"
+          outputFile  = maybe libFileName
+                              (</>libFileName)
+                              (gsJsLibOutputDir settings `mplus` objectDir dflags)
+          jsFiles' = nub (gsJsLibSrcs settings ++ jsFiles)
+          meta    = Meta (opt_P dflags)
+      jsEntries <- forM jsFiles' $ \file -> -- do
+        -- putStrLn $ "reading js file: " ++ file
+        (JsSource file,) <$> B.readFile file
+      -- putStrLn "done reading js files"
+      objEntries <- forM (eltsUFM hpt) $ \hmi -> do
+        let mt    = T.pack . moduleNameString . moduleName . mi_module . hm_iface $ hmi
+            files = maybe [] (\l -> [ o | DotO o <- linkableUnlinked l]) (hm_linkable hmi)
+        -- fixme archive does not handle multiple files for a module yet
+        forM files $ \file ->
+          -- putStrLn $ "reading obj file: " ++ file
+          (Object mt,) <$> B.readFile file
+      B.writeFile outputFile (buildArchive meta (concat objEntries ++ jsEntries))
+      return Succeeded
+  | otherwise = -- do
+      -- putStrLn "ghcjsLinkJsLib: nothing to do"
+      return Succeeded
+
+dumpHpt :: DynFlags -> HomePackageTable -> String
+dumpHpt dflags pt = "hpt:\n" ++ unlines
+  (map (\hmi -> (moduleNameString . moduleName . mi_module . hm_iface $ hmi) ++
+                " -> " ++ maybe "<no linkable>" (showPpr dflags) (hm_linkable hmi))
+       (eltsUFM pt))
 ghcjsLinkJsBinary :: GhcjsSettings
                   -> [FilePath]
                   -> DynFlags
                   -> [FilePath]
-                  -> [PackageId]
+                  -> [PackageKey]
                   -> IO ()
 ghcjsLinkJsBinary settings jsFiles dflags objs dep_pkgs =
-  void $ variantLink gen2Variant dflags settings exe [] deps objs' jsFiles isRoot S.empty
+  void $ variantLink gen2Variant dflags settings exe [] dep_pkgs objs' jsFiles isRoot S.empty
     where
-      objs'    = map Right objs
+      objs'    = map ObjFile objs
       isRoot _ = True
-      deps     = map (\pkg -> (pkg, packageLibPaths pkg)) dep_pkgs
       exe      = Utils.exeFileName dflags
-      pidMap   = pkgIdMap (pkgState dflags)
-      packageLibPaths :: PackageId -> [FilePath]
+      packageLibPaths :: PackageKey -> [FilePath]
+#if __GLASGOW_HASKELL__ >= 709
+      packageLibPaths = maybe [] libraryDirs . lookupPackage dflags
+#else
       packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
+      pidMap   = pkgIdMap (pkgState dflags)
+#endif
 
-isGhcjsPrimPackage :: PackageId -> Bool
-isGhcjsPrimPackage pkgId = "ghcjs-prim-" `isPrefixOf` packageIdString pkgId
+isGhcjsPrimPackage :: DynFlags -> PackageKey -> Bool
+isGhcjsPrimPackage dflags pkgKey
+  =  getPackageName dflags pkgKey == "ghcjs-prim" ||
+     (pkgKey == thisPackage dflags && 
+      any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
 
-ghcjsPrimPackage :: DynFlags -> PackageId
-ghcjsPrimPackage dflags =
-  case prims of
-    (x:_) -> x
-    _     -> error "Package `ghcjs-prim' is required to link executables"
+ghcjsPrimPackage :: DynFlags -> IO PackageKey
+ghcjsPrimPackage dflags = do
+  keys <- BS.readFile filename
+  case Yaml.decodeEither keys of
+    Left err -> error $ "could not read wired-in package keys from " ++ filename
+    Right m -> case M.lookup "ghcjs-prim" m of
+      Nothing -> error "Package `ghcjs-prim' is required to link executables"
+      Just k -> return (stringToPackageKey k)
   where
-    prims = reverse . sort $ filter isGhcjsPrimPackage pkgIds
-    pkgIds = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
-
+    filename = getLibDir dflags </> "wiredinkeys" <.> "yaml"
 
 link' :: GhcjsSettings
       -> [FilePath]              -- extra js files
@@ -160,8 +226,9 @@ link' settings extraJs buildJs dflags batch_attempt_linking hpt
                 other         -> panicBadLink other
 
         -- make sure we link ghcjs-prim even when it's not a dependency
-        let pkg_deps' | any isGhcjsPrimPackage pkg_deps = pkg_deps
-                      | otherwise                       = ghcjsPrimPackage dflags : pkg_deps
+        pkg_deps' <- if any (isGhcjsPrimPackage dflags) pkg_deps
+                        then return pkg_deps
+                        else (:pkg_deps) <$> ghcjsPrimPackage dflags
 
         link dflags obj_files pkg_deps'
 
@@ -176,7 +243,7 @@ link' settings extraJs buildJs dflags batch_attempt_linking hpt
         return Succeeded
 
 
-linkingNeeded :: DynFlags -> Bool -> [Linkable] -> [PackageId] -> IO Bool
+linkingNeeded :: DynFlags -> Bool -> [Linkable] -> [PackageKey] -> IO Bool
 linkingNeeded dflags staticLink linkables pkg_deps = do
         -- if the modification time on the executable is later than the
         -- modification times on all of the objects and libraries, then omit
@@ -197,10 +264,10 @@ linkingNeeded dflags staticLink linkables pkg_deps = do
 
         -- next, check libraries. XXX this only checks Haskell libraries,
         -- not extra_libraries or -l things from the command line.
-        let pkg_map = pkgIdMap (pkgState dflags)
-            pkg_hslibs  = [ (libraryDirs c, lib)
-                          | Just c <- map (lookupPackage pkg_map) pkg_deps,
-                            lib <- ghcjsPackageHsLibs dflags c ]
+#if __GLASGOW_HASKELL__ >= 709
+        let pkg_hslibs  = [ (libraryDirs c, lib)
+                          | Just c <- map (lookupPackage dflags) pkg_deps,
+                            lib <- packageHsLibs dflags c ]
 
         pkg_libfiles <- mapM (uncurry (findHSLib dflags)) pkg_hslibs
         if any isNothing pkg_libfiles then return True else do
@@ -210,12 +277,26 @@ linkingNeeded dflags staticLink linkables pkg_deps = do
         if not (null lib_errs) || any (t <) lib_times
            then return True
            else checkLinkInfo dflags pkg_deps exe_file
+#else
+        let pkg_map = pkgIdMap (pkgState dflags)
+            pkg_hslibs  = [ (libraryDirs c, lib)
+                          | Just c <- map (lookupPackage pkg_map) pkg_deps,
+                            lib <- ghcjsPackageHsLibs dflags c ]
+        pkg_libfiles <- mapM (uncurry (findHSLib dflags)) pkg_hslibs
+        if any isNothing pkg_libfiles then return True else do
+        e_lib_times <- mapM (tryIO . getModificationUTCTime)
+                          (catMaybes pkg_libfiles)
+        let (lib_errs,lib_times) = splitEithers e_lib_times
+        if not (null lib_errs) || any (t <) lib_times
+           then return True
+           else checkLinkInfo dflags pkg_deps exe_file
+#endif
 
 panicBadLink :: GhcLink -> a
 panicBadLink other = panic ("link: GHC not built to link this way: " ++
                             show other)
 
-linkDynLibCheck :: DynFlags -> [String] -> [PackageId] -> IO ()
+linkDynLibCheck :: DynFlags -> [String] -> [PackageKey] -> IO ()
 linkDynLibCheck dflags o_files dep_packages
  = do
     when (haveRtsOptsFlags dflags) $ do
@@ -225,7 +306,7 @@ linkDynLibCheck dflags o_files dep_packages
 
     linkDynLib dflags o_files dep_packages
 
-linkStaticLibCheck :: DynFlags -> [String] -> [PackageId] -> IO ()
+linkStaticLibCheck :: DynFlags -> [String] -> [PackageKey] -> IO ()
 linkStaticLibCheck dflags o_files dep_packages
  = do
     when (platformOS (targetPlatform dflags) `notElem` [OSiOS, OSDarwin]) $
@@ -253,7 +334,7 @@ haveRtsOptsFlags dflags =
                                         RtsOptsSafeOnly -> False
                                         _ -> True
 
-linkBinary' :: Bool -> DynFlags -> [FilePath] -> [PackageId] -> IO ()
+linkBinary' :: Bool -> DynFlags -> [FilePath] -> [PackageKey] -> IO ()
 linkBinary' staticLink dflags o_files dep_packages = do
     let platform = targetPlatform dflags
         mySettings = settings dflags
@@ -440,17 +521,20 @@ linkBinary' staticLink dflags o_files dep_packages = do
     unless success $
         throwGhcExceptionIO (InstallationError ("cannot move binary"))
 
-ghcjsDoLink :: DynFlags -> Phase -> [FilePath] -> IO ()
-ghcjsDoLink dflags stop_phase o_files
+ghcjsDoLink :: GhcjsSettings -> Bool -> DynFlags -> Phase -> [FilePath] -> IO ()
+ghcjsDoLink settings native dflags stop_phase o_files
   | not (isStopLn stop_phase)
   = return ()           -- We stopped before the linking phase
-
-  | otherwise
+  | native
   = case ghcLink dflags of
         NoLink     -> return ()
         LinkBinary -> linkBinary      dflags o_files []
         LinkDynLib -> linkDynLibCheck dflags o_files []
         other      -> panicBadLink other
+  | isJust (gsLinkJsLib settings)
+  = void $ ghcjsLinkJsLib settings o_files dflags emptyHomePackageTable
+  | otherwise =
+    void $ ghcjsLink settings o_files True (ghcLink dflags) dflags True emptyHomePackageTable
 
 -------------------------------------------------------------------------------------------
 -- Compile Core expression

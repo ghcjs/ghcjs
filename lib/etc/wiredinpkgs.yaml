@@ -1,0 +1,15 @@
+# packages that GHCJS treats as wired-in
+#
+# A wired-in package has no version numbers of package key in the
+# JavaScript names. Runtime system code can therefore directly
+# use the names.
+#
+# This means that only one instance of a wired-in package can be used.
+#
+# All packages referred to by thdeps.yaml and rtsdeps.yaml either have to
+# be listed here or be already wired-in in GHC. Dependencies of a
+# wired-in package do not need to be wired-in themselves.
+# Only stage1 packages can be wired-in.
+
+- ghcjs-prim
+

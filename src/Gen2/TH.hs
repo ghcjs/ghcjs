@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, OverloadedStrings, LambdaCase, TupleSections, ScopedTypeVariables #-}
+{-# LANGUAGE CPP, GADTs, OverloadedStrings, LambdaCase, TupleSections, ScopedTypeVariables #-}
 
 module Gen2.TH where
 
@@ -44,6 +44,7 @@ import           FastString
 import           RdrName
 
 import           Control.Concurrent
+import qualified Control.Exception              as E
 import           Control.Lens
 import           Control.Monad
 
@@ -77,8 +78,9 @@ import qualified Language.Haskell.TH            as TH
 import           Language.Haskell.TH.Syntax     (Quasi)
 import qualified Language.Haskell.TH.Syntax     as TH
 
-import           System.Process                 (runInteractiveProcess
-                                                ,terminateProcess, waitForProcess)
+import           System.Process
+  (runInteractiveProcess, terminateProcess, waitForProcess)
+                                                
 import           System.FilePath
 import           System.IO
 import           System.IO.Error
@@ -86,7 +88,250 @@ import           System.Timeout
 
 import           Unsafe.Coerce
 
+#if __GLASGOW_HASKELL__ >= 709
+import           ErrUtils
+import           HsExpr
+import           DsMonad
+import           DsExpr
+import           HsPat
+import           HsTypes
+import           HsDecls
+import           TcSplice
+#endif
+
 #include "HsVersions.h"
+
+#if __GLASGOW_HASKELL__ >= 709
+-- GHC 7.10 has a new runMetaHook
+
+convertE :: SrcSpan -> ByteString -> TcM (LHsExpr RdrName)
+convertE = convertTH (get :: Get TH.Exp)   convertToHsExpr
+
+convertP :: SrcSpan -> ByteString -> TcM (LPat RdrName)
+convertP = convertTH (get :: Get TH.Pat)   convertToPat
+
+convertT :: SrcSpan -> ByteString -> TcM (LHsType RdrName)
+convertT = convertTH (get :: Get TH.Type)  convertToHsType
+
+convertD :: SrcSpan -> ByteString -> TcM [LHsDecl RdrName]
+convertD = convertTH (get :: Get [TH.Dec]) convertToHsDecls
+
+convertTH :: Binary a
+          => Get a
+          -> (SrcSpan -> a -> Either MsgDoc b)
+          -> SrcSpan
+          -> ByteString
+          -> TcM b
+convertTH g f s b
+  = case f s (runGet g (BL.fromStrict b)) of
+      Left msg -> failWithTc msg
+      Right x  -> return x
+
+convertAnn :: SrcSpan -> ByteString -> TcM Serialized
+convertAnn _ bs = return (toSerialized B.unpack bs)
+
+ghcjsRunMeta :: GhcjsEnv
+             -> GhcjsSettings
+             -> MetaRequest
+             -> LHsExpr Id
+             -> TcM MetaResult
+ghcjsRunMeta js_env js_settings req expr =
+  let m :: (hs_syn -> MetaResult) -> String -> TH.THResultType
+        -> Bool -> (hs_syn -> SDoc)
+        -> (SrcSpan -> ByteString -> TcM hs_syn)
+        -> TcM MetaResult
+      m r desc th_type show_code ppr_code convert_res
+        = r <$> ghcjsRunMeta' js_env
+                              js_settings
+                              desc
+                              th_type
+                              show_code
+                              ppr_code
+                              convert_res
+                              expr
+  in case req of
+    MetaE  r -> m r "expression"   TH.THExp        True  ppr convertE
+    MetaP  r -> m r "pattern"      TH.THPat        True  ppr convertP
+    MetaT  r -> m r "type"         TH.THType       True  ppr convertT
+    MetaD  r -> m r "declarations" TH.THDec        True  ppr convertD
+    MetaAW r -> m r "annotation"   TH.THAnnWrapper False ppr convertAnn
+
+ghcjsRunMeta' :: GhcjsEnv
+              -> GhcjsSettings
+              -> String
+              -> TH.THResultType
+              -> Bool
+              -> (hs_syn -> SDoc)
+              -> (SrcSpan -> ByteString -> TcM hs_syn)
+              -> LHsExpr Id
+              -> TcM hs_syn
+ghcjsRunMeta' js_env js_settings desc tht show_code ppr_code cvt expr = do
+  traceTc "About to run" (ppr expr)
+  recordThSpliceUse -- seems to be the best place to do this,
+                    -- we catch all kinds of splices and annotations.
+  failIfErrsM
+  ds_expr  <- initDsTc (dsLExpr expr)
+  dflags   <- getDynFlags
+  hsc_env  <- getTopEnv
+  src_span <- getSrcSpanM
+  traceTc "About to run (desugared)" (ppr ds_expr)
+  (js_code, symb) <-
+    compileExpr js_env js_settings hsc_env dflags src_span ds_expr
+  gbl_env  <- getGblEnv
+  r        <- liftIO $ getThRunner js_env hsc_env dflags (tcg_mod gbl_env)
+  base     <- liftIO $ takeMVar (thrBase r)
+  let m        = tcg_mod gbl_env
+      pkgs     = imp_dep_pkgs . tcg_imports $ gbl_env
+      settings = thSettings { gsUseBase = BaseState base }
+  lr       <- liftIO $ linkTh settings
+                              []
+                              dflags
+                              pkgs
+                              (hsc_HPT hsc_env)
+                              (Just js_code)
+  ext      <- liftIO $ mconcat <$> mapM (Gen2.tryReadShimFile dflags)
+                                        (Gen2.linkLibB lr ++ Gen2.linkLibA lr)
+  let bs = ext <> BL.toStrict (Gen2.linkOut lr)
+               <> T.encodeUtf8 ("\nh$TH.loadedSymbol = " <> symb <> ";\n")
+  -- fixme exception handling
+  hv <- setSrcSpan (getLoc expr) $ do
+    loc <- TH.qLocation
+    requestRunner r (TH.RunTH tht bs (Just loc)) >>= \case
+      TH.RunTH' bsr -> cvt src_span bsr
+      _             -> error
+        "ghcjsRunMeta': unexpected response, expected RunTH' message"
+  liftIO $ putMVar (thrBase r) (Gen2.linkBase lr)
+  return hv
+
+compileExpr :: GhcjsEnv -> GhcjsSettings -> HscEnv -> DynFlags
+            -> SrcSpan -> CoreExpr -> TcM (ByteString, Text)
+compileExpr js_env js_settings hsc_env dflags src_span ds_expr
+  = newUnique >>= \u -> liftIO $ do
+      prep_expr     <- corePrepExpr dflags hsc_env ds_expr
+      n             <- modifyMVar (thSplice js_env)
+                                  (\n -> let n' = n+1 in pure (n',n'))
+      stg_pgm0      <- coreToStg dflags (mod n) [bind n u prep_expr]
+      (stg_pgm1, c) <- stg2stg dflags (mod n) stg_pgm0
+      return (Gen2.generate js_settings dflags (mod n) stg_pgm1 c, symb n)
+  where
+    symb n     = "h$thrunnerZCThRunner" <> T.pack (show n) <> "zithExpr"
+    thExpr n u = mkVanillaGlobal (mkExternalName u
+                                                 (mod n)
+                                                 (mkVarOcc "thExpr")
+                                                 src_span)
+                                 (exprType ds_expr)
+    bind n u e = NonRec (thExpr n u) e
+    mod n      = mkModule pkg (mkModuleName $ "ThRunner" ++ show n)
+    pkg        = stringToPackageKey "thrunner"
+
+getThRunner :: GhcjsEnv -> HscEnv -> DynFlags -> Module -> IO ThRunner
+getThRunner js_env hsc_env dflags m = do
+  let m' = moduleNameString (moduleName m)
+  modifyMVar (thRunners js_env) $ \runners -> case M.lookup m' runners of
+    Just r  -> return (runners, r)
+    Nothing -> do
+      r <- startThRunner dflags hsc_env
+      -- fixme find where ghc finalizes
+      -- when $ TH.qAddModFinalizer (TH.Q $ finishTh is_io js_env m r)
+      return (M.insert m' r runners, r)
+
+
+linkTh :: GhcjsSettings        -- settings (contains the base state)
+       -> [FilePath]           -- extra js files
+       -> DynFlags             -- dynamic flags
+       -> [PackageKey]         -- package dependencies
+       -> HomePackageTable     -- what to link
+       -> Maybe ByteString     -- current module or Nothing to get the initial code + rts
+       -> IO Gen2.LinkResult
+linkTh settings js_files dflags pkgs hpt code = do
+  (th_deps_pkgs, th_deps)  <- Gen2.thDeps dflags
+  let home_mod_infos = eltsUFM hpt
+      pkgs' | isJust code = L.nub $ pkgs ++ th_deps_pkgs
+            | otherwise   = th_deps_pkgs
+      is_root   = const True
+      linkables = map (expectJust "link".hm_linkable) home_mod_infos
+      getOfiles (LM _ _ us) = map nameOfObject (filter isObject us)
+      link      = Gen2.link' dflags'
+                             settings
+                             "Template Haskell"
+                             []
+                             pkgs'
+                             obj_files
+                             js_files
+                             is_root
+                             th_deps
+      dflags'   = dflags { ways = WayDebug : ways dflags }
+      obj_files = maybe []
+                        (\b -> ObjLoaded "<Template Haskell>" b :
+                               map ObjFile (concatMap getOfiles linkables))
+                        code
+      packageLibPaths :: PackageKey -> [FilePath]
+      packageLibPaths pkg = maybe [] libraryDirs (lookupPackage dflags pkg)
+      -- deps  = map (\pkg -> (pkg, packageLibPaths pkg)) pkgs'
+      cache_key = T.pack $
+        (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++
+        show (ways dflags')
+  if isJust code
+     then link
+     else Gen2.getCached dflags' "template-haskell" cache_key >>= \case
+            Just c  -> return (runGet get $ BL.fromStrict c)
+            Nothing -> do
+              lr <- link
+              Gen2.putCached dflags'
+                             "template-haskell"
+                             cache_key
+                             [topDir dflags </> "ghcjs_boot.completed"]
+                             (BL.toStrict . runPut . put $ lr)
+              return lr 
+
+requestRunner :: ThRunner -> TH.Message -> TcM TH.Message
+requestRunner runner msg = liftIO (sendToRunner runner 0 msg) >> res
+  where
+    res = liftIO (readFromRunner runner) >>= \case
+            (msg, 0) -> return msg
+            (req, n) -> do
+              liftIO . sendToRunner runner n =<< handleRunnerReq runner req
+              res
+
+finishRunner :: ThRunner -> IO ()
+finishRunner runner = do
+  sendToRunner runner 0 TH.FinishTH
+  readFromRunner runner >>= \case
+    (TH.FinishTH', _) -> return ()
+    _                 -> error
+      "finishRunner: unexpected response, expected FinishTH' message"
+
+handleRunnerReq :: ThRunner -> TH.Message -> TcM TH.Message
+handleRunnerReq runner msg = case msg of
+  TH.NewName n           -> TH.NewName'                       <$> TH.qNewName n
+  TH.QException e        -> term                              >>  error e
+  TH.QFail e             -> term                              >>  fail e
+  TH.Report isErr msg    -> TH.qReport isErr msg              >>  pure TH.Report'
+  TH.LookupName b n      -> TH.LookupName'                    <$> TH.qLookupName b n
+  TH.Reify n             -> TH.Reify'                         <$> TH.qReify n
+  TH.ReifyInstances n ts -> TH.ReifyInstances'                <$> TH.qReifyInstances n ts
+  TH.ReifyRoles n        -> TH.ReifyRoles'                    <$> TH.qReifyRoles n
+  TH.ReifyAnnotations nn -> TH.ReifyAnnotations' . map B.pack <$> TH.qReifyAnnotations nn
+  TH.ReifyModule m       -> TH.ReifyModule'                   <$> TH.qReifyModule m
+  TH.AddDependentFile f  -> TH.qAddDependentFile f            >>  pure TH.AddDependentFile'
+  TH.AddTopDecls decs    -> TH.qAddTopDecls decs              >>  pure TH.AddTopDecls'
+  _                      -> term >> error "handleRunnerReq: unexpected request"
+  where
+    term = liftIO (terminateProcess $ thrProcess runner)
+
+-- | instruct the runner to finish up
+finishTh :: GhcjsEnv -> String -> ThRunner -> IO ()
+finishTh js_env m runner = do
+    let ph = thrProcess runner
+    takeMVar (thrBase runner)
+    finishRunner runner
+    modifyMVar_ (thRunners js_env) (return . M.delete m)
+    maybe (void $ terminateProcess ph)
+          (\_ -> return ())
+          =<< timeout 30000000 (waitForProcess ph)
+
+#else
+-- Template Haskell for GHC 7.8
 
 -- | run some TH code, start a runner if necessary
 runTh :: forall m. Quasi m
@@ -148,42 +393,16 @@ finishTh is_io js_env m runner = do
     TH.qRunIO $ modifyMVar_ (thRunners js_env) (return . M.delete m)
     TH.qRunIO $ maybe (void $ terminateProcess ph) (\_ -> return ()) =<< timeout 30000000 (waitForProcess ph)
 
-thSettings :: GhcjsSettings
-thSettings = GhcjsSettings False True False False Nothing Nothing Nothing True True True Nothing NoBase
-
 getThRunner :: Quasi m => Bool -> DynFlags -> GhcjsEnv -> HscEnv -> String -> m ThRunner
 getThRunner is_io dflags js_env hsc_env m = do
   runners <- TH.qRunIO $ takeMVar (thRunners js_env)
   case M.lookup m runners of
     Just r  -> TH.qRunIO (putMVar (thRunners js_env) runners) >> return r
     Nothing -> do
-      r <- TH.qRunIO $ do
-        lr <- linkTh thSettings [] dflags [] (hsc_HPT hsc_env) Nothing
-        fb <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibB lr)
-        fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
-        let rts = TL.encodeUtf8 $ Gen2.rtsText' dflags (Gen2.dfCgSettings dflags)
-        node <- T.strip <$> T.readFile (topDir dflags </> "node")
-        (inp,out,err,pid) <- runInteractiveProcess (T.unpack node) [topDir dflags </> "thrunner.js"] Nothing Nothing
-        mv  <- newMVar (Gen2.linkBase lr)
-        forkIO $ catchIOError (forever $ hGetChar out >>= putChar) (\_ -> return ())
-        let r = ThRunner pid inp err mv
-        sendToRunnerRaw r 0 (BL.toStrict $ fb <> rts <> fa <> Gen2.linkOut lr)
-        return r
+      r <- TH.qRunIO $ startThRunner dflags hsc_env
       when (not is_io) $ TH.qAddModFinalizer (TH.Q $ finishTh is_io js_env m r)
       TH.qRunIO $ putMVar (thRunners js_env) (M.insert m r runners)
       return r
-
-sendToRunner :: ThRunner -> Int -> TH.Message -> IO ()
-sendToRunner runner responseTo msg =
-  sendToRunnerRaw runner responseTo (BL.toStrict . runPut . put $ msg)
-
-sendToRunnerRaw :: ThRunner -> Int -> ByteString -> IO ()
-sendToRunnerRaw runner responseTo bs = do
-  let header = BL.toStrict . runPut $ do
-        putWord32be (fromIntegral $ B.length bs)
-        putWord32be (fromIntegral responseTo)
-  B.hPut (thrHandleIn runner) (B16.encode $ header <> bs)
-  hFlush (thrHandleIn runner)
 
 requestRunner :: Quasi m => Bool -> ThRunner -> TH.Message -> m TH.Message
 requestRunner is_io runner msg = TH.qRunIO (sendToRunner runner 0 msg) >> res
@@ -191,12 +410,6 @@ requestRunner is_io runner msg = TH.qRunIO (sendToRunner runner 0 msg) >> res
     res = TH.qRunIO (readFromRunner runner) >>= \case
       (msg, 0) -> return msg
       (req, n) -> handleRunnerReq is_io runner req >>= TH.qRunIO . sendToRunner runner n >> res
-
-readFromRunner :: ThRunner -> IO (TH.Message, Int)
-readFromRunner runner = do
-  let h = thrHandleErr runner
-  (len, tgt) <- runGet ((,) <$> getWord32be <*> getWord32be) <$> BL.hGet h 8
-  (,fromIntegral tgt) . runGet get <$> BL.hGet h (fromIntegral len)
 
 handleRunnerReq :: Quasi m => Bool -> ThRunner -> TH.Message -> m TH.Message
 handleRunnerReq is_io runner msg = case msg of
@@ -256,24 +469,28 @@ linkTh settings js_files dflags expr_pkgs hpt code = do
       linkables = map (expectJust "link".hm_linkable) home_mod_infos
       getOfiles (LM _ _ us) = map nameOfObject (filter isObject us)
       -- fixme include filename here?
-      obj_files = maybe [] (\b -> Left ("<Template Haskell>", b) : map Right (concatMap getOfiles linkables)) code
+      obj_files = maybe [] (\b -> (ObjLoaded "<Template Haskell>" b) : map ObjFile (concatMap getOfiles linkables)) code
       packageLibPaths :: PackageId -> [FilePath]
       packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
       dflags' = dflags { ways = WayDebug : ways dflags }
   -- link all packages that TH depends on, error if not configured
-  (th_deps_pkgs, mk_th_deps) <- Gen2.thDeps dflags'
+  (th_deps_pkgs, th_deps) <- Gen2.thDeps dflags'
   (rts_deps_pkgs, _) <- Gen2.rtsDeps dflags'
   expr_pkgs_deps <- packageDeps dflags expr_pkgs
-  let addDep pkgs name
-        | any (matchPackageName name) pkgs = pkgs
+  let
+      addDep :: [PackageId] -> PackageId -> [PackageId]
+      addDep pkgs name
+        | name `elem` pkgs = pkgs -- any (matchPackageName name) pkgs = pkgs
         | otherwise = lookupRequiredPackage dflags "to run Template Haskell" name : pkgs
+      pkg_deps' :: [PackageId]
       pkg_deps' = closeDeps dflags (L.foldl' addDep pkg_deps (th_deps_pkgs ++ rts_deps_pkgs) ++ expr_pkgs_deps)
-      th_deps   = mk_th_deps pkg_deps'
+      -- th_deps   = mk_th_deps pkg_deps'
+      th_deps' :: Text
       th_deps'  = T.pack $ (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++ show (ways dflags')
       deps      = map (\pkg -> (pkg, packageLibPaths pkg)) pkg_deps'
       is_root   = const True
       -- pkgs      = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
-      link      = Gen2.link' dflags' settings "template haskell" [] deps obj_files js_files is_root th_deps
+      link      = Gen2.link' dflags' settings "template haskell" [] pkg_deps' obj_files js_files is_root th_deps
   if isJust code
      then link
      else Gen2.getCached dflags' "template-haskell" th_deps' >>= \case
@@ -313,26 +530,11 @@ closeDeps dflags pkgs = map packageConfigId $ go (map getInstalledPackage pkgs)
         xs' = L.nubBy ((==) `on` installedPackageId) $
               concatMap (\x -> x : map lookupInstalledPackage (depends x)) xs
 
-lookupRequiredPackage :: DynFlags -> String -> Text -> PackageId
-lookupRequiredPackage dflags requiredFor pkgName
-  | (x:_) <- matches = x
-  | otherwise        = error ("Package `" ++ T.unpack pkgName ++ "' is required " ++ requiredFor ++ " " ++ show (map packageIdString pkgIds))
-  where
-    matches = reverse . L.sort $ filter (matchPackageName pkgName) pkgIds
-    pkgIds = map packageConfigId . eltsUFM . pkgIdMap . pkgState $ dflags
-
-matchPackageName :: Text -> PackageId -> Bool
-matchPackageName namePrefix pkgid =
-  let pt = T.pack (packageIdString pkgid)
-  in  pt == namePrefix || (namePrefix <> "-") `T.isPrefixOf` (pt<>"-") -- fixme partial number matches are supported in linker
-
-ghcjsGetValueSafely :: GhcjsSettings
-                    -> HscEnv
-                    -> Name
-                    -> Type
-                    -> IO (Maybe HValue)
-ghcjsGetValueSafely _settings _hsc_env _name _t = do
-  return Nothing -- fixme
+lookupRequiredPackage :: DynFlags -> String -> PackageId -> PackageId
+lookupRequiredPackage dflags requiredFor pkgId =
+  case lookupPackage (pkgIdMap . pkgState $ dflags) pkgId of
+    Nothing -> error ("Package `" ++ packageIdString pkgId ++ "' is required " ++ requiredFor)
+    Just p  -> packageConfigId p
 
 -- for some reason this doesn't work, although it seems to do the same as the code below
 -- myReifyAnnotations :: TH.Quasi m => TH.AnnLookup -> m [[Word8]]
@@ -385,4 +587,54 @@ notInScope th_name = quotes (text (TH.pprint th_name)) <+>
                      ptext (sLit "is not in scope at a reify")
         -- Ugh! Rather an indirect way to display the name
 
+#endif
+
+sendToRunner :: ThRunner -> Int -> TH.Message -> IO ()
+sendToRunner runner responseTo msg =
+  sendToRunnerRaw runner responseTo (BL.toStrict . runPut . put $ msg)
+
+sendToRunnerRaw :: ThRunner -> Int -> ByteString -> IO ()
+sendToRunnerRaw runner responseTo bs = do
+  let header = BL.toStrict . runPut $ do
+        putWord32be (fromIntegral $ B.length bs)
+        putWord32be (fromIntegral responseTo)
+  B.hPut (thrHandleIn runner) (B16.encode $ header <> bs)
+  hFlush (thrHandleIn runner)
+
+readFromRunner :: ThRunner -> IO (TH.Message, Int)
+readFromRunner runner = do
+  let h = thrHandleErr runner
+  (len, tgt) <- runGet ((,) <$> getWord32be <*> getWord32be) <$> BL.hGet h 8
+  (,fromIntegral tgt) . runGet get <$> BL.hGet h (fromIntegral len)
+
+thSettings :: GhcjsSettings
+thSettings = GhcjsSettings False True False False Nothing
+                           Nothing Nothing True True True
+                           Nothing NoBase
+                           Nothing Nothing []
+
+startThRunner :: DynFlags -> HscEnv -> IO ThRunner
+startThRunner dflags hsc_env = do
+  lr <- linkTh thSettings [] dflags [] (hsc_HPT hsc_env) Nothing
+  fb <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibB lr)
+  fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
+  let rts = TL.encodeUtf8 $ Gen2.rtsText' dflags (Gen2.dfCgSettings dflags)
+  node <- T.strip <$> T.readFile (topDir dflags </> "node")
+  (inp,out,err,pid) <- runInteractiveProcess (T.unpack node)
+                                             [topDir dflags </> "thrunner.js"]
+                                             Nothing
+                                             Nothing
+  mv  <- newMVar (Gen2.linkBase lr)
+  forkIO $ catchIOError (forever $ hGetChar out >>= putChar) (\_ -> return ())
+  let r = ThRunner pid inp err mv
+  sendToRunnerRaw r 0 (BL.toStrict $ fb <> rts <> fa <> Gen2.linkOut lr)
+  return r
+
+ghcjsGetValueSafely :: GhcjsSettings
+                    -> HscEnv
+                    -> Name
+                    -> Type
+                    -> IO (Maybe HValue)
+ghcjsGetValueSafely _settings _hsc_env _name _t = do
+  return Nothing -- fixme
 

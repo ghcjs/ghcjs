@@ -1,8 +1,19 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Main where
 
 import GHC.Stack
+import Control.Monad (ap)
+import Control.Applicative
 
 newtype M s a = M { unM :: s -> (s, a) }
+
+instance Functor (M s) where
+  fmap f s = s >>= \a -> return (f a)
+
+instance Applicative (M s) where
+  pure  = return
+  (<*>) = ap
 
 instance Monad (M s) where
     (M m) >>= k = M $ \s -> case m s of
@@ -21,11 +32,13 @@ someF n = replicateM n (return '.')
 replicateM :: (Monad m) => Int -> m a -> m [a]
 replicateM n x = sequence (replicate n x)
 
+bar :: [String] -> M s [String]
 bar xs = mapM foo xs
 
 foo :: String -> M s String
 foo s = (\x -> (\s -> errorM s) x) s
 
+main :: IO ()
 main = do
     print =<< whoCreated 1
     print =<< whoCreated (1 :: Int)

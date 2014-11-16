@@ -7,6 +7,7 @@ module Compiler.Variants where
 import           Data.ByteString       (ByteString)
 import           Data.Set              (Set)
 
+import           Compiler.Compat
 import           Compiler.Settings
 
 import qualified Gen2.Generator        as Gen2
@@ -15,11 +16,8 @@ import qualified Gen2.Object           as Gen2
 
 import           CostCentre            (CollectedCCs)
 import           DynFlags              (DynFlags)
-import           Module                (Module (..), PackageId)
+import           Module                (Module (..))
 import           StgSyn                (StgBinding)
-
--- an object file that's either already in memory (with name) or on disk
-type LinkedObj = Either (String, ByteString) FilePath
 
 data Variant = Variant
     { variantRender            :: GhcjsSettings
@@ -32,7 +30,7 @@ data Variant = Variant
                                -> GhcjsSettings
                                -> FilePath                     -- output directory
                                -> [FilePath]                   -- include paths for home package
-                               -> [(PackageId, [FilePath])]    -- library dirs for dependencies
+                               -> [PackageKey]                 -- dependencies
                                -> [LinkedObj]                  -- object files
                                -> [FilePath]                   -- extra JavaScript files
                                -> (Gen2.Fun -> Bool)           -- function to use as roots

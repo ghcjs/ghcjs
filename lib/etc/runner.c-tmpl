@@ -1,0 +1,21 @@
+/*
+ * GHCJS program runner for Windows
+ *
+ * This just calls node.js with a hardcoded source value
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <process.h>
+
+char* js   = {{js}};
+char* node = {{node}};
+
+int main(argc, argv) {
+  int i;
+  char** args = malloc((argc+3)*sizeof(char*));
+  args[0] = node;
+  for(i=0;i<argc;i++) {
+    args[i+1] = argv[i];
+  }
+  
+}

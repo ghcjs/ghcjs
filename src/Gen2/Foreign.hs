@@ -65,6 +65,8 @@ import TcRnMonad
 import TcHsType
 import Platform
 
+import Compiler.Compat
+
 import Gen2.PrimIface
 
 import Data.Char
@@ -111,7 +113,12 @@ ghcjsDsForeigns fos = do
       traceIf (text "fi end" <+> ppr id)
       return (h, c, [], bs)
 
+#if __GLASGOW_HASKELL__ >= 709
+   do_decl (ForeignExport (L _ id) _ co
+                          (CExport (L _ (CExportStatic ext_nm cconv)) _)) = do
+#else
    do_decl (ForeignExport (L _ id) _ co (CExport (CExportStatic ext_nm cconv))) = do
+#endif
       (h, c, bs) <- ghcjsDsFExport id co ext_nm cconv False
       return (h, c, [id], bs)
 
@@ -181,8 +188,13 @@ ghcjsDsFImport :: Id
                -> Coercion
                -> ForeignImport
                -> DsM ([Binding], SDoc, SDoc)
+#if __GLASGOW_HASKELL__ >= 709
+ghcjsDsFImport id co (CImport cconv safety mHeader spec _) = do
+    (ids, h, c) <- dsJsImport id co spec (unLoc cconv) (unLoc safety) mHeader
+#else
 ghcjsDsFImport id co (CImport cconv safety mHeader spec) = do
     (ids, h, c) <- dsJsImport id co spec cconv safety mHeader
+#endif
     return (ids, h, c)
 
 
@@ -412,7 +424,10 @@ boxJsResult result_ty
        return (realWorldStatePrimTy `mkFunTy` ccall_res_ty, wrap)
   where
     return_result _ [ans] = ans
-    return_result _ _     = panic "return_result: expected single result"
+    return_result _ xs     = -- mkCoreConApps (tupleCon UnboxedTuple (length xs))
+      mkConApp (tupleCon UnboxedTuple (length xs))
+        (map (Type . exprType) xs ++ xs)
+      -- panic "return_result: expected single result"
 
 
 mk_alt :: (Expr Var -> [Expr Var] -> Expr Var)
@@ -471,7 +486,7 @@ jsResultWrapper :: Type
 --jsResultWrapper tr = resultWrapper tr
 jsResultWrapper result_ty
   -- Base case 1: primitive types
-  | isPrimitiveType result_ty
+  | isPrimitiveType result_ty || isUnboxedTupleType result_ty
   = return (Just result_ty, \e -> e)
 
   -- Base case 2: the unit type ()
@@ -531,7 +546,9 @@ mkWildCase e boolTy
 -- low-level primitive JavaScript call:
 mkJsCall :: DynFlags -> Unique -> String -> [CoreExpr] -> Type -> CoreExpr
 mkJsCall dflags u tgt args t =
-  mkFCall dflags u (CCall (CCallSpec (StaticTarget (mkFastString tgt) (Just primPackageId) True)
+  mkFCall dflags u (CCall (CCallSpec (StaticTarget (mkFastString tgt)
+                                                   (Just primPackageKey)
+                                                   True)
                                       JavaScriptCallConv PlayRisky)) args t
 
 
@@ -576,10 +593,17 @@ ghcjsNativeDsForeigns fos = do
       inclGhcjs = text "#include \"ghcjs.h\""
 
       convertForeignDecl :: DynFlags -> LForeignDecl Id -> LForeignDecl Id
+#if __GLASGOW_HASKELL__ >= 709
+      convertForeignDecl dflags (L l (ForeignImport n t c (CImport (L lc JavaScriptCallConv) _safety mheader _spec txt))) =
+        (L l (ForeignImport n t c (CImport (noLoc CCallConv) (noLoc PlaySafe) mheader (convertSpec dflags n) txt)))
+      convertForeignDecl _dflags (L l (ForeignExport n t c (CExport (L _ (CExportStatic lbl JavaScriptCallConv)) txt))) =
+        (L l (ForeignExport n t c (CExport (noLoc (CExportStatic lbl CCallConv)) txt)))
+#else
       convertForeignDecl dflags (L l (ForeignImport n t c (CImport JavaScriptCallConv _safety mheader _spec))) =
         (L l (ForeignImport n t c (CImport CCallConv PlaySafe mheader (convertSpec dflags n))))
       convertForeignDecl _dflags (L l (ForeignExport n t c (CExport (CExportStatic lbl JavaScriptCallConv)))) =
         (L l (ForeignExport n t c (CExport (CExportStatic lbl CCallConv))))
+#endif
       convertForeignDecl _ x = x
 
       convertSpec :: DynFlags -> Located Id -> CImportSpec
@@ -590,7 +614,11 @@ ghcjsNativeDsForeigns fos = do
         "__ghcjs_stub_" ++ zEncodeString (showSDocOneLine dflags (ppr $ idName i))
 
       importStub :: DynFlags -> LForeignDecl Id -> Maybe SDoc
+#if __GLASGOW_HASKELL__ >= 709
+      importStub dflags (L _l (ForeignImport n _t c (CImport (L _ JavaScriptCallConv) (L _ safety) _mheader spec _txt))) =
+#else
       importStub dflags (L _l (ForeignImport n _t c (CImport JavaScriptCallConv safety _mheader spec))) =
+#endif
         Just (mkImportStub dflags (unLoc n) c safety spec)
       importStub _ _ = Nothing
 
@@ -717,11 +745,23 @@ ghcjsTcFImport d = pprPanic "ghcjsTcFImport" (ppr d)
 ghcjsTcCheckFIType :: Type -> [Type] -> Type -> ForeignImport -> TcM ForeignImport
 -- this is a temporary hack until template-haskell has been updated,
 -- this allows Template Haskell to produce JavaScriptCallConv declarations without proper support for them
+#if __GLASGOW_HASKELL__ >= 709
+ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport _cconv safety mh (CFunction (StaticTarget lbl mpkg b)) txt)
+#else
 ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport _cconv safety mh (CFunction (StaticTarget lbl mpkg b)))
+#endif
   | Just lbl' <- stripPrefix "__ghcjs_javascript_" (unpackFS lbl) = do
       let lbl'' = mkFastString $ map (chr . read) (splitOn "_" lbl')
+#if __GLASGOW_HASKELL__ >= 709
+      ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport (noLoc JavaScriptCallConv) safety mh (CFunction (StaticTarget lbl'' mpkg b)) txt)
+#else
       ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport JavaScriptCallConv safety mh (CFunction (StaticTarget lbl'' mpkg b)))
+#endif
+#if __GLASGOW_HASKELL__ >= 709
+ghcjsTcCheckFIType _sig_ty arg_tys res_ty (CImport lcconv@(L _ cconv) lsafety@(L _ safety) mh (CFunction target) txt)
+#else
 ghcjsTcCheckFIType _sig_ty arg_tys res_ty (CImport cconv safety mh (CFunction target))
+#endif
   | cconv == JavaScriptCallConv = do
       dflags <- getDynFlags
       checkForeignArgs (isGhcjsFFIArgumentTy dflags safety) arg_tys
@@ -731,17 +771,53 @@ ghcjsTcCheckFIType _sig_ty arg_tys res_ty (CImport cconv safety mh (CFunction ta
            | not (null arg_tys) ->
               addErrTc (text "`value' imports cannot have function types")
           _ -> return ()
+#if __GLASGOW_HASKELL__ >= 709
+      return $ CImport lcconv lsafety mh (CFunction target) txt
+#else
       return $ CImport cconv safety mh (CFunction target)
+#endif
+#if __GLASGOW_HASKELL__ >= 709
+ghcjsTcCheckFIType _sig_ty arg_tys res_ty idecl = tcCheckFIType arg_tys res_ty idecl
+#else
 ghcjsTcCheckFIType sig_ty arg_tys res_ty idecl = tcCheckFIType sig_ty arg_tys res_ty idecl
+#endif
 
+#if __GLASGOW_HASKELL__ >= 709
+
+isGhcjsFFIArgumentTy :: DynFlags -> Safety -> Type -> Validity
+isGhcjsFFIArgumentTy dflags safety ty
+  | isValid (isFFIArgumentTy dflags safety ty)                          = IsValid
+  | isGhcjsFFITy dflags ty                                              = IsValid
+  | Just (tc, _) <- tcSplitTyConApp_maybe ty
+  , getUnique tc == anyTyConKey && xopt Opt_GHCForeignImportPrim dflags = IsValid
+  | otherwise = NotValid
+      (text "JavaScript FFI argument type must be a valid CCall FFI argument type or JSRef")
+
+isGhcjsFFIImportResultTy :: DynFlags -> Type -> Validity
+isGhcjsFFIImportResultTy dflags ty
+  | isValid (isFFIImportResultTy dflags ty)                   = IsValid
+  | xopt Opt_UnliftedFFITypes dflags && isUnboxedTupleType ty = IsValid
+  | isGhcjsFFITy dflags ty                                    = IsValid
+  | otherwise = NotValid
+      (text "JavaScript FFI result type must be a valid CCall FFI result type or JSRef")
+
+#else
 
 isGhcjsFFIArgumentTy :: DynFlags -> Safety -> Type -> Bool
-isGhcjsFFIArgumentTy dflags safety ty = isFFIArgumentTy dflags safety ty
-                                     || isGhcjsFFITy dflags ty
+isGhcjsFFIArgumentTy dflags safety ty =
+  isFFIArgumentTy dflags safety ty ||
+  isGhcjsFFITy dflags ty ||
+  maybe False (\(tc, _) -> getUnique tc == anyTyConKey &&
+                           xopt Opt_GHCForeignImportPrim dflags)
+              (tcSplitTyConApp_maybe ty)
 
 isGhcjsFFIImportResultTy :: DynFlags -> Type -> Bool
-isGhcjsFFIImportResultTy dflags ty = isFFIImportResultTy dflags ty
-                                  || isGhcjsFFITy dflags ty
+isGhcjsFFIImportResultTy dflags ty =
+  isFFIImportResultTy dflags ty ||
+  xopt Opt_UnliftedFFITypes dflags && isUnboxedTupleType ty ||
+  isGhcjsFFITy dflags ty
+
+#endif
 
 isGhcjsFFITy :: DynFlags -> Type -> Bool
 isGhcjsFFITy = checkNamedTy jsFfiTys
@@ -756,14 +832,20 @@ checkNamedTy :: [(String, String, String)] -> DynFlags -> Type -> Bool
 checkNamedTy tys dflags ty = checkRepTyCon (checkNamedTyCon tys dflags) ty
 
 checkNamedTyCon :: [(String, String, String)] -> DynFlags -> TyCon -> Bool
-checkNamedTyCon tys _dflags tc = any (\(p,m,n) -> p `isPrefixOf` pkg && m == mod && n == name) tys
+checkNamedTyCon tys dflags tc
+  = any (\(p,m,n) -> m == mod && n == name && validPkg p pkg) tys
       where
+        validPkg p ""
+          | [b] <- catMaybes (map (stripPrefix "-DBOOTING_PACKAGE=")
+                                  (opt_P dflags)) = p == b
+        validPkg p p' = p == p'
+
         -- comparing strings is probably not too fast, perhaps search
         -- for the types first and use some cache
         n = tyConName (repTc tc)
         (pkg, mod) = case nameModule_maybe n of
                        Nothing -> ("", "")
-                       Just m  -> ( packageIdString (modulePackageId m)
+                       Just m  -> ( modulePackageName dflags m
                                   , moduleNameString (moduleName m))
         name = occNameString (nameOccName n)
 
@@ -843,13 +925,21 @@ ghcjsTcFExport fo@(ForeignExport (L loc nm) hs_ty _ spec)
 
 
 ghcjsTcCheckFEType :: Type -> ForeignExport -> TcM ForeignExport
+#if __GLASGOW_HASKELL__ >= 709
+ghcjsTcCheckFEType sig_ty (CExport (L l (CExportStatic str cconv)) txt) = do
+#else
 ghcjsTcCheckFEType sig_ty (CExport (CExportStatic str cconv)) = do
+#endif
 --    checkCg checkCOrAsmOrLlvm
     check (isCLabelString str) (badCName str)
     cconv' <- ghcjsCheckCConv cconv
     checkForeignArgs isFFIExternalTy arg_tys
     checkForeignRes nonIOok noCheckSafe isFFIExportResultTy res_ty
+#if __GLASGOW_HASKELL__ >= 709
+    return (CExport (L l (CExportStatic str cconv')) txt)
+#else
     return (CExport (CExportStatic str cconv'))
+#endif
   where
       -- Drop the foralls before inspecting n
       -- the structure of the foreign type.

@@ -17,6 +17,7 @@ import qualified Data.Binary.Put        as DB
 import           Data.ByteString        (ByteString)
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy   as BL
+import qualified Data.List
 import           Data.Monoid
 import           Data.Text              (Text)
 import qualified Data.Text              as T
@@ -38,7 +39,7 @@ getCacheMeta files = do
 
 checkCacheMeta :: BL.ByteString -> IO Bool
 checkCacheMeta meta =
-  and <$> mapM (\(file,mod) -> (\m -> m==mod && m/=0) <$>
+  (and :: [Bool] -> Bool) <$> mapM (\(file,mod) -> (\m -> m==mod && m/=0) <$>
     getModified file) (DB.runGet DB.get $ meta)
 
 getModified :: FilePath -> IO Integer

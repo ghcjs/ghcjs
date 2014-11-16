@@ -53,8 +53,10 @@ ghcjsPrimExports
 -- include our own primop type list, this must match the host
 -- compiler version and be processed with WORD_SIZE_IN_BITS=32
 primOpInfo :: PrimOp -> PrimOpInfo
-#if __GLASGOW_HASKELL__ >= 709
+#if __GLASGOW_HASKELL__ >= 711
 #error "unsupported GHC version"
+#elif __GLASGOW_HASKELL__ >= 709
+#include "prim/primop-primop-info-710.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 707
 #include "prim/primop-primop-info-708.hs-incl"
 #else
@@ -62,8 +64,10 @@ primOpInfo :: PrimOp -> PrimOpInfo
 #endif
 
 primOpStrictness :: PrimOp -> Arity -> StrictSig
-#if __GLASGOW_HASKELL__ >= 709
+#if __GLASGOW_HASKELL__ >= 711
 #error "unsupported GHC version"
+#elif __GLASGOW_HASKELL__ >= 709
+#include "prim/primop-strictness-710.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 707
 #include "prim/primop-strictness-708.hs-incl"
 #else

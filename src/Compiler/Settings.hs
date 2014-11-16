@@ -12,6 +12,7 @@ import           Data.ByteString        (ByteString)
 import           Data.Map               (Map)
 import qualified Data.Map            as M
 import           Data.Monoid
+import           Data.Text (Text)
 
 import           System.IO
 import           System.Process
@@ -40,7 +41,7 @@ instance Monoid UseBase where
 data GhcjsSettings =
   GhcjsSettings { gsNativeExecutables  :: Bool
                 , gsNativeToo          :: Bool
-                , gsBuildingCabalSetup :: Bool
+                , gsBuildRunner        :: Bool
                 , gsNoJSExecutables    :: Bool
                 , gsStripProgram       :: Maybe FilePath
                 , gsLogCommandLine     :: Maybe FilePath
@@ -50,6 +51,9 @@ data GhcjsSettings =
                 , gsNoStats            :: Bool
                 , gsGenBase            :: Maybe String   -- ^ module name
                 , gsUseBase            :: UseBase
+                , gsLinkJsLib          :: Maybe String
+                , gsJsLibOutputDir     :: Maybe FilePath
+                , gsJsLibSrcs          :: [FilePath]
                 }
 
 usingBase :: GhcjsSettings -> Bool
@@ -70,9 +74,9 @@ generateAllJs s
   settings, but it doesn't work very well. find something better.
  -}
 instance Monoid GhcjsSettings where
-  mempty = GhcjsSettings False False False False Nothing Nothing Nothing False False False Nothing NoBase
-  mappend (GhcjsSettings ne1 nn1 bc1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1)
-          (GhcjsSettings ne2 nn2 bc2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2) =
+  mempty = GhcjsSettings False False False False Nothing Nothing Nothing False False False Nothing NoBase Nothing Nothing []
+  mappend (GhcjsSettings ne1 nn1 bc1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1 ljsl1 jslo1 jslsrc1)
+          (GhcjsSettings ne2 nn2 bc2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2 ljsl2 jslo2 jslsrc2) =
           GhcjsSettings (ne1 || ne2)
                         (nn1 || nn2)
                         (bc1 || bc2)
@@ -85,6 +89,9 @@ instance Monoid GhcjsSettings where
                         (ns1 || ns2)
                         (gb1 `mplus` gb2)
                         (ub1 <> ub2)
+                        (ljsl1 <> ljsl2)
+                        (jslo1 <> jslo2)
+                        (jslsrc1 <> jslsrc2)
 
 data ThRunner =
   ThRunner { thrProcess        :: ProcessHandle
@@ -102,3 +109,8 @@ data GhcjsEnv = GhcjsEnv
 newGhcjsEnv :: IO GhcjsEnv
 newGhcjsEnv = GhcjsEnv <$> newMVar M.empty <*> newMVar M.empty <*> newMVar 0
 
+-- an object file that's either already in memory (with name) or on disk
+data LinkedObj = ObjFile   FilePath          -- load from this file
+               | ObjLib    Text   FilePath   -- load from library (with module name)
+               | ObjLoaded String ByteString -- already loaded, description
+               deriving (Eq, Ord, Show)

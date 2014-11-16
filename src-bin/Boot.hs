@@ -810,7 +810,6 @@ installStage1 = subTop' "ghcjs-boot" $ do
         forM_ s preparePackage >> cabalStage1 s
 
 resolveWiredInPackages :: B ()
-#if __GLASGOW_HASKELL__ >= 709
 resolveWiredInPackages = subTop $ do
   wips <- readBinary ("wiredinpkgs" <.> "yaml")
   case Yaml.decodeEither wips of
@@ -820,14 +819,15 @@ resolveWiredInPackages = subTop $ do
        (p,) . T.strip <$> ghcjs_pkg [ "--simple-output"
                                     , "field"
                                     , p
+#if __GLASGOW_HASKELL__ >= 709
                                     , "key"
+#else
+                                    , "id"
+#endif
                                     ]
      writefile ("wiredinkeys" <.> "yaml") $
        T.unlines ("# resolved wired-in packages" :
                   map (\(p,k) -> p <> ": " <> k) pkgs')
-#else
-resolveWiredInPackages = return ()
-#endif
 
 -- fixme: urk, this is probably not how it's supposed to be done
 installInTreeGmp :: B ()

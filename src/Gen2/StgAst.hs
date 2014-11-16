@@ -57,14 +57,22 @@ instance Show Type where
 instance Show CostCentre where show _ = "CostCentre"
 instance Show CostCentreStack where show _ = "CostCentreStack"
 instance Show StgBinderInfo where show _ = "StgBinderInfo"
+#if __GLASGOW_HASKELL__ >= 709
+instance Show Module where show m = packageKeyString (modulePackageKey m) ++ ":" ++ moduleNameString (moduleName m)
+#else
 instance Show Module where show m = packageIdString (modulePackageId m) ++ ":" ++ moduleNameString (moduleName m)
+#endif
 instance Show (UniqFM Id) where show u = "[" ++ show (uniqSetToList u) ++ "]"
 instance Show TyCon where show = show . tyConName
 instance Show SRT where
   show NoSRT = "SRT:NO"
   show (SRTEntries e) = "SRT:" ++ show e
   show (SRT i j _b) = "SRT:BMP" ++ show [i,j]
+#if __GLASGOW_HASKELL__ >= 709
+instance Show PackageKey where show = packageKeyString
+#else
 instance Show PackageId where show = packageIdString
+#endif
 instance Show Name where
   show n = case nameModule_maybe n of
                   Nothing -> show (nameOccName n)

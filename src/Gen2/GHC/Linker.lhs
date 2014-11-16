@@ -51,8 +51,12 @@ import UniqSet
 import FastString
 import Config
 import Platform
+#if __GLASGOW_HASKELL__ >= 709
+import SysTools
+#else
 import SysTools hiding ( linkDynLib ) -- use our own linkDynLib
 import Gen2.GHC.SysTools
+#endif
 
 -- Standard libraries
 import Control.Monad

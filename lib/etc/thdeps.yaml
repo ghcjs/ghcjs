@@ -4,28 +4,4 @@ ghcjs-prim:
   GHCJS.Prim.TH.Eval:
     runTHServer
 
-# and make sure we get all required packages linked:
 
-template-haskell:
-  Language.Haskell.TH:
-    runQ
-
-integer-gmp:
-  GHC.Integer.GMP.Internals:
-    gcdInteger
-
-binary:
-  Data.Binary:
-    putWord8
-
-bytestring:
-  Data.ByteString:
-    empty
-
-containers:
-  Data.Set:
-    empty
-
-array:
-  Data.Array:
-    array

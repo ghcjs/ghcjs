@@ -38,7 +38,8 @@ packages:
   stage1PretendToHave:
     - Cabal
 
-  # in stage 1a, we cannot do linking yet
+  # in stage 1a, we cannot do linking yet, ghc-prim is installed
+  # before this
 
   stage1a:
     - ./boot/array

@@ -42,7 +42,11 @@ import InteractiveUI    ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
 import Config
 import Constants
 import HscTypes
+#if __GLASGOW_HASKELL__ >= 709
+import Packages         ( pprPackages, pprPackagesSimple, pprModuleMap )
+#else
 import Packages         ( dumpPackages )
+#endif
 import DriverPhases
 import BasicTypes       ( failed )
 import StaticFlags
@@ -99,7 +103,7 @@ main = do
     (argv1'', ghcjsSettings) <- Ghcjs.getGhcjsSettings argv1'
 
     -- fall back to native GHC if we're booting (we can't build Setup.hs with GHCJS yet)
-    when (booting_stage1 && Ghcjs.gsBuildingCabalSetup ghcjsSettings)
+    when (booting_stage1 && Ghcjs.gsBuildRunner ghcjsSettings)
       Ghcjs.bootstrapFallback
 
     (argv2, staticFlagWarnings) <- parseStaticFlags argv1''
@@ -120,11 +124,11 @@ main = do
     case mode of
          Left preStartupMode ->
             do case preStartupMode of
-                   ShowSupportedExtensions -> showSupportedExtensions
-                   ShowVersion             -> Ghcjs.printVersion
-                   ShowNumVersion          -> Ghcjs.printNumericVersion
-                   ShowNumGhcVersion       -> putStrLn cProjectVersion
-                   ShowOptions             -> showOptions
+                   ShowSupportedExtensions   -> showSupportedExtensions
+                   ShowVersion               -> Ghcjs.printVersion
+                   ShowNumVersion            -> Ghcjs.printNumericVersion
+                   ShowNumGhcVersion         -> putStrLn cProjectVersion
+                   ShowOptions isInteractive -> showOptions isInteractive
          Right postStartupMode -> do
           when (not booting) (Ghcjs.checkIsBooted mbMinusB)
             -- start our GHC session
@@ -175,7 +179,6 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
                DoMkDependHS    -> (MkDepend,    dflt_target,    LinkBinary)
                DoAbiHash       -> (OneShot,     dflt_target,    LinkBinary)
                _               -> (OneShot,     dflt_target,    LinkBinary)
-
   let dflags1 = case lang of
                 HscInterpreted ->
                     let platform = targetPlatform dflags0
@@ -235,22 +238,13 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
 
 
   -- add GHCJS configuration
-    buildingSetup = Ghcjs.gsBuildingCabalSetup ghcjsSettings
-    dflags4a = case (postLoadMode, ghcLink dflags4) of
-                    (DoMake, LinkBinary) | native
-                             && not (Ghcjs.gsNativeExecutables ghcjsSettings)
-                             && not buildingSetup -> dflags4 { ghcLink    = NoLink
-                                                             , outputFile = Nothing
-                                                             }
-                    _ -> dflags4
-
-  let baseDir = Ghcjs.getLibDir dflags4a
+  let baseDir = Ghcjs.getLibDir dflags4
   dflags4b <- if native
-                then return (Ghcjs.setNativePlatform ghcjsSettings baseDir dflags4a)
+                then return (Ghcjs.setNativePlatform ghcjsSettings baseDir dflags4)
                 else return $
                        Ghcjs.setGhcjsPlatform ghcjsSettings jsEnv js_objs baseDir $
                        updateWays $ addWay' (WayCustom "js") $
-                       Ghcjs.setGhcjsSuffixes {- oneshot -} False dflags4a -- fixme value of oneshot?
+                       Ghcjs.setGhcjsSuffixes {- oneshot -} False dflags4 -- fixme value of oneshot?
 
   let dflags5 = dflags4b { ldInputs = map (FileOption "") objs
                                    ++ ldInputs dflags4b }
@@ -264,14 +258,27 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   when (not native) Ghcjs.fixNameCache
 
         ---------------- Display configuration -----------
+#if __GLASGOW_HASKELL__ >= 709
+  case verbosity dflags6 of
+    v | v == 4 -> liftIO $ dumpPackagesSimple dflags6
+      | v >= 5 -> liftIO $ dumpPackages dflags6
+      | otherwise -> return ()
+#else
   when (verbosity dflags6 >= 4) $
         liftIO $ dumpPackages dflags6
+#endif
 
   when (verbosity dflags6 >= 3) $ do
         liftIO $ hPutStrLn stderr ("Hsc static flags: " ++ unwords staticFlags)
 
+#if __GLASGOW_HASKELL__ >= 709
+  when (dopt Opt_D_dump_mod_map dflags6) . liftIO $
+    printInfoForUser (dflags6 { pprCols = 200 })
+                     (pkgQual dflags6) (pprModuleMap dflags6)
+#endif
+
         ---------------- Final sanity checking -----------
-  liftIO $ checkOptions postLoadMode dflags6 srcs objs
+  liftIO $ checkOptions ghcjsSettings postLoadMode dflags6 srcs objs (js_objs ++ Ghcjs.gsJsLibSrcs ghcjsSettings)
 
   ---------------- Do the business -----------
   let phaseMsg = when (Ghcjs.gsNativeToo ghcjsSettings) $
@@ -283,12 +290,15 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        liftIO $ exitWith (ExitFailure 1)) $ do
     case postLoadMode of
        ShowInterface f        -> liftIO (doShowIface dflags6 f) >> return True
-       DoMake                 -> phaseMsg >> doMake srcs >> return False
+       DoMake                 -> phaseMsg >> doMake ghcjsSettings native srcs >> return False
        DoMkDependHS           -> doMkDependHS (map fst srcs) >> return True
-       StopBefore p           -> phaseMsg >> liftIO (Ghcjs.ghcjsOneShot hsc_env p srcs) >> return False
+       StopBefore p           -> phaseMsg >> liftIO (Ghcjs.ghcjsOneShot ghcjsSettings native hsc_env p srcs) >> return False
        DoInteractive          -> ghciUI srcs Nothing >> return True
        DoEval exprs           -> (ghciUI srcs $ Just $ reverse exprs) >> return True
        DoAbiHash              -> abiHash srcs >> return True
+#if __GLASGOW_HASKELL__ >= 709
+       ShowPackages           -> liftIO $ showPackages dflags6 >> return True
+#endif
        DoGenerateLib          -> Ghcjs.generateLib ghcjsSettings >> return True
        DoPrintRts             -> liftIO (Ghcjs.printRts dflags6) >> return True
        DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings $ map fst srcs) >> return True
@@ -297,7 +307,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        DoBuildJsLibrary       -> liftIO (Ghcjs.buildJsLibrary dflags6 (map fst srcs) js_objs objs) >> return True
 
   liftIO $ dumpFinalStats dflags6
-  return (skipJs || buildingSetup)
+  return skipJs
 
 ghciUI :: [(FilePath, Maybe Phase)] -> Maybe [String] -> Ghc ()
 #ifndef GHCI
@@ -365,9 +375,9 @@ looks_like_an_input m =  isSourceFilename m
 -- | Ensure sanity of options.
 --
 -- Throws 'UsageError' or 'CmdLineError' if not.
-checkOptions :: PostLoadMode -> DynFlags -> [(String,Maybe Phase)] -> [String] -> IO ()
+checkOptions :: Ghcjs.GhcjsSettings -> PostLoadMode -> DynFlags -> [(String,Maybe Phase)] -> [String] -> [String] -> IO ()
      -- Final sanity checking before kicking off a compilation (pipeline).
-checkOptions mode dflags srcs objs = do
+checkOptions settings mode dflags srcs objs js_objs = do
      -- Complain about any unknown flags
    let unknown_opts = [ f | (f@('-':_), _) <- srcs ]
    when (notNull unknown_opts) (unknownFlagsErr unknown_opts)
@@ -404,7 +414,7 @@ checkOptions mode dflags srcs objs = do
 
         -- Check that there are some input files
         -- (except in the interactive case)
-   if null srcs && (null objs || not_linking) && needsInputsMode mode
+   if null srcs && isNothing (Ghcjs.gsLinkJsLib settings) && (null (objs++js_objs) || not_linking) && needsInputsMode mode
         then throwGhcException (UsageError "no input files")
         else do
 
@@ -416,14 +426,16 @@ checkOptions mode dflags srcs objs = do
 
 -- called to verify that the output files & directories
 -- point somewhere valid.
+-- Called to verify that the output files point somewhere valid.
 --
 -- The assumption is that the directory portion of these output
 -- options will have to exist by the time 'verifyOutputFiles'
 -- is invoked.
 --
+-- We create the directories for -odir, -hidir, -outputdir etc. ourselves if
+-- they don't exist, so don't check for those here (#2278).
 verifyOutputFiles :: DynFlags -> IO ()
 verifyOutputFiles dflags = do
-  -- not -odir: we create the directory for -odir if it doesn't exist (#2278).
   let ofile = outputFile dflags
   when (isJust ofile) $ do
      let fn = fromJust ofile
@@ -447,10 +459,10 @@ type Mode = Either PreStartupMode PostStartupMode
 type PostStartupMode = Either PreLoadMode PostLoadMode
 
 data PreStartupMode
-  = ShowVersion             -- ghc -V/--version
-  | ShowNumVersion          -- ghc --numeric-version
-  | ShowSupportedExtensions -- ghc --supported-extensions
-  | ShowOptions             -- ghc --show-options
+  = ShowVersion                          -- ghc -V/--version
+  | ShowNumVersion                       -- ghc --numeric-version
+  | ShowSupportedExtensions              -- ghc --supported-extensions
+  | ShowOptions Bool {- isInteractive -} -- ghc --show-options
 -- GHCJS pre-startup modes
   | ShowNumGhcVersion       -- ghcjs --numeric-ghc-version
 
@@ -462,7 +474,7 @@ showVersionMode, showNumVersionMode, showSupportedExtensionsMode, showOptionsMod
 showVersionMode             = mkPreStartupMode ShowVersion
 showNumVersionMode          = mkPreStartupMode ShowNumVersion
 showSupportedExtensionsMode = mkPreStartupMode ShowSupportedExtensions
-showOptionsMode             = mkPreStartupMode ShowOptions
+showOptionsMode             = mkPreStartupMode (ShowOptions False)
 
 mkPreStartupMode :: PreStartupMode -> Mode
 mkPreStartupMode = Left
@@ -515,6 +527,9 @@ data PostLoadMode
   | DoInteractive           -- ghc --interactive
   | DoEval [String]         -- ghc -e foo -e bar => DoEval ["bar", "foo"]
   | DoAbiHash               -- ghc --abi-hash
+#if __GLASGOW_HASKELL__ >= 709
+  | ShowPackages            -- ghc --show-packages
+#endif
 
 -- GHCJS modes
   | DoGenerateLib                         -- ghcjs --generate-lib
@@ -544,6 +559,11 @@ doMkDependHSMode = mkPostLoadMode DoMkDependHS
 doMakeMode = mkPostLoadMode DoMake
 doInteractiveMode = mkPostLoadMode DoInteractive
 doAbiHashMode = mkPostLoadMode DoAbiHash
+
+#if __GLASGOW_HASKELL__ >= 709
+showPackagesMode :: Mode
+showPackagesMode = mkPostLoadMode ShowPackages
+#endif
 
 showInterfaceMode :: FilePath -> Mode
 showInterfaceMode fp = mkPostLoadMode (ShowInterface fp)
@@ -624,20 +644,27 @@ type ModeM = CmdLineP (Maybe (Mode, String), [String], [Located String])
   -- mode flags sometimes give rise to new DynFlags (eg. -C, see below)
   -- so we collect the new ones and return them.
 
+#if !(__GLASGOW_HASKELL__ >= 709)
+defFlag = Flag
+#endif
+
 mode_flags :: [Flag ModeM]
 mode_flags =
   [  ------- help / version ----------------------------------------------
-    Flag "?"                     (PassFlag (setMode showGhcUsageMode))
-  , Flag "-help"                 (PassFlag (setMode showGhcUsageMode))
-  , Flag "V"                     (PassFlag (setMode showVersionMode))
-  , Flag "-version"              (PassFlag (setMode showVersionMode))
-  , Flag "-numeric-version"      (PassFlag (setMode showNumVersionMode))
-  , Flag "-info"                 (PassFlag (setMode showInfoMode))
-  , Flag "-show-options"         (PassFlag (setMode showOptionsMode))
-  , Flag "-supported-languages"  (PassFlag (setMode showSupportedExtensionsMode))
-  , Flag "-supported-extensions" (PassFlag (setMode showSupportedExtensionsMode))
+    defFlag "?"                     (PassFlag (setMode showGhcUsageMode))
+  , defFlag "-help"                 (PassFlag (setMode showGhcUsageMode))
+  , defFlag "V"                     (PassFlag (setMode showVersionMode))
+  , defFlag "-version"              (PassFlag (setMode showVersionMode))
+  , defFlag "-numeric-version"      (PassFlag (setMode showNumVersionMode))
+  , defFlag "-info"                 (PassFlag (setMode showInfoMode))
+  , defFlag "-show-options"         (PassFlag (setMode showOptionsMode))
+  , defFlag "-supported-languages"  (PassFlag (setMode showSupportedExtensionsMode))
+  , defFlag "-supported-extensions" (PassFlag (setMode showSupportedExtensionsMode))
+#if __GLASGOW_HASKELL__ >= 709
+  , defFlag "-show-packages"        (PassFlag (setMode showPackagesMode))
+#endif
   ] ++
-  [ Flag k'                      (PassFlag (setMode (printSetting k)))
+  [ defFlag k'                      (PassFlag (setMode (printSetting k)))
   | k <- ["Project version",
           "Booter version",
           "Stage",
@@ -664,34 +691,34 @@ mode_flags =
         replaceSpace c   = c
   ] ++
       ------- interfaces ----------------------------------------------------
-  [ Flag "-show-iface"  (HasArg (\f -> setMode (showInterfaceMode f)
+  [ defFlag "-show-iface"  (HasArg (\f -> setMode (showInterfaceMode f)
                                                "--show-iface"))
 
       ------- primary modes ------------------------------------------------
-  , Flag "c"            (PassFlag (\f -> do setMode (stopBeforeMode StopLn) f
-                                            addFlag "-no-link" f))
-  , Flag "M"            (PassFlag (setMode doMkDependHSMode))
-  , Flag "E"            (PassFlag (setMode (stopBeforeMode anyHsc)))
-  , Flag "C"            (PassFlag (setMode (stopBeforeMode HCc)))
+  , defFlag "c"            (PassFlag (\f -> do setMode (stopBeforeMode StopLn) f
+                                               addFlag "-no-link" f))
+  , defFlag "M"            (PassFlag (setMode doMkDependHSMode))
+  , defFlag "E"            (PassFlag (setMode (stopBeforeMode anyHsc)))
+  , defFlag "C"            (PassFlag (setMode (stopBeforeMode HCc)))
 #if MIN_VERSION_ghc(7,8,3)
-  , Flag "S"            (PassFlag (setMode (stopBeforeMode (As False))))
+  , defFlag "S"            (PassFlag (setMode (stopBeforeMode (As False))))
 #else
-  , Flag "S"            (PassFlag (setMode (stopBeforeMode As)))
+  , defFlag "S"            (PassFlag (setMode (stopBeforeMode As)))
 #endif
-  , Flag "-make"        (PassFlag (setMode doMakeMode))
-  , Flag "-interactive" (PassFlag (setMode doInteractiveMode))
-  , Flag "-abi-hash"    (PassFlag (setMode doAbiHashMode))
-  , Flag "e"            (SepArg   (\s -> setMode (doEvalMode s) "-e"))
+  , defFlag "-make"        (PassFlag (setMode doMakeMode))
+  , defFlag "-interactive" (PassFlag (setMode doInteractiveMode))
+  , defFlag "-abi-hash"    (PassFlag (setMode doAbiHashMode))
+  , defFlag "e"            (SepArg   (\s -> setMode (doEvalMode s) "-e"))
 
       ------- GHCJS modes ------------------------------------------------
-  , Flag "-generate-lib"           (PassFlag (setMode doGenerateLib))
-  , Flag "-install-executable"     (PassFlag (setMode doInstallExecutable))
-  , Flag "-print-obj"              (HasArg (\f -> setMode (doPrintObj f) "--print-obj"))
-  , Flag "-print-deps"             (HasArg (\f -> setMode (doPrintDeps f) "--print-deps"))
-  , Flag "-print-rts"              (PassFlag (setMode doPrintRts))
-  , Flag "-numeric-ghc-version"    (PassFlag (setMode (showNumGhcVersionMode)))
-  , Flag "-numeric-ghcjs-version"  (PassFlag (setMode (showNumVersionMode)))
-  , Flag "-build-js-library"       (PassFlag (setMode doBuildJsLibrary))
+  , defFlag "-generate-lib"           (PassFlag (setMode doGenerateLib))
+  , defFlag "-install-executable"     (PassFlag (setMode doInstallExecutable))
+  , defFlag "-print-obj"              (HasArg (\f -> setMode (doPrintObj f) "--print-obj"))
+  , defFlag "-print-deps"             (HasArg (\f -> setMode (doPrintDeps f) "--print-deps"))
+  , defFlag "-print-rts"              (PassFlag (setMode doPrintRts))
+  , defFlag "-numeric-ghc-version"    (PassFlag (setMode (showNumGhcVersionMode)))
+  , defFlag "-numeric-ghcjs-version"  (PassFlag (setMode (showNumVersionMode)))
+  , defFlag "-build-js-library"       (PassFlag (setMode doBuildJsLibrary))
   ]
 
 setMode :: Mode -> String -> EwM ModeM ()
@@ -725,6 +752,14 @@ setMode newMode newFlag = liftEwM $ do
                          errs)
                     -- Saying e.g. --interactive --interactive is OK
                     _ | oldFlag == newFlag -> ((oldMode, oldFlag), errs)
+
+                    -- --interactive and --show-options are used together
+                    (Right (Right DoInteractive), Left (ShowOptions _)) ->
+                      ((Left (ShowOptions True),
+                        "--interactive --show-options"), errs)
+                    (Left (ShowOptions _), (Right (Right DoInteractive))) ->
+                      ((Left (ShowOptions True),
+                        "--show-options --interactive"), errs)
                     -- Otherwise, complain
                     _ -> let err = flagMismatchErr oldFlag newFlag
                          in ((oldMode, oldFlag), err : errs)
@@ -748,8 +783,8 @@ addFlag s flag = liftEwM $ do
 -- ----------------------------------------------------------------------------
 -- Run --make mode
 
-doMake :: [(String,Maybe Phase)] -> Ghc ()
-doMake srcs  = do
+doMake :: Ghcjs.GhcjsSettings -> Bool -> [(String,Maybe Phase)] -> Ghc ()
+doMake settings native srcs  = do
     let (hs_srcs, non_hs_srcs) = partition haskellish srcs
 
         haskellish (f,Nothing) =
@@ -768,7 +803,7 @@ doMake srcs  = do
     -- This means that "ghc Foo.o Bar.o -o baz" links the program as
     -- we expect.
     if (null hs_srcs)
-       then liftIO (Ghcjs.ghcjsOneShot hsc_env StopLn srcs)
+       then liftIO (Ghcjs.ghcjsOneShot settings native hsc_env StopLn srcs)
        else do
 
     o_files <- mapM (\x -> liftIO $ compileFile hsc_env StopLn x)
@@ -828,20 +863,32 @@ showSupportedExtensions = mapM_ putStrLn supportedLanguagesAndExtensions
 showVersion :: IO ()
 showVersion = putStrLn (cProjectName ++ ", version " ++ cProjectVersion)
 
-showOptions :: IO ()
-showOptions = putStr (unlines availableOptions)
+showOptions :: Bool -> IO ()
+showOptions isInteractive = putStr (unlines availableOptions)
     where
-      availableOptions     = map ((:) '-') $
-                             getFlagNames mode_flags   ++
-                             getFlagNames flagsDynamic ++
-                             (filterUnwantedStatic . getFlagNames $ flagsStatic) ++
-                             flagsStaticNames
-      getFlagNames opts         = map getFlagName opts
+#if __GLASGOW_HASKELL__ >= 709
+      availableOptions = concat [
+        flagsForCompletion isInteractive,
+        map ('-':) (concat [
+            getFlagNames mode_flags
+          , (filterUnwantedStatic . getFlagNames $ flagsStatic)
+          , flagsStaticNames
+          ])
+        ]
+      getFlagNames opts = map flagName opts
+#else
+      availableOptions = map ((:) '-') $
+                         getFlagNames mode_flags ++
+                         getFlagNames flagsDynamic ++
+                         (filterUnwantedStatic . getFlagNames $ flagsStatic) ++
+                        flagsStaticNames
+      getFlagNames opts = map getFlagName opts
       getFlagName (Flag name _) = name
+#endif
       -- this is a hack to get rid of two unwanted entries that get listed
       -- as static flags. Hopefully this hack will disappear one day together
       -- with static flags
-      filterUnwantedStatic      = filter (\x -> not (x `elem` ["f", "fno-"]))
+      filterUnwantedStatic      = filter (`notElem`["f", "fno-"])
 
 showGhcUsage :: DynFlags -> IO ()
 showGhcUsage = showUsage False
@@ -893,6 +940,15 @@ countFS entries longest has_z (b:bs) =
         has_zs = length (filter hasZEncoding b)
   in
         countFS entries' longest' (has_z + has_zs) bs
+
+#if __GLASGOW_HASKELL__ >= 709
+
+showPackages, dumpPackages, dumpPackagesSimple :: DynFlags -> IO ()
+showPackages       dflags = putStrLn (showSDoc dflags (pprPackages dflags))
+dumpPackages       dflags = putMsg dflags (pprPackages dflags)
+dumpPackagesSimple dflags = putMsg dflags (pprPackagesSimple dflags)
+
+#endif
 
 -- -----------------------------------------------------------------------------
 -- ABI hash support

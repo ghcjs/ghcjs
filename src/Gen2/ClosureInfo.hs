@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, DeriveDataTypeable, OverloadedStrings #-}
+{-# LANGUAGE CPP, FlexibleContexts, QuasiQuotes, DeriveDataTypeable, OverloadedStrings #-}
 
 module Gen2.ClosureInfo where
 
@@ -168,6 +168,10 @@ primTypeVt t = case repType t of
     | st == pr "~#"                  = VoidV -- coercion token?
     | st == pr "~R#"                 = VoidV -- role
     | st == pr "Any"                 = PtrV
+#if __GLASGOW_HASKELL__ >= 709
+    | st == pr "SmallMutableArray#"  = ArrV
+    | st == pr "SmallArray#"         = ArrV
+#endif
     | st == "Data.Dynamic.Obj"       = PtrV -- ?
     | otherwise = error ("primTypeVt: unrecognized primitive type: " ++ st)
 
