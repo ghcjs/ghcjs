@@ -21,11 +21,11 @@
 {-# LANGUAGE CPP, ExtendedDefaultRules, OverloadedStrings, ScopedTypeVariables,
              TemplateHaskell, LambdaCase, FlexibleInstances, DeriveDataTypeable,
              GeneralizedNewtypeDeriving, NoMonomorphismRestriction, FlexibleContexts,
-             ImpredicativeTypes
+             ImpredicativeTypes, TupleSections
   #-}
 module Main where
 
-import           Prelude                         hiding (FilePath, forM_, elem, mapM_, any, all, concat, concatMap)
+import           Prelude                         hiding (FilePath, forM_, elem, mapM, mapM_, any, all, concat, concatMap)
 
 import qualified Distribution.Simple.Utils       as Cabal
 
@@ -53,6 +53,7 @@ import qualified Data.Text                       as T
 import qualified Data.Text.Encoding              as T
 import qualified Data.Text.IO                    as T
 import           Data.Time.Clock
+import           Data.Traversable
 import           Data.Typeable
 import qualified Data.Vector                     as V
 import           Data.Yaml                       ((.:))
@@ -683,13 +684,21 @@ installRts = subTop' "ghcjs-boot" $ do
   ghcjsTop <- view (beLocations . blGhcjsTopDir)
   let inc       = ghcjsLib </> "include"
       incNative = ghcjsLib </> "include_native"
+#if __GLASGOW_HASKELL__ >= 709
+      rtsLib    = ghcjsLib </> "rts"
+#else
       rtsLib    = ghcjsLib </> "rts-1.0"
+#endif
   rtsConf <- readfile (ghcLib </> "package.conf.d" </> "builtin_rts.conf")
   writefile (globalDB </> "builtin_rts.conf") (fixRtsConf (toTextI inc) (toTextI rtsLib) rtsConf)
   ghcjs_pkg_ ["recache", "--global", "--no-user-package-db"]
   forM_ [ghcjsLib, inc, incNative] mkdir_p
   sub $ cd (ghcLib </> "include") >> cp_r "." incNative
+#if __GLASGOW_HASKELL__ >= 709
+  sub $ cd (ghcLib </> "rts") >> cp_r "." rtsLib
+#else
   sub $ cd (ghcLib </> "rts-1.0") >> cp_r "." rtsLib
+#endif
   sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
   cp (ghcLib </> "settings")          (ghcjsLib </> "settings")
   cp (ghcLib </> "platformConstants") (ghcjsLib </> "platformConstants")
@@ -776,15 +785,46 @@ installGhcjsPrim = do
 
 installStage1 :: B ()
 installStage1 = subTop' "ghcjs-boot" $ do
+  installStage "0" ["./boot/ghc-prim"]
+  fixGhcPrim
   installStage "1a" =<< stagePackages bstStage1a
   s <- ask
   when (s ^. beSettings . bsGmpInTree && s ^. beLocations . blNativeToo) installInTreeGmp
   installGhcjsPrim
   installStage "1b" =<< stagePackages bstStage1b
+  resolveWiredInPackages
     where
+      fixGhcPrim = do
+        descr <- T.lines <$> ghcjs_pkg ["describe", "ghc-prim", "--no-user-package-db"]
+        setStdin (T.unlines $ map fixGhcPrimDescr descr)
+        ghcjs_pkg_ ["update", "-", "--global", "--no-user-package-db"]
+      -- add GHC.Prim to exposed-modules
+      fixGhcPrimDescr line
+        | "GHC.PrimopWrappers" `T.isInfixOf` line = line <> " GHC.Prim"
+        | otherwise                               = line
       installStage name s = do
         msg info ("installing stage " <> name)
         forM_ s preparePackage >> cabalStage1 s
+
+resolveWiredInPackages :: B ()
+#if __GLASGOW_HASKELL__ >= 709
+resolveWiredInPackages = subTop $ do
+  wips <- readBinary ("wiredinpkgs" <.> "yaml")
+  case Yaml.decodeEither wips of
+   Left err   -> failWith ("error parsing wired-in packages file wiredinpkgs.yaml\n" <> T.pack err)
+   Right pkgs -> do
+     pkgs' <- forM pkgs $ \p ->
+       (p,) . T.strip <$> ghcjs_pkg [ "--simple-output"
+                                    , "field"
+                                    , p
+                                    , "key"
+                                    ]
+     writefile ("wiredinkeys" <.> "yaml") $
+       T.unlines ("# resolved wired-in packages" :
+                  map (\(p,k) -> p <> ": " <> k) pkgs')
+#else
+resolveWiredInPackages = return ()
+#endif
 
 -- fixme: urk, this is probably not how it's supposed to be done
 installInTreeGmp :: B ()
@@ -1330,11 +1370,11 @@ checkProgramVersions bs pgms = do
   verifyNodeVersion pgms'
   where
     verifyNotProfiled :: IO ()
-    verifyNotProfiled = do
-      res <- T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-rts-profiled"]
-      when (res /= "False") $ failWith ("GHCJS program " <> pgms ^. bpGhcjs . pgmLocText <>
-                                        " has been installed with executable profiling.\n" <>
-                                        "You need a non-profiled executable to boot")
+    verifyNotProfiled = return ()
+    --  res <- T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-rts-profiled"]
+    --  when (res /= "False") $ failWith ("GHCJS program " <> pgms ^. bpGhcjs . pgmLocText <>
+    --                                    " has been installed with executable profiling.\n" <>
+    --                                    "You need a non-profiled executable to boot")
     verifyVersion :: (Lens' BootPrograms (Program a), Text, Maybe String, Bool) -> BootPrograms -> IO BootPrograms
     verifyVersion (l, arg :: Text, expected :: Maybe String, update :: Bool) ps = do
       res <- T.strip <$> run' bs (ps ^. l) [arg]

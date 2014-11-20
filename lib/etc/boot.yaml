@@ -45,7 +45,6 @@ packages:
     - ./boot/bytestring
     - ./boot/containers
     - ./boot/deepseq
-    - ./boot/ghc-prim
     - ./boot/integer-gmp
     - ./boot/pretty
     - ./boot/primitive
