@@ -168,6 +168,7 @@ data BootStages = BootStages { _bstStage1a   :: Stage
                              , _bstPretend   :: [Package] -- ^ packages we pretend to have in stage one, but actually hand off to GHC
                              , _bstCabal     :: Package   -- ^ installed between 1b and 2, only when doing a full boot
                              , _bstGhcjsPrim :: Package   -- ^ installed between 1a and 1b
+                             , _bstGhcPrim   :: Package   -- ^ installed before stage 1a
                              } deriving (Data, Typeable)
 
 type Stage   = [CondPackage]
@@ -260,7 +261,7 @@ resolveCondsHost stage =
 allPackages :: B [Package]
 allPackages = p <$> view beStages
   where
-    p s = [s ^. bstGhcjsPrim, s ^. bstCabal] ++
+    p s = [s ^. bstGhcjsPrim, s ^. bstCabal, s ^. bstGhcPrim] ++
           resolveCondsHost ((s ^. bstStage1a) ++ (s ^. bstStage1b) ++ (s ^. bstStage2))
 
 main :: IO ()
@@ -340,6 +341,7 @@ instance Yaml.FromJSON BootStages where
   parseJSON (Yaml.Object v) = BootStages
     <$> v ..: "stage1a"             <*> v ..: "stage1b" <*> v ..: "stage2"
     <*> v .:: "stage1PretendToHave" <*> v  .: "cabal"   <*> v  .: "ghcjs-prim"
+    <*> v  .: "ghc-prim"
     where
       o .:: p = ((:[])<$>o.:p) <|> o.:p
       o ..: p = pkgs Nothing Nothing =<< o .: p
@@ -785,7 +787,8 @@ installGhcjsPrim = do
 
 installStage1 :: B ()
 installStage1 = subTop' "ghcjs-boot" $ do
-  installStage "0" ["./boot/ghc-prim"]
+  prim <- view (beStages . bstGhcPrim)
+  installStage "0" [prim]
   fixGhcPrim
   installStage "1a" =<< stagePackages bstStage1a
   s <- ask

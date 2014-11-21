@@ -24,6 +24,8 @@ packages:
 
   # special packages installed between stages:
 
+  ghc-prim:   ./boot/ghc-prim
+
   ghcjs-prim: ./ghcjs/ghcjs-prim
 
   cabal:      ./boot/cabal/Cabal
