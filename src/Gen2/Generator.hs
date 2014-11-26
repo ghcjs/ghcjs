@@ -50,7 +50,7 @@ import           Data.Generics.Schemes (everywhere)
 import           Data.Int
 import qualified Data.IntMap.Strict as IM
 import           Data.Monoid
-import           Data.Maybe (isJust, fromMaybe, maybeToList, listToMaybe)
+import           Data.Maybe (isJust, isNothing, catMaybes, fromMaybe, maybeToList, listToMaybe)
 import           Data.Map (Map)
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -611,18 +611,27 @@ genBind :: ExprCtx -> StgBinding -> G (JStat, ExprCtx)
 genBind ctx bndr =
   case bndr of
     StgNonRec b r -> do
-       assign b r
-       j <- allocCls [(b,r)]
+       j <- assign b r >>= \case
+         Just ja -> return ja
+         Nothing -> allocCls Nothing [(b,r)]
        return (j, addEvalRhs ctx [(b,r)])
     StgRec bs     -> do
-       mapM_ (uncurry assign) bs
-       j <- allocCls bs
+       jas <- mapM (uncurry assign) bs -- fixme these might depend on parts initialized by allocCls
+       let m = if null jas then Nothing else Just (mconcat $ catMaybes jas)
+       j <- allocCls m . map snd . filter (isNothing . fst) $ zip jas bs
        return (j, addEvalRhs ctx bs)
    where
      ctx' = clearCtxStack ctx
 
-     assign :: Id -> StgRhs -> G ()
-     assign b r = genEntry ctx' b r
+     assign :: Id -> StgRhs -> G (Maybe JStat)
+     assign b (StgRhsClosure _ccs _bi _free _upd _str [] expr)
+       | snd (isInlineExpr (ctx ^. ctxEval) expr) = do
+           d   <- declIds b
+           tgt <- genIds b
+           (j, _) <- genExpr (ctx & ctxTarget .~ tgt) expr
+           return (Just (d <> j))
+     assign b (StgRhsCon{}) = return Nothing
+     assign b r             = genEntry ctx' b r >> return Nothing
 
      addEvalRhs c [] = c
      addEvalRhs c ((b,r):xs)
@@ -764,11 +773,11 @@ genUpdFrame u i
       assertRtsStat (return $ bhSingleEntry settings)
 
 -- allocate local closures
-allocCls :: [(Id, StgRhs)] -> C
-allocCls xs = do
+allocCls :: Maybe JStat -> [(Id, StgRhs)] -> C
+allocCls dynMiddle xs = do
    (stat, dyn) <- splitEithers <$> mapM toCl xs
    cs <- use gsSettings
-   return (mconcat stat) <> allocDynAll cs True dyn
+   return (mconcat stat) <> allocDynAll cs True dynMiddle dyn
   where
     -- left = static, right = dynamic
     toCl :: (Id, StgRhs)

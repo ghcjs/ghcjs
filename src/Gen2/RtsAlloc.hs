@@ -1,3 +1,4 @@
+
 {-# LANGUAGE QuasiQuotes,
              OverloadedStrings #-}
 
@@ -10,6 +11,7 @@ import           Control.Lens hiding ((||=))
 import           Data.Array
 import           Data.Data.Lens
 import qualified Data.Map as M
+import           Data.Maybe
 import           Data.Monoid
 import qualified Data.Text as T
 
@@ -30,13 +32,15 @@ initClosure dflags entry values ccs
 
 -- allocate multiple, possibly mutually recursive, closures
 
-allocDynAll :: CgSettings -> Bool -> [(Ident,JExpr,[JExpr],CostCentreStack)] -> G JStat
-allocDynAll s haveDecl [(to,entry,free,cc)]
-  | to `notElem` (free ^.. template) = do
+allocDynAll :: CgSettings -> Bool -> Maybe JStat -> [(Ident,JExpr,[JExpr],CostCentreStack)] -> G JStat
+allocDynAll s haveDecl middle [(to,entry,free,cc)]
+  | isNothing middle && to `notElem` (free ^.. template) = do
       ccs <- ccsVarJ cc
       return $ allocDynamic s haveDecl to entry free ccs
-allocDynAll s haveDecl cls = makeObjs <> return fillObjs <> return checkObjs
+allocDynAll s haveDecl middle cls = makeObjs <> return middle' <> return fillObjs <> return checkObjs
   where
+    middle' = fromMaybe mempty middle
+
     makeObjs :: G JStat
     makeObjs
       | csInlineAlloc s = mconcat $ flip map cls $ \(i,f,_,cc) -> do
