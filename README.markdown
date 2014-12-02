@@ -112,7 +112,7 @@ You can create a new sandbox or add GHCJS support to an existing sandbox with:
 If you also want to set GHCJS as the default compiler in the sandbox, run:
 
     $ cabal sandbox init ghcjs
-    $ echo "compiler: ghcjs" >> cabal.config
+    $ echo "compiler: ghcjs" >> cabal.sandbox.config
 
 ### Package databases
 
