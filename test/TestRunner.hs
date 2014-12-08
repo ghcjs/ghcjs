@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, OverloadedStrings, TupleSections, ScopedTypeVariables, ExtendedDefaultRules, LambdaCase #-}
+{-# LANGUAGE CPP, FlexibleContexts, OverloadedStrings, TupleSections, ScopedTypeVariables, ExtendedDefaultRules, LambdaCase #-}
 
 module Main where
 
@@ -52,7 +52,8 @@ import           Text.Read (readMaybe)
 import           Options.Applicative
 import           Options.Applicative.Types
 import           Options.Applicative.Internal
-import           Options.Applicative.Help hiding ((</>))
+import           Options.Applicative.Help hiding ((</>), fullDesc)
+import qualified Options.Applicative.Help as H
 
 default (Text)
 
@@ -86,7 +87,7 @@ setupTests tmpDir = do
       (Right (a,l), _ctx) -> return (a,l)
   when (taHelp testArgs) $ do
     defaultMainWithArgs [] ["--help"] `C.catch` \(e::ExitCode) -> return ()
-    print $ helpText (parserHelp (prefs idm) optParser)
+    putStrLn $ renderHelp 80 (parserHelp (prefs idm) optParser)
     exitSuccess
   let ghcjs      = fromString (taWithGhcjs testArgs)
       ghcjsPkg   = fromString (taWithGhcjsPkg testArgs)
