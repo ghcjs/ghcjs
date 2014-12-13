@@ -425,10 +425,11 @@ runGhcjsResult opts file = do
             opt = if optimize then ["-O2"] else []
             extraCompArgs = tsCompArguments settings
             prof = tsProf settings
-            compileOpts = [ "--no-rts", "--no-stats", "-o", encodeString outputExe
+            compileOpts = [ "-no-rts", "-no-stats"
+                          , "-o", encodeString outputExe
                           , "-odir", encodeString outputBuild
                           , "-hidir", encodeString outputBuild
-                          , "--use-base=" ++ encodeString ((if prof then profBaseSymbs else baseSymbs) opts)
+                          , "-use-base" , encodeString ((if prof then profBaseSymbs else baseSymbs) opts)
                           , encodeString (filename input)
                           ] ++ opt ++ extraCompArgs ++ extraFiles
             args = tsArguments settings
@@ -602,7 +603,7 @@ prepareBaseBundle testDir ghcjs extraArgs = shellyE . silently . sub . withTmpDi
   cp (testDir </> "TestLinkBase.hs") tmp
   cp (testDir </> "TestLinkMain.hs") tmp
   cd tmp
-  run_ ghcjs $ ["--generate-base=TestLinkBase", "-o", "base", "TestLinkMain.hs"] ++ extraArgs
+  run_ ghcjs $ ["-generate-base", "TestLinkBase", "-o", "base", "TestLinkMain.hs"] ++ extraArgs
   cd "base.jsexe"
   [symbs, js, lib, lib1, rts] <- mapM readBinary
     ["out.base.symbs", "out.base.js", "lib.base.js", "lib1.base.js", "rts.js"]
