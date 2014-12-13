@@ -361,7 +361,7 @@ runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
             = Just (TH.THDec,  toHv (get :: Get [TH.Dec]))
         | sty == "Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Pat"
             = Just (TH.THPat,  toHv (get :: Get TH.Pat))
-        | sty == "Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Lib.Type"
+        | sty == "Language.Haskell.TH.Syntax.Q Language.Haskell.TH.Syntax.Type"
             = Just (TH.THType, toHv (get :: Get TH.Type))
         | sty == "GHC.Desugar.AnnotationWrapper"
             = Just (TH.THAnnWrapper, getAnnWrapper)
