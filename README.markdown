@@ -31,8 +31,8 @@ compiler in your `PATH`. Next, make sure that you have all the prerequisites for
 
  * a recent version of `alex` and `happy` need to be in your `PATH`
  * `git`, `make`, `cpp`, `autoreconf`, `patch` need to be in your `PATH`
- * by default, `ghcjs-boot` will try to use the system GMP library, see
-   `ghcjs-boot --help` for more info.
+ * one of the dependencies is the `terminfo` Haskell package, which requires `libtinfo`. On
+   Debian/Ubuntu this is provided by the `libtinfo-dev` package.
 
 #### Windows
 
@@ -43,19 +43,14 @@ compiler in your `PATH`. Next, make sure that you have all the prerequisites for
 
 ### Installation steps
 
-Run the following script to install an updated `Cabal` and `cabal-install` with GHCJS
-support. Note that this will overwrite the `cabal` executable in your cabal executable
-installation path (typically `~/.cabal/bin`), you might want to backup your current version.
+If you use GHC 7.8, you need to update your `Cabal` to version 1.22 to be able to use
+GHCJS. GHC 7.10 already includes a compatible `Cabal` version.
 
-```bash
-#!/bin/sh
-git clone https://github.com/ghcjs/cabal.git
-cd cabal
-git checkout ghcjs
-cabal install ./Cabal ./cabal-install
-```
+Note that you need a compatible `Cabal` library in your GHC package database, just upgrading
+the `cabal-install` program is not enough. `ghcjs-boot` will complain if it finds an incompatible
+version.
 
-Make sure that you're now running the new `cabal-install`, `GHCJS` support must be listed under the
+Make sure that you're now running the updated `cabal-install`, `GHCJS` support must be listed under the
 compiler flags:
 
     $ cabal install --help
@@ -105,14 +100,22 @@ not work, please create a ticket.
 
 ### Sandboxes
 
-You can create a new sandbox or add GHCJS support to an existing sandbox with:
+You can use Cabal sandboxes with GHCJS, create a new sandbox with:
 
-    $ cabal sandbox init ghcjs
+    $ cabal sandbox init
+
+Then you can just configure with `--ghcjs` to build with GHCJS inside the sandbox:
+
+    $ cabal install --ghcjs
 
 If you also want to set GHCJS as the default compiler in the sandbox, run:
 
-    $ cabal sandbox init ghcjs
+    $ cabal sandbox init
     $ echo "compiler: ghcjs" >> cabal.config
+
+Setting the default compiler to `ghcjs` makes `cabal sandbox exec` and `cabal sandbox hc-pkg` use
+GHCJS-specific settings. These commands do not know about the configure flags, so setting the default
+compiler is the only way to make them use the correct settings for GHCJS.
 
 ### Package databases
 
