@@ -322,7 +322,7 @@ splitPath' = map (filter (`notElem` ("/\\"::String))) . splitPath
 
 getPackageArchives :: DynFlags -> [([FilePath],[String])] -> IO [FilePath]
 getPackageArchives dflags pkgs =
-  filterM doesFileExist [ p ++ profSuff <.> "js_a"
+  filterM doesFileExist [ p </> "lib" ++ l ++ profSuff <.> "js_a"
                         | (paths, libs) <- pkgs, p <- paths, l <- libs ]
   where
     profSuff | WayProf `elem` ways dflags = "_p"

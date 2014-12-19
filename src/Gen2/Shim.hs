@@ -129,7 +129,14 @@ jsCppPgmOpts :: [Option] -> [Option]
 jsCppPgmOpts opts = (Option "-P") : filter (/=(Option "-traditional")) opts
 
 jsCppOpts :: [String] -> [String]
-jsCppOpts opts = filter (/="-traditional") opts
+jsCppOpts opts = filter (/="-traditional") (removeCabalMacros opts)
+  where
+    -- options are in reverse order
+    removeCabalMacros (x1:x2:xs)
+      | x2 == "-include" && "cabal_macros.h" `L.isSuffixOf` x1 =
+          removeCabalMacros xs
+    removeCabalMacros (x:xs) = x : removeCabalMacros xs
+    removeCabalMacros []     = []
 
 readShimsArchive :: DynFlags -> FilePath -> IO B.ByteString
 readShimsArchive dflags archive = do
