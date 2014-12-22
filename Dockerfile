@@ -10,9 +10,9 @@ RUN apt-get update \
 RUN curl -sL https://deb.nodesource.com/setup | bash - \
     && apt-get install -y nodejs
 
-RUN git clone https://github.com/ghcjs/cabal.git \
+RUN git clone https://github.com/haskell/cabal.git \
     && cd cabal \
-    && git checkout ghcjs \
+    && git checkout 1.22 \
     && cabal update \
     && cabal install ./Cabal ./cabal-install
 
