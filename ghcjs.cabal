@@ -109,7 +109,7 @@ Library
     other-modules: Paths_ghcjs
     build-depends: base           >= 4        && < 5,
                    Cabal,
-                   ghc            >= 7.8      && < 7.10,
+                   ghc            >= 7.8      && < 7.11,
                    directory,
                    filepath,
                    containers,
