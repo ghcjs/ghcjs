@@ -15,6 +15,7 @@ import qualified SysTools
 import           SimplStg             (stg2stg)
 import           HeaderInfo
 import           HscTypes
+import           Maybes               (expectJust)
 
 import           Control.Concurrent.MVar
 import           Control.Monad
@@ -148,6 +149,17 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
                    -- stamp file for the benefit of Make
                    liftIO $ touchObjectFile dflags o_file
                    return (RealPhase next_phase, o_file)
+#if MIN_VERSION_ghc(7,9,0)
+            HscUpdateSig ->
+                do -- We need to create a REAL but empty .o file
+                   -- because we are going to attempt to put it in a library
+                   PipeState{hsc_env=hsc_env'} <- getPipeState
+                   let input_fn = expectJust "runPhase" (ml_hs_file location)
+                       basename = dropExtension input_fn
+		   -- fixme do we need to create a js_o file here?
+                   -- liftIO $ compileEmptyStub dflags hsc_env' basename location
+                   return (RealPhase next_phase, o_file)
+#endif
             HscRecomp cgguts mod_summary
               -> do output_fn <- phaseOutputFilename next_phase
 
@@ -214,7 +226,11 @@ ghcjsCompileModule settings jsEnv env core mod = do
     cms    = compiledModules jsEnv
     dflags = hsc_dflags env
     compile = do
+#if __GLASGOW_HASKELL__ < 709
       core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
+#else
+      core_binds <- corePrepPgm env (ms_location mod) (cg_binds core) (cg_tycons core)
+#endif
       stg <- coreToStg dflags (cg_module core) core_binds
       (stg', cCCs) <- stg2stg dflags (cg_module core) stg
       return $ variantRender gen2Variant settings dflags (cg_module core) stg' cCCs

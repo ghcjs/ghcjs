@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, TupleSections, OverloadedStrings, LambdaCase, MultiWayIf, TemplateHaskell, ViewPatterns #-}
+{-# LANGUAGE CPP, QuasiQuotes, TupleSections, OverloadedStrings, LambdaCase, MultiWayIf, TemplateHaskell, ViewPatterns #-}
 
 {-
   Main generator module
@@ -494,11 +494,15 @@ genExpr top (StgLetNoEscape _ live b e) = do
   (b', top') <- genBindLne top live b
   (s, r)     <- genExpr top' e
   return (b' <> s, r)
+#if __GLASGOW_HASKELL__ < 709
 genExpr top (StgSCC cc tick push e) = do
   setSCCstats <- ifProfilingM $ setCC cc tick push
   (stats, result) <- genExpr top e
   return (setSCCstats <> stats, result)
 genExpr top (StgTick _m _n e) = genExpr top e
+#else
+genExpr top (StgTick _m e) = genExpr top e
+#endif
 
 might_be_a_function :: Type -> Bool
 -- Return False only if we are *sure* it's a data type
@@ -1710,8 +1714,12 @@ isInlineExpr v (StgCase e _ _ b _ _ alts)         = let (_ve, ie)   = isInlineEx
                                                     in (vr, (ie || b `elementOfUniqSet` v) && and ias)
 isInlineExpr v (StgLet b e)                       = isInlineExpr (inspectInlineBinding v b) e
 isInlineExpr v (StgLetNoEscape _ _ b e)           = isInlineExpr (inspectInlineBinding v b) e
+#if __GLASGOW_HASKELL__ < 709
 isInlineExpr v (StgSCC _ _ _ e)                   = isInlineExpr v e
 isInlineExpr v (StgTick _ _ e)                    = isInlineExpr v e
+#els
+isInlineExpr v (StgTick  _ e)                     = isInlineExpr v e
+#endif
 
 inspectInlineBinding :: UniqSet Id -> StgBinding -> UniqSet Id
 inspectInlineBinding v (StgNonRec i r) = inspectInlineRhs v i r

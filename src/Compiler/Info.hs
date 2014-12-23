@@ -18,6 +18,7 @@ import           DynFlags
 
 #ifdef WINDOWS
 import           Control.Lens hiding ((<.>))
+import           Control.Monad
 
 import           Data.Char
 import           Data.Maybe

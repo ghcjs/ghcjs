@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections, CPP #-}
 
 module Gen2.Sinker (sinkPgm) where
 
@@ -128,8 +128,12 @@ foldArgsE f (StgCase e l1 l2 b s a alts) =
           <*> sequenceA (map (\(ac,bs,us,e) -> (,,,) ac bs us <$> foldArgsE f e) alts)
 foldArgsE f (StgLet b e)               = StgLet <$> foldArgs f b <*> foldArgsE f e
 foldArgsE f (StgLetNoEscape l1 l2 b e) = StgLetNoEscape l1 l2 <$> foldArgs f b <*> foldArgsE f e
+#if __GLASGOW_HASKELL__ < 709
 foldArgsE f (StgSCC cc b1 b2 e)        = StgSCC cc b1 b2 <$> foldArgsE f e
 foldArgsE f (StgTick m i e)            = StgTick m i <$> foldArgsE f e
+#else
+foldArgsE f (StgTick i e)              = StgTick i <$> foldArgsE f e
+#endif
 foldArgsE _ e                          = pure e
 
 foldArgsA :: Fold StgArg Id

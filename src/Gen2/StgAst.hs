@@ -99,6 +99,9 @@ deriving instance Show StgExpr
 deriving instance Show StgBinding
 deriving instance Show StgRhs
 deriving instance Show StgOp
+#if __GLASGOW_HASKELL__ >= 709
+deriving instance Show a => Show (Tickish a)
+#endif
 
 instance Show (GenStgArg Var) where
   show a@(StgVarArg occ) = "StgVarArg " ++ show occ ++ " :: " ++ show (stgArgType a)
@@ -130,8 +133,12 @@ exprRefs _ (StgLam {}) = mempty
 exprRefs u (StgCase expr _ _ _ _ _ alts) = exprRefs u expr <> alts^.folded._4.to (exprRefs u)
 exprRefs u (StgLet bnd expr) = bindingRefs u bnd <> exprRefs u expr
 exprRefs u (StgLetNoEscape _ _ bnd expr) = bindingRefs u bnd <> exprRefs u expr
-exprRefs u (StgSCC _ _ _ expr) = exprRefs u expr
+#if __GLASGOW_HASKELL__ < 709
 exprRefs u (StgTick _ _ expr) = exprRefs u expr
+exprRefs u (StgSCC _ _ _ expr) = exprRefs u expr
+#else
+exprRefs u (StgTick _ expr) = exprRefs u expr
+#endif
 
 argRefs :: UniqFM StgExpr -> StgArg -> Set Id
 argRefs u (StgVarArg id)
