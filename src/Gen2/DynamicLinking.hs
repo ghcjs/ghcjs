@@ -59,6 +59,7 @@ import           Compiler.Compat
 import           Compiler.Settings
 import           Compiler.Variants
 import qualified Compiler.Utils as Utils
+import qualified Compiler.Info as Info
 
 #if __GLASGOW_HASKELL__ >= 709
 import           SysTools
@@ -103,30 +104,34 @@ ghcjsLinkJsLib :: GhcjsSettings
                -> IO SuccessFlag
 ghcjsLinkJsLib settings jsFiles dflags hpt
   | Just jsLib <- gsLinkJsLib settings = do
-      -- putStrLn "linking js lib"
       let profSuff | WayProf `elem` ways dflags = "_p"
                    | otherwise                  = ""
-          libFileName = ("lib" ++ jsLib ++ profSuff) <.> "js_a"
-          outputFile  = maybe libFileName
-                              (</>libFileName)
-                              (gsJsLibOutputDir settings `mplus` objectDir dflags)
+          libFileName    = ("lib" ++ jsLib ++ profSuff) <.> "js_a"
+          inOutputDir file =
+            maybe file
+                  (</>file)
+                  (gsJsLibOutputDir settings `mplus` objectDir dflags)
+          outputFile     = inOutputDir libFileName
           jsFiles' = nub (gsJsLibSrcs settings ++ jsFiles)
           meta    = Meta (opt_P dflags)
-      jsEntries <- forM jsFiles' $ \file -> -- do
-        -- putStrLn $ "reading js file: " ++ file
+      jsEntries <- forM jsFiles' $ \file ->
         (JsSource file,) <$> B.readFile file
-      -- putStrLn "done reading js files"
       objEntries <- forM (eltsUFM hpt) $ \hmi -> do
         let mt    = T.pack . moduleNameString . moduleName . mi_module . hm_iface $ hmi
             files = maybe [] (\l -> [ o | DotO o <- linkableUnlinked l]) (hm_linkable hmi)
         -- fixme archive does not handle multiple files for a module yet
         forM files $ \file ->
-          -- putStrLn $ "reading obj file: " ++ file
           (Object mt,) <$> B.readFile file
       B.writeFile outputFile (buildArchive meta (concat objEntries ++ jsEntries))
+      -- we don't use shared js_so libraries ourselves, but Cabal expects that we
+      -- generate one when building with --dynamic-too. Just write an empty file
+      when (gopt Opt_BuildDynamicToo dflags) $ do
+        let sharedLibFileName =
+              "lib" ++ jsLib ++ "-ghcjs" ++ Info.getCompilerVersion ++ profSuff <.> "js_so"
+            sharedOutputFile = inOutputDir sharedLibFileName
+        writeFile sharedOutputFile ""
       return Succeeded
-  | otherwise = -- do
-      -- putStrLn "ghcjsLinkJsLib: nothing to do"
+  | otherwise =
       return Succeeded
 
 dumpHpt :: DynFlags -> HomePackageTable -> String
