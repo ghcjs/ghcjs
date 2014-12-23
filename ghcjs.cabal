@@ -19,6 +19,8 @@ data-files:     lib/cache/boot.tar
                 lib/etc/*.html
                 lib/etc/*.js
                 lib/etc/*.c-tmpl
+		lib/etc/*.rc
+		lib/etc/*.manifest
                 lib/bin/*.sh
                 lib/bin/*.exe.options
                 doc/*.txt

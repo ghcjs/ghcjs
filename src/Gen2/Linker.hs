@@ -42,7 +42,7 @@ import           Data.Binary
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
-import           Data.Char                (toLower)
+import           Data.Char                (toLower, chr)
 import           Data.Function            (on)
 import qualified Data.HashMap.Strict      as HM
 import           Data.Int
@@ -67,6 +67,8 @@ import           Data.Yaml                (FromJSON(..), Value(..))
 import qualified Data.Yaml                as Yaml
 
 import qualified Distribution.Simple.Utils as Cabal
+
+import           Numeric                  (showOct)
 
 import           GHC.Generics
 
@@ -366,20 +368,34 @@ writeRunner settings dflags out = when (gsBuildRunner settings) $ do
   cd    <- getCurrentDirectory
   let runner = cd </> addExeExtension (dropExtension out)
 #ifdef mingw32_HOST_OS
-  error "runner on Windows not yet implemented"
   src   <- B.readFile (cd </> out </> "all" <.> "js")
   node  <- B.readFile (topDir dflags </> "node")
   templ <- T.readFile (topDir dflags </> "runner.c-tmpl")
   runnerSrc <- SysTools.newTempName dflags "c"
   T.writeFile runnerSrc $
-    substPatterns [] [ ("js",   T.pack (show $ B.unpack src))
-                     , ("node", T.pack (show $ B.unpack node))
+    substPatterns [] [ ("js",     bsLit src)
+                     , ("jsSize", T.pack (show $ B.length src))
+                     , ("node",   bsLit node)
                      ] templ
-
   SysTools.runCc dflags [ Option "-o"
                         , FileOption "" runner
                         , FileOption "" runnerSrc
+			, FileOption "" (topDir dflags </> "runner-resources.o")
                         ]
+    where
+      bsLit b = T.pack $ '"' : concatMap escapeChar (B.unpack b) ++ "\""
+      escapeChar  9 = "\\t"
+      escapeChar 10 = "\\n"
+      escapeChar 13 = "\\r"
+      escapeChar 34 = "\\\""
+      escapeChar 63 = "\\?"
+      escapeChar 92 = "\\\\"
+      escapeChar x
+        | x >= 32 && x <= 127 = chr (fromIntegral x) : []
+        | otherwise           = '\\' : escapeOctal x
+      escapeOctal x =
+        let x' = showOct x []
+        in  replicate (3-length x') '0' ++ x'
 #else
   src   <- T.readFile (cd </> out </> "all" <.> "js")
   node  <- T.readFile (topDir dflags </> "node")

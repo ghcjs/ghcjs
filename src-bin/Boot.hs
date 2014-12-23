@@ -78,6 +78,7 @@ import           System.Environment              (getEnvironment, getArgs)
 import           System.Environment.Executable   (getExecutablePath)
 import           System.Exit                     (exitSuccess, exitFailure, ExitCode(..))
 import qualified System.FilePath
+import           System.IO                       (hSetBuffering, stdout, BufferMode(..))
 import           System.PosixCompat.Files        (setFileMode)
 import           System.Process                  (readProcessWithExitCode)
 
@@ -218,7 +219,6 @@ data BootPrograms = BootPrograms { _bpGhcjs      :: Program Required
                                  , _bpGit        :: Program Optional
                                  , _bpAlex       :: Program Optional
                                  , _bpHappy      :: Program Optional
-                                 , _bpPatch      :: Program Optional
                                  , _bpTar        :: Program Optional
                                  , _bpCpp        :: Program Optional
                                  , _bpBash       :: Program Optional
@@ -270,6 +270,7 @@ main = do
     whenM ((==["--init"]) <$> getArgs) (putStrLn "ghcjs-boot has been updated. see README.\nUse `ghcjs-boot --dev' for a development build (if you installed GHCJS from a Git repo) or `ghcjs-boot' for a release build" >> exitFailure)
     settings <- adjustDefaultSettings <$> execParser optParser'
     when (settings ^. bsShowVersion) (printVersion >> exitSuccess)
+    hSetBuffering stdout LineBuffering
     setLocaleEncoding utf8
     setForeignEncoding utf8
     env <- initBootEnv settings
@@ -327,7 +328,7 @@ instance Yaml.FromJSON BootPrograms where
     <*> v ..: "ghc"   <*> v ..: "ghc-pkg"
     <*> v ..: "cabal" <*> v ..: "node"      <*> v ..: "haddock-ghcjs"
     <*> v ..: "git"   <*> v ..: "alex"
-    <*> v ..: "happy" <*> v ..: "patch"     <*> v ..: "tar"
+    <*> v ..: "happy" <*> v ..: "tar"
     <*> v ..: "cpp"   <*> v ..: "bash"      <*> v ..: "autoreconf"
     <*> v ..: "make"
     where
@@ -373,13 +374,14 @@ adjustDefaultSettings s
 installBuildTools :: B ()
 installBuildTools
   | not isWindows = return ()
-  | otherwise = instBt >> setBuildEnv
+  | otherwise = instBt -- >> setBuildEnv
   where
     instBt = checkpoint' "buildtools" "buildtools already installed" $ do
       subTop $ do
         checkpoint' "mingw" "MingW installation already copied" $ do
           msg info "MingW installation not found, copying from GHC"
           flip cp_r ".." <^> beLocations . blGhcLibDir . to (</> (".." </> "mingw"))
+{-
       subTop $ do
         p <- absPath =<< pwd
         checkpoint' "buildtools" "Buildtools already installed" $ do
@@ -406,7 +408,7 @@ installBuildTools
         [ escapePath bt <> " /mingw"
         , escapePath (bt </> "msys" </> "1.0" </> "bin") <> " /bin"
         ]
-
+-}
 prependPathEnv :: [FilePath] -> B ()
 prependPathEnv xs = do
   path1 <- get_env "Path"
@@ -570,10 +572,6 @@ installDevelopmentTree = subTop $ do
       branch' <- view (beSources . branch)
       sub $ do
         cd repoName
-#ifdef WINDOWS
-        git_ ["config", "core.autocrlf", "false"]
-        git_ ["reset", "--hard"]
-#endif
         git_ ["checkout", branch']
     cloneGitSrcs d [] = failWith ("could not clone " <> d <> ", no available sources")
     cloneGitSrcs d (x:xs) = git_ ["clone", x] `catchAny_`
@@ -671,9 +669,10 @@ patchPackage pkg
           p       = "patches" </> fromText pkgName <.> "patch"
           applyPatch = do
             msg info ("applying patch: " <> toTextI p)
-            readfile p >>= setStdin
-            cd (fromText pkg')
-            patch_ ["-p1", "-N"]
+	    p' <- absPath p
+	    cd (fromText pkg')
+            when isWindows (git_ ["config", "core.filemode", "false"])
+	    git_ ["apply", "-3", toTextI p']
       in  sub $ cond applyPatch (msg info $ "no patch for package " <> pkgName <> " found") =<< test_f p
   | otherwise = return ()
 
@@ -747,8 +746,16 @@ exe :: FilePath -> FilePath
 exe = bool isWindows (<.>"exe") id
 
 installEtc :: B ()
-installEtc = checkpoint' "additional configuration files" "etc" $
+installEtc = checkpoint' "additional configuration files" "etc" $ do
   install' "additional configuration files" <$^> beLocations . blGhcjsLibDir <<*^> beSources . bsrcEtc
+#ifdef WINDOWS
+  -- compile the resources we need for the runner to prevent Windows from trying to detect
+  -- programs that require elevated privileges
+  ghcjsTop <- view (beLocations . blGhcjsTopDir)
+  let windres = Program "windres" "windres" Nothing
+                        (Just $ ghcjsTop </> ".." </> "mingw" </> "bin" </> "windres.exe") []
+  subTop $ run_ windres ["runner.rc", "-o", "runner-resources.o"]
+#endif
 
 installDocs :: B ()
 installDocs = checkpoint' "documentation" "doc" $
@@ -851,7 +858,7 @@ preparePackage pkg
     cd (fromText pkg)
     whenM (test_f "configure.ac") $
       make "configure" ["configure.ac"]
-        (msg info ("generating configure script for " <> pkg) >> autoreconf_ [])
+        (msg info ("generating configure script for " <> pkg) >> autoreconf_)
     rm_rf "dist"
   | otherwise = return ()
 
@@ -983,27 +990,9 @@ ghcjs_pkg_   = runE_ bpGhcjsPkg
 alex_        = runE_ bpAlex
 happy_       = runE_ bpHappy
 haddock_     = runE_ bpHaddock
-#ifdef WINDOWS
-tar_      xs = do
-  cp <- hasCheckpoint "buildtools"
-  if cp then inLibDir runE_ bpTar   []     ("buildtools" </> "msys" </> "1.0" </> "bin" </> "tar") xs
-        else inLibDir runE_ bpTar   []     ("buildtools-boot" </> "bin" </> "tar") xs
-git_         = inLibDir runE_ bpGit   []     ("buildtools" </> "git" </> "bin" </> "git")
-patch_       = inLibDir runE_ bpPatch []     ("buildtools" </> "msys" </> "1.0" </> "bin" </> "patch")
-cpp          = inLibDir runE  bpCpp   ["-E", "-x", "assembler-with-cpp"] (".." </> "mingw" </> "bin" </> "gcc")
-inLibDir r pgm args dir xs = do
-  libDir <- view (beLocations . blGhcjsLibDir)
-  let pgm' = pgm . to (pgmLoc .~ Just (libDir </> dir))
-                 . to (pgmArgs .~ args)
-  r pgm' xs
-#else
 tar_         = runE_ bpTar
 git_         = runE_ bpGit
--- alex_        = runE_ bpAlex
--- happy_       = runE_ bpHappy
-patch_       = runE_ bpPatch
 cpp          = runE  bpCpp
-#endif
 cabal        = runE  bpCabal
 cabal_       = runE_ bpCabal
 
@@ -1096,7 +1085,10 @@ cabalInstallFlags parmakeGhcjs = do
            , "--prefix",        toTextI instDir
            , bool haddock "--enable-documentation" "--disable-documentation"
            , "--haddock-html"
+-- workaround for hoogle support being broken in haddock for GHC 7.10RC1
+#if !(__GLASGOW_HASKELL__ >= 709)
            , "--haddock-hoogle"
+#endif
            , "--haddock-hyperlink-source"
            , bool prof "--enable-library-profiling" "--disable-library-profiling"
            ] ++
@@ -1108,36 +1100,13 @@ cabalInstallFlags parmakeGhcjs = do
                      , bj (v > info) "-v2"
                      ]
 
-#ifdef WINDOWS
-bash_ pgm xs
-  | Just l <- pgm ^. pgmLoc = do
-      libDir <- view (beLocations . blGhcjsLibDir)
-      bashP  <- view (bePrograms . bpBash . to (bt libDir))
-      run_ bashP ["-c", T.unwords (args l)]
-  | otherwise               = failWith ("program " <> pgm ^. pgmName <> " is required but could not be found at " <> pgm ^. pgmSearch)
-  where
-    bt l = pgmLoc .~ Just (l </> "buildtools" </> "msys" </> "1.0" </> "bin" </> "bash")
-    args l = map escapeArg $ msysPath l : (pgm ^. pgmArgs ++ xs)
-    -- might not escape everything, be careful
-    escapeArg = T.concatMap escapeChar
-    escapeChar ' '  = "\\ "
-    escapeChar '\\' = "\\\\"
-    escapeChar x    = T.singleton x
-
-configure_  = bash_ (Program "configure" "./configure" Nothing (Just "./configure") [])
-autoreconf_ xs = do
-  libDir <- view (beLocations . blGhcjsLibDir)
-  view (bePrograms . bpAutoreconf . to (setLoc libDir)) >>= \p -> bash_ p xs
-    where setLoc libDir = pgmLoc .~ Just (libDir </> "buildtools" </> "bin" </> "autoreconf")
-runMake_    xs = do
-  libDir <- view (beLocations . blGhcjsLibDir)
-  view (bePrograms . bpMake . to (setMakeLoc libDir)) >>= \p -> bash_ p xs
-    where setMakeLoc libDir = pgmLoc .~ Just (libDir </> "buildtools" </> "msys" </> "1.0" </> "bin" </> "make")
-#else
 configure_  = run_ (Program "configure" "./configure" Nothing (Just "./configure") [])
-autoreconf_ = runE_ bpAutoreconf
-runMake_    = runE_ bpMake
+#ifdef WINDOWS
+autoreconf_ = runE_ bpBash ["autoreconf"]
+#else
+autoreconf_ = runE_ bpAutoreconf []
 #endif
+runMake_    = runE_ bpMake
 
 ignoreExcep a = a `catchAny` (\e -> msg info $ "ignored exception: " <> showT e)
 
