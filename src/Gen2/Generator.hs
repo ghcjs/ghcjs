@@ -1717,7 +1717,7 @@ isInlineExpr v (StgLetNoEscape _ _ b e)           = isInlineExpr (inspectInlineB
 #if __GLASGOW_HASKELL__ < 709
 isInlineExpr v (StgSCC _ _ _ e)                   = isInlineExpr v e
 isInlineExpr v (StgTick _ _ e)                    = isInlineExpr v e
-#els
+#else
 isInlineExpr v (StgTick  _ e)                     = isInlineExpr v e
 #endif
 
