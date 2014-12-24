@@ -44,7 +44,9 @@ compiler in your `PATH`. Next, make sure that you have all the prerequisites for
 ### Installation steps
 
 If you use GHC 7.8, you need to update your `Cabal` to version 1.22 to be able to use
-GHCJS. GHC 7.10 already includes a compatible `Cabal` version.
+GHCJS. GHC 7.10 already includes a compatible `Cabal` version. Cabal support has been
+merged upstream, get the correct version from https://github.com/haskell/cabal or from
+Hackage once it has been released.
 
 Note that you need a compatible `Cabal` library in your GHC package database, just upgrading
 the `cabal-install` program is not enough. `ghcjs-boot` will complain if it finds an incompatible
@@ -73,6 +75,9 @@ Build the base libraries for `GHCJS`:
 
     if you used the Git repository to install:
     $ ghcjs-boot --dev
+
+    if you are doing a development build with GHC 7.10, you need to tell `ghcjs-boot` to use the `ghc-7.10` branch of the `ghcjs-boot` repository:
+    $ ghcjs-boot --dev --ghcjs-boot-dev-branch ghc-7.10
 
     if you are using a package from hackage that includes the libraries:
     $ ghcjs-boot
