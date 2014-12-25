@@ -669,10 +669,11 @@ patchPackage pkg
           p       = "patches" </> fromText pkgName <.> "patch"
           applyPatch = do
             msg info ("applying patch: " <> toTextI p)
-	    p' <- absPath p
 	    cd (fromText pkg')
             when isWindows (git_ ["config", "core.filemode", "false"])
-	    git_ ["apply", "-3", toTextI p']
+	    -- workaround for Windows MSYS2 git not liking our absolute paths
+	    git_ ["apply", T.replicate (1 + T.count "/" pkg') "../" <>
+	                   "patches/" <> pkgName <> ".patch"]
       in  sub $ cond applyPatch (msg info $ "no patch for package " <> pkgName <> " found") =<< test_f p
   | otherwise = return ()
 
