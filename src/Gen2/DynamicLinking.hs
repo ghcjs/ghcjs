@@ -129,7 +129,8 @@ ghcjsLinkJsLib settings jsFiles dflags hpt
         let sharedLibFileName =
               "lib" ++ jsLib ++ "-ghcjs" ++ Info.getCompilerVersion ++ profSuff <.> "js_so"
             sharedOutputFile = inOutputDir sharedLibFileName
-        writeFile sharedOutputFile ""
+        -- keep strip happy
+        B.writeFile sharedOutputFile =<< B.readFile (topDir dflags </> "empty.o")
       return Succeeded
   | otherwise =
       return Succeeded

@@ -718,6 +718,9 @@ installRts = subTop' "ghcjs-boot" $ do
   whenM (view (beLocations . blNativeToo)) $ do
     prepareGmp
     cp ("boot" </> "integer-gmp" </> "mkGmpDerivedConstants" </> "GmpDerivedConstants.h") inc
+  subTop $ do
+    writefile "empty.c" ""
+    ghc_ ["-c", "empty.c"]
   when isWindows $ cp (ghcLib </> exe "touchy") (ghcjsLib </> exe "touchy")
   msg info "RTS prepared"
 
