@@ -25,21 +25,21 @@ Installation
 First install GHC 7.8.2 or later and check with `ghc --version` that it's the
 compiler in your `PATH`. Next, make sure that you have all the prerequisites for your platform.
 
-### Platform-specific requirements
+### Platform-specific preparation
 
 #### Linux / OS X
 
- * a recent version of `alex` and `happy` need to be in your `PATH`
- * `git`, `make`, `cpp`, `autoreconf`, `patch` need to be in your `PATH`
- * one of the dependencies is the `terminfo` Haskell package, which requires `libtinfo`. On
+ * A recent version of `alex` and `happy` need to be in your `PATH`
+ * `git`, `make`, `cpp`, `autoreconf` need to be in your `PATH`
+ * One of the dependencies is the `terminfo` Haskell package, which requires `libtinfo`. On
    Debian/Ubuntu this is provided by the `libtinfo-dev` package.
 
 #### Windows
 
- * virus scanners often interfere with configure scripts (permission denied errors),
+ * You need a shell that's capable of running autotools scripts (with `git`, `make`, `cpp`, `autoreconf` installed). See the [GHCJS Wiki](https://github.com/ghcjs/ghcjs/wiki/Preparing-the-Windows-build-environment) or the `INSTALL.windows` file for instructions for setting up MSYS2 for this.
+ * A recent version of `alex` and `happy` need to be in your `PATH`
+ * Virus scanners often interfere with configure scripts (permission denied errors),
    disable on-access scanning before running `ghcjs-boot`.
- * no extra programs need to be installed, `ghcjs-boot` will download an archive (around 100MB)
-   with the required programs.
 
 ### Installation steps
 

@@ -1,0 +1,38 @@
+# Installing GHCJS on Windows
+
+Some of the packages that come with GHCJS depend on autotools for their installation. On Unix-like operating systems this works mostly out of the box, but on Windows you need to set up a compatible build environment first. The recommended environment is MSYS2. Note that the setup is in no way specific for GHCJS, if you have ever struggled installing a package on Windows (`network` is notorious for this), having a proper MSYS2 configuration just might make it doable!
+
+# Install MSYS2
+
+Get the latest MSYS2 installer http://sourceforge.net/p/msys2/wiki/MSYS2%20installation/ , choose 32 or 64 bit as appropriate for your platform.
+
+After installation, open the `MingW-w64 Win64 Shell` program (or the 32 bit version for 32 bit Windows/GHC) and install dependencies using the package manager:
+
+    $ pacman -Sy git tar binutils autoconf make libtool automake python2 p7zip patch gcc
+
+If you get strange crashes or warnings, close the MingW-w64 shell and run `c:\msys64\autorebase.bat`, then retry. See the [MSYS2 Wiki](http://sourceforge.net/p/msys2/wiki/MSYS2%20installation/) for more information.
+
+Set up your `PATH` environment variable to include the GHC `bin` and `mingw/bin` and the cabal bin directories before everything else. You can use the Windows Control Panel to edit the `PATH` or edit `.bashrc` in your MSYS2 home directory, typically `C:\msys64\home\username`.
+
+    $ echo $PATH
+    /c/Users/Username/AppData/Roaming/cabal/bin:/c/haskell/ghc-7.8.4/bin:/c/haskell/ghc-7.8.4/mingw/bin:...
+    $ which ghc
+    /c/haskell/ghc-7.8.4/bin/ghc
+    $ which gcc
+    /c/haskell/ghc-7.8.4/mingw/bin/gcc
+
+The last line should point to the gcc bundled with GHC, not the one from MSYS2 (which would be `/usr/bin/gcc`). Make sure you have `alex` and `happy` installed, if you don't, install them with `cabal install`:
+
+    $ which alex
+    /c/Users/Username/AppData/Roaming/cabal/bin/alex
+    $ which happy
+    /c/Users/Username/AppData/Roaming/cabal/bin/happy
+
+You're good to go now, everything is ready to install GHCJS! Just make sure you do the installation in the `MingW-w64 Win64 Shell` and not the Command Prompt.
+
+If you ever need more dependencies for other Haskell packages, use `pacman` to install them.
+
+# More information
+
+- Building GHC on Windows - https://ghc.haskell.org/trac/ghc/wiki/Building/Preparation/Windows
+- MSYS2 installation - http://sourceforge.net/p/msys2/wiki/MSYS2%20installation/
