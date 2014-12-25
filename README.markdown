@@ -22,8 +22,14 @@ And some JavaScript-specific features:
 Installation
 ============
 
-First install GHC 7.8.2 or later and check with `ghc --version` that it's the
-compiler in your `PATH`. Next, make sure that you have all the prerequisites for your platform.
+GHCJS can be installed with GHC 7.8.2 or later.
+
+### Requirements
+
+ - GHC 7.8.2 or higher
+ - Cabal 1.22 and cabal-install 1.22 or higher
+ - alex and happy
+ - [node.js](http://nodejs.org) 0.10.28 or higher. GHCJS uses node.js for its build system and for running Template Haskell.
 
 ### Platform-specific preparation
 
@@ -63,6 +69,8 @@ compiler flags:
         --nhc98                         compile with NHC
     ...
 
+#### Install GHCJS
+
 Next, install `ghcjs` and its `ghcjs-prim` dependency:
 
     $ git clone https://github.com/ghcjs/ghcjs-prim.git
@@ -71,7 +79,9 @@ Next, install `ghcjs` and its `ghcjs-prim` dependency:
 
 If `cabal install ./ghcjs ./ghcjs-prim` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problems, since GHC ships with an older version. Try `--constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
 
-Build the base libraries for `GHCJS`:
+#### Build the libraries
+
+Use `ghcjs-boot` to build the base libraries for `GHCJS`:
 
     if you used the Git repository to install:
     $ ghcjs-boot --dev
