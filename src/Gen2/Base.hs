@@ -92,6 +92,7 @@ emptyBase = Base emptyCompactorState [] S.empty
 putBase :: Base -> DB.Put
 putBase (Base cs packages funs) = do
   DB.putByteString "GHCJSBASE"
+  DB.putLazyByteString Object.versionTag
   putCs cs
   putList DB.put packages
   putList putPkg pkgs
@@ -108,7 +109,7 @@ putBase (Base cs packages funs) = do
     modsM = M.fromList (zip mods [(0::Int)..])
     putList f xs = pi (length xs) >> mapM_ f xs
     -- serialise the compactor state
-    putCs (CompactorState [] _ _ _ _ _ _ _ _ _ _) = error "renderBase: putCs exhausted renamer symbol names"
+    putCs (CompactorState [] _ _ _ _ _ _ _ _ _ _) = error "putBase: putCs exhausted renamer symbol names"
     putCs (CompactorState (ns:_) nm es _ ss _ ls _ pes pss pls) = do
       DB.put ns
       DB.put (HM.toList nm)
@@ -122,8 +123,8 @@ putBase (Base cs packages funs) = do
     -- fixme group things first
     putFun (p,m,s) = pi (pkgsM M.! p) >> pi (modsM M.! m) >> DB.put s
 
-getBase :: DB.Get Base
-getBase = getBase'
+getBase :: FilePath -> DB.Get Base
+getBase file = getBase'
   where
     gi :: DB.Get Int
     gi = fromIntegral <$> DB.getWord32le
@@ -143,7 +144,9 @@ getBase = getBase'
       return (CompactorState (dropWhile (/=n) renamedVars) nm es (HM.size es) ss (HM.size ss) ls (HM.size ls) pes pss pls)
     getBase' = do
       hdr <- DB.getByteString 9
-      when (hdr /= "GHCJSBASE") (error "loadBase: invalid base file")
+      when (hdr /= "GHCJSBASE") (error $ "getBase: invalid base file: " <> file)
+      vt  <- DB.getLazyByteString (fromIntegral Object.versionTagLength)
+      when (vt /= Object.versionTag) (error $ "getBase: incorrect version: " <> file)
       cs <- makeCompactorParent <$> getCs
       linkedPackages <- getList DB.get
       pkgs <- la <$> getList getPkg
@@ -161,5 +164,5 @@ makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls) =
      (HM.union (fmap (+nls) pls) ls)
 
 instance DB.Binary Base where
-  get = getBase
+  get = getBase "<unknown file>"
   put = putBase

@@ -395,7 +395,7 @@ renderBase :: Base                                   -- ^ base metadata
 renderBase = DB.runPut . putBase
 
 loadBase :: FilePath -> IO Base
-loadBase file = DB.runGet getBase <$> BL.readFile file
+loadBase file = DB.runGet (getBase file) <$> BL.readFile file
 
 ----------------------------
 
