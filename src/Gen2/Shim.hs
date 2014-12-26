@@ -30,6 +30,7 @@ import           DynFlags
 import qualified SysTools
 
 import           Control.Applicative hiding ((<|>))
+import           Control.Lens hiding ((<.>))
 import           Control.Monad
 
 import qualified Data.ByteString as B
@@ -91,18 +92,14 @@ instance FromJSON VersionRange where
 
 collectShims :: FilePath                                    -- ^ the base path
              -> [(Text, Version)]                           -- ^ packages being linked
-             -> IO ([FilePath], [FilePath])                 -- ^ files to load (before, after) rts
+             -> IO ([FilePath], [FilePath])                 -- ^ files to load (with, after) rts
 collectShims base pkgs = do
-  files <- mapM (collectShim base) pkgs
-  let files' = map (base </>) (concat files)
-      (beforeRts, afterRts) = splitFiles files'
-  beforeRts' <- mapM canonicalizePath beforeRts
-  afterRts'  <- mapM canonicalizePath afterRts
-  return (uniq beforeRts', uniq afterRts')
+  filesR <- f =<< mapM (collectShim base) (pkgsRts & traverse . _1 %~ T.tail)
+  filesA <- f =<< mapM (collectShim base) pkgs
+  return (filesR, filter (`notElem`filesR) filesA)
     where
-      splitFiles files = (before, map init after)
-        where
-          (after, before) = L.partition ("@" `L.isSuffixOf`) files
+      f = fmap uniq . mapM (canonicalizePath . (base </>)) . concat
+      (pkgsRts, pkgsAfterRts) = L.partition (("@rts" `T.isPrefixOf`).fst) pkgs
       uniq xs = let go (x:xs) s
                       | x `S.notMember` s = x : go xs (S.insert x s)
                       | otherwise         = go xs s

@@ -92,7 +92,7 @@ import           Gen2.ClosureInfo         hiding (Fun)
 import qualified Gen2.Compactor           as Compactor
 import           Gen2.Object
 import           Gen2.Printer             (pretty)
-import           Gen2.Rts                 (rtsText)
+import           Gen2.Rts                 (rtsText, rtsDeclsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
 
@@ -107,7 +107,7 @@ data LinkResult = LinkResult
   { linkOut         :: BL.ByteString -- ^ compiled Haskell code
   , linkOutStats    :: LinkerStats   -- ^ statistics about generated code
   , linkOutMetaSize :: Int64         -- ^ size of packed metadata in generated code
-  , linkLibB        :: [FilePath]    -- ^ library code to load before RTS
+  , linkLibRTS      :: [FilePath]    -- ^ library code to load with the RTS
   , linkLibA        :: [FilePath]    -- ^ library code to load after RTS
   , linkLibAArch    :: [FilePath]    -- ^ library code to load from archives after RTS
   , linkBase        :: Base          -- ^ base metadata to use if we want to link incrementally against this result
@@ -129,7 +129,7 @@ link :: DynFlags
 link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
   | gsNoJSExecutables settings = return ()
   | otherwise = do
-      LinkResult lo lstats lmetasize llb lla llarch lbase <-
+      LinkResult lo lstats lmetasize llW lla llarch lbase <-
         link' dflags settings out include pkgs objFiles jsFiles
               isRootFun extraStaticDeps
       let genBase = isJust (gsGenBase settings)
@@ -142,12 +142,14 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
           let statsFile = if genBase then "out.base.stats" else "out.stats"
           TL.writeFile (out </> statsFile) (linkerStats lmetasize lstats)
         when (not $ gsNoRts settings) $ do
-          TL.writeFile (out </> "rts.js") (rtsText' dflags $ dfCgSettings dflags)
-        BL.writeFile (out </> "lib" <.> jsExt) . BL.fromChunks
-           =<< mapM (tryReadShimFile dflags) llb
+          withRts <- mapM (tryReadShimFile dflags) llW
+          BL.writeFile (out </> "rts.js")
+            (TLE.encodeUtf8 rtsDeclsText <>
+             BL.fromChunks withRts <>
+             TLE.encodeUtf8 (rtsText' dflags $ dfCgSettings dflags))
         lla'    <- mapM (tryReadShimFile dflags) lla
         llarch' <- mapM (readShimsArchive dflags) llarch
-        BL.writeFile (out </> "lib1" <.> jsExt)
+        BL.writeFile (out </> "lib" <.> jsExt)
                      (BL.fromChunks $ lla' ++ llarch')
         if genBase
           then generateBase out lbase
@@ -190,7 +192,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
       (rdPkgs, rds) <- rtsDeps dflags
       c   <- newMVar M.empty
       let rtsPkgs     =  map stringToPackageKey
-                             ["rts", "rts_" ++ rtsBuildTag dflags]
+                             ["@rts", "@rts_" ++ rtsBuildTag dflags]
           pkgs'       = nub (rtsPkgs ++ rdPkgs ++ pkgs)
           pkgs''      = filter (not . (isAlreadyLinked base)) pkgs'
           pkgLibPaths = mkPkgLibPaths pkgs'
@@ -337,10 +339,10 @@ getPackageArchives dflags pkgs =
 -- fixme the wired-in package id's we get from GHC we have no version
 getShims :: DynFlags -> [FilePath] -> [PackageKey] -> IO ([FilePath], [FilePath])
 getShims dflags extraFiles pkgDeps = do
-  (b,a) <- collectShims (getLibDir dflags </> "shims")
+  (w,a) <- collectShims (getLibDir dflags </> "shims")
                         (map (convertPkg dflags) pkgDeps)
   extraFiles' <- mapM canonicalizePath extraFiles
-  return (b++extraFiles',a)
+  return (w, a++extraFiles')
 
 convertPkg :: DynFlags -> PackageKey -> (Text, Version)
 convertPkg dflags p
@@ -349,12 +351,12 @@ convertPkg dflags p
       -- special or wired-in
       Nothing -> (T.pack (packageKeyString p), Version [])
 
-{- | convenience: combine lib.js, rts.js, lib1.js, out.js to all.js that can be run
+{- | convenience: combine rts.js, lib.js, out.js to all.js that can be run
      directly with node.js or SpiderMonkey jsshell
  -}
 combineFiles :: DynFlags -> FilePath -> IO ()
 combineFiles df fp = do
-  files   <- mapM (B.readFile.(fp</>)) ["lib.js", "rts.js", "lib1.js", "out.js"]
+  files   <- mapM (B.readFile.(fp</>)) ["rts.js", "lib.js", "out.js"]
   runMain <- B.readFile (getLibDir df </> "runmain.js")
   B.writeFile (fp</>"all.js") (mconcat (files ++ [runMain]))
 

@@ -291,18 +291,13 @@ logStack :: JStat
 logStack = [j| h$logStack(); |]
 -}
 
--- rtsDebug = renderJs (addDebug $ jsSaturate (Just "h$RTS") rts')
+rtsDeclsText :: TL.Text
+rtsDeclsText = (displayT . renderPretty 0.8 150 . pretty $ rtsDecls) <> "\n"
 
-rtsText :: DynFlags -> CgSettings -> TL.Text
-rtsText dflags = displayT . renderPretty 0.8 150 . pretty . rts dflags
+rtsDecls :: JStat
+rtsDecls = jsSaturate (Just "h$RTSD") [j|
 
-rts :: DynFlags -> CgSettings -> JStat
-rts dflags s = jsSaturate (Just "h$RTS") (rts' dflags s)
-
-rts' :: DynFlags -> CgSettings -> JStat
-rts' dflags s = [j|
-
-var !h$currentThread   = null;      // thread state object for current thread
+            var !h$currentThread   = null;      // thread state object for current thread
 var !h$stack           = null;      // stack for the current thread
 var !h$sp              = 0;         // stack pointer for the current thread
 
@@ -314,6 +309,20 @@ var !h$staticThunksArr = [];        // indices of updatable thunks in static hea
 // stg registers
 `declRegs`;
 `declRets`;
+
+|]
+
+
+-- rtsDebug = renderJs (addDebug $ jsSaturate (Just "h$RTS") rts')
+
+rtsText :: DynFlags -> CgSettings -> TL.Text
+rtsText dflags = (<>"\n") . displayT . renderPretty 0.8 150 . pretty . rts dflags
+
+rts :: DynFlags -> CgSettings -> JStat
+rts dflags s = jsSaturate (Just "h$RTS") (rts' dflags s)
+
+rts' :: DynFlags -> CgSettings -> JStat
+rts' dflags s = [j|
 
 // use these things instead of building objects manually
 `closureConstructors s`;
@@ -357,6 +366,11 @@ fun h$false_e { return `Stack`[`Sp`]; }
 
 fun h$true_e { return `Stack`[`Sp`]; }
 `ClosureInfo "h$true_e" (CIRegs 0 [PtrV]) "GHC.Types.True" (CILayoutFixed 0 []) (CICon 2) noStatic`;
+
+fun h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e { return `Stack`[`Sp`]; }
+`ClosureInfo "h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e" (CIRegs 0 [PtrV]) "GHC.Integer.Type.S#" (CILayoutFixed 1 [IntV]) (CICon 1) noStatic`;
+fun h$integerzmgmpZCGHCziIntegerziTypeziJzh_con_e { return `Stack`[`Sp`]; }
+`ClosureInfo "h$integerzmgmpZCGHCziIntegerziTypeziJzh_con_e" (CIRegs 0 [PtrV]) "GHC.Integer.Type.J#" (CILayoutFixed 2 [IntV, ObjV]) (CICon 2) noStatic`;
 
 // generic data constructor with 1 non-heapobj field
 fun h$data1_e { return `Stack`[`Sp`]; }
