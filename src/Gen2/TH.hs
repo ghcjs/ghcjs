@@ -189,8 +189,11 @@ ghcjsRunMeta' js_env js_settings desc tht show_code ppr_code cvt expr = do
                               pkgs
                               (hsc_HPT hsc_env)
                               (Just js_code)
-  ext      <- liftIO $ mconcat <$> mapM (Gen2.tryReadShimFile dflags)
-                                        (Gen2.linkLibB lr ++ Gen2.linkLibA lr)
+  ext <- liftIO $ do
+    llb'     <- mconcat <$> mapM (Gen2.tryReadShimFile dflags)  (Gen2.linkLibB lr)
+    lla'     <- mconcat <$> mapM (Gen2.tryReadShimFile dflags)  (Gen2.linkLibA lr)
+    llaarch' <- mconcat <$> mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)
+    return (llb' <> lla' <> llaarch')
   let bs = ext <> BL.toStrict (Gen2.linkOut lr)
                <> T.encodeUtf8 ("\nh$TH.loadedSymbol = " <> symb <> ";\n")
   -- fixme exception handling
@@ -282,7 +285,7 @@ linkTh settings js_files dflags pkgs hpt code = do
                              cache_key
                              [topDir dflags </> "ghcjs_boot.completed"]
                              (BL.toStrict . runPut . put $ lr)
-              return lr 
+              return lr
 
 requestRunner :: ThRunner -> TH.Message -> TcM TH.Message
 requestRunner runner msg = liftIO (sendToRunner runner 0 msg) >> res
@@ -373,9 +376,13 @@ runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
       base <- TH.qRunIO $ takeMVar (thrBase r)
       let settings = thSettings { gsUseBase = BaseState base }
       lr  <- TH.qRunIO $ linkTh settings [] dflags expr_pkgs (hsc_HPT hsc_env) (Just code)
-      ext <- TH.qRunIO $ mconcat <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibB lr ++ Gen2.linkLibA lr)
-      let bs = ext <> BL.toStrict (Gen2.linkOut lr)
-                   <> T.encodeUtf8 ("\nh$TH.loadedSymbol = " <> symb <> ";\n")
+      ext <- TH.qRunIO $ do
+        llb'     <- mconcat <$> mapM (Gen2.tryReadShimFile dflags)  (Gen2.linkLibB lr)
+        lla'     <- mconcat <$> mapM (Gen2.tryReadShimFile dflags)  (Gen2.linkLibA lr)
+        llaarch' <- mconcat <$> mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)
+        return (llb' <> lla' <> llaarch')
+      let bs = ext <> BL.toStrict (Gen2.linkOut lr) <>
+               T.encodeUtf8 ("\nh$TH.loadedSymbol = " <> symb <> ";\n")
       hv <- requestRunner is_io r (TH.RunTH tht bs loc) >>= \case
               TH.RunTH' bsr -> getHv bsr
               _             -> error "runTh: unexpected response, expected RunTH' message"
@@ -618,6 +625,7 @@ startThRunner dflags hsc_env = do
   lr <- linkTh thSettings [] dflags [] (hsc_HPT hsc_env) Nothing
   fb <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibB lr)
   fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
+  aa <- BL.fromChunks <$> mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)
   let rts = TL.encodeUtf8 $ Gen2.rtsText' dflags (Gen2.dfCgSettings dflags)
   node <- T.strip <$> T.readFile (topDir dflags </> "node")
   (inp,out,err,pid) <- runInteractiveProcess (T.unpack node)
@@ -627,7 +635,7 @@ startThRunner dflags hsc_env = do
   mv  <- newMVar (Gen2.linkBase lr)
   forkIO $ catchIOError (forever $ hGetChar out >>= putChar) (\_ -> return ())
   let r = ThRunner pid inp err mv
-  sendToRunnerRaw r 0 (BL.toStrict $ fb <> rts <> fa <> Gen2.linkOut lr)
+  sendToRunnerRaw r 0 (BL.toStrict $ fb <> rts <> fa <> aa <> Gen2.linkOut lr)
   return r
 
 ghcjsGetValueSafely :: GhcjsSettings
