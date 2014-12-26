@@ -18,6 +18,7 @@ import           UniqSet
 import           Literal
 import           DataCon
 import           CoreSyn
+import           IdInfo
 import           TcType
 import           UniqFM
 import           Unique
@@ -576,14 +577,21 @@ genApp top i a
                                      |]
                            _   -> mempty
                 return (a <> ww, ExprInline Nothing)
+    | DataConWrapId dc <- idDetails i, isNewTyCon (dataConTyCon dc) = do
+                [i'] <- genIds i
+                [ai] <- concatMapM genArg a
+                let [StgVarArg a'] = a
+                if isEvaldId a' || a' `elementOfUniqSet` (top ^. ctxEval)
+                  then return ([j| `i'` = `ai`; |], ExprInline Nothing)
+                  else return ([j| return h$e(`ai`); |], ExprCont)
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) = do
              ii <- enterId
              return ([j| return h$e(`ii`) |], ExprCont)
-    | idRepArity i == n && not (isLocalId i) && n /= 0 = do
+    | idRepArity i == n && not (isLocalId i) && isEvaldId i && n /= 0 = do
         as' <- concatMapM genArg a
         jmp <- jumpToII i as' =<< r1
         return (jmp, ExprCont)
-    | idRepArity i < n && idRepArity i > 0 =
+    | idRepArity i < n && isEvaldId i && idRepArity i > 0 =
          let (reg,over) = splitAt (idRepArity i) a
          in  do
            reg' <- concatMapM genArg reg
@@ -659,8 +667,7 @@ genBindLne ctx live bndr = do
                  & ctxLneFrameBs %~ flip addListToUFM (map (,newFrameSize) bound)
                  & ctxLneFrame   %~ (++vis)
   mapM_ (uncurry $ genEntryLne ctx') binds
-  return (declUpds <> [j| debugLetNoEscapeLive  = `show newLvs`;
-                          debugLetNoEscapeBound = `show bound`; |], ctx')
+  return (declUpds, ctx')
   where
     oldFrame     = ctx ^. ctxLneFrame
     oldFrameSize = length oldFrame
@@ -1740,6 +1747,8 @@ isInlineApp :: UniqSet Id -> Id -> [StgArg] -> Bool
 isInlineApp v i [] = isUnboxedTupleType (idType i) || isStrictType (idType i) || i `elementOfUniqSet` v || isEvaldId i
 isInlineApp _ i [StgLitArg (MachStr _)]
   | getUnique i `elem` [unpackCStringIdKey, unpackCStringUtf8IdKey, unpackCStringAppendIdKey] = True
+isInlineApp v i [StgVarArg a]
+  | DataConWrapId dc <- idDetails i, isNewTyCon (dataConTyCon dc), isStrictType (idType a) || a `elementOfUniqSet` v || isEvaldId a = True
 isInlineApp _ _ _ = False
 
 isEvaldId :: Id -> Bool
