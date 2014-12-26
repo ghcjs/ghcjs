@@ -208,12 +208,16 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
              renderLinker settings dflags (baseCompactorState base) code
           base'  = Base compactorState (nub $ basePkgs base ++ map mkPackage pkgs'')
                          (allDeps `S.union` baseUnits base)
-      pkgArchs <- getPackageArchives dflags (M.elems pkgLibPaths)
-      (shimsBefore, shimsAfter) <- getShims dflags jsFiles pkgArchs pkgs''
-      return $ LinkResult outJs stats metaSize shimsBefore shimsAfter pkgArchs base'
+      pkgArchs <- getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs'')
+      (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims dflags [] (filter (isAlreadyLinked base) pkgs')
+      (shimsBefore, shimsAfter) <- getShims dflags jsFiles pkgs''
+      return $ LinkResult outJs stats metaSize
+                 (filter (`notElem` alreadyLinkedBefore) shimsBefore)
+                 (filter (`notElem` alreadyLinkedAfter)  shimsAfter)
+                 pkgArchs base'
   where
     isAlreadyLinked :: Base -> PackageKey -> Bool
-    isAlreadyLinked b pkg = {-T.pack (packageKeyString pkg)-} mkPackage pkg `elem` basePkgs b
+    isAlreadyLinked b pkg = mkPackage pkg `elem` basePkgs b
 
     mkPkgLibPaths :: [PackageKey] -> Map PackageKey ([FilePath],[String])
     mkPkgLibPaths
@@ -331,8 +335,8 @@ getPackageArchives dflags pkgs =
              | otherwise                  = ""
 
 -- fixme the wired-in package id's we get from GHC we have no version
-getShims :: DynFlags -> [FilePath] -> [FilePath] -> [PackageKey] -> IO ([FilePath], [FilePath])
-getShims dflags extraFiles pkgArchives pkgDeps = do
+getShims :: DynFlags -> [FilePath] -> [PackageKey] -> IO ([FilePath], [FilePath])
+getShims dflags extraFiles pkgDeps = do
   (b,a) <- collectShims (getLibDir dflags </> "shims")
                         (map (convertPkg dflags) pkgDeps)
   extraFiles' <- mapM canonicalizePath extraFiles
