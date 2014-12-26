@@ -452,11 +452,11 @@ runGhcjsResult opts file = do
             let cfile' = fromText (T.pack cfile)
             in  copyFile (testsuiteLocation opts </> directory file </> cfile') (outputExe' </> cfile')
           -- combine files with base bundle from incremental link
-          [out, lib, lib1] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
-                                ["out.js", "lib.js", "lib1.js"]
+          [out, lib] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
+                                ["out.js", "lib.js"]
           let runMain = "\nh$main(h$mainZCMainzimain);\n"
           B.writeFile (encodeString outputRun) $
-            (if prof then profBaseJs else baseJs) opts <> lib <> lib1 <> out <> runMain
+            (if prof then profBaseJs else baseJs) opts <> lib <> out <> runMain
           -- run with node.js and SpiderMonkey
           nodeResult <- runTestPgm "node"         tsDisableNode         nodeProgram
           smResult   <- runTestPgm "SpiderMonkey" tsDisableSpiderMonkey spiderMonkeyProgram
@@ -605,9 +605,9 @@ prepareBaseBundle testDir ghcjs extraArgs = shellyE . silently . sub . withTmpDi
   cd tmp
   run_ ghcjs $ ["-generate-base", "TestLinkBase", "-o", "base", "TestLinkMain.hs"] ++ extraArgs
   cd "base.jsexe"
-  [symbs, js, lib, lib1, rts] <- mapM readBinary
-    ["out.base.symbs", "out.base.js", "lib.base.js", "lib1.base.js", "rts.js"]
-  return (symbs, lib <> rts <> lib1 <> js)
+  [symbs, js, lib, rts] <- mapM readBinary
+    ["out.base.symbs", "out.base.js", "lib.base.js", "rts.js"]
+  return (symbs, rts <> lib <> js)
 
 getEnvMay :: String -> IO (Maybe String)
 getEnvMay xs = fmap Just (getEnv xs)
