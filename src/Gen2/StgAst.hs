@@ -34,6 +34,7 @@ import           Type
 import           Unique
 import           UniqFM
 import           UniqSet
+import           IdInfo
 import qualified Var
 
 import           Gen2.Utils
@@ -81,7 +82,18 @@ instance Show OccName where show = occNameString
 instance Show DataCon where show d = show (dataConName d)
 instance Show Var where show v = "(" ++ show (Var.varName v) ++ "[" ++
                                  encodeUnique (getKey (getUnique v))
-                                 ++ "] :: " ++ show (Var.varType v) ++ ")"
+                                 ++ "] <" ++ show (idDetails v) ++ "> :: " ++ show (Var.varType v) ++ ")"
+instance Show IdDetails where
+  show VanillaId          = "VanillaId"
+  show (RecSelId {})      = "RecSelId"
+  show (DataConWorkId dc) = "DataConWorkId " ++ show dc
+  show (DataConWrapId dc) = "DataConWrapId " ++ show dc
+  show (ClassOpId {})     = "ClassOpId"
+  show (PrimOpId {})      = "PrimOpId"
+  show (FCallId {})       = "FCallId"
+  show (TickBoxOpId {})   = "VanillaId"
+  show (DFunId {})        = "DFunId"
+
 
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat
