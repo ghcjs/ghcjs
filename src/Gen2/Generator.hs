@@ -578,11 +578,11 @@ genApp top i a
                            _   -> mempty
                 return (a <> ww, ExprInline Nothing)
     | DataConWrapId dc <- idDetails i, isNewTyCon (dataConTyCon dc) = do
-                [i'] <- genIds i
                 [ai] <- concatMapM genArg a
-                let [StgVarArg a'] = a
+                let [t] = top ^. ctxTarget
+                    [StgVarArg a'] = a
                 if isEvaldId a' || a' `elementOfUniqSet` (top ^. ctxEval)
-                  then return ([j| `i'` = `ai`; |], ExprInline Nothing)
+                  then return ([j| `t` = `ai`; |], ExprInline Nothing)
                   else return ([j| return h$e(`ai`); |], ExprCont)
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) = do
              ii <- enterId
