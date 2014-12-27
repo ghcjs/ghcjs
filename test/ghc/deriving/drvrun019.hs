@@ -5,8 +5,10 @@
 
 module Main where
 
+import Control.Applicative
+
 newtype Wrap m a = Wrap { unWrap :: m a } 
-    deriving (Monad, Eq)
+    deriving (Functor, Applicative, Monad, Eq)
 
 foo :: Int -> Wrap IO a -> Wrap IO ()
 foo 0 a = return ()

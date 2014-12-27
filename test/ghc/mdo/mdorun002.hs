@@ -21,14 +21,14 @@ ll = mdo n0 <- newNode n3 0 n1
 
 data Direction = Forward | Backward deriving Eq
 
-traverse                      :: Direction -> Node s a -> ST s [a]
-traverse dir (N (v, b, i, f)) = 
+traverse'                      :: Direction -> Node s a -> ST s [a]
+traverse' dir (N (v, b, i, f)) = 
        do visited <- readSTRef v
           if visited
              then return []
              else do writeSTRef v True
                      let n = if dir == Forward then f else b
-                     is <- traverse dir n
+                     is <- traverse' dir n
                      return (i:is)
 
 l2dll        :: [a] -> ST s (Node s a)
@@ -51,6 +51,6 @@ insertAfter cur@(N (v, prev, val, next)) i
 test = runST (do l   <- l2dll [1 .. 10] 
                  l'  <- insertAfter l  12 
 		 l'' <- insertAfter l' 13 
-		 traverse Forward l'')
+		 traverse' Forward l'')
 
 main = print test

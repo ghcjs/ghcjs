@@ -7,16 +7,26 @@ module Main where
 	import Prelude(String,undefined,Maybe(..),IO,putStrLn,
 		Integer,(++),Rational, (==), (>=) );
 	
-	import Prelude(Monad(..));
+	import Prelude(Monad(..),Applicative(..),Functor(..));
+        import Control.Monad(ap, liftM);
 
 	debugFunc :: String -> IO a -> IO a;
 	debugFunc s ioa = (putStrLn ("++ " ++ s)) Prelude.>>
-		(ioa Prelude.>>= (\a -> 
+		(ioa Prelude.>>= (\a ->
 			(putStrLn ("-- " ++ s)) Prelude.>> (Prelude.return a)
 		));
 
 	newtype TM a = MkTM {unTM :: IO a};
 
+        instance (Functor TM) where
+          {
+            fmap = liftM;
+          };
+        instance (Applicative TM) where
+          {
+            pure  = return;
+            (<*>) = ap;
+          };
 	instance (Monad TM) where
 		{
 		return a = MkTM (debugFunc "return" (Prelude.return a));
@@ -120,3 +130,4 @@ module Main where
 			(tmPutStrLn (test_fromRational_pattern 1.7)) -- "1.7" = 51%10
 		);
 	}
+
