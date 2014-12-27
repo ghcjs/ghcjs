@@ -433,10 +433,10 @@ runGhcjsResult opts file = do
                           , encodeString (filename input)
                           ] ++ opt ++ extraCompArgs ++ extraFiles
             args = tsArguments settings
-            runTestPgm name disabled getPgm
+            runTestPgm name disabled getPgm pgmArgs
               | Just p <- getPgm opts, not (disabled settings) =
                   fmap (,name ++ desc) <$>
-                      runProcess outputExe' p (encodeString outputRun:args) ""
+                      runProcess outputExe' p (pgmArgs++encodeString outputRun:args) ""
               | otherwise = return Nothing
         C.bracket (createDirectory False output)
                   (\_ -> removeTree output) $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
@@ -458,8 +458,8 @@ runGhcjsResult opts file = do
           B.writeFile (encodeString outputRun) $
             (if prof then profBaseJs else baseJs) opts <> lib <> out <> runMain
           -- run with node.js and SpiderMonkey
-          nodeResult <- runTestPgm "node"         tsDisableNode         nodeProgram
-          smResult   <- runTestPgm "SpiderMonkey" tsDisableSpiderMonkey spiderMonkeyProgram
+          nodeResult <- runTestPgm "node"         tsDisableNode         nodeProgram         ["--use_strict"]
+          smResult   <- runTestPgm "SpiderMonkey" tsDisableSpiderMonkey spiderMonkeyProgram ["--strict"]
           return $ catMaybes [nodeResult, smResult]
 
 
