@@ -166,8 +166,8 @@ registers :: Array StgReg JExpr
 registers = listArray (minBound, maxBound) (map regN (enumFrom R1))
   where
     regN r
-      | fromEnum r <= 32 = ValExpr . JVar . TxtI . T.pack . ("h$"++) . map toLower . show $ r
-      | otherwise        = [je| h$regs[`fromEnum r-32`] |]
+      | fromEnum r < 32 = ValExpr . JVar . TxtI . T.pack . ("h$"++) . map toLower . show $ r
+      | otherwise       = [je| h$regs[`fromEnum r-32`] |]
 
 instance ToJExpr StgRet where
   toJExpr r = ValExpr (JVar (rets!r))
