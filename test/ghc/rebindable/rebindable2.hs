@@ -7,7 +7,8 @@ module Main where
 	import Prelude(String,undefined,Maybe(..),IO,putStrLn,
 		Integer,(++),Rational, (==), (>=) );
 	
-	import Prelude(Monad(..),Applicative(..),Functor(..));
+	import Prelude(Monad(..),Functor(..));
+        import Control.Applicative(Applicative(..));
         import Control.Monad(ap, liftM);
 
 	debugFunc :: String -> IO a -> IO a;
