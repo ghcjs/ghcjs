@@ -9,7 +9,8 @@ module Main where
 
 import qualified Data.Array as Array
 import Data.List
-import Control.Monad ( liftM2, liftM3, liftM4 )
+import Control.Monad ( ap, liftM2, liftM3, liftM4 )
+import Control.Applicative
 import System.Random
 
 
@@ -258,6 +259,10 @@ generate n rnd (Gen m) = m size rnd'
 
 instance Functor Gen where
   fmap f m = m >>= return . f
+
+instance Applicative Gen where
+  pure = return
+  (<*>) = ap
 
 instance Monad Gen where
   return a    = Gen (\n r -> a)
