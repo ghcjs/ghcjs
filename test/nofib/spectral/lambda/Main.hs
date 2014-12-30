@@ -37,6 +37,8 @@ module Main( main ) where
 --              
 
 import System.Environment
+import Control.Monad
+import Control.Applicative
 
 main :: IO ()
 main = do { mainSimple ; mainMonad }
@@ -109,6 +111,13 @@ newtype StateMonad2 a = StateMonad2 (Env -> (Env,a))
 instance (Show a) => Show (StateMonad2 a) where
     show (StateMonad2 f) = show (f [])
 
+instance Functor StateMonad2 where
+    fmap f (StateMonad2 g) = StateMonad2 $ \s -> let (s1,a) = g s in (s1, f a)
+
+instance Applicative StateMonad2 where
+    pure  = return
+    (<*>) = ap
+
 instance Monad StateMonad2  where
     return a = StateMonad2 (\s -> (s,a))
     fail msg = StateMonad2 (\s -> (s,error msg))
@@ -172,6 +181,13 @@ apply a b         = fail ("bad application: " ++ pp a ++
 ----------------------------------------------------------------------
 -- A trivial monad so that we can use monad syntax.
 data Id a = Id a
+
+instance Functor Id where
+  fmap f (Id x) = Id (f x)
+
+instance Applicative Id where
+   pure  = return
+   (<*>) = ap
 
 instance Monad Id where
     return t = Id t

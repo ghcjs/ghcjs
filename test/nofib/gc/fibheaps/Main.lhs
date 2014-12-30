@@ -1,3 +1,5 @@
+> {-# LANGUAGE FlexibleContexts #-}
+
 Date:    Tue, 04 Jul 1995 13:10:58 -0400
 From:    Chris_Okasaki@LOCH.MESS.CS.CMU.EDU
 To:      simonpj@dcs.gla.ac.uk

@@ -21,7 +21,7 @@ import Foreign
 import Text.Printf
 import Control.Concurrent
 import Control.Monad
-import GHC.Base
+import GHC.Base hiding (foldr)
 import GHC.Conc
 
 type Reals = Ptr Double

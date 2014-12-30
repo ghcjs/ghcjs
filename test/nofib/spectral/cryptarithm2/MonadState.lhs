@@ -41,6 +41,7 @@
 > 	) where
 
 > import Control.Monad
+> import Control.Applicative
 > import MonadTrans
 
 <haskell:class>
@@ -92,6 +93,10 @@
 > 	fmap f p = State (\ s ->
 > 		let (x,s') = runState p s
 > 		in  (f x,s'))
+
+> instance Applicative (State s) where
+>    pure  = return
+>    (<*>) = ap
 
 > instance Monad (State s) where
 >    return v  = State (\ s -> (v,s))
@@ -149,13 +154,21 @@
 > 	fmap f p = StateT (\ s ->
 > 		do (x,s') <- runStateT p s
 > 		   return (f x,s'))
-> 
+>
+> instance (Monad m) => Applicative (StateT s m) where
+>    pure = return
+>    (<*>) = ap
+>
 > instance (Monad m) => Monad (StateT s m) where
 >    return v  = StateT (\ s -> return (v,s))
 >    p  >>= f  = StateT (\ s -> do (r,s') <- runStateT p s
 > 				   runStateT (f r) s')
 >    fail str  = StateT (\ s -> fail str)
 > 
+> instance (MonadPlus m) => Alternative (StateT s m) where
+>       empty = mzero
+>       (<|>) = mplus
+>
 > instance (MonadPlus m) => MonadPlus (StateT s m) where
 > 	mzero       = StateT (\ s -> mzero)
 > 	p `mplus` q = StateT (\ s -> runStateT p s `mplus` runStateT q s)

@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 -- | Implementation of Kahan summation algorithm that tests
 -- performance of tight loops involving unboxed arrays and floating
 -- point arithmetic.
