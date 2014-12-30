@@ -1,2 +1,3 @@
 disableSpiderMonkey: true
+disableJavaScriptCore: true
 

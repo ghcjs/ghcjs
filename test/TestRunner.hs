@@ -5,6 +5,7 @@ module Main where
 import           Control.Applicative
 import           Control.Monad
 import           Control.Monad.IO.Class
+import           Control.Lens (over, _1)
 import           Control.Concurrent.MVar
 import           Control.Concurrent
 import           Data.Char (isLower, toLower, isDigit, isSpace)
@@ -21,6 +22,7 @@ import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime, diffUTCTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
+import           Data.Traversable (traverse)
 import           Filesystem (removeTree, isFile, getWorkingDirectory, createDirectory, copyFile)
 import           Filesystem.Path ( replaceExtension, basename, directory, extension, addExtension
                                  , filename, addExtensions, dropExtensions)
@@ -94,8 +96,9 @@ setupTests tmpDir = do
       runhaskell = fromString (taWithRunhaskell testArgs)
   checkBooted ghcjs
   testDir       <- maybe (getTestDir ghcjs) (return . fromString) (taWithTests testArgs)
-  nodePgm       <- checkProgram "node" (taWithNode testArgs)         ["--help"]
-  smPgm         <- checkProgram "js"   (taWithSpiderMonkey testArgs) ["--help"]
+  nodePgm       <- checkProgram "node" (taWithNode testArgs)           ["--help"]
+  smPgm         <- checkProgram "js"   (taWithSpiderMonkey testArgs)   ["--help"]
+  jscPgm        <- checkProgram "jsc"  (taWithJavaScriptCore testArgs) ["--help"]
   -- fixme use command line options instead
   onlyOptEnv    <- getEnvOpt "GHCJS_TEST_ONLYOPT"
   onlyUnoptEnv  <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
@@ -112,7 +115,7 @@ setupTests tmpDir = do
       opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv noProf (taTravis testArgs) log testDir
                               symbsFile base
                               profSymbsFile profBase
-                              ghcjs runhaskell nodePgm smPgm
+                              ghcjs runhaskell nodePgm smPgm jscPgm
   es <- doesFileExist (encodeString specFile)
   when (not es) (error $ "test suite not found in " ++ toStringIgnore testDir)
   ts <- B.readFile (encodeString specFile) >>=
@@ -165,16 +168,17 @@ checkProgram defName userName testArgs = do
         True  -> return (Just $ fromString p)
         False -> return Nothing
 
-data TestArgs = TestArgs { taHelp             :: Bool
-                         , taWithGhcjs        :: String
-                         , taWithGhcjsPkg     :: String
-                         , taWithRunhaskell   :: String
-                         , taWithNode         :: Maybe String
-                         , taWithSpiderMonkey :: Maybe String
-                         , taWithTests        :: Maybe String
-                         , taNoProfiling      :: Bool
-                         , taBenchmark        :: Bool
-                         , taTravis           :: Bool
+data TestArgs = TestArgs { taHelp               :: Bool
+                         , taWithGhcjs          :: String
+                         , taWithGhcjsPkg       :: String
+                         , taWithRunhaskell     :: String
+                         , taWithNode           :: Maybe String
+                         , taWithSpiderMonkey   :: Maybe String
+                         , taWithJavaScriptCore :: Maybe String
+                         , taWithTests          :: Maybe String
+                         , taNoProfiling        :: Bool
+                         , taBenchmark          :: Bool
+                         , taTravis             :: Bool
                          } deriving Show
 
 optParser :: Parser TestArgs
@@ -184,56 +188,60 @@ optParser = TestArgs <$> switch (long "help" <> help "show help message")
                      <*> strOption (long "with-runhaskell" <> metavar "PROGRAM" <> value "runhaskell" <> help "runhaskell program to use")
                      <*> (optional . strOption) (long "with-node" <> metavar "PROGRAM" <> help "node.js program to use")
                      <*> (optional . strOption) (long "with-spidermonkey" <> metavar "PROGRAM" <> help "SpiderMonkey jsshell program to use")
+                     <*> (optional . strOption) (long "with-javascriptcore" <> metavar "PROGRAM" <> help "JavaScriptCore jsc program to use")
                      <*> (optional . strOption) (long "with-tests" <> metavar "LOCATION" <> help "location of the test cases")
                      <*> switch (long "no-profiling" <> help "do not run profiling tests")
                      <*> switch (long "benchmark" <> help "run benchmarks instead of regression tests")
                      <*> switch (long "travis" <> help "use settings for running on Travis CI")
 
 -- settings for the test suite
-data TestOpts = TestOpts { disableUnopt        :: Bool
-                         , disableOpt          :: Bool
-                         , noProfiling         :: Bool
-                         , travisCI            :: Bool
-                         , failedTests         :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
-                         , testsuiteLocation   :: FilePath
-                         , baseSymbs           :: FilePath
-                         , baseJs              :: B.ByteString
-                         , profBaseSymbs       :: FilePath
-                         , profBaseJs          :: B.ByteString
-                         , ghcjsProgram        :: FilePath
-                         , runhaskellProgram   :: FilePath
-                         , nodeProgram         :: Maybe FilePath
-                         , spiderMonkeyProgram :: Maybe FilePath
+data TestOpts = TestOpts { disableUnopt          :: Bool
+                         , disableOpt            :: Bool
+                         , noProfiling           :: Bool
+                         , travisCI              :: Bool
+                         , failedTests           :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
+                         , testsuiteLocation     :: FilePath
+                         , baseSymbs             :: FilePath
+                         , baseJs                :: B.ByteString
+                         , profBaseSymbs         :: FilePath
+                         , profBaseJs            :: B.ByteString
+                         , ghcjsProgram          :: FilePath
+                         , runhaskellProgram     :: FilePath
+                         , nodeProgram           :: Maybe FilePath
+                         , spiderMonkeyProgram   :: Maybe FilePath
+                         , javaScriptCoreProgram :: Maybe FilePath
                          }
 
 -- settings for a single test
 data TestSettings =
-  TestSettings { tsDisableNode         :: Bool
-               , tsDisableSpiderMonkey :: Bool
-               , tsDisableOpt          :: Bool
-               , tsDisableUnopt        :: Bool
-               , tsDisableTravis       :: Bool
-               , tsDisabled            :: Bool
-               , tsProf                :: Bool     -- ^ use profiling bundle
-               , tsCompArguments       :: [String] -- ^ command line arguments to pass to compiler
-               , tsArguments           :: [String] -- ^ command line arguments to pass to interpreter(node, js)
-               , tsCopyFiles           :: [String] -- ^ copy these files to the dir where the test is run
+  TestSettings { tsDisableNode           :: Bool
+               , tsDisableSpiderMonkey   :: Bool
+               , tsDisableJavaScriptCore :: Bool
+               , tsDisableOpt            :: Bool
+               , tsDisableUnopt          :: Bool
+               , tsDisableTravis         :: Bool
+               , tsDisabled              :: Bool
+               , tsProf                  :: Bool     -- ^ use profiling bundle
+               , tsCompArguments         :: [String] -- ^ command line arguments to pass to compiler
+               , tsArguments             :: [String] -- ^ command line arguments to pass to interpreter(node, js)
+               , tsCopyFiles             :: [String] -- ^ copy these files to the dir where the test is run
                } deriving (Eq, Show)
 
 instance Default TestSettings where
-  def = TestSettings False False False False False False False [] [] []
+  def = TestSettings False False False False False False False False [] [] []
 
 instance FromJSON TestSettings where
-  parseJSON (Object o) = TestSettings <$> o .:? "disableNode"         .!= False
-                                      <*> o .:? "disableSpiderMonkey" .!= False
-                                      <*> o .:? "disableOpt"          .!= False
-                                      <*> o .:? "disableUnopt"        .!= False
-                                      <*> o .:? "disableTravis"       .!= False
-                                      <*> o .:? "disabled"            .!= False
-                                      <*> o .:? "prof"                .!= False
-                                      <*> o .:? "compArguments"       .!= []
-                                      <*> o .:? "arguments"           .!= []
-                                      <*> o .:? "copyFiles"           .!= []
+  parseJSON (Object o) = TestSettings <$> o .:? "disableNode"           .!= False
+                                      <*> o .:? "disableSpiderMonkey"   .!= False
+                                      <*> o .:? "disableJavaScriptCore" .!= False
+                                      <*> o .:? "disableOpt"            .!= False
+                                      <*> o .:? "disableUnopt"          .!= False
+                                      <*> o .:? "disableTravis"         .!= False
+                                      <*> o .:? "disabled"              .!= False
+                                      <*> o .:? "prof"                  .!= False
+                                      <*> o .:? "compArguments"         .!= []
+                                      <*> o .:? "arguments"             .!= []
+                                      <*> o .:? "copyFiles"             .!= []
 
   parseJSON _ = mempty
 
@@ -433,10 +441,10 @@ runGhcjsResult opts file = do
                           , encodeString (filename input)
                           ] ++ opt ++ extraCompArgs ++ extraFiles
             args = tsArguments settings
-            runTestPgm name disabled getPgm pgmArgs
+            runTestPgm name disabled getPgm pgmArgs pgmArgs'
               | Just p <- getPgm opts, not (disabled settings) =
                   fmap (,name ++ desc) <$>
-                      runProcess outputExe' p (pgmArgs++encodeString outputRun:args) ""
+                      runProcess outputExe' p (pgmArgs++encodeString outputRun:pgmArgs'++args) ""
               | otherwise = return Nothing
         C.bracket (createDirectory False output)
                   (\_ -> removeTree output) $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
@@ -458,9 +466,26 @@ runGhcjsResult opts file = do
           B.writeFile (encodeString outputRun) $
             (if prof then profBaseJs else baseJs) opts <> lib <> out <> runMain
           -- run with node.js and SpiderMonkey
-          nodeResult <- runTestPgm "node"         tsDisableNode         nodeProgram         ["--use_strict"]
-          smResult   <- runTestPgm "SpiderMonkey" tsDisableSpiderMonkey spiderMonkeyProgram ["--strict"]
-          return $ catMaybes [nodeResult, smResult]
+          nodeResult <- runTestPgm "node"           tsDisableNode           nodeProgram           ["--use_strict"] []
+          smResult   <- runTestPgm "SpiderMonkey"   tsDisableSpiderMonkey   spiderMonkeyProgram   ["--strict"]     []
+          jscResult  <- over (traverse . _1 . _1) unmangleJscResult <$>
+                        runTestPgm "JavaScriptCore" tsDisableJavaScriptCore javaScriptCoreProgram []               ["--"]
+          return $ catMaybes [nodeResult, smResult, jscResult]
+
+-- jsc prefixes all sderr lines with "--> " and does not let us
+-- return a nonzero exit status
+unmangleJscResult :: StdioResult -> StdioResult
+unmangleJscResult (StdioResult exit out err)
+  | (x:xs) <- reverse (T.lines err)
+  , Just code <- T.stripPrefix "--> GHCJS JSC exit status: " x
+    = StdioResult (parseExit code) out (T.unlines . reverse $ map unmangle xs)
+  | otherwise = StdioResult exit out (T.unlines . map unmangle . T.lines $ err)
+  where
+    unmangle xs = fromMaybe xs (T.stripPrefix "--> " xs)
+    parseExit x = case reads (T.unpack x) of
+                    [(0,"")] -> ExitSuccess
+                    [(n,"")] -> ExitFailure n
+                    _        -> ExitFailure 999
 
 
 outputPath :: IO FilePath

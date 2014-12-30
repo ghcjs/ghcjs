@@ -1,2 +1,3 @@
 copyFiles: ["hGetBuf003.hs"]
 disableSpiderMonkey: True
+disableJavaScriptCore: True

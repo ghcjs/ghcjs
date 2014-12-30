@@ -351,6 +351,8 @@ fun h$doneMain {
   if(typeof process !== 'undefined' && process.exit) {
     process.exit(0);
   } else if(typeof quit !== 'undefined') {
+    if(typeof h$base_stdoutLeftover !== 'undefined' && h$base_stdoutLeftover && h$base_stdoutLeftover.val) print(h$base_stdoutLeftover.val);
+    if(typeof h$base_stderrLeftover !== 'undefined' && h$base_stderrLeftover && h$base_stderrLeftover.val) debug(h$base_stderrLeftover.val);
     quit();
   }
   h$finishThread(h$currentThread);

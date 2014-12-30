@@ -299,6 +299,7 @@ test-suite test
                       system-fileio        >= 0.3 && < 0.4,
                       text,
                       transformers,
+                      lens,
                       random,
                       time,
                       bytestring,
