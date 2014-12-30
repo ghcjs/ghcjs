@@ -158,7 +158,9 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
                      not (usingBase settings)) $ do
                  combineFiles dflags out
                  writeHtml dflags out
+                 writeRunMain dflags out
                  writeRunner settings dflags out
+                 writeWebAppManifest dflags out
 
 -- | link in memory
 link' :: DynFlags
@@ -369,6 +371,15 @@ writeHtml df out = do
   where
     htmlFile = out </> "index.html"
 
+-- | write the runmain.js file that will be run with defer so that it runs after index.html is loaded
+writeRunMain :: DynFlags -> FilePath -> IO ()
+writeRunMain df out = do
+  e <- doesFileExist runMainFile
+  when (not e) $
+    B.readFile (getLibDir df </> "runmain.js") >>= B.writeFile runMainFile
+  where
+    runMainFile = out </> "runmain.js"
+
 writeRunner :: GhcjsSettings -> DynFlags -> FilePath -> IO ()
 writeRunner settings dflags out = when (gsBuildRunner settings) $ do
   cd    <- getCurrentDirectory
@@ -408,6 +419,15 @@ writeRunner settings dflags out = when (gsBuildRunner settings) $ do
   T.writeFile runner ("#!" <> node <> "\n" <> src)
   Cabal.setFileExecutable runner
 #endif
+
+-- | write the manifest.webapp file that for firefox os
+writeWebAppManifest :: DynFlags -> FilePath -> IO ()
+writeWebAppManifest df out = do
+  e <- doesFileExist manifestFile
+  when (not e) $
+    B.readFile (getLibDir df </> "manifest.webapp") >>= B.writeFile manifestFile
+  where
+    manifestFile = out </> "manifest.webapp"
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
@@ -577,7 +597,7 @@ readSystemDeps dflags depsName requiredFor file = do
                           requiredFor ++ ", but was not found")
             _ -> return (pkgs, funs)
 
-                 
+
 
 readSystemWiredIn :: DynFlags -> IO [(Text, PackageKey)]
 readSystemWiredIn dflags = do

@@ -19,8 +19,9 @@ data-files:     lib/cache/boot.tar
                 lib/etc/*.html
                 lib/etc/*.js
                 lib/etc/*.c-tmpl
-		lib/etc/*.rc
-		lib/etc/*.manifest
+                lib/etc/*.rc
+                lib/etc/*.manifest
+                lib/etc/manifest.webapp
                 lib/bin/*.sh
                 lib/bin/*.exe.options
                 doc/*.txt
@@ -43,7 +44,7 @@ flag compiler-only
   default:            False
 
 flag network-uri
-  description: select the network/network-uri >= 2.6  
+  description: select the network/network-uri >= 2.6
   default:     True
 
 -- Don't rename the executables to include the version number in the filename
@@ -246,7 +247,7 @@ Executable ghcjs-boot
                       transformers,
                       lens,
                       unordered-containers,
-                      vector,              
+                      vector,
                       filepath             >= 1.3    && < 1.4,
                       text                 >= 0.11   && < 1.3,
                       bytestring           >= 0.10   && < 0.11,
