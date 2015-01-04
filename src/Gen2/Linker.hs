@@ -701,8 +701,7 @@ requiredUnits d = map (depsPackage d, depsModule d,) (IS.toList $ depsRequired d
 readDepsFile' :: LinkedObj -> IO (Deps, DepsLocation)
 readDepsFile' (ObjLoaded name bs) = pure . (,InMemory name bs) $
                                     readDeps name (BL.fromStrict bs)
-readDepsFile' (ObjFile file)      = do
-  putStrLn ("reading object file: " ++ file)
+readDepsFile' (ObjFile file)      =
   (,ObjectFile file) <$> readDepsFile file
 
 generateBase :: FilePath -> Base -> IO ()
