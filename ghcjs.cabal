@@ -126,7 +126,7 @@ Library
                    aeson          >= 0.7      && < 0.9,
                    text           >= 0.11     && < 1.3,
                    wl-pprint-text >= 1.1      && < 1.2,
-                   lens           >= 4.0      && < 4.7,
+                   lens           >= 4.0      && < 4.8,
                    yaml           >= 0.8      && < 0.9,
                    time,
                    system-filepath,
