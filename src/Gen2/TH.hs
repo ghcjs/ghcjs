@@ -182,7 +182,10 @@ ghcjsRunMeta' js_env js_settings desc tht show_code ppr_code cvt expr = do
   r        <- liftIO $ getThRunner js_env hsc_env dflags (tcg_mod gbl_env)
   base     <- liftIO $ takeMVar (thrBase r)
   let m        = tcg_mod gbl_env
-      pkgs     = imp_dep_pkgs . tcg_imports $ gbl_env
+      pkgs     = L.nub $
+                 (imp_dep_pkgs . tcg_imports $ gbl_env) ++
+                 concatMap (map fst . dep_pkgs .  mi_deps . hm_iface)
+                           (eltsUFM $ hsc_HPT hsc_env)
       settings = thSettings { gsUseBase = BaseState base }
   lr       <- liftIO $ linkTh settings
                               []
