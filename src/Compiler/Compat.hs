@@ -7,6 +7,7 @@ module Compiler.Compat ( PackageKey
                        , modulePackageKey
                        , stringToPackageKey
                        , primPackageKey
+                       , mainPackageKey
                        , modulePackageName
                        , getPackageName
                        , getPackageVersion
@@ -64,6 +65,9 @@ stringToPackageKey = stringToPackageId
 
 primPackageKey :: PackageKey
 primPackageKey = primPackageId
+
+mainPackageKey :: PackageKey
+mainPackageKey = mainPackageId
 
 modulePackageName :: DynFlags -> Module -> String
 modulePackageName dflags

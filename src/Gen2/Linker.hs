@@ -27,12 +27,15 @@ import           PackageConfig (sourcePackageId)
 import           Data.Maybe (listToMaybe)
 import           Distribution.Package (InstalledPackageId(..))
 #endif
+import           Module (moduleNameString)
 import           Outputable (ppr, showSDoc)
 import qualified Packages
 import qualified SysTools
 
 import           Control.Applicative
 import           Control.Concurrent.MVar
+import           Control.DeepSeq
+import           Control.Exception        (evaluate)
 import           Control.Lens             hiding ((<.>))
 import           Control.Monad
 import           Control.Parallel.Strategies
@@ -46,12 +49,13 @@ import           Data.Char                (toLower, chr)
 import           Data.Function            (on)
 import qualified Data.HashMap.Strict      as HM
 import           Data.Int
+import           Data.IntSet              (IntSet)
 import qualified Data.IntSet              as IS
 import           Data.List
   (partition, nub, foldl', intercalate, group, sort, groupBy, find)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
-import           Data.Maybe               (fromMaybe, isJust, maybeToList)
+import           Data.Maybe
 import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
@@ -96,6 +100,8 @@ import           Gen2.Rts                 (rtsText, rtsDeclsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
 
+import           System.Exit (exitFailure)
+
 type LinkableUnit = (Package, Module, Int) -- ^ module and the index of the block in the object file
 type Module       = Text
 
@@ -114,6 +120,11 @@ data LinkResult = LinkResult
   } deriving (Generic)
 
 instance Binary LinkResult
+
+data DepsLocation = ObjectFile  FilePath
+                  | ArchiveFile FilePath
+                  | InMemory    String ByteString
+                  deriving (Eq, Show)
 
 -- | link and write result to disk (jsexe directory)
 link :: DynFlags
@@ -174,13 +185,12 @@ link' :: DynFlags
       -> Set Fun                    -- ^ extra symbols to link in
       -> IO LinkResult
 link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
-      objDeps <- mapM readDepsFile' objFiles
-      let -- debug = buildingDebug dflags
-          rootSelector | Just baseMod <- gsGenBase settings =
+      (objDepsMap, objRequiredUnits) <- loadObjDeps objFiles
+      let rootSelector | Just baseMod <- gsGenBase settings =
                            \(Fun p m s) -> m == T.pack baseMod
                        | otherwise = isRootFun
           roots = S.fromList . filter rootSelector $
-            concatMap (map fst . M.toList . depsDeps) objDeps
+            concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
           rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
       -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageKeyString $ pkgs))
       compilationProgressMsg dflags $
@@ -200,19 +210,20 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
           pkgLibPaths = mkPkgLibPaths pkgs'
           getPkgLibPaths :: PackageKey -> ([FilePath],[String])
           getPkgLibPaths k = fromMaybe ([],[]) (M.lookup k pkgLibPaths)
+      (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps =<<
+          getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs')
+      pkgArchs <- getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs'')
       (allDeps, code) <-
         collectDeps dflags
-                    (lookupFun c
-                               (M.fromList . map (_1 %~ T.pack . packageKeyString)
-                                           . M.toList $ pkgLibPaths)
-                               (zip objDeps objFiles))
+                    (archsDepsMap `M.union` objDepsMap)
+                    (pkgs ++ [thisPackage dflags])
                     (baseUnits base)
                     (roots `S.union` rds `S.union` extraStaticDeps)
+                    (archsRequiredUnits ++ objRequiredUnits)
       let (outJs, metaSize, compactorState, stats) =
              renderLinker settings dflags (baseCompactorState base) code
           base'  = Base compactorState (nub $ basePkgs base ++ map mkPackage pkgs'')
                          (allDeps `S.union` baseUnits base)
-      pkgArchs <- getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs'')
       (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims dflags [] (filter (isAlreadyLinked base) pkgs')
       (shimsBefore, shimsAfter) <- getShims dflags jsFiles pkgs''
       return $ LinkResult outJs stats metaSize
@@ -229,61 +240,6 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
       . map (\k -> ( k
                    , (getPackageLibDirs dflags k, getPackageHsLibs dflags k)
                    ))
-
-    lookupFun :: MVar (Map (Package, Text, String) LinkedObj)
-              -> Map Text ([FilePath],[String])
-              -> [(Deps,LinkedObj)]
-              -> Package -> Module -> IO LinkedObj
-    lookupFun cache pkgPaths objs = {-# SCC "lookupFun" #-} lCached
-      where
-        lCached :: Package -> Module -> IO LinkedObj
-        lCached pkg mod = do
-          c <- takeMVar cache
-          let ext :: String
-              ext =
-                if pkg == mkPackage (thisPackage dflags)
-                  then objectSuf dflags
-                  else buildTag dflags ++ "_o"
-              k = (pkg, mod, ext)
-          case M.lookup k c of
-            Just p -> putMVar cache c >> return p
-            Nothing -> do
-              p <- l ext pkg mod
-              -- putStrLn ("looked up: " ++ either (const $ T.unpack (unPackage pkg) ++ ":" ++ T.unpack mod ++ " already loaded") show p)
-              putMVar cache (M.insert k p c)
-              return p
-        objs' = M.fromList $ map (\(Deps pkg m _ _ _, p) -> ((pkg,m),p)) objs
-        l ext pkg mod
-           -- already loaded objects
-           | Just p    <- M.lookup (pkg, mod) objs' = return p
-           -- known package in dependencies
-           | Just (pkg',libs) <- M.lookup (unPackage pkg) pkgPaths = searchPkgPaths [] pkg' libs
-           -- known wired-in package (no version)
-           -- -- | Just pkg' <- M.lookup (packageName pkg) pkgPaths = searchPaths [] pkg'
-           -- search in include dirs
-           | otherwise = searchPaths [] include
-           where
-             modPath = (T.unpack $ T.replace "." "/" mod) <.> ext
-             searchPkgPaths searched [] _ = do
-                error $ "cannot find module: " ++ T.unpack (unPackage pkg <> ":" <> mod)
-                        ++ "\nsearched in:\n" ++ unlines searched
-             searchPkgPaths searched (x:xs) [lib] = do
-               let libFile = "lib" ++ lib ++ profSuffix ++ ".js_a"
-                   profSuffix | WayProf `elem` ways dflags = "_p"
-                              | otherwise                  = ""
-               e <- doesFileExist (x </> libFile)
-               if e then return (ObjLib mod (x </> libFile))
-                    else searchPkgPaths (x:searched) xs [lib]
-             searchPkgPaths _ _ _ = error "searchPkgPaths: only one haskell library per package supported"
-
-             searchPaths searched [] = error $ "cannot find module: " ++ T.unpack (unPackage pkg <> ":" <> mod)
-                                            ++ "\nsearched in:\n" ++ unlines searched
-             searchPaths searched (x:xs) =
-                let p = x </> modPath
-                in  doesFileExist p >>=
-                      \case
-                         False -> searchPaths (p:searched) xs
-                         True  -> return (ObjFile p)
 
 renderLinker :: GhcjsSettings
              -> DynFlags
@@ -431,95 +387,107 @@ writeWebAppManifest df out = do
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
-modFuns (Deps _p _m _e _a d) = map fst (M.toList d)
+modFuns (Deps _p _m _r e _b) = M.keys e
 
 -- | get all dependencies for a given set of roots
-getDeps :: (Package -> Module -> IO LinkedObj)
-        -> Set LinkableUnit -- Fun -- ^ don't link these symbols
-        -> Set Fun -- ^ start here
+getDeps :: Map (Package,Module) Deps -- ^ loaded deps
+        -> Set LinkableUnit -- ^ don't link these blocks
+        -> Set Fun          -- ^ start here
+        -> [LinkableUnit]   -- ^ and also link these
         -> IO (Set LinkableUnit)
-getDeps lookup base fun = go' S.empty M.empty [] $ S.toList fun
+getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun)
   where
     go :: Set LinkableUnit
-       -> Map (Package, Module) Deps
-       -> [LinkableUnit]
+       -> Set LinkableUnit
        -> IO (Set LinkableUnit)
-    go result _    [] = return result
-    go result deps lls@((lpkg,lmod,n):ls) =
-      let key = (lpkg, lmod)
-      in  case M.lookup (lpkg,lmod) deps of
-            Nothing -> lookup lpkg lmod >>= readDepsFile' >>=
-                         \d -> go result (M.insert key d deps) lls
-            Just (Deps _ _ _ a _) -> go' result deps ls (S.toList $ a ! n)
+    go result open = case S.minView open of
+      Nothing -> return result
+      Just (lu@(lpkg,lmod,n), open') ->
+          let key = (lpkg, lmod)
+          in  case M.lookup (lpkg,lmod) lookup of
+                Nothing -> error ("getDeps.go: object file not loaded for:  " ++ show key)
+                Just (Deps _ _ _ _ b) ->
+                  let block = b!n
+                      result' = S.insert lu result
+                  in go' result'
+                         (addOpen result' open' $ map (lpkg,lmod,) (blockBlockDeps block))
+                         (blockFunDeps block)
 
     go' :: Set LinkableUnit
-        -> Map (Package, Module) Deps
-        -> [LinkableUnit]
+        -> Set LinkableUnit
         -> [Fun]
         -> IO (Set LinkableUnit)
-    go' result deps open [] = go result deps open
-    go' result deps open ffs@(f:fs) =
+    go' result open [] = go result open
+    go' result open (f:fs) =
         let key = (funPackage f, funModule f)
-        in  case M.lookup key deps of
-            Nothing -> lookup (funPackage f) (funModule f) >>= readDepsFile' >>=
-                           \d -> go' result (M.insert key d deps) open ffs
-            Just (Deps p m _e _a d) ->
-               let lu = maybe err (p,m,) (M.lookup f d)
-                   -- fixme, deps include nonexported symbols,
-                   -- add error again when those have been removed
-                   err = (p,m,-1)
-                   -- err = trace ("getDeps: unknown symbol: " ++ showFun f) (p,m,-1)
-               in if lu `S.member` result || (\(_,_,n) -> n== -1) lu || lu `S.member` base
-                    then go' result deps open fs
-                    else go' (S.insert lu result) deps (lu:open) fs
+        in  case M.lookup key lookup of
+              Nothing -> error ("getDeps.go': object file not loaded for:  " ++ show key)
+              Just (Deps p m _r e b) ->
+                 let lun :: Int
+                     lun = fromMaybe (error $ "exported function not found: " ++ show f)
+                                     (M.lookup f e)
+                     lu  = (funPackage f, funModule f, lun)
+                 in  go' result (addOpen result open [lu]) fs
 
--- | get all modules used by the roots and deps
-getDepsSources :: (Package -> Module -> IO LinkedObj)
-               -> Set LinkableUnit -- Fun
-               -> Set Fun
-               -> IO (Set LinkableUnit, [(LinkedObj, Set LinkableUnit)])
-getDepsSources lookup base roots = do
-  allDeps <- getDeps lookup base roots
-  allPaths <- mapM (\x@(pkg,mod,_) ->
-    (,S.singleton x) <$> lookup pkg mod) (S.toList allDeps)
-  return $ (allDeps, M.toList (M.fromListWith S.union allPaths))
+    addOpen :: Set LinkableUnit -> Set LinkableUnit -> [LinkableUnit]
+            -> Set LinkableUnit
+    addOpen result open newUnits =
+      let alreadyLinked s = S.member s result ||
+                            S.member s open   ||
+                            S.member s base
+      in  open `S.union` (S.fromList $ filter (not . alreadyLinked) newUnits)
 
 -- | collect dependencies for a set of roots
 collectDeps :: DynFlags
-            -> (Package -> Module -> IO LinkedObj)
+            -> Map (Package, Module) (Deps, DepsLocation)
+            -> [PackageKey]     -- ^ packages, code linked in this order
             -> Set LinkableUnit -- ^ do not include these
             -> Set Fun -- ^ roots
+            -> [LinkableUnit] -- ^ more roots
             -> IO ( Set LinkableUnit
                   , [(Package, Module, JStat, [ClosureInfo], [StaticInfo])]
                   )
-collectDeps dflags lookup base roots = do
-  (allDeps, srcs0) <- getDepsSources lookup base roots
+collectDeps dflags lookup packages base roots units = do
+  allDeps <- getDeps (fmap fst lookup) base roots units
   -- read ghc-prim first, since we depend on that for static initialization
-  let (primSrcs, srcs) = partition isPrimSrc srcs0
-      isPrimSrc (_, fs)
-        = (=="ghc-prim") . (\(p,_,_) -> getPackageName dflags (toPackageKey p))
-          . head
-          . S.toList $ fs
-  code <- mapM (uncurry extractDeps) (primSrcs ++ srcs)
+  let packages' = uncurry (++) $ partition (==primPackageKey) (nub packages)
+      unitsByModule :: Map (Package, Module) IntSet
+      unitsByModule = M.fromListWith IS.union $
+                      map (\(p,m,n) -> ((p,m),IS.singleton n)) (S.toList allDeps)
+      lookupByPkg :: Map Package [(Deps, DepsLocation)]
+      lookupByPkg = M.fromListWith (++) (map (\((p,m),v) -> (p,[v])) (M.toList lookup))
+  code <- fmap (catMaybes . concat) . forM packages' $ \pkg -> do
+    mapM (uncurry $ extractDeps unitsByModule)
+         (fromMaybe [] $ M.lookup (mkPackage pkg) lookupByPkg)
   return (allDeps, code)
 
-extractDeps :: LinkedObj
-            -> Set LinkableUnit
-            -> IO (Package, Module, JStat, [ClosureInfo], [StaticInfo])
-extractDeps obj units = do
-  let symbs        = IS.fromList . map (\(_,_,n) -> n) . S.toList $ units
-      (p, m, _)    = S.elemAt 0 units
-      selector n _ = n `IS.member` symbs || isGlobalUnit n
-      extr (ObjFile f)  = readObjectFileKeys selector f
-      extr (ObjLib m l) = readObjectKeys (l ++ ':':T.unpack m) selector <$>
-                          Ar.readObject (mkModuleName $ T.unpack m) l
-      extr (ObjLoaded n b) = return $ readObjectKeys n selector (BL.fromStrict b)
-  l <- extr obj
-  return ( p
-         , m
-         , mconcat (map oiStat l)
-         , concatMap oiClInfo l
-         , concatMap oiStatic l)
+extractDeps :: Map (Package, Module) IntSet
+            -> Deps
+            -> DepsLocation
+            -> IO (Maybe (Package, Module, JStat, [ClosureInfo], [StaticInfo]))
+extractDeps units deps loc =
+  case M.lookup (pkg, mod) units of
+    Nothing       -> return Nothing
+    Just modUnits -> do
+      let selector n _  = n `IS.member` modUnits || isGlobalUnit n
+      x <- case loc of
+        ObjectFile js_o  -> collectCode =<< readObjectFileKeys selector js_o
+        ArchiveFile js_a -> collectCode =<<
+                            (readObjectKeys (js_a ++ ':':T.unpack mod) selector <$>
+                            Ar.readObject (mkModuleName $ T.unpack mod) js_a)
+        InMemory n b     -> collectCode $
+                            readObjectKeys n selector (BL.fromStrict b)
+      evaluate (rnf x)
+      return x
+  where
+    pkg           = depsPackage deps
+    mod           = depsModule deps
+    collectCode l = let x = ( pkg
+                            , mod
+                            , mconcat (map oiStat l)
+                            , concatMap oiClInfo l
+                            , concatMap oiStatic l)
+                    in evaluate (rnf x) >> return (Just x)
 
 mkPackage :: PackageKey -> Package
 mkPackage pk = Package (T.pack $ packageKeyString pk)
@@ -702,13 +670,40 @@ closePackageDeps dflags pkgs
             Packages.packageConfigId
             (listToMaybe $ filter ((==ipid).Packages.installedPackageId) allPkgs)
 #endif
--- read dependencies from an object that might have already been loaded
-readDepsFile' :: LinkedObj -> IO Deps
-readDepsFile' (ObjLoaded name bs) = pure (readDeps name (BL.fromStrict bs))
-readDepsFile' (ObjFile file)      = readDepsFile file
-readDepsFile' (ObjLib mod file)   =
-  Ar.withObject (mkModuleName $ T.unpack mod) file $ \h _ ->
-    hReadDeps (file ++ ':':T.unpack mod) h
+
+-- read all dependency data from the to-be-linked files
+loadObjDeps :: [LinkedObj] -- ^ object files to link
+            -> IO (Map (Package, Module) (Deps, DepsLocation), [LinkableUnit])
+loadObjDeps objs = prepareLoadedDeps <$> mapM readDepsFile' objs
+
+loadArchiveDeps :: [FilePath]
+                -> IO (Map (Package, Module) (Deps, DepsLocation), [LinkableUnit])
+loadArchiveDeps archives = do
+  archDeps <- forM archives $ \file ->
+    Ar.withAllObjects file $ \modulename h _len -> (,ArchiveFile file) <$>
+        hReadDeps (file ++ ':':moduleNameString modulename) h
+  return (prepareLoadedDeps $ concat archDeps)
+
+prepareLoadedDeps :: [(Deps, DepsLocation)]
+                  -> (Map (Package, Module) (Deps, DepsLocation), [LinkableUnit])
+prepareLoadedDeps deps =
+  let req     = concatMap (requiredUnits . fst) deps
+      depsMap = M.fromList $ map (\d -> ((depsPackage (fst d)
+                                         ,depsModule (fst d)), d))
+                                 deps
+  in  (depsMap, req)
+
+requiredUnits :: Deps -> [LinkableUnit]
+requiredUnits d = map (depsPackage d, depsModule d,) (IS.toList $ depsRequired d)
+
+-- read dependencies from an object that might have already been into memory
+-- pulls in all Deps from an archive
+readDepsFile' :: LinkedObj -> IO (Deps, DepsLocation)
+readDepsFile' (ObjLoaded name bs) = pure . (,InMemory name bs) $
+                                    readDeps name (BL.fromStrict bs)
+readDepsFile' (ObjFile file)      = do
+  putStrLn ("reading object file: " ++ file)
+  (,ObjectFile file) <$> readDepsFile file
 
 generateBase :: FilePath -> Base -> IO ()
 generateBase outDir b =

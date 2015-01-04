@@ -225,8 +225,10 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
                                                  src_span)
                                  (exprType ds_expr)
     bind n u e = NonRec (thExpr n u) e
-    mod n      = mkModule pkg (mkModuleName $ "ThRunner" ++ show n)
-    pkg        = stringToPackageKey "thrunner"
+    mod n      = mkModule thrunnerPackage (mkModuleName $ "ThRunner" ++ show n)
+
+thrunnerPackage :: PackageKey
+thrunnerPackage = stringToPackageKey "thrunner"
 
 getThRunner :: GhcjsEnv -> HscEnv -> DynFlags -> Module -> IO ThRunner
 getThRunner js_env hsc_env dflags m = do
@@ -264,7 +266,9 @@ linkTh settings js_files dflags pkgs hpt code = do
                              js_files
                              is_root
                              th_deps
-      dflags'   = dflags { ways = WayDebug : ways dflags }
+      dflags'   = dflags { ways        = WayDebug : ways dflags
+                         , thisPackage = thrunnerPackage
+                         }
       obj_files = maybe []
                         (\b -> ObjLoaded "<Template Haskell>" b :
                                map ObjFile (concatMap getOfiles linkables))
@@ -457,10 +461,12 @@ ghcjsCompileCoreExpr js_env settings hsc_env srcspan ds_expr = do
     ty       = expandTypeSynonyms (exprType ds_expr)
     thExpr n = mkVanillaGlobal (mkExternalName (mkRegSingleUnique (1+n)) (mod n) (mkVarOcc "thExpr") srcspan) ty
     bind n e = NonRec (thExpr n) e
-    mod n    = mkModule pkg (mkModuleName $ "ThRunner" ++ show n)
-    pkg      = stringToPackageId "thrunner"
+    mod n    = mkModule thrunnerPackage (mkModuleName $ "ThRunner" ++ show n)
     dflags   = hsc_dflags hsc_env
     eDeps e  = uniqSetToList . mkUniqSet . catMaybes $ map (fmap modulePackageId . nameModule_maybe . idName) (e ^.. template)
+
+thrunnerPackage :: PackageId
+thrunnerPackage = stringToPackageId "thrunner"
 
 linkTh :: GhcjsSettings        -- settings (contains the base state)
        -> [FilePath]           -- extra js files
@@ -480,7 +486,9 @@ linkTh settings js_files dflags expr_pkgs hpt code = do
       obj_files = maybe [] (\b -> (ObjLoaded "<Template Haskell>" b) : map ObjFile (concatMap getOfiles linkables)) code
       packageLibPaths :: PackageId -> [FilePath]
       packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
-      dflags' = dflags { ways = WayDebug : ways dflags }
+      dflags' = dflags { ways = WayDebug : ways dflags
+                       , thisPackage = thrunnerPackage
+                       }
   -- link all packages that TH depends on, error if not configured
   (th_deps_pkgs, th_deps) <- Gen2.thDeps dflags'
   (rts_deps_pkgs, _) <- Gen2.rtsDeps dflags'

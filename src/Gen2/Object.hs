@@ -6,7 +6,8 @@
              TupleSections,
              ScopedTypeVariables,
              DeriveGeneric,
-             Rank2Types #-}
+             Rank2Types,
+             GeneralizedNewtypeDeriving#-}
 
 {- |
   Serialization/deserialization for the binary .js_o files
@@ -44,7 +45,7 @@ module Gen2.Object ( object
                    , isGlobalUnit
                    , SymbolTable
                    , ObjUnit (..)
-                   , Deps (..)
+                   , Deps (..), BlockDeps (..)
                    , Fun (..), showFun
                    , Package (..), showPkg
                    , versionTag, versionTagLength
@@ -52,7 +53,7 @@ module Gen2.Object ( object
 
 import           Control.Applicative
 import           Control.DeepSeq
-import           Control.Exception (bracket)
+import           Control.Exception (bracket, evaluate)
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Trans
@@ -72,10 +73,13 @@ import qualified Data.Foldable as F
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import           Data.Int
+import qualified Data.IntMap as IM
+import           Data.IntSet (IntSet)
+import qualified Data.IntSet as IS
 import           Data.List (sortBy)
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.Maybe (catMaybes)
+import           Data.Maybe (catMaybes, fromMaybe)
 import           Data.Monoid
 import           Data.Set (Set)
 import qualified Data.Set as S
@@ -104,12 +108,23 @@ data Header = Header { symbsLen :: !Int64
                      } deriving (Eq, Ord, Show)
 
 -- | dependencies for a single module
-data Deps = Deps { depsPackage  :: !Package
-                 , depsModule   :: !Text
-                 , depsExported :: Map Fun ExpFun
-                 , depsBlocks   :: Array Int (Set Fun)
-                 , depsDeps     :: Map Fun Int
-                 }
+data Deps = Deps
+  { depsPackage         :: !Package                -- ^ package name
+  , depsModule          :: !Text                   -- ^ module name
+  , depsRequired        :: !IntSet                 -- ^ blocks that always need to be linked when this object is loaded (e.g. everything that contains initializer code or foreign exports)
+  , depsHaskellExported :: !(Map   Fun  Int)       -- ^ exported Haskell functions -> block
+  , depsBlocks          :: !(Array Int  BlockDeps) -- ^ info about each block
+  } deriving (Show, Generic)
+
+instance NFData Deps
+
+data BlockDeps = BlockDeps
+  { blockBlockDeps       :: [Int] -- ^ dependencies on blocks in this object
+  , blockFunDeps         :: [Fun] -- ^ dependencies on exported symbols in other objects
+  , blockForeignExported :: [ExpFun]
+  } deriving (Show, Generic)
+
+instance NFData BlockDeps
 
 data ExpFun = ExpFun { isIO   :: !Bool
                      , args   :: [JSFFIType]
@@ -144,12 +159,6 @@ data JSFFIType = Int8Type
                | RefType
                deriving (Show, Ord, Eq, Enum)
 
-instance NFData Deps where rnf (Deps p m e a d) = p     `seq`
-                                                  m     `seq`
-                                                  rnf e `seq`
-                                                  rnf a `seq`
-                                                  rnf d `seq` ()
-
 data Fun = Fun { funPackage :: !Package
                , funModule  :: !Text
                , funSymbol  :: !Text
@@ -163,7 +172,7 @@ data Package = Package { packageName    :: !Text
                        }
 -} 
 newtype Package = Package { unPackage :: Text }
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show, Generic, NFData)
 instance DB.Binary Package
 
 -- we need to store the size separately, since getting a HashMap's size is O(n)
@@ -277,9 +286,9 @@ object' st0 deps0 os = rnf deps0 `seq` (hdr <> symbs <> deps1 <> idx <> mconcat 
   where
     hdr          = putHeader (Header (bl symbs) (bl deps1) (bl idx))
     bl           = fromIntegral . B.length
-    (st1, deps1) = putDeps  st0 deps0
-    (st2, idx)   = putIndex st1 os
-    symbs        = putSymbolTable st2
+    deps1        = putDepsSection deps0
+    (sti, idx)   = putIndex st0 os
+    symbs        = putSymbolTable sti
 
 putIndex :: SymbolTable -> [([Text], ByteString)] -> (SymbolTable, ByteString)
 putIndex st xs = runPutS st (put $ zip symbols offsets)
@@ -296,14 +305,38 @@ putDeps st deps = runPutS st (put deps)
 getDeps :: String -> SymbolTableR -> ByteString -> Deps
 getDeps name st bs = runGetS name st get bs
 
+toI32 :: Int -> Int32
+toI32 = fromIntegral
+
+fromI32 :: Int32 -> Int
+fromI32 = fromIntegral
+
+putDepsSection :: Deps -> ByteString
+putDepsSection deps =
+  let (st, depsbs) = putDeps emptySymbolTable deps
+      stbs         = putSymbolTable st
+  in  DB.runPut (DB.putWord32le (fromIntegral $ B.length stbs)) <> stbs <> depsbs
+
+getDepsSection :: String -> ByteString -> Deps
+getDepsSection name bs =
+  let symbsLen = fromIntegral $ DB.runGet DB.getWord32le bs
+      symbs    = getSymbolTable (B.drop 4 bs)
+  in  getDeps name symbs (B.drop (4+symbsLen) bs)
+
 instance Objectable Deps where
-  put (Deps p m e a d) = put p >> put m >> put (M.toList e) >> put (elems a) >>
-                         put (map (\(x,y) -> (x, fromIntegral y :: Int32)) $ M.toList d)
+  put (Deps p m r e b)
+    = put p >> put m >> put (map toI32 $ IS.toList r) >>
+      put (map (\(x,y) -> (x, toI32 y)) $ M.toList e) >>
+      put (elems b)
   get = Deps <$> get
              <*> get
-             <*> (M.fromList <$> get)
+             <*> (IS.fromList . map fromI32 <$> get)
+             <*> (fmap fromI32 . M.fromList <$> get)
              <*> ((\xs -> listArray (0, length xs - 1) xs) <$> get)
-             <*> (M.fromList . map (\(x,(y::Int32)) -> (x, fromIntegral y)) <$> get)
+
+instance Objectable BlockDeps where
+  put (BlockDeps bbd bfd bfe) = put bbd >> put bfd >> put bfe
+  get = BlockDeps <$> get <*> get <*> get
 
 instance Objectable ExpFun where
   put (ExpFun isIO args res) = put isIO >> put args >> put res
@@ -318,22 +351,19 @@ hReadDeps :: String -> Handle -> IO Deps
 hReadDeps name h = do
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
-    Left err -> error ("readDepsFile: not a valid GHCJS object: " ++ name ++ "\n    " ++ err)
+    Left err -> error ("hReadDeps: not a valid GHCJS object: " ++ name ++ "\n    " ++ err)
     Right hdr -> do
-      bs <- B.hGet h (fromIntegral $ symbsLen hdr + depsLen hdr)
-      let symbs = getSymbolTable bs
-          deps  = getDeps name symbs (B.drop (fromIntegral (symbsLen hdr)) bs)
-      return deps
+      hSeek h RelativeSeek (fromIntegral $ symbsLen hdr)
+      getDepsSection name <$> B.hGet h (fromIntegral $ depsLen hdr)
 
 -- | call with contents of the file
 readDeps :: String -> ByteString -> Deps
-readDeps name bs = case getHeader bs of
-                     Left err -> error ("readDeps: not a valid GHCJS object: " ++ name ++ "\n   " ++ err)
-                     Right hdr ->
-                       let bsymbs = B.drop (fromIntegral headerLength) bs
-                           bdeps  = B.drop (fromIntegral (symbsLen hdr)) bsymbs
-                           symbs  = getSymbolTable bsymbs
-                       in getDeps name symbs bdeps
+readDeps name bs =
+  case getHeader bs of
+    Left err -> error ("readDeps: not a valid GHCJS object: " ++ name ++ "\n   " ++ err)
+    Right hdr ->
+      let depsStart = fromIntegral headerLength + fromIntegral (symbsLen hdr)
+      in  getDepsSection name (B.drop depsStart bs)
 
 -- | extract the linkable units from an object file
 readObjectFile :: FilePath -> IO [ObjUnit]
@@ -445,15 +475,21 @@ showObject xs = mconcat (zipWith showSymbol xs [0..])
         ]
 
 showDeps :: Deps -> TL.Text
-showDeps (Deps p m e a d) =
+showDeps (Deps p m r e b) =
   "package: " <> showPkg p <> "\n" <>
   "module: "  <> TL.fromStrict m <> "\n" <>
-  "exports: " <> TL.pack (show $ M.toList e) <> "\n" <>
-  "deps:\n"   <> TL.unlines (map dumpDep $ M.toList d)
+  "required:" <> TL.pack (show $ IS.toList r) <> "\n" <>
+  "blocks:\n"   <> TL.unlines (map dumpBlock $ assocs b)
   where
-    dumpDep (s, n) = TL.fromStrict (funSymbol s) <> " -> " <> TL.pack (show n) <> "\n" <> 
-      F.foldMap (\(Fun fp fm fs) -> "   "
-      <> showPkg fp <> ":" <> TL.fromStrict fm <> "." <> TL.fromStrict fs <> "\n") (a ! n)
+    listOf n f xs = "  " <> n <> ":\n" <>
+                    TL.unlines (map (TL.pack . ("  - "++) . f) xs)
+    blockExps = IM.fromListWith (++) $ map (\(f,n) -> (n,[f])) (M.toList e)
+    dumpBlock (n, (BlockDeps bbd bfd bfe)) = TL.pack (show n) <> " ->\n" <>
+      listOf "block deps" show bbd <>
+
+      listOf "external deps" showFun bfd <>
+      listOf "exports"       showFun (fromMaybe [] $ IM.lookup n blockExps) {- <>
+      listOf "foreign exports" fixme bfe fixme -}
 
 showPkg :: Package -> TL.Text
 showPkg = TL.fromStrict . unPackage

@@ -4,7 +4,7 @@ module Gen2.Archive ( Entry(..), Index(..), IndexEntry(..), Meta(..)
                     , buildArchive
                     , readMeta, readIndex
                     , readSource, readAllSources
-                    , readObject, withObject
+                    , readObject, withObject, withAllObjects
                     ) where
 
 import           Control.Applicative
@@ -100,7 +100,7 @@ readSource source file = withArchive "readSource" file $
 
 readAllSources :: FilePath -> IO [(FilePath, ByteString)]
 readAllSources file = withArchive "readAllSources" file $ \sections index h ->
-  forM [ (o, l, src) | (IndexEntry (JsSource src) o l) <- index ] $ \(o, l, src) -> do
+  forM [ (o, l, src) | IndexEntry (JsSource src) o l <- index ] $ \(o, l, src) -> do
     hSeek h AbsoluteSeek (fromIntegral $ dataSectionStart sections + fromIntegral o)
     (src,) <$> B.hGet h (fromIntegral l)
 
@@ -112,6 +112,12 @@ readObject m file = withArchive "readObject" file $
 withObject :: ModuleName -> FilePath -> (Handle -> Int64 -> IO a) -> IO a
 withObject m file f = withArchive "withObject" file $
   withModuleObject ("withObject " ++ file) m f
+
+withAllObjects :: FilePath -> (ModuleName -> Handle -> Int64 -> IO a) -> IO [a]
+withAllObjects file f = withArchive "withAllObjects" file $ \sections index h ->
+  forM [ (o, l, mn) | IndexEntry (Object mn) o l <- index ] $ \(o, l, mn) -> do
+    hSeek h AbsoluteSeek (fromIntegral $ dataSectionStart sections + fromIntegral o)
+    f (mkModuleName (T.unpack mn)) h l
 
 ---------------------------------------------------------------------------------
 

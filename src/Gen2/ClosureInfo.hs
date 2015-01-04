@@ -1,6 +1,9 @@
-{-# LANGUAGE CPP, FlexibleContexts, QuasiQuotes, DeriveDataTypeable, OverloadedStrings #-}
+{-# LANGUAGE CPP, FlexibleContexts, QuasiQuotes, DeriveDataTypeable, DeriveGeneric, OverloadedStrings #-}
 
 module Gen2.ClosureInfo where
+
+import           Control.DeepSeq
+import           GHC.Generics
 
 import           Data.Array
 import           Data.Bits ((.|.), shiftL)
@@ -54,7 +57,9 @@ data VarType = PtrV     -- pointer = reference to heap object (closure object)
              | RtsObjV  -- some RTS object from GHCJS (for example TVar#, MVar#, MutVar#, Weak#)
              | ObjV     -- some JS object, user supplied, be careful around these, can be anything
              | ArrV     -- boxed array
-                deriving (Eq, Ord, Show, Enum, Bounded)
+                deriving (Eq, Ord, Show, Enum, Bounded, Generic)
+
+instance NFData VarType
 
 -- can we unbox C x to x, only if x is represented as a Number
 isUnboxableCon :: DataCon -> Bool
@@ -189,7 +194,9 @@ data ClosureInfo = ClosureInfo
      , ciType    :: CIType    -- ^ type of the object, with extra info where required
      , ciStatic  :: CIStatic  -- ^ static references of this object
      }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData ClosureInfo
 
 data CIType = CIFun { citArity :: Int  -- ^ function arity
                     , citRegs  :: Int  -- ^ number of registers for the args
@@ -199,17 +206,23 @@ data CIType = CIFun { citArity :: Int  -- ^ function arity
             | CIPap
             | CIBlackhole
             | CIStackFrame
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData CIType
 
 data CIRegs = CIRegsUnknown
             | CIRegs { ciRegsSkip  :: Int       -- ^ unused registers before actual args start
                      , ciRegsTypes :: [VarType] -- ^ args
                      }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData CIRegs
 
 data CIStatic = -- CIStaticParent { staticParent :: Ident } -- ^ static refs are stored in parent in fungroup
                 CIStaticRefs   { staticRefs :: [Text] } -- ^ list of refs that need to be kept alive
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData CIStatic
 
 noStatic :: CIStatic
 noStatic = CIStaticRefs []
@@ -228,7 +241,9 @@ data CILayout = CILayoutVariable            -- layout stored in object itself, f
                   { layoutSize :: !Int      -- closure size in array positions, including entry
                   , layout     :: [VarType]
                   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData CILayout
 
 -- standard fixed layout: payload types
 -- payload starts at .d1 for heap objects, entry closest to Sp for stack frames
@@ -329,24 +344,32 @@ data StaticInfo = StaticInfo { siVar    :: !Text          -- ^ global object
                              , siVal    :: !StaticVal     -- ^ static initialization
                              , siCC     :: !(Maybe Ident) -- ^ optional CCS name
                              }
-  deriving (Eq, Ord, Show, Typeable)
+  deriving (Eq, Ord, Show, Typeable, Generic)
+
+instance NFData StaticInfo
 
 data StaticVal = StaticFun     !Text                     -- ^ heap object for function
                | StaticThunk   !(Maybe Text)             -- ^ heap object for CAF (field is Nothing when thunk is initialized in an alternative way, like string thunks through h$str)
                | StaticUnboxed !StaticUnboxed            -- ^ unboxed constructor (Bool, Int, Double etc)
                | StaticData    !Text [StaticArg]         -- ^ regular datacon app
                | StaticList    [StaticArg] (Maybe Text)  -- ^ list initializer (with optional tail)
-  deriving (Eq, Ord, Show, Typeable)
+  deriving (Eq, Ord, Show, Typeable, Generic)
+
+instance NFData StaticVal
 
 data StaticUnboxed = StaticUnboxedBool   !Bool
                    | StaticUnboxedInt    !Integer
                    | StaticUnboxedDouble !SaneDouble
-  deriving (Eq, Ord, Show, Typeable)
+  deriving (Eq, Ord, Show, Typeable, Generic)
+
+instance NFData StaticUnboxed
 
 data StaticArg = StaticObjArg !Text             -- ^ reference to a heap object
                | StaticLitArg !StaticLit        -- ^ literal
                | StaticConArg !Text [StaticArg] -- ^ unfloated constructor
-  deriving (Eq, Ord, Show, Typeable)
+  deriving (Eq, Ord, Show, Typeable, Generic)
+
+instance NFData StaticArg
 
 data StaticLit = BoolLit   !Bool
                | IntLit    !Integer
@@ -355,7 +378,9 @@ data StaticLit = BoolLit   !Bool
                | StringLit !Text
                | BinLit    !ByteString
                | LabelLit  !Bool !Text -- ^ is function pointer, label (also used for string / binary init)
-  deriving (Eq, Ord, Show, Typeable)
+  deriving (Eq, Ord, Show, Typeable, Generic)
+
+instance NFData StaticLit
 
 instance ToJExpr StaticArg where
   toJExpr (StaticLitArg l) = toJExpr l

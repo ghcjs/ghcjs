@@ -612,8 +612,8 @@ genPrim _ t DataToTagOp [r] [d]
 genPrim _ t TagToEnumOp [r] [tag]
   | isBoolTy t = PrimInline [j| `r` = `tag`?true:false;  |]
   | otherwise  = PrimInline [j| `r` = h$tagToEnum(`tag`) |]
+genPrim _ _ AddrToAnyOp [r] [d,_o] = PrimInline [j| `r` = `d`; |]
 {-
-AddrToAnyOp
 MkApUpd0_Op
 NewBCOOp
 UnpackClosureOp

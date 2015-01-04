@@ -111,6 +111,5 @@ newGhcjsEnv = GhcjsEnv <$> newMVar M.empty <*> newMVar M.empty <*> newMVar 0
 
 -- an object file that's either already in memory (with name) or on disk
 data LinkedObj = ObjFile   FilePath          -- load from this file
-               | ObjLib    Text   FilePath   -- load from library (with module name)
                | ObjLoaded String ByteString -- already loaded, description
                deriving (Eq, Ord, Show)

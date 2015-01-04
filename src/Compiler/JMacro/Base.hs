@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverlappingInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, StandaloneDeriving, FlexibleContexts, TypeSynonymInstances, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, BangPatterns #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverlappingInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, StandaloneDeriving, FlexibleContexts, TypeSynonymInstances, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, BangPatterns, DeriveGeneric #-}
 
 -----------------------------------------------------------------------------
 {- |
@@ -40,6 +40,7 @@ module Compiler.JMacro.Base (
 import Prelude hiding (tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
 import Control.Applicative hiding (empty)
 import Control.Arrow (second, (***))
+import Control.DeepSeq
 import Control.Monad.State.Strict
 import Control.Monad.Identity
 
@@ -51,10 +52,12 @@ import qualified Data.Map as M
 import qualified Data.Text.Lazy as TL
 import           Data.Text (Text)
 import qualified Data.Text as T
-import Data.Generics
+import Data.Data
 import Data.Hashable (Hashable)
 import Data.Monoid (Monoid, mappend, mempty)
 import Data.Text.Binary ()
+
+import GHC.Generics
 
 import Numeric(showHex)
 import Safe
@@ -77,6 +80,8 @@ x $$$ y = align (nest 2 $ x $+$ y)
 --------------------------------------------------------------------}
 
 newtype IdentSupply a = IS {runIdentSupply :: State [Ident] a} deriving Typeable
+
+instance NFData (IdentSupply a) where rnf (IS{}) = ()
 
 inIdentSupply :: (State [Ident] a -> State [Ident] b) -> IdentSupply a -> IdentSupply b
 inIdentSupply f x = IS $ f (runIdentSupply x)
@@ -130,7 +135,9 @@ data JStat = DeclStat   Ident
            | LabelStat JsLabel JStat
            | BreakStat (Maybe JsLabel)
            | ContinueStat (Maybe JsLabel)
-             deriving (Eq, Ord, Show, Data, Typeable)
+             deriving (Eq, Ord, Show, Data, Typeable, Generic)
+
+instance NFData JStat
 
 type JsLabel = Text
 
@@ -154,7 +161,9 @@ data JExpr = ValExpr    JVal
            | ApplExpr   JExpr [JExpr]
            | UnsatExpr  (IdentSupply JExpr)
            | AntiExpr   Text
-             deriving (Eq, Ord, Show, Data, Typeable)
+             deriving (Eq, Ord, Show, Data, Typeable, Generic)
+
+instance NFData JExpr
 
 -- | Values
 data JVal = JVar     Ident
@@ -166,7 +175,9 @@ data JVal = JVar     Ident
           | JHash    (M.Map Text JExpr)
           | JFunc    [Ident] JStat
           | UnsatVal (IdentSupply JVal)
-            deriving (Eq, Ord, Show, Data, Typeable)
+            deriving (Eq, Ord, Show, Data, Typeable, Generic)
+
+instance NFData JVal
 
 data JOp =
         EqOp            -- ==
@@ -192,7 +203,9 @@ data JOp =
       | LOrOp           -- ||
       | InstanceofOp    -- instanceof
       | InOp            -- in
-  deriving (Show, Eq, Ord, Enum, Data, Typeable)
+  deriving (Show, Eq, Ord, Enum, Data, Typeable, Generic)
+
+instance NFData JOp
 
 opText :: JOp -> TL.Text
 opText EqOp          = "=="
@@ -233,7 +246,9 @@ data JUOp =
       | PostInc         -- x++
       | PreDec          -- --x
       | PostDec         -- x--
-  deriving (Show, Eq, Ord, Enum, Data, Typeable)
+  deriving (Show, Eq, Ord, Enum, Data, Typeable, Generic)
+
+instance NFData JUOp
 
 isPre :: JUOp -> Bool
 isPre PostInc = False
@@ -264,7 +279,7 @@ uOpText PreDec   = "--"
 uOpText PostDec  = "--"
 
 newtype SaneDouble = SaneDouble { unSaneDouble :: Double }
-                   deriving (Data, Typeable, Fractional, Num)
+                   deriving (Data, Typeable, Fractional, Num, Generic, NFData)
 
 instance Eq SaneDouble where
     (SaneDouble x) == (SaneDouble y) = x == y || (isNaN x && isNaN y)
@@ -279,7 +294,7 @@ instance Show SaneDouble where
 
 -- | Identifiers
 newtype Ident = TxtI Text
- deriving (Show, Data, Typeable, Hashable, Eq, Ord, Binary)
+ deriving (Show, Data, Typeable, Hashable, Eq, Ord, Binary, Generic, NFData)
 
 expr2stat :: JExpr -> JStat
 expr2stat (ApplExpr x y) = (ApplStat x y)
