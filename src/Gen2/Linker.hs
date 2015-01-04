@@ -192,6 +192,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
           roots = S.fromList . filter rootSelector $
             concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
           rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
+          objPkgs = map toPackageKey $ nub (map fst $ M.keys objDepsMap)
       -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageKeyString $ pkgs))
       compilationProgressMsg dflags $
         case gsGenBase settings of
@@ -205,7 +206,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
       c   <- newMVar M.empty
       let rtsPkgs     =  map stringToPackageKey
                              ["@rts", "@rts_" ++ rtsBuildTag dflags]
-          pkgs'       = nub (rtsPkgs ++ rdPkgs ++ pkgs)
+          pkgs'       = nub (rtsPkgs ++ rdPkgs ++ objPkgs ++ pkgs)
           pkgs''      = filter (not . (isAlreadyLinked base)) pkgs'
           pkgLibPaths = mkPkgLibPaths pkgs'
           getPkgLibPaths :: PackageKey -> ([FilePath],[String])
@@ -216,7 +217,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
       (allDeps, code) <-
         collectDeps dflags
                     (archsDepsMap `M.union` objDepsMap)
-                    (pkgs ++ [thisPackage dflags])
+                    (pkgs' ++ [thisPackage dflags])
                     (baseUnits base)
                     (roots `S.union` rds `S.union` extraStaticDeps)
                     (archsRequiredUnits ++ objRequiredUnits)
