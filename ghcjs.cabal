@@ -32,6 +32,7 @@ extra-source-files:
                 include/prim/*.hs-incl
                 include/prim/*.txt
                 include/*.h
+                src-bin/Pkg-708.hs
                 README.markdown
 
 source-repository head
@@ -41,7 +42,8 @@ source-repository head
 -- only build the library and ghcjs executable
 flag compiler-only
   description: only build the library and ghcjs executable
-  default:            False
+  default:     False
+  manual:      True
 
 flag network-uri
   description: select the network/network-uri >= 2.6
@@ -53,7 +55,8 @@ flag network-uri
 -- the template files in /lib/etc for more information.
 flag no-wrapper-install
   description: don't install wrapper scripts and add version numbers to the executable names
-  default:            False
+  default:     False
+  manual:      True
 
 Library
     if os(Windows)
@@ -152,10 +155,6 @@ Library
                    parsec                     >= 3.1  && < 3.2,
                    haskell-src-exts           >= 1.16 && < 1.17,
                    haskell-src-meta           >= 0.6.0.3  && < 0.7
-    -- we need the transformers version that comes with GHC.
-    -- this is a hack to (hopefully) help cabal solve the dependencies
-    if impl(ghc == 7.8.3) || impl(ghc == 7.8.2)
-      build-depends: transformers-compat == 0.3.3.3
     exposed: True
     buildable: True
     hs-source-dirs: src
@@ -206,10 +205,14 @@ Executable hsc2hs-ghcjs
 Executable ghcjs-pkg
     if flag(compiler-only)
       Buildable:      False
-    if impl(ghc >= 7.9)
-      Main-Is:          Pkg.hs
-    else
-      Main-Is:          Pkg-708.hs
+    -- cabal sdist is buggy when main-is is inside a conditional.
+    -- work around it by listing Pkg-708.hs in extra-source-files and
+    -- including that in Pkg.hs for older compilers
+    -- if impl(ghc >= 7.9)
+    --   Main-Is:          Pkg.hs
+    -- else
+    --  Main-Is:          Pkg-708.hs
+    Main-Is: Pkg.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
     Build-Depends:    ghcjs,

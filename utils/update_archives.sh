@@ -12,7 +12,13 @@
 #       working tree
 #
 # requires some tools to be in the PATH:
-#    git, tar, patch, autoreconf, alex, happy
+#    git, tar, autoreconf, alex, happy
+#
+# GHCJS has to be booted, since it is used to compile the Setup.hs scripts
+# for the stage1 packages.
+#
+# ccjs is used to minify the precompiled Setup.hs scripts, install with
+# npm -g closurecompiler
 #
 ###############################################################################
 
@@ -70,7 +76,7 @@ prepare_packages() {
               if [ -f "../../patches/${pkg}.patch" ]
               then
                 echo "patching package: ${pkg}"
-                patch -p1 < "../../patches/${pkg}.patch" || true # fixme
+                git apply "../../patches/${pkg}.patch"
               fi
               if [ -f "configure.ac" ]
               then
@@ -91,6 +97,28 @@ prepare_primops() {
       alex Lexer.x
       happy Parser.y
     )
+} 
+
+# this builds precompiled JavaScript for the Setup.hs scripts for the
+# stage1 packages. ghc-prim is the only stage1 package that has a custom
+# setup script, the other ones are either simple or autoconf
+prepare_setup_scripts() {
+  ( mkdir "setup-tmp"
+    cd "setup-tmp"
+    echo "import Distribution.Simple"                    >  setupSimple.hs
+    echo "main = defaultMain"                            >> setupSimple.hs
+    echo "import Distribution.Simple"                    >  setupAutoconf.hs
+    echo "main = defaultMainWithHooks autoconfUserHooks" >> setupAutoconf.hs
+    cp   ../boot/ghc-prim/Setup.hs setupGhcPrim.hs
+    ghcjs -o setupSimple   -O setupSimple.hs
+    ghcjs -o setupAutoconf -O setupAutoconf.hs
+    ghcjs -o setupGhcPrim  -O setupGhcPrim.hs
+    ccjs setupSimple.jsexe/all.js > ../boot/SetupSimple.precompiled.js
+    ccjs setupAutoconf.jsexe/all.js > ../boot/SetupAutoconf.precompiled.js
+    ccjs setupGhcPrim.jsexe/all.js > ../boot/ghc-prim/Setup.hs.precompiled.js
+    cd ..
+    rm -r "setup-tmp"
+  )
 }
 
 if [ -f ghcjs.cabal ] && [ -d .git ]
@@ -105,6 +133,8 @@ git update-index --assume-unchanged lib/cache/boot.tar
 git update-index --assume-unchanged lib/cache/shims.tar
 git update-index --assume-unchanged lib/cache/test.tar
 
+# fixme this is actually not enough to ensure that there is no cruft in the
+# test tree, since git may ignore files
 STATUS=`git status --porcelain`
 if [ ${#STATUS} -gt 0 ]
 then
@@ -141,6 +171,7 @@ echo "preparing boot and shims cache in ${BUILDDIR}"
     prepare_packages "boot"
     
     prepare_primops
+    prepare_setup_scripts
     cd ..
     echo "${BOOT_EXCLUDE}" > boot.exclude    
     tar -X boot.exclude -cf boot.tar ghcjs-boot
