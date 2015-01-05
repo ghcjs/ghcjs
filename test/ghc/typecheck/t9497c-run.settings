@@ -1,0 +1,1 @@
+compArguments: ["-fdefer-type-errors", "-fno-warn-typed-holes"]
