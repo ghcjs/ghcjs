@@ -4,8 +4,8 @@ import           Control.Monad         (when)
 
 import           Data.Char             (isSpace)
 import           Data.List             (isPrefixOf, isSuffixOf)
-import           Data.Maybe            (maybe, listToMaybe)
-import           Data.Version          (showVersion)
+import           Data.Maybe            (maybe, listToMaybe, mapMaybe)
+import           Data.Version          (parseVersion, showVersion)
 
 import           Distribution.PackageDescription hiding (Flag)
 import           Distribution.Simple
@@ -16,10 +16,17 @@ import           Distribution.System
 import           Distribution.Verbosity
 
 import           System.Exit           (ExitCode(..))
-import           System.Directory      (doesFileExist, removeFile, renameFile)
+import           System.Directory      (doesFileExist, removeFile, renameFile, getDirectoryContents)
 import           System.FilePath       ((</>), (<.>), splitExtensions, dropExtensions)
 import           System.IO
 import           System.IO.Error       (IOError, isDoesNotExistError)
+import           System.Process        (readProcess)
+
+import           Text.ParserCombinators.ReadP (readP_to_S)
+import           Text.Regex.Posix      ((=~))
+
+ghcLibraries :: [PackageName]
+ghcLibraries = map PackageName ["Cabal", "transformers"]
 
 {-
     add all executables that are not wrapped (or require an .options file on Windows) here
@@ -33,7 +40,29 @@ main = defaultMainWithHooks ghcjsHooks
 ghcjsHooks :: UserHooks
 ghcjsHooks = simpleUserHooks { preSDist = ghcjsSDist
                              , postCopy = ghcjsPostCopy
+                             , confHook = ghcjsConfHook
                              }
+
+{- | Restrict the Cabal and transformers packages to the exact versions bundled with ghc.
+ -}
+ghcjsConfHook :: (GenericPackageDescription, HookedBuildInfo) -> ConfigFlags -> IO LocalBuildInfo
+ghcjsConfHook (gpd, hbi) flags = do
+  deps <- ghcDependencies ghcLibraries
+  confHook simpleUserHooks (gpd, hbi) (flags {configConstraints = configConstraints flags ++ deps})
+    where
+      ghcDependencies :: [PackageName] -> IO [Dependency]
+      ghcDependencies names = do
+        dir <- readProcess "ghc" ["--print-libdir"] ""
+        ids <- getDirectoryContents (head (lines dir))
+        return $ filter (\ (Dependency name _) -> name `elem` names) $ mapMaybe parsePackageId ids
+
+      parsePackageId :: String -> Maybe Dependency
+      parsePackageId s =
+          case s =~ ("^(.*)-([0-9.]*)$") :: (String, String, String, [String]) of
+            (_, _, _, [base, vs]) -> case listToMaybe (map fst $ filter ((== "") . snd) $ readP_to_S parseVersion $ vs) of
+                                       Just v -> Just $ Dependency (PackageName base) (thisVersion v)
+                                       Nothing -> Nothing
+            _ -> Nothing
 
 {- |
     Build tar cache archives for ghcjs-boot libraries, shims (the runtime system) and the test suite
