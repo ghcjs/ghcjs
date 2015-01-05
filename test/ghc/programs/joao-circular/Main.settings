@@ -1,0 +1,5 @@
+arguments: ["inp", "40"]
+copyFiles: ["inp"]
+disableSpiderMonkey: true
+disableJavaScriptCore: true
+

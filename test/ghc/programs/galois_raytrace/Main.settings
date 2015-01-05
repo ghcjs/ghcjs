@@ -1,0 +1,4 @@
+disableUnopt: true
+disableSpiderMonkey: true
+disableJavaScriptCore: true
+copyFiles: ["galois.gml"]

@@ -1,0 +1,4 @@
+copyFiles: ["mygames.pgn"]
+disableSpiderMonkey: true
+disableJavaScriptCore: true
+
