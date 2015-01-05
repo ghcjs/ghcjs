@@ -559,7 +559,7 @@ genBody ctx i startReg args e = do
 -- find the result type after applying the function to the arguments
 resultSize :: [Id] -> Type -> Int
 resultSize (x:xs) t
-  | isUnboxedTupleType (idType x) = error "genBody: unboxed tuple argument"
+  | UbxTupleRep _ <- repType (idType x) = panic "genBody: unboxed tuple argument"
   | otherwise =
       case repType t of
        (UnaryRep t') | isFunTy t' ->
@@ -893,7 +893,8 @@ genSetConInfo i d srt = do
                                 sr
   return (ei ||= mkDataEntry)
     where
-      fields = dataConRepArgTys d
+      -- dataConRepArgTys sometimes returns unboxed tuples. is that a bug?
+      fields = concatMap (flattenRepType . repType) (dataConRepArgTys d)
 
 mkDataEntry :: JExpr
 mkDataEntry = ValExpr $ JFunc [] [j| return `Stack`[`Sp`]; |]
