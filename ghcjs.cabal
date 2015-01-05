@@ -255,7 +255,7 @@ Executable ghcjs-boot
                       text                 >= 0.11   && < 1.3,
                       bytestring           >= 0.10   && < 0.11,
                       system-filepath      >= 0.4    && < 0.5,
-                      shelly               >= 1.5    && < 1.6,
+                      shelly               >= 1.5    && < 1.7,
                       system-fileio        >= 0.3    && < 0.4,
                       optparse-applicative >= 0.11   && < 0.12,
                       tar                  >= 0.4    && < 0.5,
