@@ -22,7 +22,7 @@
 #
 ###############################################################################
 
-set -e
+set -e -x
 
 SHIMS_ORIGIN=https://github.com/ghcjs/shims.git
 BOOT_ORIGIN=https://github.com/ghcjs/ghcjs-boot.git
