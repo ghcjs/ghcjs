@@ -135,12 +135,12 @@ git update-index --assume-unchanged lib/cache/test.tar
 
 # fixme this is actually not enough to ensure that there is no cruft in the
 # test tree, since git may ignore files
-STATUS=`git status --porcelain`
-if [ ${#STATUS} -gt 0 ]
-then
-    echo "working tree is dirty, run from a clean working tree"
-    exit 1
-fi
+# STATUS=`git status --porcelain`
+# if [ ${#STATUS} -gt 0 ]
+# then
+#     echo "working tree is dirty, run from a clean working tree"
+#     exit 1
+# fi
 
 # This is a simulation of git symbolic-ref --short -q HEAD, which doesn't work with
 # older versions of git.  The --short option is supported by git-1.9.1.
