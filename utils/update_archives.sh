@@ -110,9 +110,9 @@ prepare_setup_scripts() {
     echo "import Distribution.Simple"                    >  setupAutoconf.hs
     echo "main = defaultMainWithHooks autoconfUserHooks" >> setupAutoconf.hs
     cp   ../boot/ghc-prim/Setup.hs setupGhcPrim.hs
-    ghcjs -o setupSimple   -O setupSimple.hs
-    ghcjs -o setupAutoconf -O setupAutoconf.hs
-    ghcjs -o setupGhcPrim  -O setupGhcPrim.hs
+    ghc -o setupSimple   -O setupSimple.hs
+    ghc -o setupAutoconf -O setupAutoconf.hs
+    ghc -o setupGhcPrim  -O setupGhcPrim.hs
     ccjs setupSimple.jsexe/all.js > ../boot/SetupSimple.precompiled.js
     ccjs setupAutoconf.jsexe/all.js > ../boot/SetupAutoconf.precompiled.js
     ccjs setupGhcPrim.jsexe/all.js > ../boot/ghc-prim/Setup.hs.precompiled.js
