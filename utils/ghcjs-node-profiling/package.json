@@ -1,0 +1,32 @@
+{
+  "name": "ghcjs-profiling",
+  "version": "0.0.1",
+  "main": "./lib/main",
+  "description": "Profiling tools for GHCJS on node.js",
+  "homepage": "http://github.com/ghcjs/ghcjs",
+  "author": {
+    "name": "Luite Stegeman",
+    "email": "stegeman@gmail.com",
+    "url":   "http://luite.com"
+  },
+  "keywords": [
+    "GHCJS",
+    "Haskell",
+    "profile",
+    "profiling",
+    "node-tick-processor"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "http://github.com/ghcjs/ghcjs"
+  },
+  "engines": {
+    "node": ">=0.11.0"
+  },
+  "bin": {
+    "ghcjs-tick-processor": "./bin/tickprocessor-driver.js"
+  },
+  "dependencies": {
+    "byline": "~2.0.3"
+  }
+}
