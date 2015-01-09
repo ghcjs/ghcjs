@@ -624,6 +624,10 @@ genExpr top (StgSCC cc tick push e) = do
   return (setSCCstats <> stats, result)
 genExpr top (StgTick _m _n e) = genExpr top e
 #else
+genExpr top (StgTick (ProfNote cc count scope) e) = do
+  setSCCstats <- ifProfilingM $ setCC cc count scope
+  (stats, result) <- genExpr top e
+  return (setSCCstats <> stats, result)
 genExpr top (StgTick _m e) = genExpr top e
 #endif
 
