@@ -1276,6 +1276,10 @@ configureBootLocations bs pgms = do
   globalDB     <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-global-db"]
   userDBT      <- T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-user-db-dir"]
   nativeToo    <- (=="True") . T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-native-too"]
+  when (T.null (toTextI ghcjsLibDir)) $
+    failWith ("Could not determine GHCJS library installation path.\n" <>
+              "Make sure that the ghcjs wrapper script (or options file on Windows) " <>
+              "has been set up correctly.")
   return $ BootLocations ghcjsTopDir ghcjsLibDir ghcLibDir globalDB
                            (bool (userDBT == "<none>") Nothing (Just $ fromText userDBT))
                            nativeToo
