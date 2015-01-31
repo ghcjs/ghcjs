@@ -16,8 +16,8 @@ GHCJS supports many modern Haskell features, including:
 
 And some JavaScript-specific features:
 
- * new JavaScriptFFI extension, with convenient import pattens, asynchronous FFI and a JSRef FFI type,
- * synchronous and asynchronous threads.
+ * New JavaScriptFFI extension, with convenient import pattens, asynchronous FFI and a JSRef FFI type
+ * Synchronous and asynchronous threads
 
 Installation
 ============
