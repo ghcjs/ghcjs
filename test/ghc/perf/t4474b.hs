@@ -36,5 +36,5 @@ sumDList l = loop 0 (l [])
   where loop !c []      = c
         loop !c (h : t) = loop (c + h) t
 
-main = print $ sumList  $ flatListCons2 $ fullTree 26
+main = print $ sumList  $ flatListCons2 $ fullTree 24
 
