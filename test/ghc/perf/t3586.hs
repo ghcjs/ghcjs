@@ -6,7 +6,7 @@ import Data.Array.ST
 import Data.Array.Base
 
 main = print $ runST
-          (do arr <- newArray (1,2000000) 137.0 :: ST s (STUArray s Int Double)
+          (do arr <- newArray (0,2000000) 137.0 :: ST s (STUArray s Int Double)
               go arr 2000000 0.0 )
 
 
