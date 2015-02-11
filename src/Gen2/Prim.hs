@@ -490,8 +490,7 @@ genPrim _ _ AtomicModifyMutVarOp [r] [m,f] =
 genPrim _ _ CasMutVarOp [status,r] [mv,o,n] =
   PrimInline [j| if(`mv`.val === `o`) {
                     `status` = 0;
-                    `r` = `mv`.val;
-                    `mv`.val = `n`;
+                    `r` = `n`; `mv`.val = `n`;
                  } else {
                     `status` = 1;
                     `r` = `mv`.val;
@@ -637,6 +636,49 @@ genPrim d _ GetCCSOfOp [a, o] [obj]
 
 genPrim _ _ TraceEventOp [] [ed,eo] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
 genPrim _ _ TraceMarkerOp [] [ed,eo] = PrimInline [j| h$traceMarker(`ed`, `eo`); |]
+
+#if __GLASGOW_HASKELL__ >= 709
+genPrim _ _ CasArrayOp                 [s,o] [a,i,old,new] = PrimInline [j| var x = `a`[`i`]; if(x === `old`) { `o` = `new`; `a`[`i`] = `new`; `s` = 0; } else { `s` = 1; `o` = x; } |]
+genPrim _ _ NewSmallArrayOp            [a]   [n,e]         = PrimInline [j| `a` = []; for(var i=0;i<`n`;i++) { `a`[i] = `e`; } |]
+genPrim _ _ SameSmallMutableArrayOp    [r]   [x,y]         = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0; |]
+genPrim _ _ ReadSmallArrayOp           [r]   [a,i]         = PrimInline [j| `r` = `a`[`i`]; |]
+genPrim _ _ WriteSmallArrayOp          []    [a,i,e]       = PrimInline [j| `a`[`i`] = `e`; |]
+genPrim _ _ SizeofSmallArrayOp         [r]   [a]           = PrimInline [j| `r` = `a`.length; |]
+genPrim _ _ SizeofSmallMutableArrayOp  [r]   [a]           = PrimInline [j| `r` = `a`.length; |]
+genPrim _ _ IndexSmallArrayOp          [r]   [a,i]         = PrimInline [j| `r` = `a`[`i`]; |]
+genPrim _ _ UnsafeFreezeSmallArrayOp   [r]   [a]           = PrimInline [j| `r` = `a`; |]
+genPrim _ _ UnsafeThawSmallArrayOp     [r]   [a]           = PrimInline [j| `r` = `a`; |]
+genPrim _ _ CopySmallArrayOp           []    [s,si,d,di,n] = PrimInline [j| for(var i=`n`-1;i>=0;i--) { `d`[`di`+i] = `s`[`si`+i]; } |]
+genPrim _ _ CopySmallMutableArrayOp    []    [s,si,d,di,n] = PrimInline [j| for(var i=`n`-1;i>=0;i--) { `d`[`di`+i] = `s`[`si`+i]; } |]
+genPrim _ _ CloneSmallArrayOp          [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); |]
+genPrim _ _ CloneSmallMutableArrayOp   [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); |]
+genPrim _ _ FreezeSmallArrayOp         [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); |]
+genPrim _ _ ThawSmallArrayOp           [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); |]
+genPrim _ _ CasSmallArrayOp            [s,o] [a,i,old,new] = PrimInline [j| var x = `a`[`i`]; if(x === `old`) { `o` = `new`; `a`[`i`] = `new`; `s` = 0; } else { `s` = 1; `o` = x; } |]
+
+genPrim _ _ AtomicReadByteArrayOp_Int  [r]   [a,i]         = PrimInline [j| `r` = `a`.i3[`i`]; |]
+genPrim _ _ AtomicWriteByteArrayOp_Int []    [a,i,v]       = PrimInline [j| `a`.i3[`i`] = `v`; |]
+genPrim _ _ CasByteArrayOp_Int         [r]   [a,i,old,new] = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; if(t === `old`) { `a`.i3[`i`] = `new`; } |]
+genPrim _ _ FetchAddByteArrayOp_Int    [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = t+`v`; |]
+genPrim _ _ FetchSubByteArrayOp_Int    [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = t-`v`; |]
+genPrim _ _ FetchAndByteArrayOp_Int    [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = t&`v`; |]
+genPrim _ _ FetchOrByteArrayOp_Int     [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = (t|`v`)|0; |]
+genPrim _ _ FetchNandByteArrayOp_Int   [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = ~(t&`v`); |]
+genPrim _ _ FetchXorByteArrayOp_Int    [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = t^`v`; |]
+
+genPrim _ _ ClzOp                      [r]   [x]           = PrimInline [j| `r` = h$clz32(`x`);       |]
+genPrim _ _ Clz8Op                     [r]   [x]           = PrimInline [j| `r` = h$clz8(`x`);        |]
+genPrim _ _ Clz16Op                    [r]   [x]           = PrimInline [j| `r` = h$clz16(`x`);       |]
+genPrim _ _ Clz32Op                    [r]   [x]           = PrimInline [j| `r` = h$clz32(`x`);       |]
+genPrim _ _ Clz64Op                    [r]   [x1,x2]       = PrimInline [j| `r` = h$clz64(`x1`,`x2`); |]
+
+genPrim _ _ CtzOp                      [r]   [x]           = PrimInline [j| `r` = h$ctz32(`x`);       |]
+genPrim _ _ Ctz8Op                     [r]   [x]           = PrimInline [j| `r` = h$ctz8(`x`);        |]
+genPrim _ _ Ctz16Op                    [r]   [x]           = PrimInline [j| `r` = h$ctz16(`x`);       |]
+genPrim _ _ Ctz32Op                    [r]   [x]           = PrimInline [j| `r` = h$ctz32(`x`);       |]
+genPrim _ _ Ctz64Op                    [r]   [x1,x2]       = PrimInline [j| `r` = h$ctz64(`x1`,`x2`); |]
+
+#endif
 
 genPrim _ _ op rs as = PrimInline [j| throw `"unhandled primop: " ++ show op ++ " " ++ show (length rs, length as)`; |]
 {-

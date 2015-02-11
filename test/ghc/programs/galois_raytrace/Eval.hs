@@ -13,6 +13,9 @@ import Surface
 import Data
 import Parse (rayParse, rayParseF)
 
+import Control.Monad
+import Control.Applicative
+
 class Monad m => MonadEval m where
   doOp :: PrimOp -> GMLOp -> Stack -> m Stack
   tick :: m ()
@@ -21,6 +24,13 @@ class Monad m => MonadEval m where
   tick = return ()
 
 newtype Pure a = Pure a deriving Show
+
+instance Functor Pure where
+    fmap f (Pure x) = Pure (f x)
+
+instance Applicative Pure where
+    pure         = return
+    (<*>)        = ap
 
 instance Monad Pure where
     Pure x >>= k = k x
@@ -285,6 +295,13 @@ absapply env code stk =
 newtype Abs a   = Abs { runAbs :: Int -> AbsState a }
 data AbsState a = AbsState a !Int
                 | AbsFail String
+
+instance Functor Abs where
+    fmap f a = a >>= pure . f
+
+instance Applicative Abs where
+    pure     = return
+    (<*>)    = ap
 
 instance Monad Abs where
     (Abs fn) >>= k = Abs (\ s -> case fn s of

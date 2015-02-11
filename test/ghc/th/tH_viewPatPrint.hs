@@ -1,4 +1,4 @@
-{-# LANGUAGE ViewPatterns, QuasiQuotes #-}
+{-# LANGUAGE ViewPatterns, QuasiQuotes, TemplateHaskell #-}
 
 module Main where
 

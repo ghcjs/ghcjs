@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE FlexibleContexts, DeriveDataTypeable #-}
 module Expr where
 
 import Data.Generics

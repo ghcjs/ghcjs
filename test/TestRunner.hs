@@ -39,6 +39,7 @@ import           System.Process ( createProcess, proc, CreateProcess(..), StdStr
                                 , terminateProcess, waitForProcess, readProcessWithExitCode
                                 , ProcessHandle )
 import           System.Random (randomRIO)
+import           System.Timeout (timeout)
 import           Test.Framework
 import           Test.Framework.Providers.HUnit (testCase)
 import           Test.HUnit.Base (assertBool, assertFailure, assertEqual, Assertion)
@@ -498,10 +499,11 @@ outputPath = do
 runProcess :: MonadIO m => FilePath -> FilePath -> [String] -> String -> m (Maybe (StdioResult, Integer))
 runProcess workingDir pgm args input = do
   before <- liftIO getCurrentTime
-  r <- liftIO (C.try $ readProcessWithExitCode' (encodeString workingDir) (encodeString pgm) args input)
+  r <- liftIO (C.try $ timeout 180000000 (readProcessWithExitCode' (encodeString workingDir) (encodeString pgm) args input))
   case r of
     Left (e::C.SomeException) -> return Nothing
-    Right (ex, out, err) -> do
+    Right Nothing -> return (Just (StdioResult ExitSuccess "" "process killed after timeout", 0))
+    Right (Just (ex, out, err)) -> do
       after <- liftIO getCurrentTime
       return $
         case ex of -- fixme is this the right way to find out that a program does not exist?
