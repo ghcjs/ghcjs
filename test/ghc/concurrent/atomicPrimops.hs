@@ -121,7 +121,7 @@ fetchOrTest :: IO ()
 fetchOrTest = fetchOpTest fetchOrIntArray expected "fetchOrTest"
   where expected
             | sizeOf (undefined :: Int) == 8 = 15987178197787607039
-            | otherwise = 3722313727
+            | otherwise = -572653569
 
 -- | Test casIntArray# by using it to emulate fetchAddIntArray# and
 -- then having two threads concurrenctly increment a counter,

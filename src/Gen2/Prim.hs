@@ -662,7 +662,7 @@ genPrim _ _ CasByteArrayOp_Int         [r]   [a,i,old,new] = PrimInline [j| var 
 genPrim _ _ FetchAddByteArrayOp_Int    [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = t+`v`; |]
 genPrim _ _ FetchSubByteArrayOp_Int    [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = t-`v`; |]
 genPrim _ _ FetchAndByteArrayOp_Int    [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = t&`v`; |]
-genPrim _ _ FetchOrByteArrayOp_Int     [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = (t|`v`)|0; |]
+genPrim _ _ FetchOrByteArrayOp_Int     [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = (t|`v`); |]
 genPrim _ _ FetchNandByteArrayOp_Int   [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = ~(t&`v`); |]
 genPrim _ _ FetchXorByteArrayOp_Int    [r]   [a,i,v]       = PrimInline [j| var t = `a`.i3[`i`]; `r` = t; `a`.i3[`i`] = t^`v`; |]
 
