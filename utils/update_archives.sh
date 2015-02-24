@@ -22,7 +22,7 @@
 #
 ###############################################################################
 
-set -e
+set -e -x
 
 SHIMS_ORIGIN=https://github.com/ghcjs/shims.git
 BOOT_ORIGIN=https://github.com/ghcjs/ghcjs-boot.git
@@ -110,9 +110,9 @@ prepare_setup_scripts() {
     echo "import Distribution.Simple"                    >  setupAutoconf.hs
     echo "main = defaultMainWithHooks autoconfUserHooks" >> setupAutoconf.hs
     cp   ../boot/ghc-prim/Setup.hs setupGhcPrim.hs
-    ghcjs -o setupSimple   -O setupSimple.hs
-    ghcjs -o setupAutoconf -O setupAutoconf.hs
-    ghcjs -o setupGhcPrim  -O setupGhcPrim.hs
+    ghc -o setupSimple   -O setupSimple.hs
+    ghc -o setupAutoconf -O setupAutoconf.hs
+    ghc -o setupGhcPrim  -O setupGhcPrim.hs
     ccjs setupSimple.jsexe/all.js > ../boot/SetupSimple.precompiled.js
     ccjs setupAutoconf.jsexe/all.js > ../boot/SetupAutoconf.precompiled.js
     ccjs setupGhcPrim.jsexe/all.js > ../boot/ghc-prim/Setup.hs.precompiled.js
@@ -135,12 +135,12 @@ git update-index --assume-unchanged lib/cache/test.tar
 
 # fixme this is actually not enough to ensure that there is no cruft in the
 # test tree, since git may ignore files
-STATUS=`git status --porcelain`
-if [ ${#STATUS} -gt 0 ]
-then
-    echo "working tree is dirty, run from a clean working tree"
-    exit 1
-fi
+# STATUS=`git status --porcelain`
+# if [ ${#STATUS} -gt 0 ]
+# then
+#     echo "working tree is dirty, run from a clean working tree"
+#     exit 1
+# fi
 
 # This is a simulation of git symbolic-ref --short -q HEAD, which doesn't work with
 # older versions of git.  The --short option is supported by git-1.9.1.
@@ -171,7 +171,7 @@ echo "preparing boot and shims cache in ${BUILDDIR}"
     prepare_packages "boot"
     
     prepare_primops
-    prepare_setup_scripts
+    prepare_setup_scripts || true
     cd ..
     echo "${BOOT_EXCLUDE}" > boot.exclude    
     tar -X boot.exclude -cf boot.tar ghcjs-boot
