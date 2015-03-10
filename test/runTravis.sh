@@ -50,7 +50,7 @@ travis_test() {
 }
 
 ghcjs_boot() {
-    "$GHCJSBOOT" --dev --no-haddock --with-node "$NODE" "$@"
+    "$GHCJSBOOT" --dev --no-haddock --with-node "$NODE" "$@" --ghcjs-boot-dev-repo=https://github.com/seereason/ghcjs-boot.git
 }
 
 cabal_install() {
