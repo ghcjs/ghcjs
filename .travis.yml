@@ -22,7 +22,7 @@ install:
     - cd _ghcjs_deps
     - travis_retry git clone https://github.com/seereason/haskell-src-meta
     - travis_retry git clone https://github.com/seereason/th-expand-syns
-    - travis_retry git clone https://github.com/hvr/ansi-wl-pprint --branch pr-base48
+    - travis_retry git clone https://github.com/seereason/ansi-wl-pprint --branch pr-base48
     - travis_retry git clone https://github.com/seereason/wl-pprint-text
     - travis_retry git clone https://github.com/seereason/stringsearch
     - cabal install -j2 ./haskell-src-meta ./th-expand-syns ./ansi-wl-pprint ./wl-pprint-text ./stringsearch
