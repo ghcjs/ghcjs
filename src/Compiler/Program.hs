@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, NondecreasingIndentation #-}
+{-# LANGUAGE CPP, NondecreasingIndentation, TupleSections #-}
 -- GHC frontend ( ghc/Main.hs ) adapted for GHCJS
 #undef GHCI
 
@@ -636,8 +636,14 @@ parseModeFlags args = do
       mode = case mModeFlag of
              Nothing     -> doMakeMode
              Just (m, _) -> m
+#if __GLASGOW_HASKELL__ >= 709
+  -- See Note [Handling errors when parsing commandline flags]
+  unless (null errs1 && null errs2) $ throwGhcException $ errorsToGhcException $
+      map (("on the commandline", )) $ map unLoc errs1 ++ errs2
+#else
       errs = errs1 ++ map (mkGeneralLocated "on the commandline") errs2
   when (not (null errs)) $ throwGhcException $ errorsToGhcException errs
+#endif
   return (mode, flags' ++ leftover, warns)
 
 type ModeM = CmdLineP (Maybe (Mode, String), [String], [Located String])
