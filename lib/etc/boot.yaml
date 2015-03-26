@@ -52,6 +52,7 @@ packages:
     - ./boot/pretty
     - ./boot/primitive
     - ./boot/template-haskell
+    - ./boot/transformers
 
   # after stage 1a, ghcjs-boot installs ghcjs-prim and
   # continues with stage 1b
@@ -92,7 +93,6 @@ packages:
     - ./boot/stm
     - ./boot/syb
     - ./boot/text
-    - ./boot/transformers
     - ./boot/unordered-containers
     - ./boot/vector
     - ./ghcjs/ghcjs-base
