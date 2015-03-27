@@ -17,11 +17,8 @@ ghcjs-prim:
   GHCJS.Prim:
     - JSRef
     - JSException
-    - $fTypeableJSException
     - $fShowJSException
     - $fExceptionJSException
-    - $fTypeableJSException
-    - $fShowJSException
   GHCJS.Prim.Internal:
     - wouldBlock
     - blockedIndefinitelyOnMVar
