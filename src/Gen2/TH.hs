@@ -1,4 +1,5 @@
-{-# LANGUAGE CPP, GADTs, OverloadedStrings, LambdaCase, TupleSections, ScopedTypeVariables #-}
+{-# LANGUAGE CPP, GADTs, OverloadedStrings, LambdaCase, TupleSections,
+             ScopedTypeVariables, ViewPatterns #-}
 
 module Gen2.TH where
 
@@ -8,7 +9,6 @@ module Gen2.TH where
 
 import           Compiler.Settings
 
--- import qualified Gen2.GHC.CorePrep   as Gen2
 import qualified Gen2.Generator      as Gen2
 import qualified Gen2.Linker         as Gen2
 import qualified Gen2.ClosureInfo    as Gen2
@@ -43,6 +43,8 @@ import           Convert
 import           RnEnv
 import           FastString
 import           RdrName
+import           Bag
+import           IOEnv
 
 import           Control.Concurrent
 import qualified Control.Exception              as E
@@ -50,6 +52,7 @@ import           Control.Lens
 import           Control.Monad
 
 import           Data.Data.Lens
+import qualified Data.IntMap                    as IM
 import qualified Data.Map                       as M
 
 import           Data.Text                      (Text)
@@ -68,10 +71,12 @@ import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as T
 import qualified Data.Text.IO                   as T
 import qualified Data.Text.Lazy.Encoding        as TL
+import qualified Data.Generics.Text             as SYB
 
 import           Distribution.Package (InstalledPackageId(..))
 
 import           GHC.Desugar
+import qualified GHC.Generics
 
 import qualified GHCJS.Prim.TH.Types            as TH
 
@@ -313,22 +318,59 @@ finishRunner runner = do
       "finishRunner: unexpected response, expected FinishTH' message"
 
 handleRunnerReq :: ThRunner -> TH.Message -> TcM TH.Message
-handleRunnerReq runner msg = case msg of
-  TH.NewName n           -> TH.NewName'                       <$> TH.qNewName n
-  TH.QException e        -> term                              >>  error e
-  TH.QFail e             -> term                              >>  fail e
-  TH.Report isErr msg    -> TH.qReport isErr msg              >>  pure TH.Report'
-  TH.LookupName b n      -> TH.LookupName'                    <$> TH.qLookupName b n
-  TH.Reify n             -> TH.Reify'                         <$> TH.qReify n
-  TH.ReifyInstances n ts -> TH.ReifyInstances'                <$> TH.qReifyInstances n ts
-  TH.ReifyRoles n        -> TH.ReifyRoles'                    <$> TH.qReifyRoles n
-  TH.ReifyAnnotations nn -> TH.ReifyAnnotations' . map B.pack <$> TH.qReifyAnnotations nn
-  TH.ReifyModule m       -> TH.ReifyModule'                   <$> TH.qReifyModule m
-  TH.AddDependentFile f  -> TH.qAddDependentFile f            >>  pure TH.AddDependentFile'
-  TH.AddTopDecls decs    -> TH.qAddTopDecls decs              >>  pure TH.AddTopDecls'
-  _                      -> term >> error "handleRunnerReq: unexpected request"
+handleRunnerReq runner msg =
+  case msg of
+    TH.QUserException e     -> term                              >>  error e
+    TH.QCompilerException n -> term                              >>  throwCompilerException n runner
+    TH.QFail e              -> term                              >>  fail e
+    TH.StartRecover         -> startRecover runner               >>  pure TH.StartRecover'
+    TH.EndRecover b         -> endRecover b runner               >>  pure TH.EndRecover'
+    TH.Report isErr msg     -> TH.qReport isErr msg              >>  pure TH.Report'
+    _                       -> getEnv >>= \env -> liftIO $
+      runIOEnv env (handleOtherReq msg) `E.catch` \e ->
+        addException e >>= \n -> return (TH.QCompilerException' n (show e))
   where
-    term = liftIO (terminateProcess $ thrProcess runner)
+    addException :: E.SomeException -> IO Int
+    addException e = modifyMVar (thrExceptions runner) $ \m ->
+      let s = IM.size m in return (IM.insert s e m, s)
+    handleOtherReq :: TH.Message -> TcM TH.Message
+    handleOtherReq msg = case msg of
+      TH.NewName n           -> TH.NewName'                       <$> TH.qNewName n
+      TH.LookupName b n      -> TH.LookupName'                    <$> TH.qLookupName b n
+      TH.Reify n             -> TH.Reify'                         <$> TH.qReify n
+      TH.ReifyInstances n ts -> TH.ReifyInstances'                <$> TH.qReifyInstances n ts
+      TH.ReifyRoles n        -> TH.ReifyRoles'                    <$> TH.qReifyRoles n
+      TH.ReifyAnnotations nn -> TH.ReifyAnnotations' . map B.pack <$> TH.qReifyAnnotations nn
+      TH.ReifyModule m       -> TH.ReifyModule'                   <$> TH.qReifyModule m
+      TH.AddDependentFile f  -> TH.qAddDependentFile f            >>  pure TH.AddDependentFile'
+      TH.AddTopDecls decs    -> TH.qAddTopDecls decs              >>  pure TH.AddTopDecls'
+      _                      -> term >> error "handleRunnerReq: unexpected request"
+    term :: TcM ()
+    term = liftIO $ terminateProcess (thrProcess runner)
+
+throwCompilerException :: Int -> ThRunner -> TcM a
+throwCompilerException n runner = liftIO $ do
+  e <- IM.lookup n <$> readMVar (thrExceptions runner)
+  case e of
+    Just ex -> liftIO (E.throwIO ex)
+    Nothing -> error "throwCompilerException: exception id not found"
+
+startRecover :: ThRunner -> TcM ()
+startRecover (thrRecover -> r) = do
+  v <- getErrsVar
+  msgs <- readTcRef v
+  writeTcRef v emptyMessages
+  liftIO (modifyMVar_ r (pure . (msgs:)))
+
+endRecover :: Bool -> ThRunner -> TcM ()
+endRecover recoveryTaken (thrRecover -> r) = do
+  msgs <- liftIO $ modifyMVar r (\(h:t) -> pure (t,h))
+  v <- getErrsVar
+  if recoveryTaken
+     then writeTcRef v msgs
+     else updTcRef v (unionMessages msgs)
+  where
+    unionMessages (wm1, em1) (wm2, em2) = (unionBags wm1 wm2, unionBags em1 em2)
 
 -- | instruct the runner to finish up
 finishTh :: GhcjsEnv -> String -> ThRunner -> IO ()
@@ -466,7 +508,8 @@ ghcjsCompileCoreExpr js_env settings hsc_env srcspan ds_expr = do
     bind n e = NonRec (thExpr n) e
     mod n    = mkModule thrunnerPackage (mkModuleName $ "ThRunner" ++ show n)
     dflags   = hsc_dflags hsc_env
-    eDeps e  = uniqSetToList . mkUniqSet . catMaybes $ map (fmap modulePackageId . nameModule_maybe . idName) (e ^.. template)
+    eDeps e  = uniqSetToList . mkUniqSet . catMaybes $
+               map (fmap modulePackageId . nameModule_maybe . idName) (e ^.. template)
 
 thrunnerPackage :: PackageId
 thrunnerPackage = stringToPackageId "thrunner"
@@ -643,8 +686,10 @@ startThRunner dflags hsc_env = do
                                              Nothing
                                              Nothing
   mv  <- newMVar (Gen2.linkBase lr)
+  emv <- newMVar []
+  eev <- newMVar IM.empty
   forkIO $ catchIOError (forever $ hGetChar out >>= putChar) (\_ -> return ())
-  let r = ThRunner pid inp err mv
+  let r = ThRunner pid inp err mv emv eev
   sendToRunnerRaw r 0 (BL.toStrict $ rtsd <> fr <> rts <> fa <> aa <> Gen2.linkOut lr)
   return r
 

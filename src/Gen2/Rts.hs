@@ -347,16 +347,8 @@ fun h$done o {
 }
 `ClosureInfo "h$done" (CIRegs 0 [PtrV]) "done" (CILayoutUnknown 0) CIStackFrame noStatic`;
 
-fun h$doneMain {
-  if(typeof process !== 'undefined' && process.exit) {
-    process.exit(0);
-  } else if(typeof quit !== 'undefined') {
-    if(typeof h$base_stdoutLeftover !== 'undefined' && h$base_stdoutLeftover && h$base_stdoutLeftover.val) print(h$base_stdoutLeftover.val);
-    if(typeof h$base_stderrLeftover !== 'undefined' && h$base_stderrLeftover && h$base_stderrLeftover.val) debug(h$base_stderrLeftover.val);
-    quit();
-  }
-  h$finishThread(h$currentThread);
-  return h$reschedule;
+fun h$doneMain_e {
+  return h$doneMain();
 }
 `ClosureInfo "h$doneMain" (CIRegs 0 [PtrV]) "doneMain" (CILayoutUnknown 0) CIStackFrame noStatic`;
 

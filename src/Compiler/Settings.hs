@@ -5,12 +5,14 @@ module Compiler.Settings where
 import           Gen2.Base
 
 import           Control.Applicative
+import qualified Control.Exception as E
 import           Control.Concurrent.MVar
 import           Control.Monad
 
 import           Data.ByteString        (ByteString)
+import           Data.IntMap            (IntMap)
 import           Data.Map               (Map)
-import qualified Data.Map            as M
+import qualified Data.Map               as M
 import           Data.Monoid
 import           Data.Text (Text)
 
@@ -18,6 +20,8 @@ import           System.IO
 import           System.Process
 
 import           Module
+import           TcRnTypes
+import           ErrUtils
 
 {- | We can link incrementally against a base bundle, where we assume
      that the symbols from the bundle and their dependencies have already
@@ -98,12 +102,14 @@ data ThRunner =
            , thrHandleIn       :: Handle
            , thrHandleErr      :: Handle
            , thrBase           :: MVar Base
+           , thrRecover        :: MVar [Messages]
+           , thrExceptions     :: MVar (IntMap E.SomeException)
            }
 
 data GhcjsEnv = GhcjsEnv
   { compiledModules :: MVar (Map Module ByteString) -- ^ keep track of already compiled modules so we don't compile twice for dynamic-too
-  , thRunners :: MVar (Map String ThRunner) -- ^ template haskell runners
-  , thSplice :: MVar Int
+  , thRunners       :: MVar (Map String ThRunner)   -- ^ template haskell runners
+  , thSplice        :: MVar Int
   }
 
 newGhcjsEnv :: IO GhcjsEnv

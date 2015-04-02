@@ -792,6 +792,8 @@ ghcjsTcCheckFIType sig_ty arg_tys res_ty idecl = tcCheckFIType sig_ty arg_tys re
 isGhcjsFFIArgumentTy :: DynFlags -> Safety -> Type -> Validity
 isGhcjsFFIArgumentTy dflags safety ty
   | isValid (isFFIArgumentTy dflags safety ty)                          = IsValid
+  | xopt Opt_GHCForeignImportPrim dflags && xopt Opt_UnliftedFFITypes dflags &&
+    isValid (isFFIPrimArgumentTy dflags ty)                             = IsValid
   | isGhcjsFFITy dflags ty                                              = IsValid
   | Just (tc, _) <- tcSplitTyConApp_maybe ty
   , getUnique tc == anyTyConKey && xopt Opt_GHCForeignImportPrim dflags = IsValid
@@ -802,6 +804,9 @@ isGhcjsFFIImportResultTy :: DynFlags -> Type -> Validity
 isGhcjsFFIImportResultTy dflags ty
   | isValid (isFFIImportResultTy dflags ty)                   = IsValid
   | xopt Opt_UnliftedFFITypes dflags && isUnboxedTupleType ty = IsValid
+  | xopt Opt_GHCForeignImportPrim dflags && xopt Opt_UnliftedFFITypes dflags &&
+    checkRepTyCon isUnLiftedTyCon ty                          = IsValid
+  --   isValid (isFFIPrimResultTy dflags ty)                     = IsValid
   | isGhcjsFFITy dflags ty                                    = IsValid
   | otherwise = NotValid
       (text "JavaScript FFI result type must be a valid CCall FFI result type or JSRef")
@@ -811,6 +816,7 @@ isGhcjsFFIImportResultTy dflags ty
 isGhcjsFFIArgumentTy :: DynFlags -> Safety -> Type -> Bool
 isGhcjsFFIArgumentTy dflags safety ty =
   isFFIArgumentTy dflags safety ty ||
+  (xopt Opt_GHCForeignImportPrim dflags && xopt Opt_UnliftedFFITypes dflags && isFFIPrimArgumentTy dflags ty) ||
   isGhcjsFFITy dflags ty ||
   maybe False (\(tc, _) -> getUnique tc == anyTyConKey &&
                            xopt Opt_GHCForeignImportPrim dflags)
@@ -820,6 +826,7 @@ isGhcjsFFIImportResultTy :: DynFlags -> Type -> Bool
 isGhcjsFFIImportResultTy dflags ty =
   isFFIImportResultTy dflags ty ||
   xopt Opt_UnliftedFFITypes dflags && isUnboxedTupleType ty ||
+  (xopt Opt_GHCForeignImportPrim dflags && xopt Opt_UnliftedFFITypes dflags && checkRepTyCon isUnliftedTyCon ty) ||
   isGhcjsFFITy dflags ty
 
 #endif
