@@ -22,7 +22,14 @@ And some JavaScript-specific features:
 Installation
 ============
 
-GHCJS can be installed with GHC 7.8.2 or later.
+### Docker
+
+Docker users can build the Dockerfile in this repo or pull from the registry: `docker pull hamishmack/ghcjs` to get a working ghcjs installation
+
+```
+docker run hamishmack/ghcjs --help
+```
+
 
 ### Requirements
 
