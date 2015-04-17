@@ -24,6 +24,4 @@ RUN git clone https://github.com/ghcjs/ghcjs-prim.git && \
 RUN which ghcjs-pkg
 
 RUN ghcjs-boot --dev
-CMD ["/bin/bash"]
-
-
+ENTRYPOINT ["ghcjs"]
