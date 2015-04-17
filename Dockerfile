@@ -1,7 +1,5 @@
 FROM haskell:7.8
 
-ENV DEBIAN_FRONTENT non-interactive
-
 ADD . ./ghcjs
 
 RUN apt-get update \
