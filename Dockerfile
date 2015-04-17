@@ -11,10 +11,8 @@ RUN curl -sL https://deb.nodesource.com/setup | bash - \
 ENV PATH /root/.cabal/bin:$PATH
 
 RUN cabal update && \
-    cabal install cabal-install && \
-    cabal install Cabal
-
-RUN echo $PATH && which cabal && cabal --version
+    cabal install cabal-install Cabal && \
+    echo $PATH && which cabal && cabal --version
 
 RUN git clone https://github.com/ghcjs/ghcjs-prim.git && \
     cabal install --reorder-goals --max-backjumps=-1 ./ghcjs ./ghcjs-prim
