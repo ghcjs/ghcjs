@@ -115,13 +115,13 @@ ghcjsLinkJsLib settings jsFiles dflags hpt
           jsFiles' = nub (gsJsLibSrcs settings ++ jsFiles)
           meta    = Meta (opt_P dflags)
       jsEntries <- forM jsFiles' $ \file ->
-        (JsSource file,) <$> B.readFile file
+        (JsSource file,) . B.fromStrict <$> BS.readFile file
       objEntries <- forM (eltsUFM hpt) $ \hmi -> do
         let mt    = T.pack . moduleNameString . moduleName . mi_module . hm_iface $ hmi
             files = maybe [] (\l -> [ o | DotO o <- linkableUnlinked l]) (hm_linkable hmi)
         -- fixme archive does not handle multiple files for a module yet
         forM files $ \file ->
-          (Object mt,) <$> B.readFile file
+          (Object mt,) . B.fromStrict <$> BS.readFile file
       B.writeFile outputFile (buildArchive meta (concat objEntries ++ jsEntries))
       -- we don't use shared js_so libraries ourselves, but Cabal expects that we
       -- generate one when building with --dynamic-too. Just write an empty file
@@ -130,7 +130,7 @@ ghcjsLinkJsLib settings jsFiles dflags hpt
               "lib" ++ jsLib ++ "-ghcjs" ++ Info.getCompilerVersion ++ profSuff <.> "js_so"
             sharedOutputFile = inOutputDir sharedLibFileName
         -- keep strip happy
-        B.writeFile sharedOutputFile =<< B.readFile (topDir dflags </> "empty.o")
+        BS.writeFile sharedOutputFile =<< BS.readFile (topDir dflags </> "empty.o")
       return Succeeded
   | otherwise =
       return Succeeded
