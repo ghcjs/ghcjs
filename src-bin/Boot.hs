@@ -151,6 +151,8 @@ data BootSources = BootSources { _bsrcShims                 :: [Text]
                                , _bsrcTest                  :: [Text]
                                , _bsrcEtc                   :: [Text]
                                , _bsrcDoc                   :: [Text]
+                               , _bsrcGhcjsPrim             :: [Text]
+                               , _bsrcInclude               :: [Text]
                                , _bsrcShimsDev              :: [Text]
                                , _bsrcShimsDevBranch        :: Text
                                , _bsrcBootDev               :: [Text]
@@ -292,6 +294,8 @@ main = do
       installEtc
       installDocs
       installTests
+      copyGhcjsPrim
+      copyIncludes
       let base = e ^. beLocations . blGhcjsLibDir
       setenv "CFLAGS" $ "-I" <> toTextI (base </> "include")
       installFakes
@@ -313,7 +317,8 @@ cleanTree = do
 instance Yaml.FromJSON BootSources where
   parseJSON (Yaml.Object v) = BootSources
     <$> v ..: "shims" <*> v ..: "boot" <*> v ..: "test"
-    <*> v ..: "etc"   <*> v ..: "doc"
+    <*> v ..: "etc"                    <*> v ..: "doc"
+    <*> v ..: "ghcjs-prim"             <*> v ..: "include"
     <*> v ..: "shims-dev"              <*> v  .: "shims-dev-branch"
     <*> v ..: "ghcjs-boot-dev"         <*> v  .: "ghcjs-boot-dev-branch"
     <*> v ..: "buildtools-windows"     <*> v ..: "buildtools-boot-windows"
@@ -748,6 +753,14 @@ installPlatformIncludes inc incNative = do
 
 exe :: FilePath -> FilePath
 exe = bool isWindows (<.>"exe") id
+
+copyGhcjsPrim :: B ()
+copyGhcjsPrim = checkpoint' "ghcjs-prim" "ghcjs-prim" $
+  install' "ghcjs-prim package sources" <$^> beLocations . blGhcjsLibDir . to (</> "ghcjs-prim") <<*^> beSources . bsrcGhcjsPrim
+
+copyIncludes :: B ()
+copyIncludes = checkpoint' "includes" "includes" $
+  install' "ghcjs rts include files" <$^> beLocations . blGhcjsLibDir . to (</> "include")  <<*^> beSources . bsrcInclude
 
 installEtc :: B ()
 installEtc = checkpoint' "additional configuration files" "etc" $ do

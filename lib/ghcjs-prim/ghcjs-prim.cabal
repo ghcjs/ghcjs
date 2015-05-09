@@ -1,0 +1,29 @@
+name:                ghcjs-prim
+version:             0.1.0.0
+homepage:            http://github.com/ghcjs
+license:             MIT
+license-file:        LICENSE
+author:              Luite Stegeman
+maintainer:          stegeman@gmail.com
+build-type:          Simple
+cabal-version:       >=1.10
+
+library
+  exposed-modules: GHCJS.Prim
+                   GHCJS.Prim.Internal
+                   GHCJS.Prim.TH.Eval
+                   GHCJS.Prim.TH.Serialized
+                   GHCJS.Prim.TH.Types
+
+  c-sources: cbits/ghcjs-prim.c
+  build-depends:       base             >= 4 && < 5,
+                       ghc-prim,
+                       template-haskell >= 2.9 && < 2.11,
+                       primitive,
+                       binary,
+                       bytestring,
+                       containers
+  default-language:    Haskell2010
+  ghc-options: -O2
+  cpp-options: -DBOOTING_PACKAGE=ghcjs-prim
+
