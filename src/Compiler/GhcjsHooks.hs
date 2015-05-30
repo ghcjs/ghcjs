@@ -174,7 +174,9 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
 runGhcjsPhase _ _ (RealPhase ph) input _dflags
   | Just next <- lookup ph skipPhases = do
     output <- phaseOutputFilename next
-    liftIO (copyFile input output `catchIOError` \_ -> return ())
+    liftIO $ (createDirectoryIfMissing True (takeDirectory output) >>
+              copyFile input output)
+                `catchIOError` \_ -> return ()
     return (RealPhase next, output)
   where
 #if MIN_VERSION_ghc(7,8,3)
@@ -200,7 +202,9 @@ ghcjsWriteModule :: GhcjsSettings
                  -> FilePath    -- ^ Output path
                  -> IO FilePath
 ghcjsWriteModule settings jsEnv env core mod output = do
-    B.writeFile output =<< ghcjsCompileModule settings jsEnv env core mod
+    b <- ghcjsCompileModule settings jsEnv env core mod
+    createDirectoryIfMissing True (takeDirectory output)
+    B.writeFile output b
     return output
 
 ghcjsCompileModule :: GhcjsSettings
