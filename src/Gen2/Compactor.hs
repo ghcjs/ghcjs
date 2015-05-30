@@ -37,6 +37,7 @@ import           Data.Maybe
 import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 
 import           Compiler.JMacro
 import           Compiler.Settings
@@ -321,7 +322,7 @@ encodeStatic cs (StaticInfo _to sv _)
     encodeChar = ord -- fixme make characters more readable
 
 encodeString :: Text -> [Int]
-encodeString xs = T.length xs : map ord (T.unpack xs)
+encodeString xs = encodeBinary (TE.encodeUtf8 xs)
 
 -- ByteString is prefixed with length, then blocks of 4 numbers encoding 3 bytes
 encodeBinary :: BS.ByteString -> [Int]
