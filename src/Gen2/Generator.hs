@@ -1883,4 +1883,4 @@ isInlineApp v i [StgVarArg a]
 isInlineApp _ _ _ = False
 
 isEvaldId :: Id -> Bool
-isEvaldId = isEvaldUnfolding . idUnfolding
+isEvaldId = isValueUnfolding . idUnfolding
