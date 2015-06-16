@@ -77,7 +77,8 @@ import Gen2.Archive
 -------------------------------------------------------------------------------------------
 -- Link libraries
 
-ghcjsLink :: GhcjsSettings
+ghcjsLink :: GhcjsEnv
+          -> GhcjsSettings
           -> [FilePath] -- ^ extra JS files
           -> Bool       -- ^ build JavaScript?
           -> GhcLink    -- ^ what to link
@@ -85,7 +86,7 @@ ghcjsLink :: GhcjsSettings
           -> Bool
           -> HomePackageTable
           -> IO SuccessFlag
-ghcjsLink settings extraJs buildJs ghcLink dflags batch_attempt_linking pt
+ghcjsLink env settings extraJs buildJs ghcLink dflags batch_attempt_linking pt
   | ghcLink == LinkInMemory || ghcLink == NoLink =
       return Succeeded
   | ghcLink == LinkStaticLib || ghcLink == LinkDynLib =
@@ -95,7 +96,7 @@ ghcjsLink settings extraJs buildJs ghcLink dflags batch_attempt_linking pt
   | otherwise = do
       when (buildJs && isJust (gsLinkJsLib settings))
         (void $ ghcjsLinkJsLib settings extraJs dflags pt) -- fixme use return value
-      link' settings extraJs buildJs dflags batch_attempt_linking pt
+      link' env settings extraJs buildJs dflags batch_attempt_linking pt
 
 ghcjsLinkJsLib :: GhcjsSettings
                -> [FilePath] -- ^ extra JS files
@@ -140,14 +141,15 @@ dumpHpt dflags pt = "hpt:\n" ++ unlines
   (map (\hmi -> (moduleNameString . moduleName . mi_module . hm_iface $ hmi) ++
                 " -> " ++ maybe "<no linkable>" (showPpr dflags) (hm_linkable hmi))
        (eltsUFM pt))
-ghcjsLinkJsBinary :: GhcjsSettings
+ghcjsLinkJsBinary :: GhcjsEnv
+                  -> GhcjsSettings
                   -> [FilePath]
                   -> DynFlags
                   -> [FilePath]
                   -> [PackageKey]
                   -> IO ()
-ghcjsLinkJsBinary settings jsFiles dflags objs dep_pkgs =
-  void $ variantLink gen2Variant dflags settings exe [] dep_pkgs objs' jsFiles isRoot S.empty
+ghcjsLinkJsBinary env settings jsFiles dflags objs dep_pkgs =
+  void $ variantLink gen2Variant dflags env settings exe [] dep_pkgs objs' jsFiles isRoot S.empty
     where
       objs'    = map ObjFile objs
       isRoot _ = True
@@ -177,7 +179,8 @@ ghcjsPrimPackage dflags = do
   where
     filename = getLibDir dflags </> "wiredinkeys" <.> "yaml"
 
-link' :: GhcjsSettings
+link' :: GhcjsEnv
+      -> GhcjsSettings
       -> [FilePath]              -- extra js files
       -> Bool                    -- building JavaScript
       -> DynFlags                -- dynamic flags
@@ -185,7 +188,7 @@ link' :: GhcjsSettings
       -> HomePackageTable        -- what to link
       -> IO SuccessFlag
 
-link' settings extraJs buildJs dflags batch_attempt_linking hpt
+link' env settings extraJs buildJs dflags batch_attempt_linking hpt
    | batch_attempt_linking
    = do
         let
@@ -226,7 +229,7 @@ link' settings extraJs buildJs dflags batch_attempt_linking hpt
 
         -- Don't showPass in Batch mode; doLink will do that for us.
         let link = case ghcLink dflags of
-                LinkBinary    -> if buildJs then ghcjsLinkJsBinary settings extraJs else linkBinary
+                LinkBinary    -> if buildJs then ghcjsLinkJsBinary env settings extraJs else linkBinary
                 LinkStaticLib -> linkStaticLibCheck
                 LinkDynLib    -> linkDynLibCheck
                 other         -> panicBadLink other
@@ -527,8 +530,8 @@ linkBinary' staticLink dflags o_files dep_packages = do
     unless success $
         throwGhcExceptionIO (InstallationError ("cannot move binary"))
 
-ghcjsDoLink :: GhcjsSettings -> Bool -> DynFlags -> Phase -> [FilePath] -> IO ()
-ghcjsDoLink settings native dflags stop_phase o_files
+ghcjsDoLink :: GhcjsEnv -> GhcjsSettings -> Bool -> DynFlags -> Phase -> [FilePath] -> IO ()
+ghcjsDoLink env settings native dflags stop_phase o_files
   | not (isStopLn stop_phase)
   = return ()           -- We stopped before the linking phase
   | native
@@ -540,7 +543,7 @@ ghcjsDoLink settings native dflags stop_phase o_files
   | isJust (gsLinkJsLib settings)
   = void $ ghcjsLinkJsLib settings o_files dflags emptyHomePackageTable
   | otherwise =
-    void $ ghcjsLink settings o_files True (ghcLink dflags) dflags True emptyHomePackageTable
+    void $ ghcjsLink env settings o_files True (ghcLink dflags) dflags True emptyHomePackageTable
 
 -------------------------------------------------------------------------------------------
 -- Compile Core expression

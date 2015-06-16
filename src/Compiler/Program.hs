@@ -240,7 +240,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   -- add GHCJS configuration
   let baseDir = Ghcjs.getLibDir dflags4
   dflags4b <- if native
-                then return (Ghcjs.setNativePlatform ghcjsSettings baseDir dflags4)
+                then return (Ghcjs.setNativePlatform jsEnv ghcjsSettings baseDir dflags4)
                 else return $
                        Ghcjs.setGhcjsPlatform ghcjsSettings jsEnv js_objs baseDir $
                        updateWays $ addWay' (WayCustom "js") $
@@ -289,9 +289,9 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        liftIO $ exitWith (ExitFailure 1)) $ do
     case postLoadMode of
        ShowInterface f        -> liftIO (doShowIface dflags6 f) >> return True
-       DoMake                 -> phaseMsg >> doMake ghcjsSettings native srcs >> return False
+       DoMake                 -> phaseMsg >> doMake jsEnv ghcjsSettings native srcs >> return False
        DoMkDependHS           -> doMkDependHS (map fst srcs) >> return True
-       StopBefore p           -> phaseMsg >> liftIO (Ghcjs.ghcjsOneShot ghcjsSettings native hsc_env p srcs) >> return False
+       StopBefore p           -> phaseMsg >> liftIO (Ghcjs.ghcjsOneShot jsEnv ghcjsSettings native hsc_env p srcs) >> return False
        DoInteractive          -> ghciUI srcs Nothing >> return True
        DoEval exprs           -> (ghciUI srcs $ Just $ reverse exprs) >> return True
        DoAbiHash              -> abiHash srcs >> return True
@@ -788,8 +788,8 @@ addFlag s flag = liftEwM $ do
 -- ----------------------------------------------------------------------------
 -- Run --make mode
 
-doMake :: Ghcjs.GhcjsSettings -> Bool -> [(String,Maybe Phase)] -> Ghc ()
-doMake settings native srcs  = do
+doMake :: Ghcjs.GhcjsEnv -> Ghcjs.GhcjsSettings -> Bool -> [(String,Maybe Phase)] -> Ghc ()
+doMake jsEnv settings native srcs  = do
     let (hs_srcs, non_hs_srcs) = partition haskellish srcs
 
         haskellish (f,Nothing) =
@@ -808,7 +808,7 @@ doMake settings native srcs  = do
     -- This means that "ghc Foo.o Bar.o -o baz" links the program as
     -- we expect.
     if (null hs_srcs)
-       then liftIO (Ghcjs.ghcjsOneShot settings native hsc_env StopLn srcs)
+       then liftIO (Ghcjs.ghcjsOneShot jsEnv settings native hsc_env StopLn srcs)
        else do
 
     o_files <- mapM (\x -> liftIO $ compileFile hsc_env StopLn x)

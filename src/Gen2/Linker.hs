@@ -99,7 +99,6 @@ import           Gen2.Printer             (pretty)
 import           Gen2.Rts                 (rtsText, rtsDeclsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
-
 import           System.Exit (exitFailure)
 
 type LinkableUnit = (Package, Module, Int) -- ^ module and the index of the block in the object file
@@ -121,13 +120,10 @@ data LinkResult = LinkResult
 
 instance Binary LinkResult
 
-data DepsLocation = ObjectFile  FilePath
-                  | ArchiveFile FilePath
-                  | InMemory    String ByteString
-                  deriving (Eq, Show)
 
 -- | link and write result to disk (jsexe directory)
 link :: DynFlags
+     -> GhcjsEnv
      -> GhcjsSettings
      -> FilePath                   -- ^ output file/directory
      -> [FilePath]                 -- ^ include path for home package
@@ -137,11 +133,11 @@ link :: DynFlags
      -> (Fun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
      -> Set Fun                    -- ^ extra symbols to link in
      -> IO ()
-link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
+link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
   | gsNoJSExecutables settings = return ()
   | otherwise = do
       LinkResult lo lstats lmetasize llW lla llarch lbase <-
-        link' dflags settings out include pkgs objFiles jsFiles
+        link' dflags env settings out include pkgs objFiles jsFiles
               isRootFun extraStaticDeps
       let genBase = isJust (gsGenBase settings)
           jsExt | genBase   = "base.js"
@@ -175,6 +171,7 @@ link dflags settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
 
 -- | link in memory
 link' :: DynFlags
+      -> GhcjsEnv
       -> GhcjsSettings
       -> String                     -- ^ target (for progress message)
       -> [FilePath]                 -- ^ include path for home package
@@ -184,7 +181,7 @@ link' :: DynFlags
       -> (Fun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
       -> Set Fun                    -- ^ extra symbols to link in
       -> IO LinkResult
-link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
+link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
       (objDepsMap, objRequiredUnits) <- loadObjDeps objFiles
       let rootSelector | Just baseMod <- gsGenBase settings =
                            \(Fun p m s) -> m == T.pack baseMod
@@ -211,7 +208,7 @@ link' dflags settings target include pkgs objFiles jsFiles isRootFun extraStatic
           pkgLibPaths = mkPkgLibPaths pkgs'
           getPkgLibPaths :: PackageKey -> ([FilePath],[String])
           getPkgLibPaths k = fromMaybe ([],[]) (M.lookup k pkgLibPaths)
-      (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps =<<
+      (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps env =<<
           getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs')
       pkgArchs <- getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs'')
       (allDeps, code) <-
@@ -677,9 +674,19 @@ loadObjDeps :: [LinkedObj] -- ^ object files to link
             -> IO (Map (Package, Module) (Deps, DepsLocation), [LinkableUnit])
 loadObjDeps objs = prepareLoadedDeps <$> mapM readDepsFile' objs
 
-loadArchiveDeps :: [FilePath]
+loadArchiveDeps :: GhcjsEnv
+                -> [FilePath]
                 -> IO (Map (Package, Module) (Deps, DepsLocation), [LinkableUnit])
-loadArchiveDeps archives = do
+loadArchiveDeps env archives = modifyMVar (linkerArchiveDeps env) $ \m ->
+  case M.lookup archives' m of
+    Just r  -> return (m, r)
+    Nothing -> loadArchiveDeps' archives >>= \r -> return (M.insert archives' r m, r)
+  where
+     archives' = S.fromList archives
+
+loadArchiveDeps' :: [FilePath]
+                 -> IO (Map (Package, Module) (Deps, DepsLocation), [LinkableUnit])
+loadArchiveDeps' archives = do
   archDeps <- forM archives $ \file ->
     Ar.withAllObjects file $ \modulename h _len -> (,ArchiveFile file) <$>
         hReadDeps (file ++ ':':moduleNameString modulename) h
