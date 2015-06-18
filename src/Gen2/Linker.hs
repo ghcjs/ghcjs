@@ -213,7 +213,7 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
       pkgArchs <- getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs'')
       (allDeps, code) <-
         collectDeps dflags
-                    (archsDepsMap `M.union` objDepsMap)
+                    (objDepsMap `M.union` archsDepsMap)
                     (pkgs' ++ [thisPackage dflags])
                     (baseUnits base)
                     (roots `S.union` rds `S.union` extraStaticDeps)
