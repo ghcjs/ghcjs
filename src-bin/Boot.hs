@@ -870,7 +870,7 @@ installInTreeGmp = subTop' integerGmp $ do
 
 preparePackage :: Package -> B ()
 preparePackage pkg
-  | "./" `T.isPrefixOf` pkg = sub $ do
+  | "./" `T.isPrefixOf` pkg || "../" `T.isPrefixOf` pkg = sub $ do
     msg trace ("preparing package " <> pkg)
     cd (fromText pkg)
     whenM (test_f "configure.ac") $
@@ -1107,6 +1107,7 @@ cabalInstallFlags parmakeGhcjs = do
            , "--haddock-hoogle"
 #endif
            , "--haddock-hyperlink-source"
+           , "--enable-shared"
            , bool prof "--enable-library-profiling" "--disable-library-profiling"
            ] ++
            bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++
