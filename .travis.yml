@@ -1,8 +1,8 @@
 env:
-    - GHCVER=7.10.1 TEST_PART=CORE1
-    - GHCVER=7.10.1 TEST_PART=CORE2
-    - GHCVER=7.10.1 TEST_PART=PROFILING
-    - GHCVER=7.10.1 TEST_PART=GHCJS
+    - GHCVER=7.10.2 TEST_PART=CORE1
+    - GHCVER=7.10.2 TEST_PART=CORE2
+    - GHCVER=7.10.2 TEST_PART=PROFILING
+    - GHCVER=7.10.2 TEST_PART=GHCJS
 
 before_install:
     - export GHCJS_BOOTING=1
@@ -11,20 +11,11 @@ before_install:
     - curl -sL https://deb.nodesource.com/setup | sudo bash -
     - travis_retry sudo apt-get update -qq
     - travis_retry sudo apt-get build-dep ghc
-    - travis_retry sudo apt-get install nodejs cabal-install-1.22 ghc-$GHCVER alex-3.1.3 happy-1.19.4
-    - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/1.22/bin:$PATH
+    - travis_retry sudo apt-get install nodejs cabal-install-1.22 ghc-$GHCVER alex-3.1.4 happy-1.19.5
+    - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/1.22/bin:/opt/alex/3.1.4/bin:/opt/happy/1.19.5/bin:$PATH
 
 install:
     - travis_retry cabal update
-    - mkdir _ghcjs_deps
-    - cd _ghcjs_deps
-    - travis_retry git clone https://github.com/ghcjs/ghcjs-prim.git
-    - travis_retry git clone https://github.com/haskell/haddock.git
-    - cd ghcjs-prim
-    - git checkout $TRAVIS_BRANCH
-    - cd ..
-    - cabal install -j2 ./ghcjs-prim ./haddock/haddock-api ./haddock/haddock-library
-    - cd ..
     - cabal install --enable-tests --enable-benchmarks
     - ghcjs --version
     - ghcjs-boot --version
