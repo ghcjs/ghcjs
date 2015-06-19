@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -O0 #-}
+
 {- |
     The ghcjs-boot program installs the libraries and runtime system for GHCJS
 
