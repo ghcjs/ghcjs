@@ -16,7 +16,8 @@ before_install:
 
 install:
     - travis_retry cabal update
-    - cabal install --enable-tests --enable-benchmarks
+    - cabal install --only-dependencies
+    - cabal install --enable-tests --enable-benchmarks -v -j1 --ghc-options="+RTS -c -RTS"
     - ghcjs --version
     - ghcjs-boot --version
     - ./test/runTravis.sh boot
