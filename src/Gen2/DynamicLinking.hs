@@ -126,7 +126,7 @@ ghcjsLinkJsLib settings jsFiles dflags hpt
       B.writeFile outputFile (buildArchive meta (concat objEntries ++ jsEntries))
       -- we don't use shared js_so libraries ourselves, but Cabal expects that we
       -- generate one when building with --dynamic-too. Just write an empty file
-      when (gopt Opt_BuildDynamicToo dflags) $ do
+      when (gopt Opt_BuildDynamicToo dflags || WayDyn `elem` ways dflags) $ do
         let sharedLibFileName =
               "lib" ++ jsLib ++ "-ghcjs" ++ Info.getCompilerVersion ++ profSuff <.> "js_so"
             sharedOutputFile = inOutputDir sharedLibFileName
