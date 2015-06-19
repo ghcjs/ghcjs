@@ -50,7 +50,7 @@ travis_test() {
 }
 
 ghcjs_boot() {
-    "$GHCJSBOOT" --dev --no-haddock --with-node "$NODE" "$@"
+    "$GHCJSBOOT" --dev --ghcjs-boot-dev-branch "$TRAVIS_BRANCH" --shims-dev-branch "$TRAVIS_BRANCH" --no-haddock --with-node "$NODE" "$@"
 }
 
 cabal_install() {
