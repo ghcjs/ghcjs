@@ -1,0 +1,18 @@
+testFFI
+FFI test 1 OK
+testMVar
+OK: MVar test 1
+MVar test 2: thread blocked indefinitely in an MVar operation
+OK
+OK
+MVar test3: OK
+testSTM
+2
+OK: STM test 1
+testWeak
+Weak test 1
+True
+OK
+Weak test 1 finalizer
+False
+
