@@ -1109,7 +1109,11 @@ cabalInstallFlags parmakeGhcjs = do
            , "--haddock-hoogle"
 #endif
            , "--haddock-hyperlink-source"
+-- don't slow down Windows builds too much, on other platforms we get this more
+-- or less for free, thanks to dynamic-too
+#ifndef WINDOWS
            , "--enable-shared"
+#endif
            , bool prof "--enable-library-profiling" "--disable-library-profiling"
            ] ++
            bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++
