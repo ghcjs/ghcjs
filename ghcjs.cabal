@@ -42,6 +42,8 @@ extra-source-files:
                 include/*.h
                 src-bin/Pkg-708.hs
                 README.markdown
+                test/LICENSE
+                test/ghcjs-testsuite.cabal
 
 source-repository head
   type:     git
