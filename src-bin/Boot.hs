@@ -897,7 +897,7 @@ installFakes = silently $ do
   dumped <- T.lines <$> ghc_pkg ["dump"]
   fakes <- view (beStages . bstPretend)
   forM_ fakes $ \pkg ->
-    case reverse (filter ((pkg<>"-") `T.isPrefixOf`) installed) of
+    case reverse (filter ((==pkg<>"-") . fst . T.breakOnEnd "-") installed) of
       [] -> failWith ("required package " <> pkg <> " not found in host GHC")
       (x:_) -> do
         let version = T.drop 1 (T.dropWhile (/='-') x)
