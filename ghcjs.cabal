@@ -171,7 +171,7 @@ Library
     buildable: True
     hs-source-dirs: src lib/ghcjs-prim
     include-dirs: include
-    GHC-Options: -O2 -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-unused-do-bind -auto-all -fprof-auto
+    GHC-Options: -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-unused-do-bind -auto-all -fprof-auto
 
 -- the compiler executable, Setup.hs installs a wrapper script that
 -- supplies the installation directory
@@ -181,7 +181,7 @@ Executable ghcjs
     hs-source-dirs: src-bin
     Build-Depends:  base                >= 4    &&  < 5,
                     ghcjs
-    GHC-Options:    -O2 -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded
+    GHC-Options:    -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded
 
 Executable haddock-ghcjs
     if os(Windows)
@@ -199,7 +199,7 @@ Executable haddock-ghcjs
                     filepath,
                     ghcjs,
                     haddock-api >= 2.15
-    GHC-Options:    -O -Wall
+    GHC-Options:    -Wall
 
 Executable hsc2hs-ghcjs
     if os(Windows)
@@ -210,7 +210,7 @@ Executable hsc2hs-ghcjs
     Build-Depends:  base                >= 4    &&  < 5,
                     ghcjs,
                     process
-    GHC-Options:    -O -Wall
+    GHC-Options:    -Wall
 
 -- the package manager, like with the compiler, this executable is called
 -- through a wrapper script
@@ -250,7 +250,7 @@ Executable ghcjs-boot
       Buildable:      False
     if os(Windows)
       cpp-options: -DWINDOWS
-    ghc-options:      -threaded -O
+    ghc-options:      -threaded
     Main-Is:          Boot.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
@@ -288,7 +288,7 @@ Executable ghcjs-run
       Buildable:      False
     if os(Windows)
       cpp-options: -DWINDOWS
-    ghc-options:      -threaded -O
+    ghc-options:      -threaded
     Main-Is:          Run.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
@@ -304,7 +304,7 @@ test-suite test
     type:             exitcode-stdio-1.0
     Default-Language: Haskell2010
     hs-source-dirs:   test
-    ghc-options:      -threaded -O
+    ghc-options:      -threaded
     main-is:          TestRunner.hs
     build-depends:    base                 >= 4 && < 5,
                       process,
