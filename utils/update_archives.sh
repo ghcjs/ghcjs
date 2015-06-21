@@ -171,7 +171,7 @@ echo "preparing boot and shims cache in ${BUILDDIR}"
     prepare_packages "boot"
     
     prepare_primops
-    prepare_setup_scripts
+    # prepare_setup_scripts
     cd ..
     echo "${BOOT_EXCLUDE}" > boot.exclude    
     tar -X boot.exclude -cf boot.tar ghcjs-boot
