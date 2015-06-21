@@ -691,7 +691,7 @@ genApp top i a
                 [i'] <- genIds i
                 return ([j| `c` = (typeof `i'` === 'object') ? `i'`.d1 : `i'`; |]
                        ,ExprInline Nothing)
-    | n == 0 && (i `elementOfUniqSet` (top ^. ctxEval) || isEvaldId i) = do
+    | n == 0 && (i `elementOfUniqSet` (top ^. ctxEval) || isStrictId i) = do
                 a <- assignAllCh ("genApp:" ++ show i ++ " " ++ show (idRepArity i, idVt i))
                                  (top ^. ctxTarget)
                                  <$> genIds i
@@ -707,17 +707,17 @@ genApp top i a
                 [ai] <- concatMapM genArg a
                 let [t] = top ^. ctxTarget
                     [StgVarArg a'] = a
-                if isEvaldId a' || a' `elementOfUniqSet` (top ^. ctxEval)
+                if isStrictId a' || a' `elementOfUniqSet` (top ^. ctxEval)
                   then return ([j| `t` = `ai`; |], ExprInline Nothing)
                   else return ([j| return h$e(`ai`); |], ExprCont)
     | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) = do
              ii <- enterId
              return ([j| return h$e(`ii`) |], ExprCont)
-    | idRepArity i == n && not (isLocalId i) && isEvaldId i && n /= 0 = do
+    | idRepArity i == n && not (isLocalId i) && isStrictId i && n /= 0 = do
         as' <- concatMapM genArg a
         jmp <- jumpToII i as' =<< r1
         return (jmp, ExprCont)
-    | idRepArity i < n && isEvaldId i && idRepArity i > 0 =
+    | idRepArity i < n && isStrictId i && idRepArity i > 0 =
          let (reg,over) = splitAt (idRepArity i) a
          in  do
            reg' <- concatMapM genArg reg
@@ -1875,12 +1875,10 @@ isInlineForeignCall (CCall (CCallSpec _ cconv safety)) =
   not (cconv /= JavaScriptCallConv && playSafe safety)
 
 isInlineApp :: UniqSet Id -> Id -> [StgArg] -> Bool
-isInlineApp v i [] = isUnboxedTupleType (idType i) || isStrictType (idType i) || i `elementOfUniqSet` v || isEvaldId i
+isInlineApp v i [] = isUnboxedTupleType (idType i) || isStrictType (idType i) || i `elementOfUniqSet` v || isStrictId i
 isInlineApp _ i [StgLitArg (MachStr _)]
   | getUnique i `elem` [unpackCStringIdKey, unpackCStringUtf8IdKey, unpackCStringAppendIdKey] = True
 isInlineApp v i [StgVarArg a]
-  | DataConWrapId dc <- idDetails i, isNewTyCon (dataConTyCon dc), isStrictType (idType a) || a `elementOfUniqSet` v || isEvaldId a = True
+  | DataConWrapId dc <- idDetails i, isNewTyCon (dataConTyCon dc), isStrictType (idType a) || a `elementOfUniqSet` v || isStrictId a = True
 isInlineApp _ _ _ = False
 
-isEvaldId :: Id -> Bool
-isEvaldId = isValueUnfolding . idUnfolding

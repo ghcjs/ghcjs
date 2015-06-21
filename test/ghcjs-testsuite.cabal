@@ -17,7 +17,7 @@ executable ghcjs-testsuite
     cpp-options: -DSTANDALONE
     Default-Language: Haskell2010
     hs-source-dirs:   .
-    ghc-options:      -threaded -O
+    ghc-options:      -threaded
     main-is:          TestRunner.hs
     build-depends:    base                 >= 4 && < 5,
                       process,
@@ -32,10 +32,11 @@ executable ghcjs-testsuite
                       time,
                       bytestring,
                       deepseq,
-                      shelly               >= 1.5 &&  < 1.6,
+                      shelly               >= 1.5 &&  < 1.7,
                       data-default         >= 0.5 &&  < 0.6,
                       yaml                 >= 0.8 &&  < 0.9,
                       unordered-containers,
-                      optparse-applicative >= 0.9 &&  < 0.10,
-                      directory
+                      optparse-applicative >= 0.11 &&  < 0.12,
+                      directory,
+                      lens
 

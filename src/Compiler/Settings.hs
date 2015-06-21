@@ -3,6 +3,7 @@
 module Compiler.Settings where
 
 import           Gen2.Base
+import qualified Gen2.Object as Object
 
 import           Control.Applicative
 import qualified Control.Exception as E
@@ -13,6 +14,7 @@ import           Data.ByteString        (ByteString)
 import           Data.IntMap            (IntMap)
 import           Data.Map               (Map)
 import qualified Data.Map               as M
+import           Data.Set               (Set)
 import           Data.Monoid
 import           Data.Text (Text)
 
@@ -106,14 +108,27 @@ data ThRunner =
            , thrExceptions     :: MVar (IntMap E.SomeException)
            }
 
+data DepsLocation = ObjectFile  FilePath
+                  | ArchiveFile FilePath
+                  | InMemory    String ByteString
+                  deriving (Eq, Show)
+
 data GhcjsEnv = GhcjsEnv
-  { compiledModules :: MVar (Map Module ByteString) -- ^ keep track of already compiled modules so we don't compile twice for dynamic-too
-  , thRunners       :: MVar (Map String ThRunner)   -- ^ template haskell runners
-  , thSplice        :: MVar Int
+  { compiledModules   :: MVar (Map Module ByteString) -- ^ keep track of already compiled modules so we don't compile twice for dynamic-too
+  , thRunners         :: MVar (Map String ThRunner)   -- ^ template haskell runners
+  , thSplice          :: MVar Int
+  , linkerArchiveDeps :: MVar (Map (Set FilePath)
+                                   (Map (Object.Package, Text)
+                                        (Object.Deps, DepsLocation), [(Object.Package, Text, Int)]
+                                   )
+                              )
   }
 
 newGhcjsEnv :: IO GhcjsEnv
-newGhcjsEnv = GhcjsEnv <$> newMVar M.empty <*> newMVar M.empty <*> newMVar 0
+newGhcjsEnv = GhcjsEnv <$> newMVar M.empty
+                       <*> newMVar M.empty
+                       <*> newMVar 0
+                       <*> newMVar M.empty
 
 -- an object file that's either already in memory (with name) or on disk
 data LinkedObj = ObjFile   FilePath          -- load from this file

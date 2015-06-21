@@ -54,10 +54,10 @@ setGhcjsPlatform set js_env js_objs basePath df
        , pc_WORDS_BIGENDIAN = False
        }
 
-setNativePlatform :: GhcjsSettings -> FilePath -> DynFlags -> DynFlags
-setNativePlatform gs baseDir df
+setNativePlatform :: GhcjsEnv -> GhcjsSettings -> FilePath -> DynFlags -> DynFlags
+setNativePlatform env gs baseDir df
   = addPlatformDefines baseDir
-  $ installNativeHooks gs
+  $ installNativeHooks env gs
   $ df
 
 -- | Apply additional dynamic flags options.

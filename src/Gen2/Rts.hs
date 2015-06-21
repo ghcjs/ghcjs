@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -O0 #-}
+
 {-# LANGUAGE QuasiQuotes, OverloadedStrings #-}
 
 module Gen2.Rts where

@@ -192,7 +192,8 @@ ghcjsRunMeta' js_env js_settings desc tht show_code ppr_code cvt expr = do
                  concatMap (map fst . dep_pkgs .  mi_deps . hm_iface)
                            (eltsUFM $ hsc_HPT hsc_env)
       settings = thSettings { gsUseBase = BaseState base }
-  lr       <- liftIO $ linkTh settings
+  lr       <- liftIO $ linkTh js_env
+                              settings
                               []
                               dflags
                               pkgs
@@ -244,20 +245,21 @@ getThRunner js_env hsc_env dflags m = do
   modifyMVar (thRunners js_env) $ \runners -> case M.lookup m' runners of
     Just r  -> return (runners, r)
     Nothing -> do
-      r <- startThRunner dflags hsc_env
+      r <- startThRunner dflags js_env hsc_env
       -- fixme find where ghc finalizes
       -- when $ TH.qAddModFinalizer (TH.Q $ finishTh is_io js_env m r)
       return (M.insert m' r runners, r)
 
 
-linkTh :: GhcjsSettings        -- settings (contains the base state)
+linkTh :: GhcjsEnv
+       -> GhcjsSettings        -- settings (contains the base state)
        -> [FilePath]           -- extra js files
        -> DynFlags             -- dynamic flags
        -> [PackageKey]         -- package dependencies
        -> HomePackageTable     -- what to link
        -> Maybe ByteString     -- current module or Nothing to get the initial code + rts
        -> IO Gen2.LinkResult
-linkTh settings js_files dflags pkgs hpt code = do
+linkTh env settings js_files dflags pkgs hpt code = do
   (th_deps_pkgs, th_deps)  <- Gen2.thDeps dflags
   let home_mod_infos = eltsUFM hpt
       pkgs' | isJust code = L.nub $ pkgs ++ th_deps_pkgs
@@ -266,6 +268,7 @@ linkTh settings js_files dflags pkgs hpt code = do
       linkables = map (expectJust "link".hm_linkable) home_mod_infos
       getOfiles (LM _ _ us) = map nameOfObject (filter isObject us)
       link      = Gen2.link' dflags'
+                             env
                              settings
                              "Template Haskell"
                              []
@@ -425,7 +428,7 @@ runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
       r <- getThRunner is_io dflags js_env hsc_env m
       base <- TH.qRunIO $ takeMVar (thrBase r)
       let settings = thSettings { gsUseBase = BaseState base }
-      lr  <- TH.qRunIO $ linkTh settings [] dflags expr_pkgs (hsc_HPT hsc_env) (Just code)
+      lr  <- TH.qRunIO $ linkTh js_env settings [] dflags expr_pkgs (hsc_HPT hsc_env) (Just code)
       ext <- TH.qRunIO $ do
         llr      <- mconcat <$> mapM (Gen2.tryReadShimFile dflags)  (Gen2.linkLibRTS lr)
         lla'     <- mconcat <$> mapM (Gen2.tryReadShimFile dflags)  (Gen2.linkLibA lr)
@@ -433,6 +436,7 @@ runTh is_io js_env hsc_env dflags expr_pkgs ty code symb = do
         return (llr <> lla' <> llaarch')
       let bs = ext <> BL.toStrict (Gen2.linkOut lr) <>
                T.encodeUtf8 ("\nh$TH.loadedSymbol = " <> symb <> ";\n")
+
       hv <- requestRunner is_io r (TH.RunTH tht bs loc) >>= \case
               TH.RunTH' bsr -> getHv bsr
               _             -> error "runTh: unexpected response, expected RunTH' message"
@@ -456,7 +460,7 @@ getThRunner is_io dflags js_env hsc_env m = do
   case M.lookup m runners of
     Just r  -> TH.qRunIO (putMVar (thRunners js_env) runners) >> return r
     Nothing -> do
-      r <- TH.qRunIO $ startThRunner dflags hsc_env
+      r <- TH.qRunIO $ startThRunner dflags js_env hsc_env
       when (not is_io) $ TH.qAddModFinalizer (TH.Q $ finishTh is_io js_env m r)
       TH.qRunIO $ putMVar (thRunners js_env) (M.insert m r runners)
       return r
@@ -514,14 +518,15 @@ ghcjsCompileCoreExpr js_env settings hsc_env srcspan ds_expr = do
 thrunnerPackage :: PackageId
 thrunnerPackage = stringToPackageId "thrunner"
 
-linkTh :: GhcjsSettings        -- settings (contains the base state)
+linkTh :: GhcjsEnv
+       -> GhcjsSettings        -- settings (contains the base state)
        -> [FilePath]           -- extra js files
        -> DynFlags             -- dynamic flags
        -> [PackageId]
        -> HomePackageTable     -- what to link
        -> Maybe ByteString     -- current module or Nothing to get the initial code + rts
        -> IO Gen2.LinkResult
-linkTh settings js_files dflags expr_pkgs hpt code = do
+linkTh env settings js_files dflags expr_pkgs hpt code = do
   let home_mod_infos = eltsUFM hpt
       pidMap    = pkgIdMap (pkgState dflags)
       pkg_deps :: [PackageId]
@@ -549,7 +554,7 @@ linkTh settings js_files dflags expr_pkgs hpt code = do
       th_deps' :: Text
       th_deps'  = T.pack $ (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++ show (ways dflags')
       is_root   = const True
-      link      = Gen2.link' dflags' settings "template haskell" [] pkg_deps' obj_files js_files is_root th_deps
+      link      = Gen2.link' dflags' env settings "template haskell" [] pkg_deps' obj_files js_files is_root th_deps
   if isJust code
      then link
      else Gen2.getCached dflags' "template-haskell" th_deps' >>= \case
@@ -672,9 +677,9 @@ thSettings = GhcjsSettings False True False False Nothing
                            Nothing NoBase
                            Nothing Nothing []
 
-startThRunner :: DynFlags -> HscEnv -> IO ThRunner
-startThRunner dflags hsc_env = do
-  lr <- linkTh thSettings [] dflags [] (hsc_HPT hsc_env) Nothing
+startThRunner :: DynFlags -> GhcjsEnv -> HscEnv -> IO ThRunner
+startThRunner dflags js_env hsc_env = do
+  lr <- linkTh js_env thSettings [] dflags [] (hsc_HPT hsc_env) Nothing
   fr <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibRTS lr)
   fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
   aa <- BL.fromChunks <$> mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)

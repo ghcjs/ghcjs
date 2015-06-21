@@ -48,7 +48,7 @@ installGhcjsHooks env settings js_objs dflags =
   Gen2.installForeignHooks True $ dflags { hooks = addHooks (hooks dflags) }
     where
       addHooks h = h
-        { linkHook               = Just (Gen2.ghcjsLink settings js_objs True)
+        { linkHook               = Just (Gen2.ghcjsLink env settings js_objs True)
         , getValueSafelyHook     = Just (Gen2TH.ghcjsGetValueSafely settings)
 #if __GLASGOW_HASKELL__ >= 709
         , runMetaHook            = Just (Gen2TH.ghcjsRunMeta env settings)
@@ -57,11 +57,11 @@ installGhcjsHooks env settings js_objs dflags =
 #endif
         }
 
-installNativeHooks :: GhcjsSettings -> DynFlags -> DynFlags
-installNativeHooks settings dflags =
+installNativeHooks :: GhcjsEnv -> GhcjsSettings -> DynFlags -> DynFlags
+installNativeHooks env settings dflags =
   Gen2.installForeignHooks False $ dflags { hooks = addHooks (hooks dflags) }
     where
-      addHooks h = h { linkHook               = Just (Gen2.ghcjsLink settings [] False)
+      addHooks h = h { linkHook               = Just (Gen2.ghcjsLink env settings [] False)
 #if !(__GLASGOW_HASKELL__ >= 709)
                      , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
                      , hscCompileCoreExprHook = Just Gen2.ghcjsCompileCoreExpr
@@ -72,10 +72,10 @@ installNativeHooks settings dflags =
 -- One shot replacement (the oneShot in DriverPipeline
 -- always uses the unhooked linker)
 
-ghcjsOneShot :: GhcjsSettings -> Bool -> HscEnv -> Phase -> [(String, Maybe Phase)] -> IO ()
-ghcjsOneShot settings native hsc_env stop_phase srcs = do
+ghcjsOneShot :: GhcjsEnv -> GhcjsSettings -> Bool -> HscEnv -> Phase -> [(String, Maybe Phase)] -> IO ()
+ghcjsOneShot env settings native hsc_env stop_phase srcs = do
   o_files <- mapM (compileFile hsc_env stop_phase) srcs
-  Gen2.ghcjsDoLink settings native (hsc_dflags hsc_env) stop_phase o_files
+  Gen2.ghcjsDoLink env settings native (hsc_dflags hsc_env) stop_phase o_files
 
 --------------------------------------------------
 -- Driver hooks

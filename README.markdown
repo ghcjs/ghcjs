@@ -54,6 +54,8 @@ GHCJS. GHC 7.10 already includes a compatible `Cabal` version. Cabal support has
 merged upstream, get the correct version from https://github.com/haskell/cabal or from
 Hackage once it has been released.
 
+**Warning: GHC 7.10 is not yet officially supported, there are some bugs in 7.10.1 that need to be worked around for GHCJS to work, see: https://github.com/ghcjs/ghcjs/wiki/GHCJS-with-GHC-7.10**
+
 Note that you need a compatible `Cabal` library in your GHC package database, just upgrading
 the `cabal-install` program is not enough. `ghcjs-boot` will complain if it finds an incompatible
 version.

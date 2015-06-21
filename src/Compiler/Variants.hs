@@ -27,6 +27,7 @@ data Variant = Variant
                                -> CollectedCCs
                                -> ByteString
     , variantLink              :: DynFlags
+                               -> GhcjsEnv
                                -> GhcjsSettings
                                -> FilePath                     -- output directory
                                -> [FilePath]                   -- include paths for home package

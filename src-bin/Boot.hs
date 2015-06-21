@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -O0 #-}
+
 {- |
     The ghcjs-boot program installs the libraries and runtime system for GHCJS
 
@@ -870,7 +872,7 @@ installInTreeGmp = subTop' integerGmp $ do
 
 preparePackage :: Package -> B ()
 preparePackage pkg
-  | "./" `T.isPrefixOf` pkg = sub $ do
+  | "./" `T.isPrefixOf` pkg || "../" `T.isPrefixOf` pkg = sub $ do
     msg trace ("preparing package " <> pkg)
     cd (fromText pkg)
     whenM (test_f "configure.ac") $
@@ -895,7 +897,7 @@ installFakes = silently $ do
   dumped <- T.lines <$> ghc_pkg ["dump"]
   fakes <- view (beStages . bstPretend)
   forM_ fakes $ \pkg ->
-    case reverse (filter ((pkg<>"-") `T.isPrefixOf`) installed) of
+    case reverse (filter ((==pkg<>"-") . fst . T.breakOnEnd "-") installed) of
       [] -> failWith ("required package " <> pkg <> " not found in host GHC")
       (x:_) -> do
         let version = T.drop 1 (T.dropWhile (/='-') x)
@@ -1107,6 +1109,11 @@ cabalInstallFlags parmakeGhcjs = do
            , "--haddock-hoogle"
 #endif
            , "--haddock-hyperlink-source"
+-- don't slow down Windows builds too much, on other platforms we get this more
+-- or less for free, thanks to dynamic-too
+#ifndef WINDOWS
+           , "--enable-shared"
+#endif
            , bool prof "--enable-library-profiling" "--disable-library-profiling"
            ] ++
            bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++
