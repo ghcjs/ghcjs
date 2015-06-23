@@ -1562,6 +1562,8 @@ afterLoad :: SuccessFlag
           -> Bool   -- keep the remembered_ctx, as far as possible (:reload)
           -> InputT GHCi ()
 afterLoad ok retain_context = do
+  st <- lift $ getGHCiState
+  liftIO $ modifyMVar_ (runnerBase $ runnerState st) (const (return Nothing))
   lift revertCAFs  -- always revert CAFs on load.
   lift discardTickArrays
   loaded_mod_summaries <- getLoadedModules
