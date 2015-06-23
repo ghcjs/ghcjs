@@ -112,6 +112,7 @@ Library
                      Compiler.GhciTags,
                      Compiler.InteractiveEval,
                      Compiler.InteractiveUI,
+                     Compiler.GhcMake,
                      Compiler.JMacro,
                      Compiler.JMacro.Base,
                      Compiler.JMacro.Lens,

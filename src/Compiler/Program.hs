@@ -173,8 +173,8 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   let dflt_target = hscTarget dflags0
       (mode, lang, link)
          = case postLoadMode of
-               DoInteractive   -> (CompManager, HscInterpreted, LinkInMemory)
-               DoEval _        -> (CompManager, HscInterpreted, LinkInMemory)
+               DoInteractive   -> (CompManager, dflt_target, LinkBinary) -- HscInterpreted, LinkInMemory)
+               DoEval _        -> (CompManager, dflt_target, LinkBinary) -- HscInterpreted, LinkInMemory)
                DoMake          -> (CompManager, dflt_target,    LinkBinary)
                DoMkDependHS    -> (MkDepend,    dflt_target,    LinkBinary)
                DoAbiHash       -> (OneShot,     dflt_target,    LinkBinary)

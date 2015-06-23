@@ -31,8 +31,10 @@ import Debugger
 import DynFlags
 import ErrUtils
 import GhcMonad ( modifySession )
-import qualified GHC
-import GHC ( LoadHowMuch(..), Target(..),  TargetId(..), InteractiveImport(..),
+import qualified GHC hiding ( load, topSortModuleGraph )
+import qualified Compiler.GhcMake as GHC
+import Compiler.GhcMake
+import GHC ( {- LoadHowMuch(..), -} Target(..),  TargetId(..), InteractiveImport(..),
              TyThing(..), Phase, BreakIndex, Resume, SingleStep, Ghc,
              handleSourceError )
 import HsImpExp
