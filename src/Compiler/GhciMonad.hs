@@ -73,6 +73,8 @@ import System.Process
 import Control.Concurrent
 import Id
 
+import Compiler.InteractiveEval (RunnerState(..))
+import Compiler.Settings
 ---
 
 -----------------------------------------------------------------------------
@@ -80,14 +82,6 @@ import Id
 
 -- the Bool means: True = we should exit GHCi (:quit)
 type Command = (String, String -> InputT GHCi Bool, CompletionFunc GHCi)
-
-data RunnerState = RunnerState { runnerProcess :: ProcessHandle
-                               , runnerIn      :: Handle
-                               , runnerErr     :: Handle
-                               , runnerBase    :: Base
-                               , runnerThread  :: ThreadId
-                               , runnerSymbols :: Map Id Text
-                               }
 
 data GHCiState = GHCiState
      {
@@ -135,6 +129,8 @@ data GHCiState = GHCiState
         short_help :: String,
         long_help  :: String,
         lastErrorLocations :: IORef [(FastString, Int)],
+        ghcjsSettings :: GhcjsSettings,
+        ghcjsEnv :: GhcjsEnv,
         runnerState :: RunnerState
      }
 
@@ -292,15 +288,13 @@ printForUserPartWay doc = do
 runStmt :: String -> GHC.SingleStep -> GHCi (Maybe GHC.RunResult)
 runStmt expr step = do
   st <- getGHCiState
-  liftIO (putStrLn "runStmt")
   reifyGHCi $ \x ->
     withProgName (progname st) $
     withArgs (args st) $
       reflectGHCi x $ do
         GHC.handleSourceError (\e -> do GHC.printException e;
                                         return Nothing) $ do
-          liftIO (putStrLn "runStmtWithLocation")
-          r <- IE.runStmtWithLocation (progname st) (line_number st) expr step
+          r <- IE.runStmtWithLocation (ghcjsEnv st) (ghcjsSettings st) (runnerState st) (progname st) (line_number st) expr step
           return (Just r)
 
 runDecls :: String -> GHCi [GHC.Name]
@@ -311,7 +305,7 @@ runDecls decls = do
     withArgs (args st) $
       reflectGHCi x $ do
         GHC.handleSourceError (\e -> do GHC.printException e; return []) $ do
-          IE.runDeclsWithLocation (progname st) (line_number st) decls
+          IE.runDeclsWithLocation (ghcjsSettings st) (ghcjsEnv st) (runnerState st) (progname st) (line_number st) decls
 
 resume :: (SrcSpan -> Bool) -> GHC.SingleStep -> GHCi GHC.RunResult
 resume canLogSpan step = do

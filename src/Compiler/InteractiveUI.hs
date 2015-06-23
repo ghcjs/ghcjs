@@ -118,7 +118,7 @@ import qualified Gen2.ClosureInfo as Gen2
 import qualified Gen2.Object as Gen2
 
 import Compiler.Settings
-
+import Compiler.Info
 
 import Control.Concurrent.MVar
 import Data.Binary
@@ -137,6 +137,10 @@ import qualified Data.IntMap as IM
 import Packages
 import HscTypes
 import UniqFM
+
+import qualified Data.Map as M
+import System.IO
+import Control.Concurrent
 
 -----------------------------------------------------------------------------
 
@@ -159,8 +163,8 @@ defaultGhciSettings =
     }
 
 ghciWelcomeMsg :: String
-ghciWelcomeMsg = "GHCJSi, version " ++ cProjectVersion ++
-                 ": http://www.haskell.org/ghc/  :? for help"
+ghciWelcomeMsg = "GHCJSi, version " ++ getFullCompilerVersion ++
+                 ": http://www.github.com/ghcjs/ghcjs/  :? for help"
 
 cmdName :: Command -> String
 cmdName (n,_,_) = n
@@ -425,7 +429,9 @@ interactiveUI config srcs maybe_exprs = do
 #endif
 
    default_editor <- liftIO $ findEditor
-   runner <- startRunner
+   hsc_env <- GHC.getSession
+   js_env <- liftIO newGhcjsEnv
+   runner <- liftIO (startRunner dflags js_env hsc_env)
    startGHCi (runGHCi srcs maybe_exprs)
         GHCiState{ progname           = default_progname,
                    Compiler.GhciMonad.args     = default_args,
@@ -447,6 +453,8 @@ interactiveUI config srcs maybe_exprs = do
                    short_help         = shortHelpText config,
                    long_help          = fullHelpText config,
                    lastErrorLocations = lastErrLocationsRef,
+                   ghcjsSettings      = ghcjsiSettings,
+                   ghcjsEnv           = js_env,
                    runnerState        = runner
                  }
 
@@ -458,28 +466,28 @@ ghcjsiSettings = GhcjsSettings False True False False Nothing
                            Nothing NoBase
                            Nothing Nothing []
 
-startRunner :: DynFlags -> HscEnv -> IO RunnerState
-startRunner dflags hsc_env = do
-  lr <- linkInteractive ghcjsiSettings [] dflags [] (hsc_HPT hsc_env) Nothing
+startRunner :: DynFlags -> GhcjsEnv -> HscEnv -> IO RunnerState
+startRunner dflags js_env hsc_env = do
+{-  lr <- linkInteractive ghcjsiSettings js_env [] dflags [] (hsc_HPT hsc_env) Nothing
   fr <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibRTS lr)
   fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
   aa <- BL.fromChunks <$> mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)
   let rtsd = TL.encodeUtf8 Gen2.rtsDeclsText
-      rts  = TL.encodeUtf8 $ Gen2.rtsText' dflags (Gen2.dfCgSettings dflags)
+      rts  = TL.encodeUtf8 $ Gen2.rtsText' dflags (Gen2.dfCgSettings dflags) -}
   node <- T.strip <$> T.readFile (topDir dflags </> "node")
   (inp,out,err,pid) <- runInteractiveProcess (T.unpack node)
                                              [topDir dflags </> "irunner.js"]
                                              Nothing
                                              Nothing
-  mv  <- newMVar (Gen2.linkBase lr)
-  emv <- newMVar []
-  eev <- newMVar IM.empty
-  return r
-
+  lb  <- newMVar Nothing
+  rs  <- newMVar M.empty
+  rt <- forkIO $ forever (hGetChar out >>= hPutChar stdout >> hFlush stdout)
+  return (RunnerState pid inp err lb rt rs)
+{-
 runnerThread :: Handle -> IO ()
 runnerThread h = go
   where
-    go = readMessage >>= uncurry go'
+    go = readMessage h >>= uncurry go'
     go' :: Int -> BL.ByteString -> IO ()
     go' 1 bs = BL.hPut stdout bs >> hFlush stdout >> go
     go' 2 bs = BL.hPut stderr bs >> hFlush stderr >> go
@@ -488,16 +496,17 @@ runnerThread h = go
 readMessage :: Handle -> IO (Int, BL.ByteString)
 readMessage h = do
   (len, typ) <- runGet ((,) <$> getWord32be <*> getWord32be) <$> BL.hGet h 8
-  (,fromIntegral typ) . runGet get <$> BL.hGet h (fromIntegral len)
+  (fromIntegral typ,) . runGet get <$> BL.hGet h (fromIntegral len)
   
 linkInteractive :: GhcjsSettings        -- settings (contains the base state)
+                -> GhcjsEnv
                 -> [FilePath]           -- extra js files
                 -> DynFlags             -- dynamic flags
                 -> [PackageKey]         -- package dependencies
                 -> HomePackageTable     -- what to link
                 -> Maybe ByteString     -- current module or Nothing to get the initial code + rts
                 -> IO Gen2.LinkResult
-linkInteractive settings js_files dflags pkgs hpt code = do
+linkInteractive settings js_env js_files dflags pkgs hpt code = do
   (th_deps_pkgs, th_deps)  <- Gen2.thDeps dflags -- fixme remove
   let home_mod_infos = eltsUFM hpt
       pkgs' | isJust code = L.nub $ pkgs ++ th_deps_pkgs
@@ -506,6 +515,7 @@ linkInteractive settings js_files dflags pkgs hpt code = do
       linkables = map (expectJust "link".hm_linkable) home_mod_infos
       getOfiles (LM _ _ us) = map nameOfObject (filter isObject us)
       link      = Gen2.link' dflags'
+                             js_env
                              settings
                              "interactive"
                              []
@@ -529,17 +539,17 @@ linkInteractive settings js_files dflags pkgs hpt code = do
         show (ways dflags')
   if isJust code
      then link
-     else Gen2.getCached dflags' "ghcjsi" cache_key >>= \case
+     else Gen2.getCached dflags' (T.pack "ghcjsi") cache_key >>= \case
             Just c  -> return (runGet get $ BL.fromStrict c)
             Nothing -> do
               lr <- link
               Gen2.putCached dflags'
-                             "ghcjsi"
+                             (T.pack "ghcjsi")
                              cache_key
                              [topDir dflags </> "ghcjs_boot.completed"]
                              (BL.toStrict . runPut . put $ lr)
               return lr
-
+-}
 
 interactivePackage :: PackageKey
 interactivePackage = stringToPackageKey "interactive"

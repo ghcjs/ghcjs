@@ -1,9 +1,9 @@
-{-# LANGUAGE CPP, MagicHash, NondecreasingIndentation, UnboxedTuples, BangPatterns #-}
+{-# LANGUAGE CPP, MagicHash, NondecreasingIndentation, UnboxedTuples, BangPatterns, TupleSections #-}
 
 module Compiler.InteractiveEval (
 --        RunResult(..), Status(..), Resume(..), History(..),
         runStmt, runStmtWithLocation, runDecls, runDeclsWithLocation,
-        parseImportDecl
+        parseImportDecl, RunnerState(..)
 --        , SingleStep(..),
 {-        resume,
         abandon, abandonAll,
@@ -32,6 +32,8 @@ module Compiler.InteractiveEval (
 
 #include "HsVersions.h"
 
+import Data.Monoid
+
 import InteractiveEvalTypes
 
 import GhcMonad hiding (logWarnings)
@@ -47,7 +49,7 @@ import TyCon
 import Type     hiding( typeKind )
 import TcType           hiding( typeKind )
 import Var
-import Id
+import Id hiding (setIdExported)
 import Name             hiding ( varName )
 import NameSet
 import Avail
@@ -67,7 +69,7 @@ import ErrUtils
 import SrcLoc
 import BreakArray
 import RtClosureInspect
-import Outputable
+import Outputable hiding ((<>))
 import FastString
 import MonadUtils
 
@@ -105,9 +107,57 @@ import Desugar
 import CoreSyn
 import ConLike
 import TcRnTypes
+import UniqSet
+import qualified Data.Text as T
+import qualified Gen2.Generator as Gen2
+import CoreToStg
+import SimplStg
+import Compiler.Settings
+import System.Process
+import System.IO
+import Data.Map (Map)
+import qualified Data.Map as M
+import qualified Data.Set as S
+import Data.Text (Text)
+import Gen2.Object
+import Gen2.Base
+import Data.ByteString (ByteString)
+import qualified Gen2.Linker as Gen2
+import qualified Gen2.Shim as Gen2
+import Packages
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text as T
+import qualified Data.Text.Lazy.Encoding as TL
+import qualified Data.Text.Lazy as TL
+import qualified Data.ByteString.Base16         as B16
+import Data.Binary
+import Data.Binary.Get
+import Data.Binary.Put
+import           Gen2.Rts                 (rtsText, rtsDeclsText)
+import qualified Gen2.ClosureInfo as Gen2
+import qualified CoreUtils
+import qualified Data.List as L
+import qualified Gen2.Object as Object
+import Encoding
+import Gen2.Utils (showIndent)
+import FloatOut
+import CoreMonad (FloatOutSwitches(..))
+import Control.Lens.Plated
+import Data.Data.Lens
+import Control.Lens
 
 import InteractiveEval (RunResult(..), Status(..), Resume(..), History(..),
                         SingleStep(..))
+
+data RunnerState = RunnerState { runnerProcess :: ProcessHandle
+                               , runnerIn      :: Handle
+                               , runnerErr     :: Handle
+                               , runnerBase    :: MVar (Maybe Base)
+                               , runnerThread  :: ThreadId
+                               , runnerSymbols :: MVar (Map Id Text)
+                               }
 
 -- -----------------------------------------------------------------------------
 -- running a statement interactively
@@ -169,14 +219,14 @@ updateFixityEnv fix_env = do
 
 -- | Run a statement in the current interactive context.  Statement
 -- may bind multple values.
-runStmt :: GhcMonad m => String -> SingleStep -> m RunResult
-runStmt = runStmtWithLocation "<interactive>" 1
+runStmt :: GhcMonad m => GhcjsEnv -> GhcjsSettings -> RunnerState -> String -> SingleStep -> m RunResult
+runStmt js_env js_settings rs = runStmtWithLocation js_env js_settings rs "<interactive>" 1
 
 -- | Run a statement in the current interactive context.  Passing debug information
 --   Statement may bind multple values.
-runStmtWithLocation :: GhcMonad m => String -> Int ->
+runStmtWithLocation :: GhcMonad m => GhcjsEnv -> GhcjsSettings -> RunnerState -> String -> Int ->
                        String -> SingleStep -> m RunResult
-runStmtWithLocation source linenumber expr step =
+runStmtWithLocation js_env js_settings rs source linenumber expr step =
   do
     hsc_env <- getSession
 
@@ -189,21 +239,24 @@ runStmtWithLocation source linenumber expr step =
         idflags' = ic_dflags ic `wopt_unset` Opt_WarnUnusedBinds
         hsc_env' = hsc_env{ hsc_IC = ic{ ic_dflags = idflags' } }
 
-    -- compile to value (IO [HValue]), don't run
-    r <- liftIO $ hscStmtWithLocation hsc_env' expr source linenumber
+    -- compile to value, don't run
+    r <- liftIO $ ghcjsStmtWithLocation hsc_env' js_env js_settings rs expr source linenumber
 
     case r of
       -- empty statement / comment
       Nothing -> return (RunOk [])
 
-      Just (tyThings, hval, fix_env) -> do
+      Just (tyThings, code, name, fix_env) -> do
         updateFixityEnv fix_env
 
         status <-
-          withVirtualCWD $
+          withVirtualCWD . liftIO $ do
+            ghcjsiLoadCode rs code
+            ghcjsiRunActions rs [name]
+          {-
             withBreakAction (isStep step) idflags' breakMVar statusMVar $ do
                 liftIO $ sandboxIO idflags' statusMVar hval
-
+-}
         let ic = hsc_IC hsc_env
             bindings = (ic_tythings ic, ic_rn_gbl_env ic)
 
@@ -212,15 +265,189 @@ runStmtWithLocation source linenumber expr step =
         handleRunStatus step expr bindings tyThings
                         breakMVar statusMVar status (emptyHistory size)
 
-runDecls :: GhcMonad m => String -> m [Name]
-runDecls = runDeclsWithLocation "<interactive>" 1
+-------------------------------------------------------------
 
-runDeclsWithLocation :: GhcMonad m => String -> Int -> String -> m [Name]
-runDeclsWithLocation source linenumber expr =
+ghcjsiSendToRunner :: RunnerState -> Int -> ByteString -> IO ()
+ghcjsiSendToRunner rs typ payload = do
+  let header = BL.toStrict . runPut $ do
+        putWord32be (fromIntegral $ B.length payload)
+        putWord32be (fromIntegral typ)
+  B.hPut (runnerIn rs) (B16.encode $ header <> payload)
+  hFlush (runnerIn rs)
+
+ghcjsiReadFromRunner :: RunnerState -> IO (Int, ByteString)
+ghcjsiReadFromRunner runner = do
+  let h = runnerErr runner
+  (len, status) <- runGet ((,) <$> getWord32be <*> getWord32be) <$> BL.hGet h 8
+  (fromIntegral status,) . runGet get <$> BL.hGet h (fromIntegral len)
+
+ghcjsiLoadInitialCode :: RunnerState -> ByteString -> IO ()
+ghcjsiLoadInitialCode rs code = do
+  ghcjsiSendToRunner rs 0 code
+  ghcjsiReadFromRunner rs
+  return ()
+
+ghcjsiLoadCode :: RunnerState -> ByteString -> IO ()
+ghcjsiLoadCode rs code = do
+  ghcjsiSendToRunner rs 1 code
+  ghcjsiReadFromRunner rs
+  return ()
+
+ghcjsiRunActions :: RunnerState -> [Text] -> IO Status -- RunResult
+ghcjsiRunActions rs actions = do
+  forM_ actions $ \a -> do
+    ghcjsiSendToRunner rs 2 (TE.encodeUtf8 a)
+    ghcjsiReadFromRunner rs
+  return (Complete $ Right []) -- fixme return bound stuff
+  -- return (RunOk []) -- fixme return names bound and handle exceptions
+
+ghcjsStmtWithLocation :: HscEnv
+                    -> GhcjsEnv
+                    -> GhcjsSettings
+                    -> RunnerState
+                    -> String -- ^ The statement
+                    -> String -- ^ The source
+                    -> Int    -- ^ Starting line
+                    -> IO (Maybe ([Id], ByteString, Text, FixityEnv))
+ghcjsStmtWithLocation hsc_env0 js_env js_settings rs stmt source linenumber =
+ runInteractiveHsc hsc_env0 $ do
+    maybe_stmt <- hscParseStmtWithLocation source linenumber stmt
+    case maybe_stmt of
+        Nothing -> return Nothing
+
+        Just parsed_stmt -> do
+            -- Rename and typecheck it
+            hsc_env <- getHscEnv
+            (ids, tc_expr, fix_env) <- ioMsgMaybe $ tcRnStmt hsc_env parsed_stmt
+            let idsRep = map (\i -> (i, fixId i)) ids
+                ids'   = map snd idsRep
+                idReplace = listToUFM idsRep
+                fixId i =
+                  let n  = idName i
+                      nn = mkExternalName (nameUnique n)
+                                          (icInteractiveModule (hsc_IC hsc_env))
+                                          (nameOccName n)
+                                          (nameSrcSpan n)
+                  in setIdExported (setIdName i nn)
+
+            -- Desugar it
+            ds_expr <- ioMsgMaybe $ deSugarExpr hsc_env tc_expr
+            let ds_expr' = idsE %~ (\i -> fromMaybe i $ lookupUFM idReplace i) $ ds_expr
+            handleWarnings
+            -- Then code-gen, and link it
+            -- It's important NOT to have package 'interactive' as thisPackageKey
+            -- for linking, else we try to link 'main' and can't find it.
+            -- Whereas the linker already knows to ignore 'interactive'
+            let  src_span     = srcLocSpan interactiveSrcLoc
+            (code, name) <- liftIO $ ghcjsCompileInteractiveCoreExpr js_env js_settings rs hsc_env src_span ds_expr'
+            return $ Just (ids', code, name, fix_env)
+
+-- fixme this should be doable with generic traveral
+
+
+idsE :: Traversal' CoreExpr Id
+idsE f (Var i)         = Var  <$> f i
+idsE f (App b a)       = App  <$> idsE f b <*> idsE f a
+idsE f (Let b e)       = Let  <$> idsB f b <*> idsE f e
+idsE f (Lam i e)       = Lam  <$> f i <*> idsE f e
+idsE f (Case e i t as) = Case <$> idsE f e <*> f i <*> pure t
+                              <*> traverse (\(ac, bs, e) -> (,,) <$> pure ac <*> traverse f bs <*> idsE f e) as
+idsE f (Cast e c)      = Cast <$> idsE f e <*> pure c
+idsE f (Tick t e)      = Tick <$> idsT f t <*> idsE f e
+idsE _ x               = pure x
+
+idsB :: Traversal' CoreBind Id
+idsB f (NonRec b e) = NonRec <$> f b <*> idsE f e
+idsB f (Rec bs) = Rec <$> traverse (\(b,e) -> (,) <$> f b <*> idsE f e) bs
+
+idsT :: Traversal' (Tickish Id) Id
+idsT f (Breakpoint i fvs) = Breakpoint i <$> traverse f fvs
+idsT _ x                  = pure x
+
+ghcjsCompileInteractiveCoreExpr :: GhcjsEnv -> GhcjsSettings -> RunnerState -> HscEnv -> SrcSpan -> CoreExpr -> IO (ByteString, Text)
+ghcjsCompileInteractiveCoreExpr js_env settings rs hsc_env srcspan ds_expr = do
+  bs <- ghcjsCompileInteractiveCoreBinds js_env settings rs hsc_env srcspan [bind]
+  return (bs <> sets, symb)
+  where
+    m     = icInteractiveModule (hsc_IC hsc_env)
+    iExpr = mkVanillaGlobal (mkExternalName (getUnique m) -- mkRegSingleUnique (1+n))
+                            m
+                            (mkVarOcc $ "interactiveExpr")
+                             srcspan) (CoreUtils.exprType ds_expr)
+    bind = NonRec iExpr ds_expr
+    symb = T.pack ("h$interactiveZC" ++ zEncodeString (moduleNameString $ moduleName m) ++ "ziinteractiveExpr")
+    sets = TE.encodeUtf8 . T.pack $
+             "\nh$GHCJSi.loadedSymbols['" ++ T.unpack symb ++ "'] = " ++ T.unpack symb ++ ";\n"
+
+ghcjsCompileInteractiveCoreBinds :: GhcjsEnv -> GhcjsSettings -> RunnerState -> HscEnv -> SrcSpan -> CoreProgram -> IO ByteString
+ghcjsCompileInteractiveCoreBinds js_env settings rs hsc_env srcspan core_pgm = do
+  us <- mkSplitUniqSupply 's'
+  core_pgm1 <- floatOutwards (FloatOutSwitches (Just 0) True True) dflags us core_pgm
+  core_pgm2 <- corePrepPgm hsc_env iNTERACTIVE_loc core_pgm1 []
+  stg_pgm0      <- coreToStg dflags m core_pgm2
+  (stg_pgm1, c) <- stg2stg dflags m stg_pgm0
+  base <- takeMVar (runnerBase rs)
+  let bs        = Gen2.generate settings dflags m stg_pgm1 c
+      settings' = settings { gsUseBase = maybe NoBase BaseState base }
+      pkgs      = L.nub $
+           {-        (imp_dep_pkgs . tcg_imports $ gbl_env) ++ -}
+                   concatMap (map fst . dep_pkgs .  mi_deps . hm_iface)
+                             (eltsUFM $ hsc_HPT hsc_env)
+  lr <- linkInteractive js_env settings' [] {-fixme-} dflags pkgs (hsc_HPT hsc_env) bs
+  rts <- if isNothing base
+            then do
+              let rtsd = TL.encodeUtf8 rtsDeclsText
+                  rts  = TL.encodeUtf8 $ rtsText dflags (Gen2.dfCgSettings dflags)
+              fr <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibRTS lr)
+              return (rtsd <> fr <> rts)
+            else return mempty
+  lla    <- mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
+  llarch <- mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)
+  putMVar (runnerBase rs) (Just $ Gen2.linkBase lr)
+  return (BL.toStrict $ rts <> BL.fromChunks lla <> BL.fromChunks llarch <> Gen2.linkOut lr)
+  where
+    dflags   = hsc_dflags hsc_env
+    m        = icInteractiveModule (hsc_IC hsc_env)
+    iNTERACTIVE_loc = ModLocation{ ml_hs_file   = Nothing,
+                                  ml_hi_file   = panic "ghcjsCompileInteractiveCoreExpr:ml_hi_file",
+                                  ml_obj_file  = panic "ghcjsCompileInteractiveCoreExpr:ml_hi_file"}
+
+linkInteractive :: GhcjsEnv
+                -> GhcjsSettings        -- settings (contains the base state)
+                -> [FilePath]           -- extra js files
+                -> DynFlags             -- dynamic flags
+                -> [PackageKey]         -- package dependencies
+                -> HomePackageTable     -- what to link
+                -> ByteString     -- current module or Nothing to get the initial code + rts
+                -> IO Gen2.LinkResult
+linkInteractive env settings js_files dflags pkgs hpt code = do
+  let home_mod_infos = eltsUFM hpt
+      is_root   = const True
+      linkables = map (expectJust "link".hm_linkable) home_mod_infos
+      getOfiles (LM _ _ us) = map nameOfObject (filter isObject us)
+      dflags'   = dflags { ways        = WayDebug : ways dflags
+                         , thisPackage = interactivePackageKey
+                         , verbosity   = 0
+                         }
+      obj_files = ObjLoaded "<interactive>" code : map ObjFile (concatMap getOfiles linkables)
+      packageLibPaths :: PackageKey -> [FilePath]
+      packageLibPaths pkg = maybe [] libraryDirs (lookupPackage dflags pkg)
+  lr <- Gen2.link' dflags' env settings "interactive" [] pkgs obj_files js_files is_root S.empty
+  let b  = Gen2.linkBase lr
+      b' = b { baseUnits = S.filter (\(Object.Package p,_,_) -> p /= T.pack "interactive") (baseUnits b) }
+  return $ lr { Gen2.linkBase = b' }
+
+-------------------------------------------------------------
+
+runDecls :: GhcMonad m => GhcjsSettings -> GhcjsEnv -> RunnerState -> String -> m [Name]
+runDecls js_settings js_env rs = runDeclsWithLocation js_settings js_env rs "<interactive>" 1
+
+runDeclsWithLocation :: GhcMonad m => GhcjsSettings -> GhcjsEnv -> RunnerState -> String -> Int -> String -> m [Name]
+runDeclsWithLocation js_settings js_env rs source linenumber expr =
   do
     hsc_env <- getSession
-    (tyThings, ic) <- liftIO $ hscDeclsWithLocation hsc_env expr source linenumber
-
+    (tyThings, ic, bs) <- liftIO $ hscDeclsWithLocation js_settings js_env rs hsc_env expr source linenumber
+    liftIO $ ghcjsiLoadCode rs bs
     setSession $ hsc_env { hsc_IC = ic }
     hsc_env <- getSession
     hsc_env' <- liftIO $ rttiEnvironment hsc_env
@@ -986,50 +1213,6 @@ typeKind  :: GhcMonad m => Bool -> String -> m (Type, Kind)
 typeKind normalise str = withSession $ \hsc_env -> do
    liftIO $ hscKcType hsc_env normalise str
 
------------------------------------------------------------------------------
--- Compile an expression, run it and deliver the resulting HValue
-
-compileExpr :: GhcMonad m => String -> m HValue
-compileExpr expr = withSession $ \hsc_env -> do
-  Just (ids, hval, fix_env) <- liftIO $ hscStmt hsc_env ("let __cmCompileExpr = "++expr)
-  updateFixityEnv fix_env
-  hvals <- liftIO hval
-  case (ids,hvals) of
-    ([_],[hv]) -> return hv
-    _          -> panic "compileExpr"
-
--- -----------------------------------------------------------------------------
--- Compile an expression, run it and return the result as a dynamic
-
-dynCompileExpr :: GhcMonad m => String -> m Dynamic
-dynCompileExpr expr = do
-    iis <- getContext
-    let importDecl = ImportDecl {
-                         ideclSourceSrc = Nothing,
-                         ideclName = noLoc (mkModuleName "Data.Dynamic"),
-                         ideclPkgQual = Nothing,
-                         ideclSource = False,
-                         ideclSafe = False,
-                         ideclQualified = True,
-                         ideclImplicit = False,
-                         ideclAs = Nothing,
-                         ideclHiding = Nothing
-                     }
-    setContext (IIDecl importDecl : iis)
-    let stmt = "let __dynCompileExpr = Data.Dynamic.toDyn (" ++ expr ++ ")"
-    Just (ids, hvals, fix_env) <- withSession $ \hsc_env ->
-                           liftIO $ hscStmt hsc_env stmt
-    setContext iis
-    updateFixityEnv fix_env
-
-    vals <- liftIO (unsafeCoerce# hvals :: IO [Dynamic])
-    case (ids,vals) of
-        (_:[], v:[]) -> return v
-        _            -> panic "dynCompileExpr"
-
------------------------------------------------------------------------------
--- show a module and it's source/object filenames
-
 showModule :: GhcMonad m => ModSummary -> m String
 showModule mod_summary =
     withSession $ \hsc_env -> do
@@ -1066,66 +1249,24 @@ reconstructType hsc_env bound id = do
 mkRuntimeUnkTyVar :: Name -> Kind -> TyVar
 mkRuntimeUnkTyVar name kind = mkTcTyVar name kind RuntimeUnk
 
---------------------------------------------------------------------------------
--- adapted from HscMain
---------------------------------------------------------------------------------
-
--- | Compile a stmt all the way to an HValue, but don't run it
---
--- We return Nothing to indicate an empty statement (or comment only), not a
--- parse error.
-hscStmt :: HscEnv -> String -> IO (Maybe ([Id], IO [HValue], FixityEnv))
-hscStmt hsc_env stmt = hscStmtWithLocation hsc_env stmt "<interactive>" 1
-
--- | Compile a stmt all the way to an HValue, but don't run it
---
--- We return Nothing to indicate an empty statement (or comment only), not a
--- parse error.
-hscStmtWithLocation :: HscEnv
-                    -> String -- ^ The statement
-                    -> String -- ^ The source
-                    -> Int    -- ^ Starting line
-                    -> IO (Maybe ([Id], IO [HValue], FixityEnv))
-hscStmtWithLocation hsc_env0 stmt source linenumber =
- runInteractiveHsc hsc_env0 $ do
-    maybe_stmt <- hscParseStmtWithLocation source linenumber stmt
-    case maybe_stmt of
-        Nothing -> return Nothing
-
-        Just parsed_stmt -> do
-            -- Rename and typecheck it
-            hsc_env <- getHscEnv
-            (ids, tc_expr, fix_env) <- ioMsgMaybe $ tcRnStmt hsc_env parsed_stmt
-
-            -- Desugar it
-            ds_expr <- ioMsgMaybe $ deSugarExpr hsc_env tc_expr
-            liftIO (lintInteractiveExpr "desugar expression" hsc_env ds_expr)
-            handleWarnings
-
-            -- Then code-gen, and link it
-            -- It's important NOT to have package 'interactive' as thisPackageKey
-            -- for linking, else we try to link 'main' and can't find it.
-            -- Whereas the linker already knows to ignore 'interactive'
-            let  src_span     = srcLocSpan interactiveSrcLoc
-            liftIO (putStrLn "before hscCompileCoreExpr")
-            hval <- liftIO $ hscCompileCoreExpr hsc_env src_span ds_expr
-            let hval_io = unsafeCoerce# hval :: IO [HValue]
-
-            return $ Just (ids, hval_io, fix_env)
-
--- | Compile a decls
-hscDecls :: HscEnv
+hscDecls :: GhcjsSettings
+         -> GhcjsEnv
+         -> RunnerState
+         -> HscEnv
          -> String -- ^ The statement
-         -> IO ([TyThing], InteractiveContext)
-hscDecls hsc_env str = hscDeclsWithLocation hsc_env str "<interactive>" 1
+         -> IO ([TyThing], InteractiveContext, ByteString)
+hscDecls js_settings js_env rs hsc_env str = hscDeclsWithLocation js_settings js_env rs hsc_env str "<interactive>" 1
 
 -- | Compile a decls
-hscDeclsWithLocation :: HscEnv
+hscDeclsWithLocation :: GhcjsSettings
+                     -> GhcjsEnv
+                     -> RunnerState
+                     -> HscEnv
                      -> String -- ^ The statement
                      -> String -- ^ The source
                      -> Int    -- ^ Starting line
-                     -> IO ([TyThing], InteractiveContext)
-hscDeclsWithLocation hsc_env0 str source linenumber =
+                     -> IO ([TyThing], InteractiveContext, ByteString)
+hscDeclsWithLocation js_settings js_env rs hsc_env0 str source linenumber =
  runInteractiveHsc hsc_env0 $ do
     L _ (HsModule{ hsmodDecls = decls }) <-
         hscParseThingWithLocation source linenumber parseModule str
@@ -1170,15 +1311,9 @@ hscDeclsWithLocation hsc_env0 str source linenumber =
     prepd_binds <- {-# SCC "CorePrep" #-}
       liftIO $ corePrepPgm hsc_env iNTERACTIVELoc core_binds data_tycons
 
-    {- Generate byte code -}
-    -- fixme hook here
-    
-    cbc <- liftIO $ error "GHCJSi" {-byteCodeGen dflags this_mod
-                                prepd_binds data_tycons mod_breaks -}
-
     let src_span = srcLocSpan interactiveSrcLoc
-    liftIO $ error "GHCJSi" -- linkDecls hsc_env src_span cbc
-
+    bs <- liftIO $ ghcjsCompileInteractiveCoreBinds js_env js_settings rs hsc_env src_span prepd_binds
+ 
     let tcs = filterOut isImplicitTyCon (mg_tcs simpl_mg)
         patsyns = mg_patsyns simpl_mg
 
@@ -1196,7 +1331,7 @@ hscDeclsWithLocation hsc_env0 str source linenumber =
     let icontext = hsc_IC hsc_env
         ictxt    = extendInteractiveContext icontext ext_ids tcs
                                             cls_insts fam_insts defaults patsyns
-    return (tythings, ictxt)
+    return (tythings, ictxt, bs)
 
 hscImport :: HscEnv -> String -> IO (ImportDecl RdrName)
 hscImport hsc_env str = runInteractiveHsc hsc_env $ do

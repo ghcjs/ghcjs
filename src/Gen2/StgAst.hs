@@ -38,6 +38,8 @@ import           IdInfo
 import qualified Var
 
 import           Gen2.Utils
+import qualified CoreSyn as Core
+import Coercion
 
 -- this is a hack to be able to use pprShow in a Show instance, should be removed
 {-# NOINLINE hackPprDflags #-}
@@ -82,7 +84,7 @@ instance Show OccName where show = occNameString
 instance Show DataCon where show d = show (dataConName d)
 instance Show Var where show v = "(" ++ show (Var.varName v) ++ "[" ++
                                  encodeUnique (getKey (getUnique v))
-                                 ++ "] <" ++ show (idDetails v) ++ "> :: " ++ show (Var.varType v) ++ ")"
+                                 ++ "] <" {- ++ show (idDetails v) -} ++ "> :: " ++ show (Var.varType v) ++ ")"
 instance Show IdDetails where
   show VanillaId          = "VanillaId"
   show (RecSelId {})      = "RecSelId"
@@ -94,6 +96,10 @@ instance Show IdDetails where
   show (TickBoxOpId {})   = "VanillaId"
   show (DFunId {})        = "DFunId"
 
+
+deriving instance Show a => Show (Core.Bind a)
+deriving instance Show a => Show (Core.Expr a)
+instance Show Coercion where show _ = "[coercion]"
 
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat
