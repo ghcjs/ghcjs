@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, MagicHash, NondecreasingIndentation, UnboxedTuples, BangPatterns, TupleSections #-}
+{-# LANGUAGE CPP, MagicHash, NondecreasingIndentation, UnboxedTuples, BangPatterns, TupleSections, QuasiQuotes #-}
 
 module Compiler.InteractiveEval (
 --        RunResult(..), Status(..), Resume(..), History(..),
@@ -90,6 +90,7 @@ import Data.Array
 import Exception
 import Control.Concurrent
 import System.IO.Unsafe
+import ForeignCall
 
 -- for HscMain things
 
@@ -141,12 +142,19 @@ import qualified CoreUtils
 import qualified Data.List as L
 import qualified Gen2.Object as Object
 import Encoding
-import Gen2.Utils (showIndent)
+import Gen2.Utils (showIndent, encodeUnique, globaliseIdWith, decl)
 import FloatOut
 import CoreMonad (FloatOutSwitches(..))
 import Control.Lens.Plated
 import Data.Data.Lens
 import Control.Lens
+import Text.PrettyPrint.Leijen.Text (renderPretty, displayT)
+import Gen2.Printer (pretty)
+import Gen2.RtsTypes
+import Compiler.JMacro
+import IdInfo
+import Data.List (foldl')
+import TysWiredIn
 
 import InteractiveEval (RunResult(..), Status(..), Resume(..), History(..),
                         SingleStep(..))
@@ -319,31 +327,20 @@ ghcjsStmtWithLocation hsc_env0 js_env js_settings rs stmt source linenumber =
             -- Rename and typecheck it
             hsc_env <- getHscEnv
             (ids, tc_expr, fix_env) <- ioMsgMaybe $ tcRnStmt hsc_env parsed_stmt
-            let idsRep = map (\i -> (i, fixId i)) ids
-                ids'   = map snd idsRep
-                idReplace = listToUFM idsRep
-                fixId i =
-                  let n  = idName i
-                      nn = mkExternalName (nameUnique n)
-                                          (icInteractiveModule (hsc_IC hsc_env))
-                                          (nameOccName n)
-                                          (nameSrcSpan n)
-                  in setIdExported (setIdName i nn)
-
             -- Desugar it
             ds_expr <- ioMsgMaybe $ deSugarExpr hsc_env tc_expr
-            let ds_expr' = idsE %~ (\i -> fromMaybe i $ lookupUFM idReplace i) $ ds_expr
+
             handleWarnings
             -- Then code-gen, and link it
             -- It's important NOT to have package 'interactive' as thisPackageKey
             -- for linking, else we try to link 'main' and can't find it.
             -- Whereas the linker already knows to ignore 'interactive'
             let  src_span     = srcLocSpan interactiveSrcLoc
-            (code, name) <- liftIO $ ghcjsCompileInteractiveCoreExpr js_env js_settings rs hsc_env src_span ds_expr'
-            return $ Just (ids', code, name, fix_env)
+                 m            = icInteractiveModule (hsc_IC hsc_env)
+            (code, name) <- liftIO $ ghcjsCompileInteractiveCoreExpr js_env js_settings rs hsc_env src_span ds_expr ids
+            return $ Just (map (globaliseIdWith m) ids, code, name, fix_env)
 
 -- fixme this should be doable with generic traveral
-
 
 idsE :: Traversal' CoreExpr Id
 idsE f (Var i)         = Var  <$> f i
@@ -364,26 +361,24 @@ idsT :: Traversal' (Tickish Id) Id
 idsT f (Breakpoint i fvs) = Breakpoint i <$> traverse f fvs
 idsT _ x                  = pure x
 
-ghcjsCompileInteractiveCoreExpr :: GhcjsEnv -> GhcjsSettings -> RunnerState -> HscEnv -> SrcSpan -> CoreExpr -> IO (ByteString, Text)
-ghcjsCompileInteractiveCoreExpr js_env settings rs hsc_env srcspan ds_expr = do
-  bs <- ghcjsCompileInteractiveCoreBinds js_env settings rs hsc_env srcspan [bind]
+ghcjsCompileInteractiveCoreExpr :: GhcjsEnv -> GhcjsSettings -> RunnerState -> HscEnv -> SrcSpan -> CoreExpr -> [Id] -> IO (ByteString, Text)
+ghcjsCompileInteractiveCoreExpr js_env settings rs hsc_env srcspan ds_expr iids = do
+  bs <- ghcjsCompileInteractiveCoreBinds js_env settings rs hsc_env srcspan [bind] iids
   return (bs <> sets, symb)
   where
     m     = icInteractiveModule (hsc_IC hsc_env)
-    iExpr = mkVanillaGlobal (mkExternalName (getUnique m) -- mkRegSingleUnique (1+n))
-                            m
-                            (mkVarOcc $ "interactiveExpr")
-                             srcspan) (CoreUtils.exprType ds_expr)
+    iExpr = mkVanillaGlobal (mkExternalName (getUnique m) m (mkVarOcc "iExpr") srcspan)
+                            (CoreUtils.exprType ds_expr)
     bind = NonRec iExpr ds_expr
-    symb = T.pack ("h$interactiveZC" ++ zEncodeString (moduleNameString $ moduleName m) ++ "ziinteractiveExpr")
+    symb = T.pack ("h$interactiveZC" ++ zEncodeString (moduleNameString $ moduleName m) ++ "ziiExpr")
     sets = TE.encodeUtf8 . T.pack $
              "\nh$GHCJSi.loadedSymbols['" ++ T.unpack symb ++ "'] = " ++ T.unpack symb ++ ";\n"
 
-ghcjsCompileInteractiveCoreBinds :: GhcjsEnv -> GhcjsSettings -> RunnerState -> HscEnv -> SrcSpan -> CoreProgram -> IO ByteString
-ghcjsCompileInteractiveCoreBinds js_env settings rs hsc_env srcspan core_pgm = do
-  us <- mkSplitUniqSupply 's'
-  core_pgm1 <- floatOutwards (FloatOutSwitches (Just 0) True True) dflags us core_pgm
-  core_pgm2 <- corePrepPgm hsc_env iNTERACTIVE_loc core_pgm1 []
+ghcjsCompileInteractiveCoreBinds :: GhcjsEnv -> GhcjsSettings -> RunnerState -> HscEnv -> SrcSpan -> CoreProgram -> [Id] -> IO ByteString
+ghcjsCompileInteractiveCoreBinds js_env settings rs hsc_env srcspan core_pgm iids = do
+  let iids'     = map (\i -> (i, globaliseIdWith m i)) iids
+      core_pgm1 = captureBindings iids' core_pgm
+  core_pgm2     <- corePrepPgm hsc_env iNTERACTIVE_loc core_pgm1 []
   stg_pgm0      <- coreToStg dflags m core_pgm2
   (stg_pgm1, c) <- stg2stg dflags m stg_pgm0
   base <- takeMVar (runnerBase rs)
@@ -404,7 +399,7 @@ ghcjsCompileInteractiveCoreBinds js_env settings rs hsc_env srcspan core_pgm = d
   lla    <- mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
   llarch <- mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)
   putMVar (runnerBase rs) (Just $ Gen2.linkBase lr)
-  return (BL.toStrict $ rts <> BL.fromChunks lla <> BL.fromChunks llarch <> Gen2.linkOut lr)
+  return (BL.toStrict $ rts <> BL.fromChunks lla <> BL.fromChunks llarch <> declareCapture dflags m (map snd iids') <> Gen2.linkOut lr)
   where
     dflags   = hsc_dflags hsc_env
     m        = icInteractiveModule (hsc_IC hsc_env)
@@ -412,6 +407,60 @@ ghcjsCompileInteractiveCoreBinds js_env settings rs hsc_env srcspan core_pgm = d
                                   ml_hi_file   = panic "ghcjsCompileInteractiveCoreExpr:ml_hi_file",
                                   ml_obj_file  = panic "ghcjsCompileInteractiveCoreExpr:ml_hi_file"}
 
+declareCapture :: DynFlags -> Module -> [Id] -> BL.ByteString
+declareCapture dflags m ids = pe (mconcat $ runGen dflags m emptyUFM (mapM d ids))
+  where
+    d  = fmap decl . jsIdI
+    pe = TL.encodeUtf8 . (<> TL.pack "\n") . displayT . renderPretty 0.8 150 . pretty
+         
+
+{-
+  rewrite: let x = y in z ->
+                let x = y in case capture cx x of z
+            \x -> y to
+                \x -> case capture cx x of y
+-}
+captureBindings :: [(Id,Id)] -> CoreProgram -> CoreProgram
+captureBindings bs pgm = map tb pgm
+  where
+    repl = listToUFM bs
+    r i  = lookupUFM repl i
+    tb (NonRec i e) = NonRec i (te e)
+    tb (Rec bs)     = Rec (map (\(i,e) -> (i, te e)) bs)
+    te (Lam i e) | Just i' <- r i = Lam i $ capture i i' (te e)
+    te (Lam i e)                  = Lam i (te e)
+    te (App e a) = App (te e) (te a)
+    te (Let b e) = tbe b (te e)
+    te (Case e i t as) | Just i' <- r i =
+      Case (te e) i t (mapAlts (capture i i' . te) as)
+    te (Case e i t as) = Case (te e) i t (mapAlts te as)
+    te (Cast e c) = Cast (te e) c
+    te (Tick t e) = Tick t (te e)
+    te x          = x -- Var, Lit, Type, Coercion
+    tbe (NonRec i e1) e2 | Just i' <- r i = Let (NonRec i (te e1)) (capture i i' (te e2))
+    tbe (NonRec i e1) e2 = Let (NonRec i (te e1)) (te e2)
+    tbe (Rec bs) e =
+      let capt :: CoreExpr -> Id -> CoreExpr
+          capt e i | Just i' <- r i = capture i i' e
+                   | otherwise      = e
+      in  Let (Rec $ map (\(b,e0) -> (b, te e0)) bs) (foldl' capt (te e) (map fst bs))
+    capture i i' e = Case (App (App (Var captureOp) (Var i)) (Var i')) captureOp unitTy [(DEFAULT, [], e)]
+    mapAlts f as = map (_3 %~ f) as
+
+captureOp :: Id
+captureOp = mkGlobalId (FCallId call) (mkSystemName (mkBuiltinUnique 5000) (mkVarOcc "capture")) ty info
+  where
+    ty   = mkFunTys [unitTy, unitTy] unitTy -- wrong
+    call = CCall (CCallSpec (StaticTarget (fsLit "__ghcjsi_capture") Nothing True) PrimCallConv PlayRisky)
+    -- name = mkFCallName uniq occ_str
+    info = noCafIdInfo `setArityInfo` 2
+{-                       `setStrictnessInfo`    strict_sig
+
+    (_, tau)        = tcSplitForAllTys ty
+    (arg_tys, _)    = tcSplitFunTys tau
+    arity           = length arg_tys
+    strict_sig      = mkClosedStrictSig (replicate arity evalDmd) topRes
+-}
 linkInteractive :: GhcjsEnv
                 -> GhcjsSettings        -- settings (contains the base state)
                 -> [FilePath]           -- extra js files
@@ -1312,7 +1361,7 @@ hscDeclsWithLocation js_settings js_env rs hsc_env0 str source linenumber =
       liftIO $ corePrepPgm hsc_env iNTERACTIVELoc core_binds data_tycons
 
     let src_span = srcLocSpan interactiveSrcLoc
-    bs <- liftIO $ ghcjsCompileInteractiveCoreBinds js_env js_settings rs hsc_env src_span prepd_binds
+    bs <- liftIO $ ghcjsCompileInteractiveCoreBinds js_env js_settings rs hsc_env src_span prepd_binds []
  
     let tcs = filterOut isImplicitTyCon (mg_tcs simpl_mg)
         patsyns = mg_patsyns simpl_mg

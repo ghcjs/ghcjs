@@ -1587,6 +1587,11 @@ genPrimCall top (PrimCall lbl _) args t = do
   return (j, ExprInline Nothing)
 
 genForeignCall :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, ExprResult)
+genForeignCall (CCall (CCallSpec (StaticTarget ccLbl Nothing True) PrimCallConv PlayRisky)) _ _ [StgVarArg i1, StgVarArg i2]
+  | ccLbl == fsLit "__ghcjsi_capture" = do
+      ii1 <- jsIdI i1
+      ii2 <- jsIdI i2
+      return ([j| `ii2` = `ii1`; |], ExprInline Nothing)
 genForeignCall (CCall (CCallSpec ccTarget cconv safety)) t tgt args =
   (,exprResult) <$> parseFFIPattern catchExcep async isJsCc lbl t tgt' args
   where
@@ -1881,4 +1886,3 @@ isInlineApp _ i [StgLitArg (MachStr _)]
 isInlineApp v i [StgVarArg a]
   | DataConWrapId dc <- idDetails i, isNewTyCon (dataConTyCon dc), isStrictType (idType a) || a `elementOfUniqSet` v || isStrictId a = True
 isInlineApp _ _ _ = False
-
