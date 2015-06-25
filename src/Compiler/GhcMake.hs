@@ -28,8 +28,8 @@ module Compiler.GhcMake(
 -- #endif
 
 import DriverPhases
-import DriverPipeline
-import DynFlags
+import Compiler.DriverPipeline
+import DynFlags hiding (isObjectTarget)
 import ErrUtils
 import Finder
 import GhcMonad
@@ -80,6 +80,8 @@ import System.IO        ( fixIO )
 import System.IO.Error  ( isDoesNotExistError )
 
 import GHC.Conc ( getNumProcessors, getNumCapabilities, setNumCapabilities )
+
+isObjectTarget _ = True
 
 label_self :: String -> IO ()
 label_self thread_name = do

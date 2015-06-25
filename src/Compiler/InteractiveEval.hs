@@ -159,12 +159,13 @@ import TysWiredIn
 import InteractiveEval (RunResult(..), Status(..), Resume(..), History(..),
                         SingleStep(..))
 
-data RunnerState = RunnerState { runnerProcess :: ProcessHandle
-                               , runnerIn      :: Handle
-                               , runnerErr     :: Handle
-                               , runnerBase    :: MVar (Maybe Base)
-                               , runnerThread  :: ThreadId
-                               , runnerSymbols :: MVar (Map Id Text)
+data RunnerState = RunnerState { runnerProcess   :: ProcessHandle
+                               , runnerIn        :: Handle
+                               , runnerErr       :: Handle
+                               , runnerBase      :: MVar (Maybe Base)
+                               , runnerRtsLoaded :: MVar Bool
+                               , runnerThread    :: ThreadId
+                               , runnerSymbols   :: MVar (Map Id Text)
                                }
 
 -- -----------------------------------------------------------------------------
@@ -291,15 +292,26 @@ ghcjsiReadFromRunner runner = do
 
 ghcjsiLoadInitialCode :: RunnerState -> ByteString -> IO ()
 ghcjsiLoadInitialCode rs code = do
+  takeMVar (runnerRtsLoaded rs)
+  ghcjsiLoadInitialCode' rs code
+  putMVar (runnerRtsLoaded rs) True
+
+ghcjsiLoadInitialCode' :: RunnerState -> ByteString -> IO ()
+ghcjsiLoadInitialCode' rs code = do
   ghcjsiSendToRunner rs 0 code
   ghcjsiReadFromRunner rs
   return ()
-
+  
 ghcjsiLoadCode :: RunnerState -> ByteString -> IO ()
 ghcjsiLoadCode rs code = do
-  ghcjsiSendToRunner rs 1 code
-  ghcjsiReadFromRunner rs
-  return ()
+  rl <- takeMVar (runnerRtsLoaded rs)
+  if not rl
+    then ghcjsiLoadInitialCode' rs code
+    else do
+      ghcjsiSendToRunner rs 1 code
+      ghcjsiReadFromRunner rs
+      return ()
+  putMVar (runnerRtsLoaded rs) True
 
 ghcjsiRunActions :: RunnerState -> [Text] -> IO Status -- RunResult
 ghcjsiRunActions rs actions = do

@@ -108,6 +108,7 @@ Library
                      Compiler.Settings,
                      Compiler.Utils,
                      Compiler.Variants,
+                     Compiler.DriverPipeline,
                      Compiler.GhciMonad,
                      Compiler.GhciTags,
                      Compiler.InteractiveEval,

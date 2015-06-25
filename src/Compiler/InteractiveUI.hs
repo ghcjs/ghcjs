@@ -482,9 +482,10 @@ startRunner dflags js_env hsc_env = do
                                              Nothing
                                              Nothing
   lb  <- newMVar Nothing
+  rl  <- newMVar False
   rs  <- newMVar M.empty
   rt <- forkIO $ forever (hGetChar out >>= hPutChar stdout >> hFlush stdout)
-  return (RunnerState pid inp err lb rt rs)
+  return (RunnerState pid inp err lb rl rt rs)
 {-
 runnerThread :: Handle -> IO ()
 runnerThread h = go
@@ -1563,7 +1564,8 @@ afterLoad :: SuccessFlag
           -> InputT GHCi ()
 afterLoad ok retain_context = do
   st <- lift $ getGHCiState
-  liftIO $ modifyMVar_ (runnerBase $ runnerState st) (const (return Nothing))
+  liftIO $ modifyMVar_ (runnerBase      $ runnerState st) (const (return Nothing))
+  liftIO $ modifyMVar_ (runnerRtsLoaded $ runnerState st) (const (return False))
   lift revertCAFs  -- always revert CAFs on load.
   lift discardTickArrays
   loaded_mod_summaries <- getLoadedModules
