@@ -3,7 +3,8 @@
 module Compiler.InteractiveEval (
 --        RunResult(..), Status(..), Resume(..), History(..),
         runStmt, runStmtWithLocation, runDecls, runDeclsWithLocation,
-        parseImportDecl, RunnerState(..)
+        parseImportDecl, RunnerState(..),
+        ghcjsiInterrupt
 --        , SingleStep(..),
 {-        resume,
         abandon, abandonAll,
@@ -161,7 +162,7 @@ import InteractiveEval (RunResult(..), Status(..), Resume(..), History(..),
 
 data RunnerState = RunnerState { runnerProcess   :: ProcessHandle
                                , runnerIn        :: Handle
-                               , runnerErr       :: Handle
+                               , runnerErr       :: MVar (Int, ByteString)
                                , runnerBase      :: MVar (Maybe Base)
                                , runnerRtsLoaded :: MVar Bool
                                , runnerThread    :: ThreadId
@@ -285,10 +286,7 @@ ghcjsiSendToRunner rs typ payload = do
   hFlush (runnerIn rs)
 
 ghcjsiReadFromRunner :: RunnerState -> IO (Int, ByteString)
-ghcjsiReadFromRunner runner = do
-  let h = runnerErr runner
-  (len, status) <- runGet ((,) <$> getWord32be <*> getWord32be) <$> BL.hGet h 8
-  (fromIntegral status,) . runGet get <$> BL.hGet h (fromIntegral len)
+ghcjsiReadFromRunner runner = takeMVar (runnerErr runner)
 
 ghcjsiLoadInitialCode :: RunnerState -> ByteString -> IO ()
 ghcjsiLoadInitialCode rs code = do
@@ -320,6 +318,13 @@ ghcjsiRunActions rs actions = do
     ghcjsiReadFromRunner rs
   return (Complete $ Right []) -- fixme return bound stuff
   -- return (RunOk []) -- fixme return names bound and handle exceptions
+
+-- fixme this could lock up if we got interrupted just after getting the value from the MVar in ghcjsiRunActions
+ghcjsiInterrupt :: RunnerState -> IO ()
+ghcjsiInterrupt rs = withMVar (runnerRtsLoaded rs) $ \_ -> do
+  ghcjsiSendToRunner rs 3 mempty
+  ghcjsiReadFromRunner rs
+  return ()
 
 ghcjsStmtWithLocation :: HscEnv
                     -> GhcjsEnv

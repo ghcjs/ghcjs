@@ -121,6 +121,7 @@ import qualified Gen2.Object as Gen2
 
 import Compiler.Settings
 import Compiler.Info
+import Compiler.Utils
 
 import Control.Concurrent.MVar
 import Data.Binary
@@ -144,6 +145,7 @@ import qualified Data.Map as M
 import System.IO
 import Control.Concurrent
 
+import Compiler.InteractiveEval (ghcjsiInterrupt)
 -----------------------------------------------------------------------------
 
 data GhciSettings = GhciSettings {
@@ -470,89 +472,20 @@ ghcjsiSettings = GhcjsSettings False True False False Nothing
 
 startRunner :: DynFlags -> GhcjsEnv -> HscEnv -> IO RunnerState
 startRunner dflags js_env hsc_env = do
-{-  lr <- linkInteractive ghcjsiSettings js_env [] dflags [] (hsc_HPT hsc_env) Nothing
-  fr <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibRTS lr)
-  fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
-  aa <- BL.fromChunks <$> mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)
-  let rtsd = TL.encodeUtf8 Gen2.rtsDeclsText
-      rts  = TL.encodeUtf8 $ Gen2.rtsText' dflags (Gen2.dfCgSettings dflags) -}
   node <- T.strip <$> T.readFile (topDir dflags </> "node")
-  (inp,out,err,pid) <- runInteractiveProcess (T.unpack node)
-                                             [topDir dflags </> "irunner.js"]
-                                             Nothing
-                                             Nothing
+  (inp,out,err,pid) <- runWorkerProcess (T.unpack node)
+                                        [topDir dflags </> "irunner.js"]
+                                        Nothing
+                                        Nothing
   lb  <- newMVar Nothing
   rl  <- newMVar False
   rs  <- newMVar M.empty
+  re <- newEmptyMVar
   rt <- forkIO $ forever (hGetChar out >>= hPutChar stdout >> hFlush stdout)
-  return (RunnerState pid inp err lb rl rt rs)
-{-
-runnerThread :: Handle -> IO ()
-runnerThread h = go
-  where
-    go = readMessage h >>= uncurry go'
-    go' :: Int -> BL.ByteString -> IO ()
-    go' 1 bs = BL.hPut stdout bs >> hFlush stdout >> go
-    go' 2 bs = BL.hPut stderr bs >> hFlush stderr >> go
-    go' 3 _  = return ()
-
-readMessage :: Handle -> IO (Int, BL.ByteString)
-readMessage h = do
-  (len, typ) <- runGet ((,) <$> getWord32be <*> getWord32be) <$> BL.hGet h 8
-  (fromIntegral typ,) . runGet get <$> BL.hGet h (fromIntegral len)
-  
-linkInteractive :: GhcjsSettings        -- settings (contains the base state)
-                -> GhcjsEnv
-                -> [FilePath]           -- extra js files
-                -> DynFlags             -- dynamic flags
-                -> [PackageKey]         -- package dependencies
-                -> HomePackageTable     -- what to link
-                -> Maybe ByteString     -- current module or Nothing to get the initial code + rts
-                -> IO Gen2.LinkResult
-linkInteractive settings js_env js_files dflags pkgs hpt code = do
-  (th_deps_pkgs, th_deps)  <- Gen2.thDeps dflags -- fixme remove
-  let home_mod_infos = eltsUFM hpt
-      pkgs' | isJust code = L.nub $ pkgs ++ th_deps_pkgs
-            | otherwise   = th_deps_pkgs
-      is_root   = const True
-      linkables = map (expectJust "link".hm_linkable) home_mod_infos
-      getOfiles (LM _ _ us) = map nameOfObject (filter isObject us)
-      link      = Gen2.link' dflags'
-                             js_env
-                             settings
-                             "interactive"
-                             []
-                             pkgs'
-                             obj_files
-                             js_files
-                             is_root
-                             th_deps
-      dflags'   = dflags { ways        = WayDebug : ways dflags
-                         , thisPackage = interactivePackage
-                         }
-      obj_files = maybe []
-                        (\b -> ObjLoaded "<interactive>" b :
-                               map ObjFile (concatMap getOfiles linkables))
-                        code
-      packageLibPaths :: PackageKey -> [FilePath]
-      packageLibPaths pkg = maybe [] libraryDirs (lookupPackage dflags pkg)
-      -- deps  = map (\pkg -> (pkg, packageLibPaths pkg)) pkgs'
-      cache_key = T.pack $
-        (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++
-        show (ways dflags')
-  if isJust code
-     then link
-     else Gen2.getCached dflags' (T.pack "ghcjsi") cache_key >>= \case
-            Just c  -> return (runGet get $ BL.fromStrict c)
-            Nothing -> do
-              lr <- link
-              Gen2.putCached dflags'
-                             (T.pack "ghcjsi")
-                             cache_key
-                             [topDir dflags </> "ghcjs_boot.completed"]
-                             (BL.toStrict . runPut . put $ lr)
-              return lr
--}
+  forkIO . forever $ do
+    (len, status) <- runGet ((,) <$> getWord32be <*> getWord32be) <$> BL.hGet err 8
+    putMVar re =<< (fromIntegral status,) . runGet get <$> BL.hGet err (fromIntegral len)
+  return (RunnerState pid inp re lb rl rt rs)
 
 interactivePackage :: PackageKey
 interactivePackage = stringToPackageKey "interactive"
@@ -3249,6 +3182,11 @@ setBreakFlag dflags toggle arr i
 handler :: SomeException -> GHCi Bool
 
 handler exception = do
+  case fromException exception of
+    Just UserInterrupt -> do
+      st <- getGHCiState
+      liftIO (ghcjsiInterrupt $ runnerState st)
+    _ -> return ()
   flushInterpBuffers
   liftIO installSignalHandlers
   ghciHandle handler (showException exception >> return False)
