@@ -368,9 +368,9 @@ writeRunner settings dflags out = when (gsBuildRunner settings) $ do
         let x' = showOct x []
         in  replicate (3-length x') '0' ++ x'
 #else
-  src   <- T.readFile (cd </> out </> "all" <.> "js")
-  node  <- T.readFile (topDir dflags </> "node")
-  T.writeFile runner ("#!" <> node <> "\n" <> src)
+  src   <- B.readFile (cd </> out </> "all" <.> "js")
+  node  <- B.readFile (topDir dflags </> "node")
+  B.writeFile runner ("#!" <> node <> "\n" <> src)
   Cabal.setFileExecutable runner
 #endif
 
