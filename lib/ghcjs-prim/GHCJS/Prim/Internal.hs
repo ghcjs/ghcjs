@@ -1,7 +1,3 @@
-{-# LANGUAGE CPP, LambdaCase, JavaScriptFFI, UnliftedFFITypes, BangPatterns,
-             DeriveGeneric, StandaloneDeriving, MagicHash, TupleSections
-  #-}
-
 {- | Code used by the RTS
 
  -}

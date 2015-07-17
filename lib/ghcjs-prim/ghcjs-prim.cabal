@@ -11,6 +11,7 @@ cabal-version:       >=1.10
 library
   exposed-modules: GHCJS.Prim
                    GHCJS.Prim.Internal
+                   GHCJS.Prim.Internal.Build
                    GHCJS.Prim.TH.Eval
                    GHCJS.Prim.TH.Serialized
                    GHCJS.Prim.TH.Types
