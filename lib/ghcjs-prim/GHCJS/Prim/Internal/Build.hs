@@ -810,11 +810,11 @@ foreign import javascript unsafe "[$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$1
   js_buildArrayM32 :: J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> J -> IO A
 
 
-foreign import javascript unsafe "h$buildObjectFromList"
-  js_buildObjectFromListI :: Any -> O
+foreign import javascript unsafe "h$buildObjectFromTupList($1)"
+  js_buildObjectFromTupListI :: Any -> O
 foreign import javascript unsafe "$r = {};" js_emptyObjectI :: O
 buildObjectI :: [(K,V)] -> O
-buildObjectI xs = js_buildObjectFromListI . unsafeCoerce . seqTupList $ xs
+buildObjectI xs = js_buildObjectFromTupListI . unsafeCoerce . seqTupList $ xs
 {-# INLINE [1] buildObjectI #-}
 {-# RULES "buildObjectI/empty" buildObjectI [] = js_emptyObjectI #-}
 {-# RULES "buildObjectI/buildObjectI1" forall k1 v1. buildObjectI [(k1,v1)] = buildObjectI1 k1 v1 #-}
@@ -855,7 +855,7 @@ buildObjectI1 k1 v1 =
   js_buildObjectI1 k1 v1
 {-# INLINE buildObjectI1 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2)"
   js_buildObjectI1 :: K -> V -> O
 
 
@@ -864,7 +864,7 @@ buildObjectI2 k1 v1 k2 v2 =
   js_buildObjectI2 k1 v1 k2 v2
 {-# INLINE buildObjectI2 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4)"
   js_buildObjectI2 :: K -> V -> K -> V -> O
 
 
@@ -873,7 +873,7 @@ buildObjectI3 k1 v1 k2 v2 k3 v3 =
   js_buildObjectI3 k1 v1 k2 v2 k3 v3
 {-# INLINE buildObjectI3 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6)"
   js_buildObjectI3 :: K -> V -> K -> V -> K -> V -> O
 
 
@@ -882,7 +882,7 @@ buildObjectI4 k1 v1 k2 v2 k3 v3 k4 v4 =
   js_buildObjectI4 k1 v1 k2 v2 k3 v3 k4 v4
 {-# INLINE buildObjectI4 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8)"
   js_buildObjectI4 :: K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -891,7 +891,7 @@ buildObjectI5 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 =
   js_buildObjectI5 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5
 {-# INLINE buildObjectI5 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"
   js_buildObjectI5 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -900,7 +900,7 @@ buildObjectI6 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 =
   js_buildObjectI6 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6
 {-# INLINE buildObjectI6 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)"
   js_buildObjectI6 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -909,7 +909,7 @@ buildObjectI7 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 =
   js_buildObjectI7 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7
 {-# INLINE buildObjectI7 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)"
   js_buildObjectI7 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -918,7 +918,7 @@ buildObjectI8 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 =
   js_buildObjectI8 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8
 {-# INLINE buildObjectI8 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)"
   js_buildObjectI8 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -927,7 +927,7 @@ buildObjectI9 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 =
   js_buildObjectI9 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9
 {-# INLINE buildObjectI9 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)"
   js_buildObjectI9 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -936,7 +936,7 @@ buildObjectI10 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 =
   js_buildObjectI10 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10
 {-# INLINE buildObjectI10 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)"
   js_buildObjectI10 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -945,7 +945,7 @@ buildObjectI11 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI11 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11
 {-# INLINE buildObjectI11 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)"
   js_buildObjectI11 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -954,7 +954,7 @@ buildObjectI12 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI12 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12
 {-# INLINE buildObjectI12 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)"
   js_buildObjectI12 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -963,7 +963,7 @@ buildObjectI13 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI13 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13
 {-# INLINE buildObjectI13 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)"
   js_buildObjectI13 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -972,7 +972,7 @@ buildObjectI14 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI14 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14
 {-# INLINE buildObjectI14 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)"
   js_buildObjectI14 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -981,7 +981,7 @@ buildObjectI15 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI15 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15
 {-# INLINE buildObjectI15 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)"
   js_buildObjectI15 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -990,7 +990,7 @@ buildObjectI16 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI16 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16
 {-# INLINE buildObjectI16 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)"
   js_buildObjectI16 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -999,7 +999,7 @@ buildObjectI17 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI17 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17
 {-# INLINE buildObjectI17 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)"
   js_buildObjectI17 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1008,7 +1008,7 @@ buildObjectI18 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI18 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18
 {-# INLINE buildObjectI18 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)"
   js_buildObjectI18 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1017,7 +1017,7 @@ buildObjectI19 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI19 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19
 {-# INLINE buildObjectI19 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)"
   js_buildObjectI19 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1026,7 +1026,7 @@ buildObjectI20 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI20 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20
 {-# INLINE buildObjectI20 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40)"
   js_buildObjectI20 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1035,7 +1035,7 @@ buildObjectI21 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI21 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21
 {-# INLINE buildObjectI21 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42)"
   js_buildObjectI21 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1044,7 +1044,7 @@ buildObjectI22 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI22 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22
 {-# INLINE buildObjectI22 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44)"
   js_buildObjectI22 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1053,7 +1053,7 @@ buildObjectI23 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI23 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23
 {-# INLINE buildObjectI23 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46)"
   js_buildObjectI23 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1062,7 +1062,7 @@ buildObjectI24 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI24 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24
 {-# INLINE buildObjectI24 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48)"
   js_buildObjectI24 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1071,7 +1071,7 @@ buildObjectI25 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI25 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25
 {-# INLINE buildObjectI25 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50)"
   js_buildObjectI25 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1080,7 +1080,7 @@ buildObjectI26 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI26 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26
 {-# INLINE buildObjectI26 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52)"
   js_buildObjectI26 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1089,7 +1089,7 @@ buildObjectI27 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI27 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27
 {-# INLINE buildObjectI27 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54)"
   js_buildObjectI27 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1098,7 +1098,7 @@ buildObjectI28 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI28 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28
 {-# INLINE buildObjectI28 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56)"
   js_buildObjectI28 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1107,7 +1107,7 @@ buildObjectI29 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI29 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28 k29 v29
 {-# INLINE buildObjectI29 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58)"
   js_buildObjectI29 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1116,7 +1116,7 @@ buildObjectI30 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI30 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28 k29 v29 k30 v30
 {-# INLINE buildObjectI30 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60)"
   js_buildObjectI30 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1125,7 +1125,7 @@ buildObjectI31 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI31 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28 k29 v29 k30 v30 k31 v31
 {-# INLINE buildObjectI31 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60,$61,$62)"
   js_buildObjectI31 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
@@ -1134,15 +1134,15 @@ buildObjectI32 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectI32 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28 k29 v29 k30 v30 k31 v31 k32 v32
 {-# INLINE buildObjectI32 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60,$61,$62,$63,$64)"
   js_buildObjectI32 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> O
 
 
-foreign import javascript unsafe "h$buildObjectFromList"
-  js_buildObjectFromListM :: Any -> IO O
+foreign import javascript unsafe "h$buildObjectFromTupList($1)"
+  js_buildObjectFromTupListM :: Any -> IO O
 foreign import javascript unsafe "$r = {};" js_emptyObjectM :: IO O
 buildObjectM :: [(K,V)] -> IO O
-buildObjectM xs = js_buildObjectFromListM . unsafeCoerce . seqTupList $ xs
+buildObjectM xs = js_buildObjectFromTupListM . unsafeCoerce . seqTupList $ xs
 {-# INLINE [1] buildObjectM #-}
 {-# RULES "buildObjectM/empty" buildObjectM [] = js_emptyObjectM #-}
 {-# RULES "buildObjectM/buildObjectM1" forall k1 v1. buildObjectM [(k1,v1)] = buildObjectM1 k1 v1 #-}
@@ -1183,7 +1183,7 @@ buildObjectM1 k1 v1 =
   js_buildObjectM1 k1 v1
 {-# INLINE buildObjectM1 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2)"
   js_buildObjectM1 :: K -> V -> IO O
 
 
@@ -1192,7 +1192,7 @@ buildObjectM2 k1 v1 k2 v2 =
   js_buildObjectM2 k1 v1 k2 v2
 {-# INLINE buildObjectM2 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4)"
   js_buildObjectM2 :: K -> V -> K -> V -> IO O
 
 
@@ -1201,7 +1201,7 @@ buildObjectM3 k1 v1 k2 v2 k3 v3 =
   js_buildObjectM3 k1 v1 k2 v2 k3 v3
 {-# INLINE buildObjectM3 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6)"
   js_buildObjectM3 :: K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1210,7 +1210,7 @@ buildObjectM4 k1 v1 k2 v2 k3 v3 k4 v4 =
   js_buildObjectM4 k1 v1 k2 v2 k3 v3 k4 v4
 {-# INLINE buildObjectM4 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8)"
   js_buildObjectM4 :: K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1219,7 +1219,7 @@ buildObjectM5 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 =
   js_buildObjectM5 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5
 {-# INLINE buildObjectM5 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"
   js_buildObjectM5 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1228,7 +1228,7 @@ buildObjectM6 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 =
   js_buildObjectM6 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6
 {-# INLINE buildObjectM6 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)"
   js_buildObjectM6 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1237,7 +1237,7 @@ buildObjectM7 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 =
   js_buildObjectM7 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7
 {-# INLINE buildObjectM7 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)"
   js_buildObjectM7 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1246,7 +1246,7 @@ buildObjectM8 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 =
   js_buildObjectM8 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8
 {-# INLINE buildObjectM8 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)"
   js_buildObjectM8 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1255,7 +1255,7 @@ buildObjectM9 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 =
   js_buildObjectM9 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9
 {-# INLINE buildObjectM9 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)"
   js_buildObjectM9 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1264,7 +1264,7 @@ buildObjectM10 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 =
   js_buildObjectM10 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10
 {-# INLINE buildObjectM10 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)"
   js_buildObjectM10 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1273,7 +1273,7 @@ buildObjectM11 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM11 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11
 {-# INLINE buildObjectM11 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)"
   js_buildObjectM11 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1282,7 +1282,7 @@ buildObjectM12 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM12 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12
 {-# INLINE buildObjectM12 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)"
   js_buildObjectM12 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1291,7 +1291,7 @@ buildObjectM13 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM13 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13
 {-# INLINE buildObjectM13 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)"
   js_buildObjectM13 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1300,7 +1300,7 @@ buildObjectM14 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM14 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14
 {-# INLINE buildObjectM14 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)"
   js_buildObjectM14 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1309,7 +1309,7 @@ buildObjectM15 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM15 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15
 {-# INLINE buildObjectM15 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)"
   js_buildObjectM15 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1318,7 +1318,7 @@ buildObjectM16 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM16 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16
 {-# INLINE buildObjectM16 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)"
   js_buildObjectM16 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1327,7 +1327,7 @@ buildObjectM17 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM17 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17
 {-# INLINE buildObjectM17 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)"
   js_buildObjectM17 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1336,7 +1336,7 @@ buildObjectM18 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM18 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18
 {-# INLINE buildObjectM18 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)"
   js_buildObjectM18 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1345,7 +1345,7 @@ buildObjectM19 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM19 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19
 {-# INLINE buildObjectM19 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)"
   js_buildObjectM19 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1354,7 +1354,7 @@ buildObjectM20 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM20 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20
 {-# INLINE buildObjectM20 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40)"
   js_buildObjectM20 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1363,7 +1363,7 @@ buildObjectM21 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM21 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21
 {-# INLINE buildObjectM21 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42)"
   js_buildObjectM21 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1372,7 +1372,7 @@ buildObjectM22 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM22 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22
 {-# INLINE buildObjectM22 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44)"
   js_buildObjectM22 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1381,7 +1381,7 @@ buildObjectM23 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM23 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23
 {-# INLINE buildObjectM23 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46)"
   js_buildObjectM23 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1390,7 +1390,7 @@ buildObjectM24 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM24 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24
 {-# INLINE buildObjectM24 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48)"
   js_buildObjectM24 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1399,7 +1399,7 @@ buildObjectM25 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM25 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25
 {-# INLINE buildObjectM25 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50)"
   js_buildObjectM25 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1408,7 +1408,7 @@ buildObjectM26 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM26 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26
 {-# INLINE buildObjectM26 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52)"
   js_buildObjectM26 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1417,7 +1417,7 @@ buildObjectM27 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM27 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27
 {-# INLINE buildObjectM27 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54)"
   js_buildObjectM27 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1426,7 +1426,7 @@ buildObjectM28 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM28 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28
 {-# INLINE buildObjectM28 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56)"
   js_buildObjectM28 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1435,7 +1435,7 @@ buildObjectM29 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM29 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28 k29 v29
 {-# INLINE buildObjectM29 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58)"
   js_buildObjectM29 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1444,7 +1444,7 @@ buildObjectM30 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM30 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28 k29 v29 k30 v30
 {-# INLINE buildObjectM30 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60)"
   js_buildObjectM30 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1453,7 +1453,7 @@ buildObjectM31 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM31 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28 k29 v29 k30 v30 k31 v31
 {-# INLINE buildObjectM31 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60,$61,$62)"
   js_buildObjectM31 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 
@@ -1462,7 +1462,7 @@ buildObjectM32 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11
   js_buildObjectM32 k1 v1 k2 v2 k3 v3 k4 v4 k5 v5 k6 v6 k7 v7 k8 v8 k9 v9 k10 v10 k11 v11 k12 v12 k13 v13 k14 v14 k15 v15 k16 v16 k17 v17 k18 v18 k19 v19 k20 v20 k21 v21 k22 v22 k23 v23 k24 v24 k25 v25 k26 v26 k27 v27 k28 v28 k29 v29 k30 v30 k31 v31 k32 v32
 {-# INLINE buildObjectM32 #-}
 
-foreign import javascript unsafe "h$buildObject"
+foreign import javascript unsafe "h$buildObject($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50,$51,$52,$53,$54,$55,$56,$57,$58,$59,$60,$61,$62,$63,$64)"
   js_buildObjectM32 :: K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> K -> V -> IO O
 
 

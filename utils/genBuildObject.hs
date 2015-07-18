@@ -98,11 +98,11 @@ genBuildA' n res i = genBuild ("buildArray" ++ n ++ show i) imp args sig
 
 genBuildOL :: String -> String -> String
 genBuildOL m res = unlines $
-  [ "foreign import javascript unsafe \"h$buildObjectFromList\""
-  , "  js_buildObjectFromList" ++ m ++ " :: Any -> " ++ res
+  [ "foreign import javascript unsafe \"h$buildObjectFromTupList($1)\""
+  , "  js_buildObjectFromTupList" ++ m ++ " :: Any -> " ++ res
   , "foreign import javascript unsafe \"$r = {};\" js_emptyObject"  ++ m ++ " :: " ++ res
   , m' ++ " :: [(K,V)] -> " ++ res
-  , m' ++ " xs = js_buildObjectFromList" ++ m ++ " . unsafeCoerce . seqTupList $ xs"
+  , m' ++ " xs = js_buildObjectFromTupList" ++ m ++ " . unsafeCoerce . seqTupList $ xs"
   , "{-# INLINE [1] " ++ m' ++ " #-}"
   , "{-# RULES \"" ++ m' ++ "/empty\" " ++ m' ++ " [] = js_emptyObject" ++ m ++ " #-}"
   ] ++ map mkRule sizes
@@ -120,12 +120,12 @@ genBuildOL m res = unlines $
 genBuildO n res = unlines $ genBuildOL n res : map (genBuildO' n res) sizes
 
 genBuildO' :: String -> String -> Int -> String
-genBuildO' n res i = genBuild ("buildObject" ++ n ++ show i)
-                    "h$buildObject" args sig
+genBuildO' n res i = genBuild ("buildObject" ++ n ++ show i) imp args sig
   where
+    imp  = "h$buildObject(" ++ intercalate "," (map (('$':).show) [1..2*i]) ++ ")"
     args = intercalate " " $
            map (\j -> "k" ++ show j ++ " v" ++ show j) [1..i]
-    sig = join (replicate i "K -> V -> ") ++ res
+    sig  = join (replicate i "K -> V -> ") ++ res
 
 genBuild n imp args sig = unlines
   [ n ++ " :: " ++ sig
