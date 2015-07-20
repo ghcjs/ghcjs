@@ -126,7 +126,9 @@
 // general deconstruction
 #define IS_THUNK(x) ((x).f.t === CLOSURE_TYPE_THUNK)
 #define CONSTR_TAG(x) ((x).f.a)
-// retrieve  a numeric value that's possible stored as an indirection
+
+// retrieve  a numeric value that's possibly stored as an indirection
+#define IS_WRAPPED_NUMBER(val) ((typeof(val)==='object')&&(val).f === h$unbox_e)
 #define UNWRAP_NUMBER(val) ((typeof(val) === 'number')?(val):(val).d1)
 
 // generic lazy values
