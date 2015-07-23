@@ -16,8 +16,6 @@ before_install:
 
 install:
     - travis_retry cabal update
-# until hvr's ppa contains a cabal-install with the fixes required for ghcjs (1.22.3+)
-    - cabal install cabal-install
     - cabal install --only-dependencies --enable-tests --enable-benchmarks
     - cabal install --enable-tests --enable-benchmarks -v -j1 --ghc-options="+RTS -c -RTS"
     - ghcjs --version
