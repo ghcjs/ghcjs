@@ -103,7 +103,7 @@ for example:
 
     -- Contents of helloWorld.hs
     main :: IO ()
-    main = print "Hellow world!"
+    main = print "Hello world!"
 
     $ ghcjs -o helloWorld helloWorld.hs
     $ node helloWorld.jsexe/all.js
