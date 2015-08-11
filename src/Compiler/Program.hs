@@ -300,7 +300,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
 #endif
        DoGenerateLib          -> Ghcjs.generateLib ghcjsSettings >> return True
        DoPrintRts             -> liftIO (Ghcjs.printRts dflags6) >> return True
-       DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings $ map fst srcs) >> return True
+       DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings objs) >> return True
        DoPrintObj obj         -> liftIO (Ghcjs.printObj obj) >> return True
        DoPrintDeps obj        -> liftIO (Ghcjs.printDeps obj) >> return True
        DoBuildJsLibrary       -> liftIO (Ghcjs.buildJsLibrary dflags6 (map fst srcs) js_objs objs) >> return True
