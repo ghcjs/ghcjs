@@ -16,8 +16,8 @@ GHCJS supports many modern Haskell features, including:
 
 And some JavaScript-specific features:
 
- * new JavaScriptFFI extension, with convenient import pattens, asynchronous FFI and a JSRef FFI type,
- * synchronous and asynchronous threads.
+ * New JavaScriptFFI extension, with convenient import pattens, asynchronous FFI and a JSRef FFI type
+ * Synchronous and asynchronous threads
 
 Installation
 ============
@@ -60,16 +60,10 @@ Note that you need a compatible `Cabal` library in your GHC package database, ju
 the `cabal-install` program is not enough. `ghcjs-boot` will complain if it finds an incompatible
 version.
 
-Make sure that you're now running the updated `cabal-install`, `GHCJS` support must be listed under the
-compiler flags:
+Make sure that you're now running the updated `cabal-install`, `GHCJS` support must be listed under the compiler flags:
 
-    $ cabal install --help
-    ...
-                                    build files (default dist)
-     -g --ghc                           compile with GHC
+    $ cabal install --help | grep GHCJS
         --ghcjs                         compile with GHCJS
-        --nhc98                         compile with NHC
-    ...
 
 #### Install GHCJS
 
