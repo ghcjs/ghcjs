@@ -320,8 +320,7 @@ unboxJsArg arg
   | Just tc <- tyConAppTyCon_maybe arg_ty,
     tc `hasKey` anyTyConKey
   = return (arg,
-              \ body -> mkWildCase arg anyTy (exprType body) [(DEFAULT,[],body)])
-
+              \ body -> mkWildCase arg arg_ty (exprType body) [(DEFAULT,[],body)])
   -- Data types with a single constructor, which has a single, primitive-typed arg
   -- This deals with Int, Float etc; also Ptr, ForeignPtr
   | is_product_type && data_con_arity == 1
