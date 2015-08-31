@@ -38,3 +38,4 @@ requiredPackages:
   - old-time
   - vector
   - stm
+  - parsec

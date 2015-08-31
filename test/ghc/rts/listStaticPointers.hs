@@ -7,9 +7,11 @@ import Data.List ((\\))
 import GHC.StaticPtr
 import System.Exit
 
-main = when (not $ eqBags staticPtrKeys expected) $ do
+main = do
+  found <- staticPtrKeys
+  when (not $ eqBags found expected) $ do
     print ("expected", expected)
-    print ("found", staticPtrKeys)
+    print ("found", found)
     exitFailure
   where
 
