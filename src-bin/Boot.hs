@@ -130,6 +130,7 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsWithGhcjsPkg :: Maybe Text -- ^ location of ghcjs-pkg program
                                  , _bsWithGhcjsRun :: Maybe Text -- ^ location of ghcjs-run program
                                  , _bsWithGhc      :: Maybe Text -- ^ location of GHC compiler (must have a GHCJS-compatible Cabal library installed. ghcjs-boot copies some files from this compiler)
+                                 , _bsWithGhcPkg   :: Maybe Text -- ^ location of ghc-pkg program
                                  , _bsWithNode     :: Maybe Text -- ^ location of the node.js program
                                  , _bsWithDataDir  :: Maybe Text -- ^ override data dir
                                  , _bsWithConfig   :: Maybe Text -- ^ installation source configuration (default: lib/etc/boot-sources.yaml in data dir)
@@ -498,6 +499,8 @@ optParser = BootSettings
                   help "ghcjs-run program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-ghc" <> metavar "PROGRAM" <>
                   help "ghc program to use" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-ghc-pkg" <> metavar "PROGRAM" <>
+                  help "ghc-pkg program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-node" <> metavar "PROGRAM" <>
                   help "node.js program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-datadir" <> metavar "DIR" <>
@@ -1325,6 +1328,7 @@ configureBootPrograms bs srcs pgms0 = do
                     & bpGhcjsPkg %~ r bsWithGhcjsPkg
                     & bpGhcjsRun %~ r bsWithGhcjsRun
                     & bpGhc      %~ r bsWithGhc
+                    & bpGhcPkg   %~ r bsWithGhcPkg
                     & bpCabal    %~ r bsWithCabal
                     & bpNode     %~ r bsWithNode
   -- resolve all programs
