@@ -427,11 +427,12 @@ boxJsResult result_ty
                                            [the_alt]
        return (realWorldStatePrimTy `mkFunTy` ccall_res_ty, wrap)
   where
+    return_result _ xs
+      | isUnboxedTupleType result_ty =
+          mkConApp (tupleCon UnboxedTuple (length xs))
+                   (map (Type . exprType) xs ++ xs)
     return_result _ [ans] = ans
-    return_result _ xs     = -- mkCoreConApps (tupleCon UnboxedTuple (length xs))
-      mkConApp (tupleCon UnboxedTuple (length xs))
-        (map (Type . exprType) xs ++ xs)
-      -- panic "return_result: expected single result"
+    return_result _ xs    = panic "return_result: expected single result"
 
 
 mk_alt :: (Expr Var -> [Expr Var] -> Expr Var)
