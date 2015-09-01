@@ -33,9 +33,9 @@ import qualified GHC.Exception as Ex
   argument or result.
 -}
 #ifdef ghcjs_HOST_OS
-data JSRef a = JSRef ByteArray#
+data JSRef = JSRef ByteArray#
 #else
-data JSRef a = JSRef Addr#
+data JSRef = JSRef Addr#
 #endif
 
 {-
@@ -43,7 +43,7 @@ data JSRef a = JSRef Addr#
   a safe or interruptible foreign call, it is converted
   to a JSException
  -}
-data JSException = JSException (JSRef ()) String
+data JSException = JSException JSRef String
   deriving (Typeable)
 
 instance Ex.Exception JSException
@@ -53,7 +53,7 @@ instance Show JSException where
 
 #ifdef ghcjs_HOST_OS
 
-mkJSException :: JSRef a -> IO JSException
+mkJSException :: JSRef -> IO JSException
 mkJSException ref =
   return (JSException (unsafeCoerce ref) (fromJSString ref))
 
@@ -64,49 +64,49 @@ mkJSException ref =
 {- | returns an empty string if the JSRef does not contain
      a string
  -}
-fromJSString :: JSRef a -> String
+fromJSString :: JSRef -> String
 fromJSString = unsafeCoerce . js_fromJSString
 {-# INLINE fromJSString #-}
 
-toJSString :: String -> JSRef a
+toJSString :: String -> JSRef
 toJSString = js_toJSString . unsafeCoerce . seqList
 {-# INLINE toJSString #-}
 
-fromJSArray :: JSRef a -> IO [JSRef a]
+fromJSArray :: JSRef -> IO [JSRef]
 fromJSArray = unsafeCoerce . js_fromJSArray
 {-# INLINE fromJSArray #-}
 
-toJSArray :: [JSRef a] -> IO (JSRef b)
+toJSArray :: [JSRef] -> IO JSRef
 toJSArray = js_toJSArray . unsafeCoerce . seqList
 {-# INLINE toJSArray #-}
 
 {- | returns zero if the JSRef does not contain a number
  -}
-fromJSInt :: JSRef a -> Int
+fromJSInt :: JSRef -> Int
 fromJSInt = js_fromJSInt
 {-# INLINE fromJSInt #-}
 
-toJSInt :: Int -> JSRef a
+toJSInt :: Int -> JSRef
 toJSInt = js_toJSInt
 {-# INLINE toJSInt #-}
 
-isNull :: JSRef a -> Bool
+isNull :: JSRef -> Bool
 isNull = js_isNull
 {-# INLINE isNull #-}
 
-isUndefined :: JSRef a -> Bool
+isUndefined :: JSRef -> Bool
 isUndefined = js_isUndefined
 {-# INLINE isUndefined #-}
 
-jsNull :: JSRef a
+jsNull :: JSRef
 jsNull = js_null
 {-# INLINE jsNull #-}
 
-getProp :: JSRef a -> String -> IO (JSRef b)
+getProp :: JSRef -> String -> IO JSRef
 getProp o p = js_getProp o (unsafeCoerce $ seqList p)
 {-# INLINE getProp #-}
 
-getProp' :: JSRef a -> JSRef b -> IO (JSRef c)
+getProp' :: JSRef -> JSRef -> IO JSRef
 getProp' o p = js_getProp' o p
 {-# INLINE getProp' #-}
 
@@ -122,37 +122,37 @@ seqListSpine xs = go xs `seq` xs
         go []     = ()
 
 foreign import javascript unsafe "h$toHsString($1)"
-  js_fromJSString :: JSRef a -> Double
+  js_fromJSString :: JSRef -> Double
 
 foreign import javascript unsafe "h$fromHsString($1)"
-  js_toJSString :: Double -> JSRef a
+  js_toJSString :: Double -> JSRef
 
 foreign import javascript unsafe "h$toHsListJSRef($1)"
-  js_fromJSArray :: JSRef a -> IO Double
+  js_fromJSArray :: JSRef -> IO Double
 
 foreign import javascript unsafe "h$fromHsListJSRef($1)"
-  js_toJSArray :: Double -> IO (JSRef a)
+  js_toJSArray :: Double -> IO JSRef
 
 foreign import javascript unsafe "$1 === null"
-  js_isNull :: JSRef a -> Bool
+  js_isNull :: JSRef -> Bool
 
 foreign import javascript unsafe "$1 === undefined"
-  js_isUndefined :: JSRef a -> Bool
+  js_isUndefined :: JSRef -> Bool
 
 foreign import javascript unsafe "$r = typeof($1) === 'number' ? ($1|0) : 0;"
-  js_fromJSInt :: JSRef a -> Int
+  js_fromJSInt :: JSRef -> Int
 
 foreign import javascript unsafe "$r = $1;"
-  js_toJSInt :: Int -> JSRef a
+  js_toJSInt :: Int -> JSRef
 
 foreign import javascript unsafe "$r = null;"
-  js_null :: JSRef a
+  js_null :: JSRef
 
 foreign import javascript unsafe "$1[h$fromHsString($2)]"
-  js_getProp :: JSRef a -> Double -> IO (JSRef b)
+  js_getProp :: JSRef -> Double -> IO JSRef
 
 foreign import javascript unsafe "$1[$2]"
-  js_getProp' :: JSRef a -> JSRef b -> IO (JSRef c)
+  js_getProp' :: JSRef -> JSRef -> IO JSRef
 
 #endif
 
