@@ -878,9 +878,11 @@ preparePackage pkg
   | "./" `T.isPrefixOf` pkg || "../" `T.isPrefixOf` pkg = sub $ do
     msg trace ("preparing package " <> pkg)
     cd (fromText pkg)
-    whenM (test_f "configure.ac") $
-      make "configure" ["configure.ac"]
-        (msg info ("generating configure script for " <> pkg) >> autoreconf_)
+    e <- ask
+    when (e ^. beSettings . bsDev) $
+      whenM (test_f "configure.ac") $
+        make "configure" ["configure.ac"]
+          (msg info ("generating configure script for " <> pkg) >> autoreconf_)
     rm_rf "dist"
   | otherwise = return ()
 
