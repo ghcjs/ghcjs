@@ -1,3 +1,13 @@
+Quick Start
+===========
+
+Get GHC 7.10.2 ([MinGHC](https://www.haskell.org/downloads/windows) on Windows) and make sure that `happy` is installed. On linux you may need to install a package like `libtinfo-dev` to make the Haskell `terminfo` package work.
+
+Now run the following to install the current snapshot of the `improved-base` branch, the currently recommended version:
+```
+$ cabal install http://ghcjs.luite.com/improved-base.tar.gz
+$ ghcjs-boot
+```
 
 Haskell to JavaScript compiler
 ==============================
