@@ -113,12 +113,8 @@ ghcjsDsForeigns fos = do
       traceIf (text "fi end" <+> ppr id)
       return (h, c, [], bs)
 
-#if __GLASGOW_HASKELL__ >= 709
    do_decl (ForeignExport (L _ id) _ co
                           (CExport (L _ (CExportStatic ext_nm cconv)) _)) = do
-#else
-   do_decl (ForeignExport (L _ id) _ co (CExport (CExportStatic ext_nm cconv))) = do
-#endif
       (h, c, bs) <- ghcjsDsFExport id co ext_nm cconv False
       return (h, c, [id], bs)
 
@@ -150,11 +146,7 @@ ghcjsDsFExport fn_id co ext_name cconv isDyn = -- return (empty, empty, [])
     dflags <- getDynFlags
     u <- newUnique
     u1 <- newUnique
-#if MIN_VERSION_ghc(7,8,3)
     let bnd = mkExportedLocalId VanillaId (mkSystemVarName u1 $ fsLit "dsjs") unitTy
-#else
-    let bnd = mkExportedLocalId (mkSystemVarName u1 $ fsLit "dsjs") unitTy
-#endif
         bs  = mkFExportJsBits bnd dflags (cconv == JavaScriptCallConv) ext_name
                      (if isDyn then Nothing else Just fn_id)
                      fe_arg_tys orig_res_ty cconv u
@@ -188,13 +180,8 @@ ghcjsDsFImport :: Id
                -> Coercion
                -> ForeignImport
                -> DsM ([Binding], SDoc, SDoc)
-#if __GLASGOW_HASKELL__ >= 709
 ghcjsDsFImport id co (CImport cconv safety mHeader spec _) = do
     (ids, h, c) <- dsJsImport id co spec (unLoc cconv) (unLoc safety) mHeader
-#else
-ghcjsDsFImport id co (CImport cconv safety mHeader spec) = do
-    (ids, h, c) <- dsJsImport id co spec cconv safety mHeader
-#endif
     return (ids, h, c)
 
 
@@ -385,17 +372,10 @@ boxJsResult result_ty
         -- another case, and a coercion.)
         -- The result is IO t, so wrap the result in an IO constructor
   = do  { res <- jsResultWrapper io_res_ty
-        ; let extra_result_tys
-                = case res of
-                     (Just ty,_)
-                       | isUnboxedTupleType ty
-                       -> let Just ls = tyConAppArgs_maybe ty in tail ls
-                     _ -> []
-
-              return_result state anss
-                = mkConApp (tupleCon UnboxedTuple (2 + length extra_result_tys))
-                           (map Type (realWorldStatePrimTy : io_res_ty : extra_result_tys)
-                              ++ (state : anss))
+        ; let return_result state ans
+                = mkConApp (tupleCon UnboxedTuple 2)
+                           (map Type [realWorldStatePrimTy, io_res_ty]
+                              ++ [state, ans])
 
         ; (ccall_res_ty, the_alt) <- mk_alt return_result res
 
@@ -427,23 +407,17 @@ boxJsResult result_ty
                                            [the_alt]
        return (realWorldStatePrimTy `mkFunTy` ccall_res_ty, wrap)
   where
-    return_result _ xs
-      | isUnboxedTupleType result_ty =
-          mkConApp (tupleCon UnboxedTuple (length xs))
-                   (map (Type . exprType) xs ++ xs)
-    return_result _ [ans] = ans
-    return_result _ xs    = panic "return_result: expected single result"
+    return_result _ ans = ans
 
-
-mk_alt :: (Expr Var -> [Expr Var] -> Expr Var)
+mk_alt :: (Expr Var -> Expr Var -> Expr Var)
        -> (Maybe Type, Expr Var -> Expr Var)
        -> DsM (Type, (AltCon, [Id], Expr Var))
 mk_alt return_result (Nothing, wrap_result)
   = do -- The ccall returns ()
        state_id <- newSysLocalDs realWorldStatePrimTy
        let
-             the_rhs = return_result (Var state_id) 
-                                     [wrap_result (panic "jsBoxResult")]
+             the_rhs = return_result (Var state_id)
+                                     (wrap_result $ panic "jsBoxResult")
 
              ccall_res_ty = mkTyConApp unboxedSingletonTyCon [realWorldStatePrimTy]
              the_alt      = (DataAlt unboxedSingletonDataCon, [state_id], the_rhs)
@@ -452,15 +426,16 @@ mk_alt return_result (Nothing, wrap_result)
 
 mk_alt return_result (Just prim_res_ty, wrap_result)
                 -- The ccall returns a non-() value
-  | isUnboxedTupleType prim_res_ty= do
+  | isUnboxedTupleType prim_res_ty = do
     let
         Just ls = tyConAppArgs_maybe prim_res_ty
         arity = 1 + length ls
-    args_ids@(result_id:as) <- mapM newSysLocalDs ls
+    args_ids {-@(result_id:as)-} <- mapM newSysLocalDs ls
     state_id <- newSysLocalDs realWorldStatePrimTy
     let
-        the_rhs = return_result (Var state_id) 
-                                (wrap_result (Var result_id) : map Var as)
+        result_tup = mkCoreConApps (tupleCon UnboxedTuple (length ls)) (map Type ls ++ map Var args_ids)
+        the_rhs = return_result (Var state_id)
+                                (wrap_result result_tup)
         ccall_res_ty = mkTyConApp (tupleTyCon UnboxedTuple arity)
                                   (realWorldStatePrimTy : ls)
         the_alt      = ( DataAlt (tupleCon UnboxedTuple arity)
@@ -473,8 +448,8 @@ mk_alt return_result (Just prim_res_ty, wrap_result)
     result_id <- newSysLocalDs prim_res_ty
     state_id <- newSysLocalDs realWorldStatePrimTy
     let
-        the_rhs = return_result (Var state_id) 
-                                [wrap_result (Var result_id)]
+        the_rhs = return_result (Var state_id)
+                                (wrap_result (Var result_id))
         ccall_res_ty = mkTyConApp unboxedPairTyCon [realWorldStatePrimTy, prim_res_ty]
         the_alt      = (DataAlt unboxedPairDataCon, [state_id, result_id], the_rhs)
     return (ccall_res_ty, the_alt)
@@ -490,10 +465,45 @@ jsResultWrapper :: Type
 -- Then resultWrapper deals with marshalling the 'T' part
 --jsResultWrapper tr = resultWrapper tr
 jsResultWrapper result_ty
-  -- Base case 1: primitive types
-  | isPrimitiveType result_ty || isUnboxedTupleType result_ty
+  -- Base case 1a: unboxed tuples
+  | Just (tc, args) <- splitTyConApp_maybe result_ty
+  , isUnboxedTupleTyCon tc {- && False -} = do
+    (tys, wrappers) <- unzip <$> mapM jsResultWrapper args
+    matched <- mapM (mapM newSysLocalDs) tys
+    let tys'    = catMaybes tys
+        arity   = length args
+        resCon  = tupleCon UnboxedTuple (length args)
+        err     = panic "jsResultWrapper: used Id with result type Nothing"
+        resWrap :: CoreExpr
+        resWrap = mkCoreConApps resCon (map Type args ++ zipWith (\w -> w . Var . fromMaybe err) wrappers matched)
+    return $
+      if null tys'
+        then (Nothing, \_ -> resWrap)
+        else let innerArity = length tys'
+                 innerTy    = mkTyConApp (tupleTyCon UnboxedTuple innerArity) tys'
+                 innerCon   = tupleCon UnboxedTuple innerArity
+                 inner :: CoreExpr -> CoreExpr
+                 inner e    = mkWildCase e innerTy result_ty
+                                         [( DataAlt innerCon
+                                          , catMaybes matched
+                                          , resWrap
+                                          )]
+             in (Just innerTy, inner)
+  -- Base case 1b: primitive types
+  | isPrimitiveType result_ty
   = return (Just result_ty, \e -> e)
-
+  -- Base case 1c: boxed tuples
+  | Just (tc, args) <- splitTyConApp_maybe result_ty
+  , isBoxedTupleTyCon tc = do
+      let innerTy = mkTyConApp (tupleTyCon UnboxedTuple (length args)) args
+      (inner_res, w) <- jsResultWrapper innerTy
+      matched <- mapM newSysLocalDs args
+      let inner e = mkWildCase (w e) innerTy result_ty
+                               [( DataAlt (tupleCon UnboxedTuple (length args))
+                                , matched
+                                , mkCoreConApps (tupleCon BoxedTuple (length args)) (map Type args ++ map Var matched)
+                                )]
+      return (inner_res, inner)
   -- Base case 2: the unit type ()
   | Just (tc,_) <- maybe_tc_app, tc `hasKey` unitTyConKey
   = return (Nothing, \_ -> Var unitDataConId)
@@ -507,18 +517,9 @@ jsResultWrapper result_ty
     let forceBool e = mkJsCall dflags ccall_uniq "$r = !(!$1)" [e] boolTy
     return
      (Just intPrimTy, \e -> forceBool e)
--- Cast (forceBool e) (UnivCo Representational intPrimTy boolTy))
-{-
-Case (forceBool e) result_id boolTy
-        [(DEFAULT,[], Cast (Var result_id) (UnivCo Representational intPrimTy boolTy))]) -}
-
--- e -> e -- mkIfThenElse e (Var falseDataConId) (Var trueDataConId)
-{-
-mkWildCase e boolTy
-                                   boolTy
-                                   [(DEFAULT             ,[],Var trueDataConId),
-                                    (DataAlt falseDataCon,[],Var falseDataConId)] -}
-
+  -- Base case 4: the any type
+  |  Just (tc,_) <- maybe_tc_app, tc `hasKey` anyTyConKey
+  = return (Just result_ty, \e -> e)
   -- Recursive newtypes
   | Just (co, rep_ty) <- topNormaliseNewType_maybe result_ty
   = do (maybe_ty, wrapper) <- jsResultWrapper rep_ty
@@ -598,17 +599,10 @@ ghcjsNativeDsForeigns fos = do
       inclGhcjs = text "#include \"ghcjs.h\""
 
       convertForeignDecl :: DynFlags -> LForeignDecl Id -> LForeignDecl Id
-#if __GLASGOW_HASKELL__ >= 709
       convertForeignDecl dflags (L l (ForeignImport n t c (CImport (L lc JavaScriptCallConv) _safety mheader _spec txt))) =
         (L l (ForeignImport n t c (CImport (noLoc CCallConv) (noLoc PlaySafe) mheader (convertSpec dflags n) txt)))
       convertForeignDecl _dflags (L l (ForeignExport n t c (CExport (L _ (CExportStatic lbl JavaScriptCallConv)) txt))) =
         (L l (ForeignExport n t c (CExport (noLoc (CExportStatic lbl CCallConv)) txt)))
-#else
-      convertForeignDecl dflags (L l (ForeignImport n t c (CImport JavaScriptCallConv _safety mheader _spec))) =
-        (L l (ForeignImport n t c (CImport CCallConv PlaySafe mheader (convertSpec dflags n))))
-      convertForeignDecl _dflags (L l (ForeignExport n t c (CExport (CExportStatic lbl JavaScriptCallConv)))) =
-        (L l (ForeignExport n t c (CExport (CExportStatic lbl CCallConv))))
-#endif
       convertForeignDecl _ x = x
 
       convertSpec :: DynFlags -> Located Id -> CImportSpec
@@ -619,11 +613,7 @@ ghcjsNativeDsForeigns fos = do
         "__ghcjs_stub_" ++ zEncodeString (showSDocOneLine dflags (ppr $ idName i))
 
       importStub :: DynFlags -> LForeignDecl Id -> Maybe SDoc
-#if __GLASGOW_HASKELL__ >= 709
       importStub dflags (L _l (ForeignImport n _t c (CImport (L _ JavaScriptCallConv) (L _ safety) _mheader spec _txt))) =
-#else
-      importStub dflags (L _l (ForeignImport n _t c (CImport JavaScriptCallConv safety _mheader spec))) =
-#endif
         Just (mkImportStub dflags (unLoc n) c safety spec)
       importStub _ _ = Nothing
 
@@ -750,23 +740,11 @@ ghcjsTcFImport d = pprPanic "ghcjsTcFImport" (ppr d)
 ghcjsTcCheckFIType :: Type -> [Type] -> Type -> ForeignImport -> TcM ForeignImport
 -- this is a temporary hack until template-haskell has been updated,
 -- this allows Template Haskell to produce JavaScriptCallConv declarations without proper support for them
-#if __GLASGOW_HASKELL__ >= 709
 ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport _cconv safety mh (CFunction (StaticTarget lbl mpkg b)) txt)
-#else
-ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport _cconv safety mh (CFunction (StaticTarget lbl mpkg b)))
-#endif
   | Just lbl' <- stripPrefix "__ghcjs_javascript_" (unpackFS lbl) = do
       let lbl'' = mkFastString $ map (chr . read) (splitOn "_" lbl')
-#if __GLASGOW_HASKELL__ >= 709
       ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport (noLoc JavaScriptCallConv) safety mh (CFunction (StaticTarget lbl'' mpkg b)) txt)
-#else
-      ghcjsTcCheckFIType sig_ty arg_tys res_ty (CImport JavaScriptCallConv safety mh (CFunction (StaticTarget lbl'' mpkg b)))
-#endif
-#if __GLASGOW_HASKELL__ >= 709
 ghcjsTcCheckFIType _sig_ty arg_tys res_ty (CImport lcconv@(L _ cconv) lsafety@(L _ safety) mh (CFunction target) txt)
-#else
-ghcjsTcCheckFIType _sig_ty arg_tys res_ty (CImport cconv safety mh (CFunction target))
-#endif
   | cconv == JavaScriptCallConv = do
       dflags <- getDynFlags
       checkForeignArgs (isGhcjsFFIArgumentTy dflags safety) arg_tys
@@ -776,18 +754,8 @@ ghcjsTcCheckFIType _sig_ty arg_tys res_ty (CImport cconv safety mh (CFunction ta
            | not (null arg_tys) ->
               addErrTc (text "`value' imports cannot have function types")
           _ -> return ()
-#if __GLASGOW_HASKELL__ >= 709
       return $ CImport lcconv lsafety mh (CFunction target) txt
-#else
-      return $ CImport cconv safety mh (CFunction target)
-#endif
-#if __GLASGOW_HASKELL__ >= 709
 ghcjsTcCheckFIType _sig_ty arg_tys res_ty idecl = tcCheckFIType arg_tys res_ty idecl
-#else
-ghcjsTcCheckFIType sig_ty arg_tys res_ty idecl = tcCheckFIType sig_ty arg_tys res_ty idecl
-#endif
-
-#if __GLASGOW_HASKELL__ >= 709
 
 isGhcjsFFIArgumentTy :: DynFlags -> Safety -> Type -> Validity
 isGhcjsFFIArgumentTy dflags safety ty
@@ -802,34 +770,27 @@ isGhcjsFFIArgumentTy dflags safety ty
 
 isGhcjsFFIImportResultTy :: DynFlags -> Type -> Validity
 isGhcjsFFIImportResultTy dflags ty
+  | Just (tc, args) <- tcSplitTyConApp_maybe ty
+  , isBoxedTupleTyCon tc || isUnboxedTupleTyCon tc =
+      if all (\ty -> isValid (isGhcjsFFIImportResultTy' dflags ty) || isGhcjsFFITy dflags ty) args
+         then IsValid
+         else NotValid
+              (text $ "JavaScript FFI result type must be a valid CCall FFI result type or JSRef: " ++ showPpr dflags ty)
+  | otherwise = isGhcjsFFIImportResultTy' dflags ty
+
+isGhcjsFFIImportResultTy' :: DynFlags -> Type -> Validity
+isGhcjsFFIImportResultTy' dflags ty
   | isValid (isFFIImportResultTy dflags ty)                   = IsValid
-  | xopt Opt_UnliftedFFITypes dflags && isUnboxedTupleType ty = IsValid
+
+-- -  | xopt Opt_UnliftedFFITypes dflags && isUnboxedTupleType ty = IsValid
   | xopt Opt_GHCForeignImportPrim dflags && xopt Opt_UnliftedFFITypes dflags &&
     checkRepTyCon isUnLiftedTyCon ty                          = IsValid
   --   isValid (isFFIPrimResultTy dflags ty)                     = IsValid
+  | Just (tc, _) <- tcSplitTyConApp_maybe ty
+  , xopt Opt_GHCForeignImportPrim dflags && getUnique tc == anyTyConKey = IsValid
   | isGhcjsFFITy dflags ty                                    = IsValid
   | otherwise = NotValid
-      (text "JavaScript FFI result type must be a valid CCall FFI result type or JSRef")
-
-#else
-
-isGhcjsFFIArgumentTy :: DynFlags -> Safety -> Type -> Bool
-isGhcjsFFIArgumentTy dflags safety ty =
-  isFFIArgumentTy dflags safety ty ||
-  (xopt Opt_GHCForeignImportPrim dflags && xopt Opt_UnliftedFFITypes dflags && isFFIPrimArgumentTy dflags ty) ||
-  isGhcjsFFITy dflags ty ||
-  maybe False (\(tc, _) -> getUnique tc == anyTyConKey &&
-                           xopt Opt_GHCForeignImportPrim dflags)
-              (tcSplitTyConApp_maybe ty)
-
-isGhcjsFFIImportResultTy :: DynFlags -> Type -> Bool
-isGhcjsFFIImportResultTy dflags ty =
-  isFFIImportResultTy dflags ty ||
-  xopt Opt_UnliftedFFITypes dflags && isUnboxedTupleType ty ||
-  (xopt Opt_GHCForeignImportPrim dflags && xopt Opt_UnliftedFFITypes dflags && checkRepTyCon isUnliftedTyCon ty) ||
-  isGhcjsFFITy dflags ty
-
-#endif
+      (text $ "JavaScript FFI result type must be a valid CCall FFI result type or JSRef: " ++ showPpr dflags ty)
 
 isGhcjsFFITy :: DynFlags -> Type -> Bool
 isGhcjsFFITy = checkNamedTy jsFfiTys
@@ -904,11 +865,7 @@ ghcjsTcForeignExports decls
   where
    combine (binds, fs, gres1) (L loc fe) = do
        (b, f, gres2) <- setSrcSpan loc (ghcjsTcFExport fe)
-#if MIN_VERSION_ghc(7,8,3)
        return (b `consBag` binds, L loc f : fs, gres1 `unionBags` gres2)
-#else
-       return ((FromSource, b) `consBag` binds, L loc f : fs, gres1 `unionBags` gres2)
-#endif
 
 ghcjsTcFExport :: ForeignDecl Name -> TcM (LHsBind Id, ForeignDecl Id, Bag GlobalRdrElt)
 ghcjsTcFExport fo@(ForeignExport (L loc nm) hs_ty _ spec)
@@ -937,21 +894,13 @@ ghcjsTcFExport fo@(ForeignExport (L loc nm) hs_ty _ spec)
 
 
 ghcjsTcCheckFEType :: Type -> ForeignExport -> TcM ForeignExport
-#if __GLASGOW_HASKELL__ >= 709
 ghcjsTcCheckFEType sig_ty (CExport (L l (CExportStatic str cconv)) txt) = do
-#else
-ghcjsTcCheckFEType sig_ty (CExport (CExportStatic str cconv)) = do
-#endif
 --    checkCg checkCOrAsmOrLlvm
     check (isCLabelString str) (badCName str)
     cconv' <- ghcjsCheckCConv cconv
     checkForeignArgs isFFIExternalTy arg_tys
     checkForeignRes nonIOok noCheckSafe isFFIExportResultTy res_ty
-#if __GLASGOW_HASKELL__ >= 709
     return (CExport (L l (CExportStatic str cconv')) txt)
-#else
-    return (CExport (CExportStatic str cconv'))
-#endif
   where
       -- Drop the foralls before inspecting n
       -- the structure of the foreign type.

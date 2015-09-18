@@ -37,6 +37,8 @@ import           UniqSet
 import           IdInfo
 import qualified Var
 
+import           Coercion
+import           CoAxiom
 import           Gen2.Utils
 
 -- this is a hack to be able to use pprShow in a Show instance, should be removed
@@ -114,7 +116,14 @@ deriving instance Show StgOp
 #if __GLASGOW_HASKELL__ >= 709
 deriving instance Show a => Show (Tickish a)
 #endif
-
+-- 
+deriving instance Show Coercion
+deriving instance Show a => Show (Expr a)
+deriving instance Show a => Show (Bind a)
+instance Show CoAxiomRule where show _ = "CoAxiomRule"
+instance Show (CoAxiom a) where show _ = "CoAxiom"
+deriving instance Show LeftOrRight
+deriving instance Show Role
 instance Show (GenStgArg Var) where
   show a@(StgVarArg occ) = "StgVarArg " ++ show occ ++ " :: " ++ show (stgArgType a)
   show (StgLitArg l)   = "StgLitArg " ++ show l
