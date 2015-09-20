@@ -1,6 +1,6 @@
 {-# LANGUAGE MagicHash, DeriveDataTypeable, CPP #-}
 #ifdef __GHCJS__
-{-# LANGUAGE JavaScriptFFI #-}
+{-# LANGUAGE JavaScriptFFI, GHCForeignImportPrim #-}
 #endif
 
 module GHCJS.Prim ( JSRef(..)
@@ -27,7 +27,7 @@ import           Unsafe.Coerce (unsafeCoerce)
 
 import           GHC.Prim
 import qualified GHC.Exception as Ex
-
+import qualified GHC.Exts as Exts
 {-
   JSRef is a boxed type that can be used as FFI
   argument or result.
@@ -122,16 +122,16 @@ seqListSpine xs = go xs `seq` xs
         go []     = ()
 
 foreign import javascript unsafe "h$toHsString($1)"
-  js_fromJSString :: JSRef -> Double
+  js_fromJSString :: JSRef -> Exts.Any
 
 foreign import javascript unsafe "h$fromHsString($1)"
-  js_toJSString :: Double -> JSRef
+  js_toJSString :: Exts.Any -> JSRef
 
 foreign import javascript unsafe "h$toHsListJSRef($1)"
-  js_fromJSArray :: JSRef -> IO Double
+  js_fromJSArray :: JSRef -> IO Exts.Any
 
 foreign import javascript unsafe "h$fromHsListJSRef($1)"
-  js_toJSArray :: Double -> IO JSRef
+  js_toJSArray :: Exts.Any -> IO JSRef
 
 foreign import javascript unsafe "$1 === null"
   js_isNull :: JSRef -> Bool
@@ -149,7 +149,7 @@ foreign import javascript unsafe "$r = null;"
   js_null :: JSRef
 
 foreign import javascript unsafe "$1[h$fromHsString($2)]"
-  js_getProp :: JSRef -> Double -> IO JSRef
+  js_getProp :: JSRef -> Exts.Any -> IO JSRef
 
 foreign import javascript unsafe "$1[$2]"
   js_getProp' :: JSRef -> JSRef -> IO JSRef
