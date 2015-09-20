@@ -77,7 +77,7 @@ Next, install `ghcjs` and its `ghcjs-prim` dependency:
 
     $ git clone https://github.com/ghcjs/ghcjs-prim.git
     $ git clone https://github.com/ghcjs/ghcjs.git
-    $ cabal install ./ghcjs ./ghcjs-prim
+    $ cabal install ./ghcjs ./ghcjs-prim  # on GHC 7.10 you don't need to install ghcjs-prim. [See wiki page](https://github.com/ghcjs/ghcjs/wiki/GHCJS-with-GHC-7.10)
 
 If `cabal install ./ghcjs ./ghcjs-prim` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problems, since GHC ships with an older version. Try `--constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
 
@@ -88,8 +88,8 @@ Use `ghcjs-boot` to build the base libraries for `GHCJS`:
     if you used the Git repository to install:
     $ ghcjs-boot --dev
 
-    if you are doing a development build with GHC 7.10, you need to tell `ghcjs-boot` to use the `ghc-7.10` branch of the `ghcjs-boot` repository:
-    $ ghcjs-boot --dev --ghcjs-boot-dev-branch ghc-7.10
+    if you are doing a development build with GHC 7.10, you need to tell `ghcjs-boot` to use the `improved-base` branch of the `ghcjs-boot` repository ([see wiki for full details](https://github.com/ghcjs/ghcjs/wiki/GHCJS-with-GHC-7.10)):
+    $ ghcjs-boot --dev --ghcjs-boot-dev-branch improved-base --shims-dev-branch improved-base
 
     if you are using a package from hackage that includes the libraries:
     $ ghcjs-boot
