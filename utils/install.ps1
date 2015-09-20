@@ -12,7 +12,7 @@
 # prepare the GHCJS source distribution archive on a POSIX system by running 'cabal sdist'
 # this step requires autoreconf, patch, git etc.
 
-$ghcjs  = "http://ghcjs.luite.com/improved-base.tar.gz"
+$ghcjs  = "http://ghcjs.luite.com/master.tar.gz"
 
 $minghc = "https://github.com/fpco/minghc/releases/download/2015-08-13/minghc-7.10.2-i386.exe"
 $node   = "http://nodejs.org/dist/v0.12.7/node-v0.12.7-x86.msi"
