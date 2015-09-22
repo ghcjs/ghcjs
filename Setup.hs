@@ -33,6 +33,7 @@ main = defaultMainWithHooks ghcjsHooks
 ghcjsHooks :: UserHooks
 ghcjsHooks = simpleUserHooks { preSDist = ghcjsSDist
                              , postCopy = ghcjsPostCopy
+                             , postInst = \args -> ghcjsPostCopy args . installFlagsToCopyFlags
                              }
 
 {- |
@@ -44,6 +45,15 @@ ghcjsSDist :: Args -> SDistFlags -> IO HookedBuildInfo
 ghcjsSDist as flags = do
   rawSystemExit (fromFlagOrDefault normal $ sDistVerbosity flags) "bash" ["utils/update_archives.sh"]
   return emptyHookedBuildInfo
+
+-- Necessary because postCopy isn't invoked when install is run.
+-- Copied from https://github.com/haskell/cabal/blob/589cc887c4ef10f514174e0875d7df1963bdcf71/Cabal/Distribution/Simple.hs#L689
+installFlagsToCopyFlags :: InstallFlags -> CopyFlags
+installFlagsToCopyFlags flags = defaultCopyFlags
+  { copyDistPref = installDistPref flags
+  , copyDest = toFlag NoCopyDest
+  , copyVerbosity = installVerbosity flags
+  }
 
 ghcjsPostCopy :: Args -> CopyFlags -> PackageDescription -> LocalBuildInfo -> IO ()
 ghcjsPostCopy args flags descr lbi

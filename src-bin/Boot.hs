@@ -60,7 +60,7 @@ import           Data.Yaml                       ((.:))
 import qualified Data.Yaml                       as Yaml
 
 import           Filesystem                      (getWorkingDirectory, getModified, getSize
-                                                 ,canonicalizePath)
+                                                 ,canonicalizePath, isDirectory)
 import           Filesystem.Path                 hiding ((<.>), (</>), null, concat)
 import           Filesystem.Path.CurrentOS       (encodeString)
 
@@ -306,9 +306,13 @@ main = do
 cleanTree :: B ()
 cleanTree = do
   topDir <- view (beLocations . blGhcjsTopDir)
-  msg info ("cleaning installation tree " <> toTextI topDir)
-  hasCheckpoint "init" >>= cond (rm_rf topDir)
-    (failWith ("directory to clean might not be a GHCJS installation directory: " <> toTextI topDir <> ", not cleaning"))
+  exists <- liftIO $ isDirectory topDir
+  if exists
+     then do
+       msg info ("cleaning installation tree " <> toTextI topDir)
+       hasCheckpoint "init" >>= cond (rm_rf topDir)
+         (failWith ("directory to clean might not be a GHCJS installation directory: " <> toTextI topDir <> ", not cleaning"))
+     else msg info "skipping clean because installation tree doesn't exist"
 
 instance Yaml.FromJSON BootSources where
   parseJSON (Yaml.Object v) = BootSources

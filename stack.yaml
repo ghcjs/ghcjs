@@ -1,0 +1,4 @@
+resolver: lts-3.6
+packages:
+- .
+- ghcjs-prim

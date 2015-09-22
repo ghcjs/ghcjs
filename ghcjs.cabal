@@ -25,6 +25,15 @@ data-files:     lib/cache/boot.tar
                 lib/bin/*.sh
                 lib/bin/*.exe.options
                 doc/*.txt
+                ghcjs-prim/ghcjs-prim.cabal
+                ghcjs-prim/cbits/ghcjs-prim.c
+                ghcjs-prim/Setup.hs
+                ghcjs-prim/LICENSE
+                ghcjs-prim/GHCJS/Prim.hs
+                ghcjs-prim/GHCJS/Prim/Internal.hs
+                ghcjs-prim/GHCJS/Prim/TH/Serialized.hs
+                ghcjs-prim/GHCJS/Prim/TH/Eval.hs
+                ghcjs-prim/GHCJS/Prim/TH/Types.hs
 
 extra-source-files:
                 utils/*.hs
@@ -34,6 +43,7 @@ extra-source-files:
                 include/*.h
                 src-bin/Pkg-708.hs
                 README.markdown
+                stack.yaml
 
 source-repository head
   type:     git
@@ -136,7 +146,7 @@ Library
                    transformers,
                    split          >= 0.2      && < 0.3,
                    deepseq,
-                   vector         >= 0.11     && < 0.12,
+                   vector         >= 0.10     && < 0.12,
                    data-default   >= 0.5      && < 0.6,
                    array          >= 0.4      && < 0.6,
                    binary         >= 0.7      && < 0.8,
