@@ -45,6 +45,7 @@ extra-source-files:
                 README.markdown
                 test/LICENSE
                 test/ghcjs-testsuite.cabal
+                stack.yaml
 
 source-repository head
   type:     git
