@@ -1,4 +1,4 @@
 resolver: lts-3.6
 packages:
 - .
-- ghcjs-prim
+- lib/ghcjs-prim

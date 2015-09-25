@@ -24,16 +24,15 @@ data-files:     lib/cache/boot.tar
                 lib/etc/manifest.webapp
                 lib/bin/*.sh
                 lib/bin/*.exe.options
+                lib/ghcjs-prim/LICENSE
+                lib/ghcjs-prim/Setup.hs
+                lib/ghcjs-prim/cbits/*.c
+                lib/ghcjs-prim/GHCJS/*.hs
+                lib/ghcjs-prim/GHCJS/Prim/*.hs
+                lib/ghcjs-prim/GHCJS/Prim/Internal/*.hs
+                lib/ghcjs-prim/GHCJS/Prim/TH/*.hs
+                lib/ghcjs-prim/ghcjs-prim.cabal
                 doc/*.txt
-                ghcjs-prim/ghcjs-prim.cabal
-                ghcjs-prim/cbits/ghcjs-prim.c
-                ghcjs-prim/Setup.hs
-                ghcjs-prim/LICENSE
-                ghcjs-prim/GHCJS/Prim.hs
-                ghcjs-prim/GHCJS/Prim/Internal.hs
-                ghcjs-prim/GHCJS/Prim/TH/Serialized.hs
-                ghcjs-prim/GHCJS/Prim/TH/Eval.hs
-                ghcjs-prim/GHCJS/Prim/TH/Types.hs
 
 extra-source-files:
                 utils/*.hs
@@ -324,4 +323,3 @@ test-suite test
                       yaml                 >= 0.8 &&  < 0.9,
                       optparse-applicative,
                       directory
-

@@ -1,3 +1,3 @@
-[submodule "ghcjs-prim"]
-	path = ghcjs-prim
-	url = git://github.com/ghcjs/ghcjs-prim.git
+[submodule "lib/ghcjs-prim"]
+	path = lib/ghcjs-prim
+	url = https://github.com/ghcjs/ghcjs-prim.git
