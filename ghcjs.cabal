@@ -29,7 +29,6 @@ data-files:     lib/cache/boot.tar
                 lib/ghcjs-prim/cbits/*.c
                 lib/ghcjs-prim/GHCJS/*.hs
                 lib/ghcjs-prim/GHCJS/Prim/*.hs
-                lib/ghcjs-prim/GHCJS/Prim/Internal/*.hs
                 lib/ghcjs-prim/GHCJS/Prim/TH/*.hs
                 lib/ghcjs-prim/ghcjs-prim.cabal
                 doc/*.txt
