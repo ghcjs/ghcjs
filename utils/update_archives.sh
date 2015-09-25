@@ -113,9 +113,9 @@ prepare_setup_scripts() {
     ghcjs -o setupSimple   -O setupSimple.hs
     ghcjs -o setupAutoconf -O setupAutoconf.hs
     ghcjs -o setupGhcPrim  -O setupGhcPrim.hs
-    cp setupSimple.jsexe/all.js ../boot/SetupSimple.precompiled.js
-    cp setupAutoconf.jsexe/all.js ../boot/SetupAutoconf.precompiled.js
-    cp setupGhcPrim.jsexe/all.js ../boot/ghc-prim/Setup.hs.precompiled.js
+    ccjs setupSimple.jsexe/all.js > ../boot/SetupSimple.precompiled.js
+    ccjs setupAutoconf.jsexe/all.js > ../boot/SetupAutoconf.precompiled.js
+    ccjs setupGhcPrim.jsexe/all.js > ../boot/ghc-prim/Setup.hs.precompiled.js
     cd ..
     rm -r "setup-tmp"
   )
