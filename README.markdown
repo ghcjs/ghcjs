@@ -3,9 +3,9 @@ Quick Start
 
 Get GHC 7.10.2 ([MinGHC](https://www.haskell.org/downloads/windows) on Windows) and make sure that `happy` is installed. On linux you may need to install a package like `libtinfo-dev` to make the Haskell `terminfo` package work.
 
-Now run the following to install the current snapshot of the `improved-base` branch, the currently recommended version:
+Now run the following to install the current snapshot of the `master` branch, the currently recommended version:
 ```
-$ cabal install http://ghcjs.luite.com/improved-base.tar.gz
+$ cabal install http://ghcjs.luite.com/master.tar.gz
 $ ghcjs-boot
 ```
 
@@ -83,26 +83,31 @@ compiler flags:
 
 #### Install GHCJS
 
-Next, install `ghcjs` and its `ghcjs-prim` dependency:
+Next, install `ghcjs`:
 
-    $ git clone https://github.com/ghcjs/ghcjs-prim.git
     $ git clone https://github.com/ghcjs/ghcjs.git
-    $ cabal install ./ghcjs ./ghcjs-prim
+    $ cd ghcjs
+    $ git checkout old-base-ghc-7.10
+    $ cabal sandbox init  # recommended, not required
+    $ cabal install . lib/ghcjs-prim
 
-If `cabal install ./ghcjs ./ghcjs-prim` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problems, since GHC ships with an older version. Try `--constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
+Use `old-base-ghc-7.8` to use ghc-7.8 instead.  Note: this is currently
+untested with the new branch setup, but should work in theory.
+
+If `cabal install . lib/ghcjs-prim` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problems, since GHC ships with an older version. Try `--constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
 
 #### Build the libraries
 
 Use `ghcjs-boot` to build the base libraries for `GHCJS`:
 
-    if you used the Git repository to install:
-    $ ghcjs-boot --dev
-
-    if you are doing a development build with GHC 7.10, you need to tell `ghcjs-boot` to use the `ghc-7.10` branch of the `ghcjs-boot` repository:
-    $ ghcjs-boot --dev --ghcjs-boot-dev-branch ghc-7.10
-
     if you are using a package from hackage that includes the libraries:
     $ ghcjs-boot
+
+    if you are doing a development build with GHC 7.10, you need to tell `ghcjs-boot` to use the `ghc-7.10` branch of the `ghcjs-boot` repository:
+    $ ghcjs-boot --dev --ghcjs-boot-dev-branch old-base-ghc-7.10 --shims-dev-branch old-base-ghc-7.10
+
+    otherwise, if doing a development build with GHC 7.8:
+    $ ghcjs-boot --dev --ghcjs-boot-dev-branch old-base-ghc-7.8 --shims-dev-branch old-base-ghc-7.8
 
 Some distros install node.js as `nodejs` instead of `node`. Add `--with-node nodejs` to the `ghcjs-boot` command in that case.
 
