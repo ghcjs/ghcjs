@@ -15,7 +15,7 @@ ghc-prim:
     - "[]"
 ghcjs-prim:
   GHCJS.Prim:
-    - JSRef
+    - JSVal
     - JSException
     - $fShowJSException
     - $fExceptionJSException
