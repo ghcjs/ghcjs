@@ -184,7 +184,7 @@ ghcjsRunMeta' js_env js_settings desc tht show_code ppr_code cvt expr = do
   (js_code, symb) <-
     compileExpr js_env js_settings hsc_env dflags src_span ds_expr
   gbl_env  <- getGblEnv
-  r        <- liftIO $ getThRunner js_env hsc_env dflags (tcg_mod gbl_env)
+  r        <- getThRunner js_env hsc_env dflags (tcg_mod gbl_env)
   base     <- liftIO $ takeMVar (thrBase r)
   let m        = tcg_mod gbl_env
       pkgs     = L.nub $
@@ -239,17 +239,21 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
 thrunnerPackage :: PackageKey
 thrunnerPackage = stringToPackageKey "thrunner"
 
-getThRunner :: GhcjsEnv -> HscEnv -> DynFlags -> Module -> IO ThRunner
+getThRunner :: GhcjsEnv -> HscEnv -> DynFlags -> Module -> TcM ThRunner
 getThRunner js_env hsc_env dflags m = do
   let m' = moduleNameString (moduleName m)
-  modifyMVar (thRunners js_env) $ \runners -> case M.lookup m' runners of
-    Just r  -> return (runners, r)
-    Nothing -> do
-      r <- startThRunner dflags js_env hsc_env
-      -- fixme find where ghc finalizes
-      -- when $ TH.qAddModFinalizer (TH.Q $ finishTh is_io js_env m r)
-      return (M.insert m' r runners, r)
-
+  (r, fin) <- liftIO $ modifyMVar (thRunners js_env) $ \runners ->
+    case M.lookup m' runners of
+      Just r  -> return (runners, (r, return ()))
+      Nothing -> do
+        r <- startThRunner dflags js_env hsc_env
+        let fin = do
+              th_modfinalizers_var <- fmap tcg_th_modfinalizers
+                                           getGblEnv
+              writeTcRef th_modfinalizers_var
+                         [TH.qRunIO (finishTh js_env m' r)]
+        return (M.insert m' r runners, (r, fin))
+  fin >> return r
 
 linkTh :: GhcjsEnv
        -> GhcjsSettings        -- settings (contains the base state)
@@ -316,7 +320,9 @@ finishRunner :: ThRunner -> IO ()
 finishRunner runner = do
   sendToRunner runner 0 TH.FinishTH
   readFromRunner runner >>= \case
-    (TH.FinishTH', _) -> return ()
+    (TH.FinishTH', _) -> do
+      hClose (thrHandleIn runner) `E.catch` \(_::E.SomeException) -> return ()
+      hClose (thrHandleErr runner) `E.catch` \(_::E.SomeException) -> return ()
     _                 -> error
       "finishRunner: unexpected response, expected FinishTH' message"
 

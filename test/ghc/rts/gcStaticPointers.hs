@@ -26,7 +26,7 @@ main = do
   print z
   performGC
   threadDelay 1000000
-  let Just p = unsafeLookupStaticPtr nats_fp
+  Just p <- unsafeLookupStaticPtr nats_fp
   print (deRefStaticPtr (unsafeCoerce p) !! 800 :: Integer)
   -- Uncommenting the next line keeps primes alive and would prevent a segfault
   -- if nats were garbage collected.

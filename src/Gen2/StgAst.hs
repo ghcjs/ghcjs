@@ -37,6 +37,8 @@ import           UniqSet
 import           IdInfo
 import qualified Var
 
+import           Coercion
+import           CoAxiom
 import           Gen2.Utils
 import qualified CoreSyn as Core
 import Coercion
@@ -97,10 +99,6 @@ instance Show IdDetails where
   show (DFunId {})        = "DFunId"
 
 
-deriving instance Show a => Show (Core.Bind a)
-deriving instance Show a => Show (Core.Expr a)
-instance Show Coercion where show _ = "[coercion]"
-
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat
 deriving instance Show Literal
@@ -120,7 +118,14 @@ deriving instance Show StgOp
 #if __GLASGOW_HASKELL__ >= 709
 deriving instance Show a => Show (Tickish a)
 #endif
-
+-- 
+deriving instance Show Coercion
+deriving instance Show a => Show (Expr a)
+deriving instance Show a => Show (Bind a)
+instance Show CoAxiomRule where show _ = "CoAxiomRule"
+instance Show (CoAxiom a) where show _ = "CoAxiom"
+deriving instance Show LeftOrRight
+deriving instance Show Role
 instance Show (GenStgArg Var) where
   show a@(StgVarArg occ) = "StgVarArg " ++ show occ ++ " :: " ++ show (stgArgType a)
   show (StgLitArg l)   = "StgLitArg " ++ show l

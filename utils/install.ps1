@@ -12,10 +12,10 @@
 # prepare the GHCJS source distribution archive on a POSIX system by running 'cabal sdist'
 # this step requires autoreconf, patch, git etc.
 
-$ghcjs  = "http://hdiff.luite.com/ghcjs-sdist/ghcjs-master.tar.gz"
+$ghcjs  = "http://ghcjs.luite.com/master.tar.gz"
 
-$minghc = "https://github.com/fpco/minghc/releases/download/2015-05-26/minghc-7.10.1-i386.exe"
-$node   = "http://nodejs.org/dist/v0.12.4/node-v0.12.4-x86.msi"
+$minghc = "https://github.com/fpco/minghc/releases/download/2015-08-13/minghc-7.10.2-i386.exe"
+$node   = "http://nodejs.org/dist/v0.12.7/node-v0.12.7-x86.msi"
 
 #######################################################################
 
@@ -41,15 +41,6 @@ Get-Content C:\haskell\tmp\environment.txt | Foreach-Object {
 $env:Path += ";C:\haskell\node"
 
 Start-Process cabal update -Wait -NoNewWindow
-
-
-#######################################################################
-# workaround for buggy cabal-install in MinGHC 7.10.1
-
-Start-Process cabal -Argumentlist install, Cabal-1.22.4.0, cabal-install-1.22.6.0 -Wait -NoNewWindow
-Remove-Item C:\haskell\ghc\bin\cabal.exe
-
-#######################################################################
 
 # build and boot GHCJS
 Set-Location -Path C:\haskell\ghcjs

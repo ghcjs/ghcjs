@@ -1,3 +1,14 @@
+Quick Start
+===========
+
+Get GHC 7.10.2 ([MinGHC](https://www.haskell.org/downloads/windows) on Windows) and make sure that `happy` is installed. On linux you may need to install a package like `libtinfo-dev` to make the Haskell `terminfo` package work.
+
+Now run the following to install the current snapshot of the `master` branch:
+```
+$ cabal install http://ghcjs.luite.com/master.tar.gz
+$ ghcjs-boot
+```
+
 
 Haskell to JavaScript compiler
 ==============================
@@ -22,12 +33,12 @@ And some JavaScript-specific features:
 Installation
 ============
 
-GHCJS can be installed with GHC 7.8.2 or later.
+GHCJS can be installed with GHC 7.10.2 or later.
 
 ### Requirements
 
- - GHC 7.8.2 or higher
- - Cabal 1.22 and cabal-install 1.22 or higher
+ - GHC 7.10.2 or higher
+ - Cabal 1.22.4 and cabal-install 1.22.3 or higher
  - alex and happy
  - [node.js](http://nodejs.org) 0.10.28 or higher. GHCJS uses node.js for its build system and for running Template Haskell.
 
@@ -49,37 +60,12 @@ GHCJS can be installed with GHC 7.8.2 or later.
 
 ### Installation steps
 
-If you use GHC 7.8, you need to update your `Cabal` to version 1.22 to be able to use
-GHCJS. GHC 7.10 already includes a compatible `Cabal` version. Cabal support has been
-merged upstream, get the correct version from https://github.com/haskell/cabal or from
-Hackage once it has been released.
+#### Install GHCJS (for compiler development)
 
-**Warning: GHC 7.10 is not yet officially supported, there are some bugs in 7.10.1 that need to be worked around for GHCJS to work, see: https://github.com/ghcjs/ghcjs/wiki/GHCJS-with-GHC-7.10**
+Get `ghcjs` from Github and install it:
 
-Note that you need a compatible `Cabal` library in your GHC package database, just upgrading
-the `cabal-install` program is not enough. `ghcjs-boot` will complain if it finds an incompatible
-version.
-
-Make sure that you're now running the updated `cabal-install`, `GHCJS` support must be listed under the
-compiler flags:
-
-    $ cabal install --help
-    ...
-                                    build files (default dist)
-     -g --ghc                           compile with GHC
-        --ghcjs                         compile with GHCJS
-        --nhc98                         compile with NHC
-    ...
-
-#### Install GHCJS
-
-Next, install `ghcjs` and its `ghcjs-prim` dependency:
-
-    $ git clone https://github.com/ghcjs/ghcjs-prim.git
     $ git clone https://github.com/ghcjs/ghcjs.git
-    $ cabal install ./ghcjs ./ghcjs-prim
-
-If `cabal install ./ghcjs ./ghcjs-prim` fails because cabal cannot resolve dependencies, try adding `--reorder-goals --max-backjumps=-1`. Sometimes the `transformers` package causes problems, since GHC ships with an older version. Try `--constraint=transformers==0.3.0.0` (or the version that came with your GHC) if the problem looks related to this package.
+    $ cabal install ./ghcjs
 
 #### Build the libraries
 
@@ -88,10 +74,10 @@ Use `ghcjs-boot` to build the base libraries for `GHCJS`:
     if you used the Git repository to install:
     $ ghcjs-boot --dev
 
-    if you are doing a development build with GHC 7.10, you need to tell `ghcjs-boot` to use the `ghc-7.10` branch of the `ghcjs-boot` repository:
-    $ ghcjs-boot --dev --ghcjs-boot-dev-branch ghc-7.10
+    if you are doing a development build from a different branch than `master`, you need to tell `ghcjs-boot` to use the correct branch of the `ghcjs-boot` and `shims` repositories:
+    $ ghcjs-boot --dev --ghcjs-boot-dev-branch somebranch --shims-dev-branch
 
-    if you are using a package from hackage that includes the libraries:
+    if you are installing from hackage, the ghcjs source distribution package already includes the correct libraries. run:
     $ ghcjs-boot
 
 Some distros install node.js as `nodejs` instead of `node`. Add `--with-node nodejs` to the `ghcjs-boot` command in that case.

@@ -75,15 +75,15 @@
 #endif
 
 // Data.Maybe.Maybe
-#define HS_NOTHING
+#define HS_NOTHING h$baseZCGHCziBaseziNothing
 #define IS_NOTHING(cl) ((cl).f === h$baseZCGHCziBaseziNothing_con_e)
 #define IS_JUST(cl) ((cl).f === h$baseZCGHCziBaseziJust_con_e)
 #define JUST_VAL(jj) ((jj).d1)
 // #define HS_NOTHING h$nothing
 #ifdef GHCJS_PROF
-#define MK_JUST(val) (h$c1(h$baseZCGHCziBaseziJust_con_e, (val)))
-#else
 #define MK_JUST(val) (h$c1(h$baseZCGHCziBaseziJust_con_e, (val), h$CCS_SYSTEM))
+#else
+#define MK_JUST(val) (h$c1(h$baseZCGHCziBaseziJust_con_e, (val)))
 #endif
 
 // Data.List
@@ -126,7 +126,9 @@
 // general deconstruction
 #define IS_THUNK(x) ((x).f.t === CLOSURE_TYPE_THUNK)
 #define CONSTR_TAG(x) ((x).f.a)
-// retrieve  a numeric value that's possible stored as an indirection
+
+// retrieve  a numeric value that's possibly stored as an indirection
+#define IS_WRAPPED_NUMBER(val) ((typeof(val)==='object')&&(val).f === h$unbox_e)
 #define UNWRAP_NUMBER(val) ((typeof(val) === 'number')?(val):(val).d1)
 
 // generic lazy values

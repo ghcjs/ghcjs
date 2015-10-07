@@ -958,7 +958,7 @@ genCase top bnd e at alts l srt
       (aj, ar) <- genAlts (addEval bnd top) bnd at d alts
       saveCCS <- ifProfiling $ ccsVar |= jCurrentCCS
       restoreCCS <- ifProfiling $ [j| `jCurrentCCS` = `ccsVar`; |]
-      return (mconcat (map decl bndi) <> saveCCS <> ww <> ej <> restoreCCS <> aj, ar)
+      return (decl ccsVar <> mconcat (map decl bndi) <> saveCCS <> ww <> ej <> restoreCCS <> aj, ar)
   | otherwise = do
       n        <- length <$> genIdsI bnd
       rj       <- genRet (addEval bnd top) bnd at alts l srt
@@ -1586,12 +1586,28 @@ genPrimCall top (PrimCall lbl _) args t = do
   j <- parseFFIPattern False False False ("h$" ++ unpackFS lbl) t (map toJExpr $ top ^. ctxTarget) args
   return (j, ExprInline Nothing)
 
+getObjectKeyValuePairs :: [StgArg] -> Maybe [(Text, StgArg)]
+getObjectKeyValuePairs [] = Just []
+getObjectKeyValuePairs (k:v:xs)
+  | Just t <- argJSStringLitUnfolding k =
+      fmap ((t,v):) (getObjectKeyValuePairs xs)
+getObjectKeyValuePairs _ = Nothing                                     
+
+argJSStringLitUnfolding :: StgArg -> Maybe Text
+argJSStringLitUnfolding (StgVarArg v)
+  | False = Just "abc" -- fixme
+argJSStringLitUnfolding _ = Nothing
+
 genForeignCall :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, ExprResult)
 genForeignCall (CCall (CCallSpec (StaticTarget ccLbl Nothing True) PrimCallConv PlayRisky)) _ _ [StgVarArg i1, StgVarArg i2]
   | ccLbl == fsLit "__ghcjsi_capture" = do
       ii1 <- jsIdI i1
       ii2 <- jsIdI i2
       return ([j| `ii2` = `ii1`; |], ExprInline Nothing)
+genForeignCall (CCall (CCallSpec (StaticTarget tgt Nothing True) JavaScriptCallConv PlayRisky)) t [obj] args
+  | tgt == fsLit "h$buildObject", Just pairs <- getObjectKeyValuePairs args = do
+      pairs' <- mapM (\(k,v) -> genArg v >>= \([v']) -> return (k,v')) pairs
+      return (assignj obj (ValExpr (JHash $ M.fromList pairs')), ExprInline Nothing)
 genForeignCall (CCall (CCallSpec ccTarget cconv safety)) t tgt args =
   (,exprResult) <$> parseFFIPattern catchExcep async isJsCc lbl t tgt' args
   where

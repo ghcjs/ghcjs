@@ -62,7 +62,7 @@ import           Data.Yaml                       ((.:))
 import qualified Data.Yaml                       as Yaml
 
 import           Filesystem                      (getWorkingDirectory, getModified, getSize
-                                                 ,canonicalizePath)
+                                                 ,canonicalizePath, isDirectory)
 import           Filesystem.Path                 hiding ((<.>), (</>), null, concat)
 import           Filesystem.Path.CurrentOS       (encodeString)
 
@@ -130,6 +130,7 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsWithGhcjsPkg :: Maybe Text -- ^ location of ghcjs-pkg program
                                  , _bsWithGhcjsRun :: Maybe Text -- ^ location of ghcjs-run program
                                  , _bsWithGhc      :: Maybe Text -- ^ location of GHC compiler (must have a GHCJS-compatible Cabal library installed. ghcjs-boot copies some files from this compiler)
+                                 , _bsWithGhcPkg   :: Maybe Text -- ^ location of ghc-pkg program
                                  , _bsWithNode     :: Maybe Text -- ^ location of the node.js program
                                  , _bsWithDataDir  :: Maybe Text -- ^ override data dir
                                  , _bsWithConfig   :: Maybe Text -- ^ installation source configuration (default: lib/etc/boot-sources.yaml in data dir)
@@ -312,9 +313,13 @@ main = do
 cleanTree :: B ()
 cleanTree = do
   topDir <- view (beLocations . blGhcjsTopDir)
-  msg info ("cleaning installation tree " <> toTextI topDir)
-  hasCheckpoint "init" >>= cond (rm_rf topDir)
-    (failWith ("directory to clean might not be a GHCJS installation directory: " <> toTextI topDir <> ", not cleaning"))
+  exists <- liftIO $ isDirectory topDir
+  if exists
+     then do
+       msg info ("cleaning installation tree " <> toTextI topDir)
+       hasCheckpoint "init" >>= cond (rm_rf topDir)
+         (failWith ("directory to clean might not be a GHCJS installation directory: " <> toTextI topDir <> ", not cleaning"))
+     else msg info "skipping clean because installation tree doesn't exist"
 
 instance Yaml.FromJSON BootSources where
   parseJSON (Yaml.Object v) = BootSources
@@ -498,6 +503,8 @@ optParser = BootSettings
                   help "ghcjs-run program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-ghc" <> metavar "PROGRAM" <>
                   help "ghc program to use" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-ghc-pkg" <> metavar "PROGRAM" <>
+                  help "ghc-pkg program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-node" <> metavar "PROGRAM" <>
                   help "node.js program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-datadir" <> metavar "DIR" <>
@@ -875,9 +882,11 @@ preparePackage pkg
   | "./" `T.isPrefixOf` pkg || "../" `T.isPrefixOf` pkg = sub $ do
     msg trace ("preparing package " <> pkg)
     cd (fromText pkg)
-    whenM (test_f "configure.ac") $
-      make "configure" ["configure.ac"]
-        (msg info ("generating configure script for " <> pkg) >> autoreconf_)
+    e <- ask
+    when (e ^. beSettings . bsDev) $
+      whenM (test_f "configure.ac") $
+        make "configure" ["configure.ac"]
+          (msg info ("generating configure script for " <> pkg) >> autoreconf_)
     rm_rf "dist"
   | otherwise = return ()
 
@@ -1082,6 +1091,7 @@ cabalGlobalFlags :: B [Text]
 cabalGlobalFlags = do
   instDir  <- view (beLocations . blGhcjsTopDir)
   return [ "--config-file", toTextI (instDir </> "cabalBootConfig")
+         , "--ignore-sandbox"
          ]
 
 cabalInstallFlags :: Bool -> B [Text]
@@ -1324,6 +1334,7 @@ configureBootPrograms bs srcs pgms0 = do
                     & bpGhcjsPkg %~ r bsWithGhcjsPkg
                     & bpGhcjsRun %~ r bsWithGhcjsRun
                     & bpGhc      %~ r bsWithGhc
+                    & bpGhcPkg   %~ r bsWithGhcPkg
                     & bpCabal    %~ r bsWithCabal
                     & bpNode     %~ r bsWithNode
   -- resolve all programs
@@ -1352,7 +1363,7 @@ resolveProgram bs pgm = do
 reportProgramLocation :: BootSettings -> Program a -> IO ()
 reportProgramLocation bs p
   | Just l <- p ^. pgmLoc = msg' bs info ("program " <> p ^. pgmName <> " found at " <> toTextI l)
-  | otherwise             = msg' bs info ("program " <> p ^. pgmName <> " NOT found, searched for" <> p ^. pgmSearch)
+  | otherwise             = msg' bs info ("program " <> p ^. pgmName <> " NOT found, searched for " <> p ^. pgmSearch)
 
 -- | check that the GHC, ghcjs and ghcjs-pkg we're using are the correct version
 checkProgramVersions :: BootSettings -> BootPrograms -> IO BootPrograms
