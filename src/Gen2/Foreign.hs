@@ -663,7 +663,7 @@ jsTySigLit dflags isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe
              | isUnLiftedTyCon tc                                  = prim (tyConPrimRep tc)
              | Just r <- lookup (getUnique tc) boxed               = r
              | isResult && getUnique tc == unitTyConKey            = ("void", 'v')
-             | isJSRefTyCon dflags tc = ("StgPtr", 'r')
+             | isJSValTyCon dflags tc = ("StgPtr", 'r')
              | otherwise = error $ "jsTySigLit: unexpected TyCon: "
                                        ++ showSDoc dflags (ppr tc)
               where
@@ -766,7 +766,7 @@ isGhcjsFFIArgumentTy dflags safety ty
   | Just (tc, _) <- tcSplitTyConApp_maybe ty
   , getUnique tc == anyTyConKey && xopt Opt_GHCForeignImportPrim dflags = IsValid
   | otherwise = NotValid
-      (text "JavaScript FFI argument type must be a valid CCall FFI argument type or JSRef")
+      (text "JavaScript FFI argument type must be a valid CCall FFI argument type or JSVal")
 
 isGhcjsFFIImportResultTy :: DynFlags -> Type -> Validity
 isGhcjsFFIImportResultTy dflags ty
@@ -775,7 +775,7 @@ isGhcjsFFIImportResultTy dflags ty
       if all (\ty -> isValid (isGhcjsFFIImportResultTy' dflags ty) || isGhcjsFFITy dflags ty) args
          then IsValid
          else NotValid
-              (text $ "JavaScript FFI result type must be a valid CCall FFI result type or JSRef: " ++ showPpr dflags ty)
+              (text $ "JavaScript FFI result type must be a valid CCall FFI result type or JSVal: " ++ showPpr dflags ty)
   | otherwise = isGhcjsFFIImportResultTy' dflags ty
 
 isGhcjsFFIImportResultTy' :: DynFlags -> Type -> Validity
@@ -790,16 +790,16 @@ isGhcjsFFIImportResultTy' dflags ty
   , xopt Opt_GHCForeignImportPrim dflags && getUnique tc == anyTyConKey = IsValid
   | isGhcjsFFITy dflags ty                                    = IsValid
   | otherwise = NotValid
-      (text $ "JavaScript FFI result type must be a valid CCall FFI result type or JSRef: " ++ showPpr dflags ty)
+      (text $ "JavaScript FFI result type must be a valid CCall FFI result type or JSVal: " ++ showPpr dflags ty)
 
 isGhcjsFFITy :: DynFlags -> Type -> Bool
 isGhcjsFFITy = checkNamedTy jsFfiTys
 
-isJSRefTy :: DynFlags -> Type -> Bool
-isJSRefTy = checkNamedTy [jsRefTy]
+isJSValTy :: DynFlags -> Type -> Bool
+isJSValTy = checkNamedTy [jsValTy]
 
-isJSRefTyCon :: DynFlags -> TyCon -> Bool
-isJSRefTyCon = checkNamedTyCon [jsRefTy]
+isJSValTyCon :: DynFlags -> TyCon -> Bool
+isJSValTyCon = checkNamedTyCon [jsValTy]
 
 checkNamedTy :: [(String, String, String)] -> DynFlags -> Type -> Bool
 checkNamedTy tys dflags ty = checkRepTyCon (checkNamedTyCon tys dflags) ty
@@ -833,10 +833,10 @@ repTc = go
           | otherwise = tc
 
 jsFfiTys :: [(String, String, String)]
-jsFfiTys = [jsRefTy]
+jsFfiTys = [jsValTy]
 
-jsRefTy :: (String, String, String)
-jsRefTy = ("ghcjs-prim", "GHCJS.Prim", "JSRef")
+jsValTy :: (String, String, String)
+jsValTy = ("ghcjs-prim", "GHCJS.Prim", "JSVal")
 
 -- normaliseFfiType gets run before checkRepTyCon, so we don't
 -- need to worry about looking through newtypes or type functions
