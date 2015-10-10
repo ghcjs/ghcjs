@@ -7,7 +7,7 @@
 
 module Compiler.GhcjsProgram where
 
-import           GHC hiding (setSessionDynFlags)
+import           GHC
 import           GhcMonad
 import           DynFlags
 import           PackageConfig hiding (Version)
@@ -20,11 +20,7 @@ import           DsMeta
 import           ErrUtils (fatalErrorMsg'')
 import           Panic (handleGhcException)
 import           Exception
-#if __GLASGOW_HASKELL__ >= 709
 import           Packages (initPackages)
-#else
-import           Gen2.GHC.Packages (initPackages)
-#endif
 
 import           Control.Applicative
 import           Control.Concurrent.MVar (readMVar)
@@ -364,15 +360,9 @@ ghcjsCleanupHandler dflags env inner =
                 getProcessExitCode (thrProcess r) >>= \case
                   Just _ -> return ()
                   Nothing ->
-#if __GLASGOW_HASKELL__ >= 709
                     (timeout 2000000 (Gen2.finishTh env m r) >>=
                       maybe (terminate r) return)
                       `catch` \(_::SomeException) -> terminate r
-#else
-                    (timeout 2000000 (Gen2.finishTh True env m r) >>=
-                      maybe (terminate r) return)
-                      `catch` \(_::SomeException) -> terminate r
-#endif
           )
   where
     terminate r = terminateProcess (thrProcess r) `catch` \(_::SomeException) -> return ()
@@ -383,23 +373,21 @@ runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
                 -> Ghc b           -- ^ Action to perform
                 -> IO b
 runGhcjsSession mbMinusB settings m = runGhc mbMinusB $ do
-    dflags <- getSessionDynFlags
-    let base = getLibDir dflags
-    jsEnv <- liftIO newGhcjsEnv
-    _ <- setSessionDynFlags
-         $ setGhcjsPlatform settings jsEnv [] base
-         $ updateWays $ addWay' (WayCustom "js")
-         $ setGhcjsSuffixes False dflags
-    fixNameCache
+    setupSessionForGhcjs settings
     m
 
-setSessionDynFlags :: GhcMonad m => DynFlags -> m [PackageKey]
-setSessionDynFlags dflags = do
-  (dflags', preload) <- liftIO $ initPackages dflags -- this is Gen2.GHC.Packages.initPackages
-  modifySession $ \h -> h{ hsc_dflags = dflags'
-                         , hsc_IC = (hsc_IC h){ ic_dflags = dflags' } }
-  invalidateModSummaryCache
-  return preload
+-- | modifies a Ghc session to use the GHCJS target
+setupSessionForGhcjs :: GhcjsSettings
+                     -> Ghc ()
+setupSessionForGhcjs ghcjsSettings = do
+  dflags <- getSessionDynFlags
+  let base = getLibDir dflags
+  jsEnv <- liftIO newGhcjsEnv
+  _ <- setSessionDynFlags
+       $ setGhcjsPlatform ghcjsSettings jsEnv [] base
+       $ updateWays $ addWay' (WayCustom "js")
+       $ setGhcjsSuffixes False dflags
+  fixNameCache
 
 invalidateModSummaryCache :: GhcMonad m => m ()
 invalidateModSummaryCache =
