@@ -57,7 +57,7 @@ withGhcjs' libDir flags ghcActs = runGhc (Just libDir) $ do
       -- ignore the following return-value, which is a list of packages
       -- that may need to be re-linked: Haddock doesn't do any
       -- dynamic or static linking at all!
-      _ <- Ghcjs.setSessionDynFlags dynflags''
+      _ <- setSessionDynFlags dynflags''
       Ghcjs.fixNameCache
       ghcActs dynflags''
   where
