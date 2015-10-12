@@ -19,6 +19,7 @@ groups:
   ffi:         JavaScript interaction through FFI
   pkg:         Tests imported from packages
   profiling:   Profiling tests (cost-centres, stack traces, etc.)
+  rts:         Run-time system
 
 requiredPackages:
   - ghc-prim
