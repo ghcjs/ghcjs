@@ -153,8 +153,8 @@ primTypeVt t = case repType t of
     | st == pr "Float#"              = DoubleV
     | st == pr "Array#"              = ArrV
     | st == pr "MutableArray#"       = ArrV
-    | st == pr "ByteArray#"          = ObjV -- can contain any JS reference, used for JSRef
-    | st == pr "MutableByteArray#"   = ObjV -- can contain any JS reference, used for JSRef
+    | st == pr "ByteArray#"          = ObjV -- can contain any JS reference, used for JSVal
+    | st == pr "MutableByteArray#"   = ObjV -- can contain any JS reference, used for JSVal
     | st == pr "ArrayArray#"         = ArrV
     | st == pr "MutableArrayArray#"  = ArrV
     | st == pr "MutVar#"             = RtsObjV

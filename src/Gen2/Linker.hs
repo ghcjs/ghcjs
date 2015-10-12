@@ -514,7 +514,7 @@ noStaticDeps = StaticDeps []
        Control.Exception.Base: nonTermination
      ghcjs-prim:
        GHCJS.Prim:
-         - JSRef
+         - JSVal
          - JSException
  -}
 instance FromJSON StaticDeps where

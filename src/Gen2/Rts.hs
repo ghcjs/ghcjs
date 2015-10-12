@@ -72,14 +72,14 @@ closureConstructors s =
     traceAlloc x | csTraceRts s = [j| h$traceAlloc(`x`); |]
                  | otherwise    = mempty
 
-    -- only JSRef can typically contain undefined or null
+    -- only JSVal can typically contain undefined or null
     -- although it's possible (and legal) to make other Haskell types
     -- to contain JS refs directly
     -- this can cause false positives here
     checkC :: JStat
     checkC {- | csAssertRts s =
                      [j|
-                         if(arguments[0] !== h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e) {
+                         if(arguments[0] !== h$ghcjszmprimZCGHCJSziPrimziJSVal_con_e) {
                            for(var i=1;i<arguments.length;i++) {
                              if(arguments[i] === null || arguments[i] === undefined) {
                                var msg = "warning: undefined or null in argument: " 
@@ -92,7 +92,7 @@ closureConstructors s =
                        |] -}
            | otherwise = mempty
 
-    -- h$d is never used for JSRef (since it's only for constructors with
+    -- h$d is never used for JSVal (since it's only for constructors with
     -- at least three fields, so we always warn here
     checkD | csAssertRts s =
                      [j| for(var i=0;i<arguments.length;i++) {

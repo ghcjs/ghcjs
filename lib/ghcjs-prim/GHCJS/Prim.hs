@@ -3,7 +3,7 @@
 {-# LANGUAGE JavaScriptFFI, GHCForeignImportPrim #-}
 #endif
 
-module GHCJS.Prim ( JSRef(..)
+module GHCJS.Prim ( JSVal(..)
                   , JSException(..)
                   , WouldBlockException(..)
 #ifdef ghcjs_HOST_OS
@@ -29,13 +29,13 @@ import           GHC.Prim
 import qualified GHC.Exception as Ex
 import qualified GHC.Exts as Exts
 {-
-  JSRef is a boxed type that can be used as FFI
+  JSVal is a boxed type that can be used as FFI
   argument or result.
 -}
 #ifdef ghcjs_HOST_OS
-data JSRef = JSRef ByteArray#
+data JSVal = JSVal ByteArray#
 #else
-data JSRef = JSRef Addr#
+data JSVal = JSVal Addr#
 #endif
 
 {-
@@ -43,7 +43,7 @@ data JSRef = JSRef Addr#
   a safe or interruptible foreign call, it is converted
   to a JSException
  -}
-data JSException = JSException JSRef String
+data JSException = JSException JSVal String
   deriving (Typeable)
 
 instance Ex.Exception JSException
@@ -53,7 +53,7 @@ instance Show JSException where
 
 #ifdef ghcjs_HOST_OS
 
-mkJSException :: JSRef -> IO JSException
+mkJSException :: JSVal -> IO JSException
 mkJSException ref =
   return (JSException (unsafeCoerce ref) (fromJSString ref))
 
@@ -61,52 +61,52 @@ mkJSException ref =
      depend on ghcjs-base
  -}
 
-{- | returns an empty string if the JSRef does not contain
+{- | returns an empty string if the JSVal does not contain
      a string
  -}
-fromJSString :: JSRef -> String
+fromJSString :: JSVal -> String
 fromJSString = unsafeCoerce . js_fromJSString
 {-# INLINE fromJSString #-}
 
-toJSString :: String -> JSRef
+toJSString :: String -> JSVal
 toJSString = js_toJSString . unsafeCoerce . seqList
 {-# INLINE toJSString #-}
 
-fromJSArray :: JSRef -> IO [JSRef]
+fromJSArray :: JSVal -> IO [JSVal]
 fromJSArray = unsafeCoerce . js_fromJSArray
 {-# INLINE fromJSArray #-}
 
-toJSArray :: [JSRef] -> IO JSRef
+toJSArray :: [JSVal] -> IO JSVal
 toJSArray = js_toJSArray . unsafeCoerce . seqList
 {-# INLINE toJSArray #-}
 
-{- | returns zero if the JSRef does not contain a number
+{- | returns zero if the JSVal does not contain a number
  -}
-fromJSInt :: JSRef -> Int
+fromJSInt :: JSVal -> Int
 fromJSInt = js_fromJSInt
 {-# INLINE fromJSInt #-}
 
-toJSInt :: Int -> JSRef
+toJSInt :: Int -> JSVal
 toJSInt = js_toJSInt
 {-# INLINE toJSInt #-}
 
-isNull :: JSRef -> Bool
+isNull :: JSVal -> Bool
 isNull = js_isNull
 {-# INLINE isNull #-}
 
-isUndefined :: JSRef -> Bool
+isUndefined :: JSVal -> Bool
 isUndefined = js_isUndefined
 {-# INLINE isUndefined #-}
 
-jsNull :: JSRef
+jsNull :: JSVal
 jsNull = js_null
 {-# INLINE jsNull #-}
 
-getProp :: JSRef -> String -> IO JSRef
+getProp :: JSVal -> String -> IO JSVal
 getProp o p = js_getProp o (unsafeCoerce $ seqList p)
 {-# INLINE getProp #-}
 
-getProp' :: JSRef -> JSRef -> IO JSRef
+getProp' :: JSVal -> JSVal -> IO JSVal
 getProp' o p = js_getProp' o p
 {-# INLINE getProp' #-}
 
@@ -122,37 +122,37 @@ seqListSpine xs = go xs `seq` xs
         go []     = ()
 
 foreign import javascript unsafe "h$toHsString($1)"
-  js_fromJSString :: JSRef -> Exts.Any
+  js_fromJSString :: JSVal -> Exts.Any
 
 foreign import javascript unsafe "h$fromHsString($1)"
-  js_toJSString :: Exts.Any -> JSRef
+  js_toJSString :: Exts.Any -> JSVal
 
-foreign import javascript unsafe "h$toHsListJSRef($1)"
-  js_fromJSArray :: JSRef -> IO Exts.Any
+foreign import javascript unsafe "h$toHsListJSVal($1)"
+  js_fromJSArray :: JSVal -> IO Exts.Any
 
-foreign import javascript unsafe "h$fromHsListJSRef($1)"
-  js_toJSArray :: Exts.Any -> IO JSRef
+foreign import javascript unsafe "h$fromHsListJSVal($1)"
+  js_toJSArray :: Exts.Any -> IO JSVal
 
 foreign import javascript unsafe "$1 === null"
-  js_isNull :: JSRef -> Bool
+  js_isNull :: JSVal -> Bool
 
 foreign import javascript unsafe "$1 === undefined"
-  js_isUndefined :: JSRef -> Bool
+  js_isUndefined :: JSVal -> Bool
 
 foreign import javascript unsafe "$r = typeof($1) === 'number' ? ($1|0) : 0;"
-  js_fromJSInt :: JSRef -> Int
+  js_fromJSInt :: JSVal -> Int
 
 foreign import javascript unsafe "$r = $1;"
-  js_toJSInt :: Int -> JSRef
+  js_toJSInt :: Int -> JSVal
 
 foreign import javascript unsafe "$r = null;"
-  js_null :: JSRef
+  js_null :: JSVal
 
 foreign import javascript unsafe "$1[h$fromHsString($2)]"
-  js_getProp :: JSRef -> Exts.Any -> IO JSRef
+  js_getProp :: JSVal -> Exts.Any -> IO JSVal
 
 foreign import javascript unsafe "$1[$2]"
-  js_getProp' :: JSRef -> JSRef -> IO JSRef
+  js_getProp' :: JSVal -> JSVal -> IO JSVal
 
 #endif
 
