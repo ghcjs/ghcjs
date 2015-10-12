@@ -50,11 +50,11 @@ genImports = unlines
   ]
 
 genDefns = unlines
-  [ "type O = JSVal () -- object"
-  , "type K = JSVal () -- key"
-  , "type V = JSVal () -- value"
-  , "type J = JSVal () -- some JS value"
-  , "type A = JSVal () -- array"
+  [ "type O = JSVal -- object"
+  , "type K = JSVal -- key"
+  , "type V = JSVal -- value"
+  , "type J = JSVal -- some JS value"
+  , "type A = JSVal -- array"
   , ""
   , "seqTupList :: [(a,b)] -> [(a,b)]"
   , "seqTupList xs = go xs `seq` xs"
