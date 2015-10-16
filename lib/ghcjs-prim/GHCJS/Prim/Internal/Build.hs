@@ -145,11 +145,11 @@ import GHC.Prim
 import Unsafe.Coerce
 import System.IO.Unsafe
 
-type O = JSRef -- object
-type K = JSRef -- key
-type V = JSRef -- value
-type J = JSRef -- some JS value
-type A = JSRef -- array
+type O = JSVal -- object
+type K = JSVal -- key
+type V = JSVal -- value
+type J = JSVal -- some JS value
+type A = JSVal -- array
 
 seqTupList :: [(a,b)] -> [(a,b)]
 seqTupList xs = go xs `seq` xs

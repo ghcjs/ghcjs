@@ -34,13 +34,13 @@
 
 
 
-// GHCJS.Prim.JSRef
+// GHCJS.Prim.JSVal
 #ifdef GHCJS_PROF
-#define MK_JSREF(x) (h$c1(h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e, (x), h$CCS_SYSTEM))
+#define MK_JSVAL(x) (h$c1(h$ghcjszmprimZCGHCJSziPrimziJSVal_con_e, (x), h$CCS_SYSTEM))
 #else
-#define MK_JSREF(x) (h$c1(h$ghcjszmprimZCGHCJSziPrimziJSRef_con_e, (x)))
+#define MK_JSVAL(x) (h$c1(h$ghcjszmprimZCGHCJSziPrimziJSVal_con_e, (x)))
 #endif
-#define JSREF_VAL(x) ((x).d1)
+#define JSVAL_VAL(x) ((x).d1)
 
 // GHCJS.Prim.JSException
 #ifdef GHCJS_PROF
