@@ -12,8 +12,8 @@ import           Control.Exception
 import           GHCJS.Prim
 import           GHC.Exts
 
-wouldBlock :: String -> SomeException
-wouldBlock = toException . WouldBlockException
+wouldBlock :: SomeException
+wouldBlock = toException WouldBlockException
 
 blockedIndefinitelyOnMVar :: SomeException
 blockedIndefinitelyOnMVar = toException BlockedIndefinitelyOnMVar

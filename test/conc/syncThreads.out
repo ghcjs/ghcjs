@@ -1,0 +1,63 @@
+synchronously1
+(False,True)
+(True,False)
+(False,True)
+(True,False)
+handler: outside
+(False,True)
+(False,True)
+(True,False)
+handler: inside
+(True,False)
+(False,True)
+synchronously1 done
+---------------------------
+wouldBlock1
+(False,True)
+(True,False)
+exeption caught inner1
+thread would block
+exeption caught inner2
+thread would block
+ok
+exception caught: outer
+thread would block
+wouldBlock1 done
+---------------------------
+wouldBlock2
+exception caught: inner
+(True,False)
+ok
+exception caught: outer
+wouldBlock2 done
+---------------------------
+callback1
+(True,False)
+ok
+exception: would block
+(True,False)
+ok
+callback1 finished
+---------------------------
+callback2
+(True,True)
+ok
+main
+()
+callback
+(False,True)
+()
+main
+callback2 done
+---------------------------
+callback3
+async callback
+(False,True)
+()
+main
+()
+callback
+()
+main
+(False,True)
+callback3 done

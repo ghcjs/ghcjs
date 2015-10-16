@@ -160,8 +160,11 @@ foreign import javascript unsafe "$1[$2]"
      be done asynchronously, and the thread is set up to not
      continue asynchronously, it receives this exception.
  -}
-data WouldBlockException = WouldBlockException String
-  deriving (Show, Typeable)
+data WouldBlockException = WouldBlockException
+  deriving (Typeable)
+
+instance Show WouldBlockException where
+  show _ = "thread would block"
 
 instance Ex.Exception WouldBlockException
 
