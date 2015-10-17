@@ -8,7 +8,7 @@ before_install:
     - export GHCJS_BOOTING=1
     - export GHCJS_BOOTING_STAGE1=1
     - travis_retry sudo add-apt-repository -y ppa:hvr/ghc
-    - curl -sL https://deb.nodesource.com/setup_0.12 | sudo bash -
+    - curl -sL https://deb.nodesource.com/setup_4.x | sudo -E bash -
     - travis_retry sudo apt-get update -qq
     - travis_retry sudo apt-get build-dep ghc
     - travis_retry sudo apt-get install nodejs cabal-install-1.22 ghc-$GHCVER alex-3.1.4 happy-1.19.5
