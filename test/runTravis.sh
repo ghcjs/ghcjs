@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-NODE="nodejs"
+NODE="node"
 PART="$TEST_PART"
 CABAL="cabal"
 GHCJSBOOT="ghcjs-boot"
