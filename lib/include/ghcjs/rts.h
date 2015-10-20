@@ -109,8 +109,8 @@
 // Data.Text.Lazy
 #define LAZY_TEXT_IS_CHUNK(x) ((x).f.a === 2)
 #define LAZY_TEXT_IS_NIL(x) ((x).f.a === 1)
-#define LAZY_TEXT_CHUNK_HEAD(x) ((x).d1)
-#define LAZY_TEXT_CHUNK_TAIL(x) ((x).d2)
+#define LAZY_TEXT_CHUNK_HEAD(x) ((x))
+#define LAZY_TEXT_CHUNK_TAIL(x) ((x).d2.d3)
 
 // black holes
 // can we skip the indirection for black holes?
