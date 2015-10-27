@@ -158,6 +158,7 @@ checkBooted ghcjs = check `C.catch` \(e::C.SomeException) -> cantRun e
 -- find programs at the start so we don't try to run a nonexistent program over and over again
 -- temporary workaround, process-1.2.0.0 leaks when trying to run a nonexistent program
 checkProgram :: FilePath -> Maybe String -> [String] -> IO (Maybe FilePath)
+checkProgram _ (Just "none") _ = return Nothing
 checkProgram defName userName testArgs = do
   let testProg p as = either (\(e::C.SomeException) -> False) (const True) <$>
                         C.try (readProcessWithExitCode' "/" p as "")
