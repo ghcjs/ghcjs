@@ -58,7 +58,7 @@ cabal_install() {
 }
 
 run_tests() {
-    "$TESTRUNNER" --travis --with-node="$NODE" "$@" -j2
+    "$TESTRUNNER" --travis --with-spidermonkey=none --with-javascriptcore=none --with-node="$NODE" "$@" -j2
 }
 
 case "$1" in
