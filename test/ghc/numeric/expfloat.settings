@@ -1,0 +1,5 @@
+# v8 has faster but inaccurate exponentiation
+
+# enable node again when it has a strict ES6 mode, which requires it to give the
+# expected result
+disableNode: true
