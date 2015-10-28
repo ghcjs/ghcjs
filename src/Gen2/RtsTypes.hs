@@ -6,6 +6,10 @@
              TupleSections,
              OverloadedStrings #-}
 
+-- TODO (meiersi): @luite please remove these flags and review the unused
+-- cases as part of #438. There might be some bugs lurking there.
+{-# OPTIONS_GHC -fno-warn-unused-binds #-}
+
 module Gen2.RtsTypes where
 
 import           DynFlags
@@ -19,7 +23,6 @@ import           Unique
 import           UniqFM
 import           SrcLoc
 
-import           Control.Applicative
 import qualified Control.Exception as Ex
 import           Control.Lens
 import           Control.Monad.State.Strict
@@ -657,7 +660,7 @@ encodePackageKey dflags k
 isGhcjsPrimPackage :: DynFlags -> PackageKey -> Bool
 isGhcjsPrimPackage dflags pkgKey
   =  pn == "ghcjs-prim" ||
-     (null pn && pkgKey == thisPackage dflags && 
+     (null pn && pkgKey == thisPackage dflags &&
       any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
   where
     pn = getPackageName dflags pkgKey

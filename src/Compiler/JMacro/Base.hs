@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverlappingInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, StandaloneDeriving, FlexibleContexts, TypeSynonymInstances, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, BangPatterns, DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, StandaloneDeriving, FlexibleContexts, TypeSynonymInstances, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, BangPatterns, DeriveGeneric #-}
 
 -----------------------------------------------------------------------------
 {- |
@@ -38,7 +38,6 @@ module Compiler.JMacro.Base (
   jsSaturate, SaneDouble(..)
   ) where
 import Prelude hiding (tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
-import Control.Applicative hiding (empty)
 import Control.Arrow (second, (***))
 import Control.DeepSeq
 import Control.Monad.State.Strict
@@ -54,7 +53,6 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import Data.Data
 import Data.Hashable (Hashable)
-import Data.Monoid (Monoid, mappend, mempty)
 import Data.Text.Binary ()
 
 import GHC.Generics
@@ -504,7 +502,7 @@ withHygiene_ un f x = jfromGADT $ case jtoGADT x of
     JMGVal  _ -> jtoGADT $ UnsatVal (jsUnsat_ is' x'')
     JMGId _ -> jtoGADT $ f x
     where
-        (x', (TxtI l : _)) = runState (runIdentSupply $ jsSaturate_ x) is 
+        (x', (TxtI l : _)) = runState (runIdentSupply $ jsSaturate_ x) is
         is' = take lastVal is
         x'' = f x'
         lastVal = readNote ("inSat" ++ T.unpack un) (reverse . takeWhile (/= '_') . reverse $ T.unpack l) :: Int

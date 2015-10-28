@@ -24,12 +24,15 @@ js:
 
 -}
 
+-- TODO (meiersi): @luite please remove these flags and review the unused
+-- cases as part of #438. There might be some bugs lurking there.
+{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
+
 module Gen2.Shim where
 
 import           DynFlags
 import qualified SysTools
 
-import           Control.Applicative hiding ((<|>))
 import           Control.Lens hiding ((<.>))
 import           Control.Monad
 

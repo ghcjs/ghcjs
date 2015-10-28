@@ -1,4 +1,9 @@
-{-# LANGUAGE CPP, GADTs, ScopedTypeVariables, ImpredicativeTypes, OverloadedStrings, TupleSections #-}
+{-# LANGUAGE GADTs, ScopedTypeVariables, ImpredicativeTypes, OverloadedStrings, TupleSections #-}
+
+-- TODO (meiersi): @luite please remove these flags and review the unused
+-- cases as part of #438. There might be some bugs lurking there.
+{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
+
 module Compiler.GhcjsHooks where
 
 import           CorePrep             (corePrepPgm)
@@ -38,7 +43,6 @@ import qualified Gen2.TH              as Gen2TH
 
 import           System.IO.Error
 
-import           TcRnTypes
 
 installGhcjsHooks :: GhcjsEnv
                   -> GhcjsSettings
@@ -50,11 +54,7 @@ installGhcjsHooks env settings js_objs dflags =
       addHooks h = h
         { linkHook               = Just (Gen2.ghcjsLink env settings js_objs True)
         , getValueSafelyHook     = Just (Gen2TH.ghcjsGetValueSafely settings)
-#if __GLASGOW_HASKELL__ >= 709
         , runMetaHook            = Just (Gen2TH.ghcjsRunMeta env settings)
-#else
-        , hscCompileCoreExprHook = Just (Gen2TH.ghcjsCompileCoreExpr env settings)
-#endif
         }
 
 installNativeHooks :: GhcjsEnv -> GhcjsSettings -> DynFlags -> DynFlags
@@ -62,10 +62,6 @@ installNativeHooks env settings dflags =
   Gen2.installForeignHooks False $ dflags { hooks = addHooks (hooks dflags) }
     where
       addHooks h = h { linkHook               = Just (Gen2.ghcjsLink env settings [] False)
-#if !(__GLASGOW_HASKELL__ >= 709)
-                     , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
-                     , hscCompileCoreExprHook = Just Gen2.ghcjsCompileCoreExpr
-#endif
                      }
 
 --------------------------------------------------
@@ -149,17 +145,15 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
                    -- stamp file for the benefit of Make
                    liftIO $ touchObjectFile dflags o_file
                    return (RealPhase next_phase, o_file)
-#if MIN_VERSION_ghc(7,9,0)
             HscUpdateSig ->
                 do -- We need to create a REAL but empty .o file
                    -- because we are going to attempt to put it in a library
                    PipeState{hsc_env=hsc_env'} <- getPipeState
                    let input_fn = expectJust "runPhase" (ml_hs_file location)
                        basename = dropExtension input_fn
-		   -- fixme do we need to create a js_o file here?
+                   -- fixme do we need to create a js_o file here?
                    -- liftIO $ compileEmptyStub dflags hsc_env' basename location
                    return (RealPhase next_phase, o_file)
-#endif
             HscRecomp cgguts mod_summary
               -> do output_fn <- phaseOutputFilename next_phase
 
@@ -179,11 +173,7 @@ runGhcjsPhase _ _ (RealPhase ph) input _dflags
                 `catchIOError` \_ -> return ()
     return (RealPhase next, output)
   where
-#if MIN_VERSION_ghc(7,8,3)
     skipPhases = [ (CmmCpp, Cmm), (Cmm, As False), (Cmm, As True), (As False, StopLn), (As True, StopLn) ]
-#else
-    skipPhases = [ (CmmCpp, Cmm), (Cmm, As), (As, StopLn) ]
-#endif
 
 -- otherwise use default
 runGhcjsPhase _ _ p input dflags = runPhase p input dflags
@@ -230,11 +220,7 @@ ghcjsCompileModule settings jsEnv env core mod = do
     cms    = compiledModules jsEnv
     dflags = hsc_dflags env
     compile = do
-#if __GLASGOW_HASKELL__ < 709
-      core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
-#else
       core_binds <- corePrepPgm env (ms_location mod) (cg_binds core) (cg_tycons core)
-#endif
       stg <- coreToStg dflags (cg_module core) core_binds
       (stg', cCCs) <- stg2stg dflags (cg_module core) stg
       return $ variantRender gen2Variant settings dflags (cg_module core) stg' cCCs
