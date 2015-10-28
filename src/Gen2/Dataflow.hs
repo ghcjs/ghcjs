@@ -36,7 +36,6 @@ module Gen2.Dataflow ( Graph(..), nodes, arcsIn, arcsOut, entry, nodeid, labels,
                      ) where
 
 import           Control.Arrow (second)
-import           Control.Applicative
 import           Control.Lens hiding (op)
 import           Control.Monad.State
 import           Data.Bits (shiftL, shiftR, (.|.), (.&.))
@@ -64,7 +63,7 @@ type IdSet = IntSet
 type IdS   = State (HashMap Ident Int)
 
 -- | Annotated expression, store identifiers so that rewrites can be applied more quickly
-data AExpr a = AExpr { getAnnot :: a 
+data AExpr a = AExpr { getAnnot :: a
                      , fromA    :: Expr
                      }
   deriving (Show, Eq, Ord, Data, Typeable)
@@ -273,7 +272,7 @@ isBoolOp LeOp         = True
 isBoolOp InstanceofOp = True
 isBoolOp InOp         = True
 isBoolOp _            = False
- 
+
 -- is this an equality operator
 isEqOp :: JOp -> Bool
 isEqOp EqOp        = True
@@ -327,7 +326,7 @@ fromJVal (JRegEx r)  = pure (RegExV r)
 fromJVal (JFunc is s) = pure (FuncV is s)
 fromJVal (UnsatVal{}) = error "fromJVal: unsaturated value"
 fromJVal (JHash h)   = HashV . M.fromList <$> mapM f (M.toList h)
-  where 
+  where
    f :: (Text, JExpr) -> IdS (Text, Expr)
    f (k, e) = (k,) <$> fromJExpr e
 

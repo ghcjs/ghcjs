@@ -9,6 +9,10 @@
              Rank2Types,
              GeneralizedNewtypeDeriving#-}
 
+-- TODO (meiersi): @luite please remove these flags and review the unused
+-- cases as part of #438. There might be some bugs lurking there.
+{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
+
 {- |
   Serialization/deserialization for the binary .js_o files
 
@@ -51,9 +55,8 @@ module Gen2.Object ( object
                    , versionTag, versionTagLength
                    ) where
 
-import           Control.Applicative
 import           Control.DeepSeq
-import           Control.Exception (bracket, evaluate)
+import           Control.Exception (bracket)
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Trans
@@ -69,7 +72,6 @@ import           Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as C8 (pack, unpack)
 import           Data.Data.Lens
 import           Data.Function (on)
-import qualified Data.Foldable as F
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import           Data.Int
@@ -170,7 +172,7 @@ instance NFData Fun where rnf x = x `seq` ()
 data Package = Package { packageName    :: !Text
                        , packageVersion :: !Text
                        }
--} 
+-}
 newtype Package = Package { unPackage :: Text }
   deriving (Eq, Ord, Show, Generic, NFData)
 instance DB.Binary Package

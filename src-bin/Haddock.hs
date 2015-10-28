@@ -8,7 +8,6 @@ module Main where
 
 import           Control.Exception
 import           Control.Monad.IO.Class
-import           Data.Monoid
 import           System.Exit
 
 import           GHC

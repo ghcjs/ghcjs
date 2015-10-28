@@ -11,14 +11,10 @@ module GHCJS.Prim.TH.Serialized ( Serialized
                                 , deserializeWithData
                                 ) where
 
-import Control.Applicative
-
 import Data.Binary
 import Data.Bits
 import Data.Data
-import Data.Typeable
 import Data.Typeable.Internal
-import Data.Word
 
 -- | Represents a serialized value of a particular type. Attempts can be made to deserialize it at certain types
 data Serialized = Serialized TypeRep [Word8]

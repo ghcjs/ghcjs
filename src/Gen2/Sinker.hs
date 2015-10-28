@@ -12,13 +12,11 @@ import Module
 import Literal
 import Digraph
 
-import Control.Applicative
 import Control.Lens
 
 import Data.Char
 import Data.List (partition)
 import Data.Maybe
-import Data.Traversable
 
 import Gen2.ClosureInfo
 
@@ -94,7 +92,7 @@ collectUsedOnce binds = intersectUniqSets (usedOnce foldArgs) (usedOnce foldArgs
 
 -- | fold over all id in StgArg used at the top level in an StgRhsCon
 foldArgsTop :: Fold StgBinding Id
-foldArgsTop f e@(StgNonRec b r) 
+foldArgsTop f e@(StgNonRec b r)
   | (StgRhsCon ccs dc args) <- r =
      StgNonRec b . StgRhsCon ccs dc <$> (traverse . foldArgsA) f args
   | otherwise                    = pure e

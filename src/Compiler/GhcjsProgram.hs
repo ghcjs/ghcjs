@@ -10,8 +10,6 @@ module Compiler.GhcjsProgram where
 import           GHC
 import           GhcMonad
 import           DynFlags
-import           PackageConfig hiding (Version)
-import           UniqFM
 import           PrimOp
 import           PrelInfo
 import           IfaceEnv
@@ -29,8 +27,7 @@ import           Control.Monad.IO.Class
 
 import qualified Data.ByteString as B
 import           Data.IORef
-import           Data.List (isPrefixOf, partition)
-import qualified Data.List as L
+import           Data.List (isPrefixOf)
 import qualified Data.Map as M
 import           Data.Maybe
 import           Data.Monoid
