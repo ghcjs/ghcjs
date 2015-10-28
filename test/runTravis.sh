@@ -11,7 +11,7 @@ travis_boot() {
     case "$PART" in
         CORE1)
             ghcjs_boot -j2 --build-stage1-unbooted --no-prof
-            cabal_install random QuickCheck stm syb
+            cabal_install random QuickCheck stm syb parsec parallel
         ;;
         CORE2)
             ghcjs_boot -j2 --build-stage1-unbooted --no-prof
@@ -32,7 +32,7 @@ travis_boot() {
 travis_test() {
     case "$PART" in
         CORE1)
-            run_tests --no-profiling -t ghc -t conc -t integer
+            run_tests --no-profiling -t ghc -t integer
         ;;
         CORE2)
             run_tests --no-profiling -t pkg -t fay
@@ -41,7 +41,7 @@ travis_test() {
             run_tests -t profiling
         ;;
         GHCJS)
-            run_tests --no-profiling -t ffi
+            run_tests --no-profiling -t ffi -t conc
         ;;
         *)
             echo $"Unknown test part: $PART"
