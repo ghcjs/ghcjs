@@ -7,11 +7,6 @@
   Contains code adapted from DsForeign, DsCCall and TcForeign
  -}
 
--- TODO (meiersi): @luite please remove these flags and review the unused
--- cases as part of #438. There might be some bugs lurking there.
-{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
-{-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
-
 module Gen2.Foreign where
 
 import Control.Monad

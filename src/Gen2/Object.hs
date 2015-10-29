@@ -9,10 +9,6 @@
              Rank2Types,
              GeneralizedNewtypeDeriving#-}
 
--- TODO (meiersi): @luite please remove these flags and review the unused
--- cases as part of #438. There might be some bugs lurking there.
-{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
-
 {- |
   Serialization/deserialization for the binary .js_o files
 
