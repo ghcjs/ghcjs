@@ -1,9 +1,5 @@
 {-# LANGUAGE GADTs, ScopedTypeVariables, ImpredicativeTypes, OverloadedStrings, TupleSections #-}
 
--- TODO (meiersi): @luite please remove these flags and review the unused
--- cases as part of #438. There might be some bugs lurking there.
-{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
-
 module Compiler.GhcjsHooks where
 
 import           CorePrep             (corePrepPgm)

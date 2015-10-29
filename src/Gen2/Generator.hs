@@ -1,9 +1,5 @@
 {-# LANGUAGE QuasiQuotes, TupleSections, OverloadedStrings, LambdaCase, MultiWayIf, TemplateHaskell, ViewPatterns, BangPatterns #-}
 
--- TODO (meiersi): remove these flags once a decision has been made regarding
--- #438
-{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
-
 {-
   Main generator module
 -}

@@ -6,10 +6,6 @@
              TupleSections,
              OverloadedStrings #-}
 
--- TODO (meiersi): @luite please remove these flags and review the unused
--- cases as part of #438. There might be some bugs lurking there.
-{-# OPTIONS_GHC -fno-warn-unused-binds #-}
-
 module Gen2.RtsTypes where
 
 import           DynFlags

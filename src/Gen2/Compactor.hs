@@ -4,11 +4,6 @@
              TemplateHaskell,
              OverloadedStrings #-}
 
--- TODO (meiersi): @luite please remove these flags and review the unused
--- cases as part of #438. There might be some bugs lurking there.
-{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
-{-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
-
 {-
   The compactor does link-time optimization. It is much simpler
   than the Optimizer, no fancy dataflow analysis here.

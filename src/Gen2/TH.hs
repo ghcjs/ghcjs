@@ -1,10 +1,6 @@
 {-# LANGUAGE GADTs, OverloadedStrings, LambdaCase, TupleSections,
              ScopedTypeVariables, ViewPatterns #-}
 
--- TODO (meiersi): @luite please remove these flags and review the unused
--- cases as part of #438. There might be some bugs lurking there.
-{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
-
 module Gen2.TH where
 
 {-

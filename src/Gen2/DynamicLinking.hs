@@ -4,10 +4,6 @@
   work in GHCJS
  -}
 
--- TODO (meiersi): remove these flags once a decision has been made regarding
--- #438
-{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
-
 module Gen2.DynamicLinking ( ghcjsLink
                            , ghcjsCompileCoreExpr
                            , ghcjsGetValueSafely

@@ -6,10 +6,6 @@
              DeriveGeneric,
              TemplateHaskell #-}
 
--- TODO (meiersi): @luite please remove these flags and review the unused
--- cases as part of #438. There might be some bugs lurking there.
-{-# OPTIONS_GHC -fno-warn-unused-binds -fno-warn-unused-matches #-}
-
 {- |
   GHCJS linker, collects dependencies from
     the object files (.js_o, js_p_o), which contain linkable
