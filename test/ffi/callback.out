@@ -1,7 +1,58 @@
-a
-b
-c
-d
-e
-f
-
+test1
+>>> cb1
+cb1 result: false
+mvar taken
+>>> cb2
+cb2 result: false
+>>> cb3
+cb3 result: false
+mvar taken
+>>> cb4
+would block
+cb4 result: true
+>>> cb5
+AB
+cb5 result: true
+>>> cb6
+ABBC
+cb6 result: true
+>>> cb7
+ABBCCD
+cb7 result: true
+test2
+>>> cb1
+cb1 result: AB
+>>> cb2
+cb2 result: ABBC
+>>> cb3
+cb3 result: ABBCCD
+>>> cb4
+cb4 exception: Haskell Operation would block
+>>> cb5
+cb5 exception: Haskell Operation would block
+>>> cb6
+cb6 exception: Haskell Operation would block
+>>> cb7
+would block
+cb7 result: AB
+>>> cb8
+would block
+cb8 result: ABBC
+>>> cb9
+would block
+cb9 result: ABBCCD
+test3
+value: abc
+cb1 result: true
+xyzabc
+cb2 result: true
+value: def
+cb1 result: true
+xyzdef
+cb2 result: true
+test3.1
+def
+test3.2
+finalized
+<empty>
+test3.3
