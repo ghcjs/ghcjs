@@ -23,3 +23,7 @@ ghcjs-prim:
     - wouldBlock
     - blockedIndefinitelyOnMVar
     - blockedIndefinitelyOnSTM
+    - ignoreException
+    - setCurrentThreadResultException
+    - setCurrentThreadResultValue
+
