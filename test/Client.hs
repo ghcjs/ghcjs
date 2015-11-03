@@ -37,13 +37,11 @@ data Session = Session { sessionName  :: String
                        , sessionQueue :: (Chan (Maybe ( FilePath
                                                       , FilePath
                                                       , [String]
-                                                      , MVar (Maybe (StdioResult,Integer)))))
+                                                      , MVar (Maybe (StdioResult,Integer))
+                                                      )))
+
                        }
-{-
-data TestArgs = TestArgs { testDir     :: FilePath
-                         , programArgs :: [String]
-                         } deriving (Show, Eq)
--}
+
 wdConfig :: Text -> Int -> WD.Browser -> WD.WDConfig
 wdConfig host port browser =
   WD.defaultConfig { WD.wdHost         = T.unpack host
@@ -62,6 +60,7 @@ startSessions server host port = do
                    , ("Chrome",            WD.chrome)
                    , ("Internet Explorer", WD.ie)
                    , ("Opera",             WD.opera)
+                   , ("Safari",            WD.Browser "safari")
                    ]
   return (catMaybes sessions)
 
@@ -114,29 +113,3 @@ runSessionChan server sess =
       t1 <- liftIO getCurrentTime
       liftIO (putMVar res (fmap (,round (1000 * diffUTCTime t1 t0)) r))
       WD.openPage (serverUrl server "empty.html")
-
-        {-}
-main :: IO ()
-main = do
-  let wdPort = 4444
-      wdHost = "127.0.0.1"
-  serverPort <- Server.startServer "."
-  serverCode <- T.readFile "test.js"
-  let srv = Server serverPort serverCode
-  sessions <- startSessions srv wdHost wdPort
-  forM_ sessions (\sess -> putStrLn (sessionName sess) >> closeSession sess)
--}
-{-main = do
-  js <- T.readFile "test.js"
-  let wdPort = 4444
-      wdHost = "127.0.0.1"
-
-  runSession cfg  $ do
-    finallyClose $ do
-      setScriptTimeout 300000
-      openPage "http://localhost:3000/"
-      res <- asyncJS (map JSArg (["a","bc", "d"]::[Text])) js
-      liftIO $ print (res :: Maybe StdioResult)
-  return ()
--}
--- test
