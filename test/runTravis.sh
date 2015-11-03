@@ -22,6 +22,7 @@ travis_boot() {
         ;;
         GHCJS)
             ghcjs_boot -j1 --no-prof
+            cabal_install random
         ;;
         *)
             echo $"Unknown test part: $PART"

@@ -15,7 +15,8 @@ import           Data.List (partition, isPrefixOf)
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Traversable (sequenceA)
-import qualified Data.ByteString as B
+import qualified Data.ByteString      as B
+import qualified Data.ByteString.Lazy as BL
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -57,6 +58,10 @@ import           Options.Applicative.Types
 import           Options.Applicative.Internal
 import           Options.Applicative.Help hiding ((</>), fullDesc)
 import qualified Options.Applicative.Help as H
+
+import qualified Server
+import qualified Client
+import           Types
 
 default (Text)
 
@@ -105,18 +110,27 @@ setupTests tmpDir = do
   onlyUnoptEnv  <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
   log           <- newIORef []
   let noProf    = taNoProfiling testArgs
+      runDir    = tmpDir </> "run"
+  createDirectory False runDir
+  (wdRunMain, wdStart, wdHtml, browserSessions) <-
+    startBrowserSessions testDir
+                         runDir
+                         (taSeleniumHost testArgs)
+                         (taSeleniumPort testArgs)
   (symbs, base) <- prepareBaseBundle testDir ghcjs []
   (profSymbs, profBase) <- if noProf then return (symbs, base)
                                      else prepareBaseBundle testDir ghcjs ["-prof"]
   let specFile  = testDir </> if taBenchmark testArgs then "benchmarks.yaml" else "tests.yaml"
       symbsFile = tmpDir </> "base.symbs"
       profSymbsFile = tmpDir </> "base.p_symbs"
+
       disUnopt  = onlyOptEnv || taBenchmark testArgs
       disOpt    = onlyUnoptEnv
-      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv noProf (taTravis testArgs) log testDir
+      opts      = TestOpts (onlyOptEnv || taBenchmark testArgs) onlyUnoptEnv noProf (taTravis testArgs) log testDir runDir
                               symbsFile base
                               profSymbsFile profBase
                               ghcjs runhaskell nodePgm smPgm jscPgm
+                              wdRunMain wdStart wdHtml browserSessions
   es <- doesFileExist (encodeString specFile)
   when (not es) (error $ "test suite not found in " ++ toStringIgnore testDir)
   ts <- B.readFile (encodeString specFile) >>=
@@ -130,11 +144,34 @@ setupTests tmpDir = do
   B.writeFile (encodeString profSymbsFile) profSymbs
   when (disUnopt && disOpt) (putStrLn "nothing to do, optimized and unoptimized disabled")
   putStrLn ("running tests in " <> toStringIgnore testDir)
-  defaultMainWithArgs groups leftoverArgs `C.catch` \(e::ExitCode) -> do
-    errs <- readIORef log
-    when (e /= ExitSuccess && not (null errs))
-            (putStrLn "\nFailed tests:" >> mapM_ putStrLn (reverse errs) >> putStrLn "")
-    when (e /= ExitSuccess) (C.throwIO e)
+  (defaultMainWithArgs groups leftoverArgs `C.finally` closeBrowserSessions opts)
+    `C.catch` \(e::ExitCode) -> do
+      errs <- readIORef log
+      when (e /= ExitSuccess && not (null errs))
+              (putStrLn "\nFailed tests:" >> mapM_ putStrLn (reverse errs) >> putStrLn "")
+      when (e /= ExitSuccess) (C.throwIO e)
+
+startBrowserSessions :: FilePath
+                     -> FilePath
+                     -> Maybe String
+                     -> Maybe Int
+                     -> IO (B.ByteString, Text, B.ByteString, [Client.Session])
+startBrowserSessions _ _ (Just "none") _ = return (mempty, mempty, mempty, [])
+startBrowserSessions testRoot serverRoot mbSeleniumHost mbSeleniumPort = do
+  let seleniumHost = fromMaybe "127.0.0.1" mbSeleniumHost
+      seleniumPort = fromMaybe 4444        mbSeleniumPort
+  wdRunMain  <- B.readFile (toStringIgnore $ testRoot </> "wdrunmain.js")
+  wdHtml     <- B.readFile (toStringIgnore $ testRoot </> "wdindex.html")
+  serverPort <- Server.startServer serverRoot -- wdScript
+  wdStart    <- T.readFile (toStringIgnore $ testRoot </> "wdstart.js")
+  sess <- Client.startSessions (Client.Server serverPort wdStart)
+                               (T.pack seleniumHost)
+                               seleniumPort
+  return (wdRunMain, wdStart, wdHtml, sess)
+
+closeBrowserSessions :: TestOpts -> IO ()
+closeBrowserSessions opts = mapM_ Client.closeSession (browsers opts)
+
 
 checkBooted :: FilePath -> IO ()
 checkBooted ghcjs = check `C.catch` \(e::C.SomeException) -> cantRun e
@@ -165,7 +202,7 @@ checkProgram defName userName testArgs = do
   findExecutable (fromMaybe (encodeString defName) userName) >>= \case
     Nothing | Just n <- userName -> error ("could not find program " ++ toStringIgnore defName ++ " at " ++ n)
     Nothing                      -> return Nothing
-    Just p -> do
+    Just p ->
       testProg p testArgs >>= \case
         True  -> return (Just $ fromString p)
         False -> return Nothing
@@ -177,6 +214,8 @@ data TestArgs = TestArgs { taHelp               :: Bool
                          , taWithNode           :: Maybe String
                          , taWithSpiderMonkey   :: Maybe String
                          , taWithJavaScriptCore :: Maybe String
+                         , taSeleniumPort       :: Maybe Int
+                         , taSeleniumHost       :: Maybe String
                          , taWithTests          :: Maybe String
                          , taNoProfiling        :: Bool
                          , taBenchmark          :: Bool
@@ -191,6 +230,8 @@ optParser = TestArgs <$> switch (long "help" <> help "show help message")
                      <*> (optional . strOption) (long "with-node" <> metavar "PROGRAM" <> help "node.js program to use")
                      <*> (optional . strOption) (long "with-spidermonkey" <> metavar "PROGRAM" <> help "SpiderMonkey jsshell program to use")
                      <*> (optional . strOption) (long "with-javascriptcore" <> metavar "PROGRAM" <> help "JavaScriptCore jsc program to use")
+                     <*> (optional . option auto) (long "selenium-port" <> metavar "PORT" <> help "port number of Selenium server")
+                     <*> (optional . strOption) (long "selenium-host" <> metavar "HOSTNAME" <> help "host name of Selenium server")
                      <*> (optional . strOption) (long "with-tests" <> metavar "LOCATION" <> help "location of the test cases")
                      <*> switch (long "no-profiling" <> help "do not run profiling tests")
                      <*> switch (long "benchmark" <> help "run benchmarks instead of regression tests")
@@ -203,6 +244,7 @@ data TestOpts = TestOpts { disableUnopt          :: Bool
                          , travisCI              :: Bool
                          , failedTests           :: IORef [String] -- yes it's ugly but i don't know how to get the data from test-framework
                          , testsuiteLocation     :: FilePath
+                         , runDir                :: FilePath
                          , baseSymbs             :: FilePath
                          , baseJs                :: B.ByteString
                          , profBaseSymbs         :: FilePath
@@ -212,6 +254,10 @@ data TestOpts = TestOpts { disableUnopt          :: Bool
                          , nodeProgram           :: Maybe FilePath
                          , spiderMonkeyProgram   :: Maybe FilePath
                          , javaScriptCoreProgram :: Maybe FilePath
+                         , wdRunMain             :: B.ByteString
+                         , wdStart               :: Text
+                         , wdHtml                :: B.ByteString
+                         , browsers              :: [Client.Session]
                          }
 
 -- settings for a single test
@@ -224,13 +270,15 @@ data TestSettings =
                , tsDisableTravis         :: Bool
                , tsDisabled              :: Bool
                , tsProf                  :: Bool     -- ^ use profiling bundle
+               , tsBrowserOnly           :: Bool     -- ^ only run in browser
+               , tsDisableBrowser        :: Bool
                , tsCompArguments         :: [String] -- ^ command line arguments to pass to compiler
                , tsArguments             :: [String] -- ^ command line arguments to pass to interpreter(node, js)
                , tsCopyFiles             :: [String] -- ^ copy these files to the dir where the test is run
                } deriving (Eq, Show)
 
 instance Default TestSettings where
-  def = TestSettings False False False False False False False False [] [] []
+  def = TestSettings False False False False False False False False False False [] [] []
 
 instance FromJSON TestSettings where
   parseJSON (Object o) = TestSettings <$> o .:? "disableNode"           .!= False
@@ -241,6 +289,8 @@ instance FromJSON TestSettings where
                                       <*> o .:? "disableTravis"         .!= False
                                       <*> o .:? "disabled"              .!= False
                                       <*> o .:? "prof"                  .!= False
+                                      <*> o .:? "browserOnly"           .!= False
+                                      <*> o .:? "disableBrowser"        .!= False
                                       <*> o .:? "compArguments"         .!= []
                                       <*> o .:? "arguments"             .!= []
                                       <*> o .:? "copyFiles"             .!= []
@@ -289,21 +339,6 @@ allTestsIn testOpts testDir groupDir = shelly $ do
       ((maybe False testFirstChar . listToMaybe . encodeString . basename $ file) ||
       (basename file == "Main"))
 
-{-
-  a stdio test tests two things:
-  stdout/stderr/exit output must be either:
-     - the same as filename.out/filename.err/filename.exit (if any exists)
-     - the same as runhaskell output (otherwise)
-  the javascript is run with `js' (SpiderMonkey) and `node` (v8)
-  if they're in $PATH.
--}
-data StdioResult = StdioResult { stdioExit :: ExitCode
-                               , stdioOut :: Text
-                               , stdioErr :: Text
-                               }
-instance Eq StdioResult where
-  (StdioResult e1 ou1 er1) == (StdioResult e2 ou2 er2) =
-    e1 == e2 && (T.strip ou1 == T.strip ou2) && (T.strip er1 == T.strip er2)
 
 outputLimit :: Int
 outputLimit = 4096
@@ -426,10 +461,14 @@ runGhcjsResult opts file = do
         extraFiles <- extraJsFiles file
         cd <- getWorkingDirectory
         -- compile test
-        let outputExe   = cd </> output </> "a"
+        let output'     = runDir opts </> output
+            outputExe   = output' </> "a"
             outputExe'  = outputExe <.> "jsexe"
-            outputBuild = cd </> output </> "build"
+            outputUrl   = output </> "a.jsexe"
+            outputBuild = output' </> "build"
             outputRun   = outputExe' </> ("all.js"::FilePath)
+            outputClient = outputExe' </> ("client.js"::FilePath)
+            outputHtml   = outputExe' </> ("wdindex.html"::FilePath)
             input  = file
             desc = ", optimization: " ++ show optimize
             opt = if optimize then ["-O2"] else []
@@ -448,8 +487,10 @@ runGhcjsResult opts file = do
                   fmap (,name ++ desc) <$>
                       runProcess outputExe' p (pgmArgs++encodeString outputRun:pgmArgs'++args) ""
               | otherwise = return Nothing
-        C.bracket (createDirectory False output)
-                  (\_ -> removeTree output) $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
+            runBrowser session = fmap (,Client.sessionName session ++ desc) <$>
+              Client.runTest (toStringIgnore outputUrl) "wdindex.html" args session
+        C.bracket (createDirectory False output')
+                  (\_ -> removeTree output') $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
           createDirectory False outputBuild
           e <- liftIO $ runProcess (testsuiteLocation opts </> directory file) (ghcjsProgram opts) compileOpts ""
           case e of
@@ -464,15 +505,25 @@ runGhcjsResult opts file = do
           -- combine files with base bundle from incremental link
           [out, lib] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
                                 ["out.js", "lib.js"]
-          let runMain = "\nh$main(h$mainZCMainzimain);\n"
-          B.writeFile (encodeString outputRun) $
-            (if prof then profBaseJs else baseJs) opts <> lib <> out <> runMain
+          let runMain  = "\nh$main(h$mainZCZCMainzimain);\n"
+              allNoRun = (if prof then profBaseJs else baseJs) opts <> lib <> out
+          B.writeFile (encodeString outputRun) (allNoRun <> runMain)
+          B.writeFile (encodeString outputClient) (allNoRun <> wdRunMain opts)
+          B.writeFile (encodeString outputHtml) (wdHtml opts)
           -- run with node.js and SpiderMonkey
-          nodeResult <- runTestPgm "node"           tsDisableNode           nodeProgram           ["--use_strict"] []
-          smResult   <- runTestPgm "SpiderMonkey"   tsDisableSpiderMonkey   spiderMonkeyProgram   ["--strict"]     []
-          jscResult  <- over (traverse . _1 . _1) unmangleJscResult <$>
+          standaloneResults <- if tsBrowserOnly settings
+            then return []
+            else do
+              nodeResult <- runTestPgm "node"           tsDisableNode           nodeProgram           ["--use_strict"] []
+              smResult   <- runTestPgm "SpiderMonkey"   tsDisableSpiderMonkey   spiderMonkeyProgram   ["--strict"]     []
+              jscResult  <- over (traverse . _1 . _1) unmangleJscResult <$>
                         runTestPgm "JavaScriptCore" tsDisableJavaScriptCore javaScriptCoreProgram []               ["--"]
-          return $ catMaybes [nodeResult, smResult, jscResult]
+              return (catMaybes [nodeResult, smResult, jscResult])
+          -- run in browsers through Selenium WebDriver server
+          browserResults <- if tsDisableBrowser settings
+                            then return []
+                            else catMaybes <$> mapM runBrowser (browsers opts)
+          return $ standaloneResults ++ browserResults
 
 -- jsc prefixes all sderr lines with "--> " and does not let us
 -- return a nonzero exit status
