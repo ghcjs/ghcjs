@@ -1,8 +1,8 @@
 env:
-    - GHCVER=7.10.2 TEST_PART=CORE1
-    - GHCVER=7.10.2 TEST_PART=CORE2
-    - GHCVER=7.10.2 TEST_PART=PROFILING
-    - GHCVER=7.10.2 TEST_PART=GHCJS
+    - GHCVER=7.10.3 TEST_PART=CORE1
+    - GHCVER=7.10.3 TEST_PART=CORE2
+    - GHCVER=7.10.3 TEST_PART=PROFILING
+    - GHCVER=7.10.3 TEST_PART=GHCJS
 
 addons:
     apt:
@@ -12,7 +12,7 @@ addons:
             - build-essential
             - nodejs
             - cabal-install-1.22
-            - ghc-7.10.2
+            - ghc-7.10.3
             - alex-3.1.4
             - happy-1.19.5
 
