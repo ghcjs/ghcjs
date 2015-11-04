@@ -109,7 +109,7 @@ runSessionChan server sess =
     processCommand dir page args res = do
       t0 <- liftIO getCurrentTime
       WD.openPage (serverUrl server (dir <> "/" <> page))
-      r <- WD.asyncJS [WD.JSArg args, WD.JSArg dir] (wdScript server)
+      r <- WD.asyncJS [WD.JSArg args, WD.JSArg (serverUrl server dir)] (wdScript server)
       t1 <- liftIO getCurrentTime
       liftIO (putMVar res (fmap (,round (1000 * diffUTCTime t1 t0)) r))
       WD.openPage (serverUrl server "empty.html")

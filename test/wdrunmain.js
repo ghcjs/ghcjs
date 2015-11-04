@@ -9,6 +9,21 @@
               }
  */
 
+function h$fileUrl(baseUrl, currentDir, file) {
+  if(file.substr(0,1) === '/') {
+    return baseUrl + file;
+  } else {
+    if(currentDir.substr(0,1) !== '/') {
+      currentDir = currentDir.substr(1);
+    }
+    if(currentDir === '' || currentDir.substr(-1) === '/') {
+      return baseUrl + currentDir + file;
+    } else {
+      return baseUrl + currentDir + '/' + file;
+    }
+  }
+}
+
 function h$runMainWebDriver(args, baseUrl, cb) {
   // set up command line arguments
   var a = args.slice(0);
@@ -26,6 +41,11 @@ function h$runMainWebDriver(args, baseUrl, cb) {
   h$base_writeStderr = function(fd, fdo, buf, buf_offset, n, c) {
     wdStderr.push(h$decodeUtf8(buf, n, buf_offset));
     c(n);
+  };
+  h$log = function() {
+    var s = '';
+    for(var i=0;i<arguments.length;i++) { s = s + arguments[i]; }
+    wdStdout.push(s+'\n');
   };
   h$errorMsg = function(pat) {
     // poor man's vprintf
@@ -59,6 +79,56 @@ function h$runMainWebDriver(args, baseUrl, cb) {
                      };
     c(fd);
   }
+  /*
+   fixme, still missing:
+     - h$base_stat, h$base_lstat, h$base_access
+   */
+  h$base_lseek = function(fd, pos_1, pos_2, whence, c) {
+    var p = goog.math.Long.fromBits(pos_2, pos_1), p1;
+    var o = h$base_fds[fd];
+    if(!o) {
+      h$setErrno('EBADF');
+      c(-1,-1);
+    } else {
+      switch(whence) {
+      case 0: /* SET */
+        o.pos = p.toNumber();
+        c(p.getHighBits(), p.getLowBits());
+        break;
+      case 1: /* CUR */
+        o.pos += p.toNumber();
+        p1 = goog.math.Long.fromNumber(o.pos);
+        c(p1.getHighBits(), p1.getLowBits());
+        break;
+      case 2: /* END */
+        o.pos = o.data.length + p.toNumber();
+        p1 = goog.math.Long.fromNumber(o.pos);
+        c(p1.getHighBits(), p1.getLowBits());
+        break;
+      default:
+        h$setErrno('EINVAL');
+        c(-1,-1);
+      }
+    }
+  };
+  h$base_fstat = function(fd, stat, stat_off, c) {
+    var f = h$base_fds[fd];
+    if(f) {
+      h$base_fillStat({ mode: 292
+                        , ino: 0
+                        , uid: 0
+                        , gid: 0
+                        , dev: 0
+                        , size: f.data.length
+                      }
+                      , stat
+                      , stat_off);
+      c(0);
+    } else {
+      h$setErrno('ENOENT');
+      c(-1);
+    }
+  };
   h$base_open = function(file, file_off, how, mode, c) {
     var fp = h$decodeUtf8z(file, file_off);
     var u  = h$fileUrl(baseUrl, currentDir, fp);
@@ -73,7 +143,7 @@ function h$runMainWebDriver(args, baseUrl, cb) {
         if(x.response) {
           var fl = files.length;
           files[fl] = { data: new Uint8Array(x.response)
-                      , lenght: x.response.length
+                      , length: x.response.byteLength
                       };
           paths[u] = fl;
           returnNewFd(fl, how, c);
@@ -92,7 +162,7 @@ function h$runMainWebDriver(args, baseUrl, cb) {
     }
   };
 
-  h$readServerFile = function(fd, fdo, buf, buf_offset, n, c) {
+  var readServerFile = function(fd, fdo, buf, buf_offset, n, c) {
     var p = fdo.pos;
     var toRead = Math.min(n, fdo.data.length - p);
     if(toRead > 0) {
@@ -105,7 +175,7 @@ function h$runMainWebDriver(args, baseUrl, cb) {
       c(0);
     }
   };
-  h$writeServerFile = function(fd, fdo, buf, buf_offset, n, c) {
+  var writeServerFile = function(fd, fdo, buf, buf_offset, n, c) {
     var d = fdo.data.data;
     var p = fdo.pos;
     var i;
@@ -127,7 +197,7 @@ function h$runMainWebDriver(args, baseUrl, cb) {
     fdo.data.length = Math.max(fdo.data.length, p + n);
     c(n);
   };
-  h$closeServerFile = function(fd, fdo, c) {
+  var closeServerFile = function(fd, fdo, c) {
     c(0); // keep local changes
   };
 
