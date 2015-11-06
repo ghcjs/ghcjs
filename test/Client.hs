@@ -74,6 +74,7 @@ startSession server host port (bname, browser) = do
     sess mv = WD.runSession (wdConfig host port browser) $
       WD.finallyClose $ do
         WD.setScriptTimeout 300000
+        WD.setPageLoadTimeout 300000
         WD.openPage (serverUrl server "empty.html")
         ch <- liftIO  newChan
         let s = Session bname ch

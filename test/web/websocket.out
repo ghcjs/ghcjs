@@ -1,0 +1,16 @@
+test1
+received message: string: TestTextMessage
+received message: string: TestTextMessage
+received message: string: TestTextMessage
+received message: string: TestTextMessage
+received message: string: TestTextMessage
+received message: ArrayBuffer
+received message: ArrayBuffer
+received message: ArrayBuffer
+received message: ArrayBuffer
+received message: ArrayBuffer
+connection closed, status: 1000 clean: True reason: ""
+test2
+connection closed, status: 1000 clean: True reason: ""
+test3
+user error (WebSocket failed to connect)

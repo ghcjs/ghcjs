@@ -20,6 +20,7 @@ groups:
   pkg:         Tests imported from packages
   profiling:   Profiling tests (cost-centres, stack traces, etc.)
   rts:         Run-time system
+  web:         Web API bindings (ghcjs-base)
 
 requiredPackages:
   - ghc-prim
