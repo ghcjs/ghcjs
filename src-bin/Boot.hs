@@ -550,16 +550,17 @@ installDevelopmentTree :: B ()
 installDevelopmentTree = subTop $ do
   p <- pwd
   msgD info $ "preparing development boot tree"
-  checkpoint' "ghcjs-boot-git" "ghcjs-boot repository already cloned and prepared" $ do
+  checkpoint' "ghcjs-boot-clone" "ghcjs-boot repository already cloned" $ do
     testGit "ghcjs-boot" >>= \case
       Just False -> failWith "ghcjs-boot already exists and is not a git repository"
       Just True  -> do
-        msg info "ghcjs-boot repository already exists but checkpoint not reached, cleaning first, then cloning"
-        rm_rf "ghcjs-boot"
-        initGhcjsBoot
+        msg info "ghcjs-boot repository already exists but checkpoint not reached, continue pulling"
+        cloneGhcjsBoot True
       Nothing    -> do
         msgD info "cloning ghcjs-boot git repository"
-        initGhcjsBoot
+        cloneGhcjsBoot False
+  checkpoint' "ghcjs-boot-prepare" "ghcjs-boot repository already prepared" $ do
+    initGhcjsBoot
   checkpoint' "shims-git" "shims repository already cloned" $ do
     testGit "shims" >>= \case
       Just False -> failWith "shims already exists and is not a git repository"
@@ -571,10 +572,18 @@ installDevelopmentTree = subTop $ do
         msgD info "cloning shims git repository"
         cloneGit shimsDescr "shims" bsrcShimsDevBranch bsrcShimsDev
   where
-    initGhcjsBoot = sub $ do
-      cloneGit bootDescr "ghcjs-boot"  bsrcBootDevBranch bsrcBootDev
-      cd "ghcjs-boot"
+    cloneGhcjsBoot exists = sub $ do
+      if not exists
+         then do
+           cloneGit bootDescr "ghcjs-boot"  bsrcBootDevBranch bsrcBootDev
+           cd "ghcjs-boot"
+         else do
+           cd "ghcjs-boot"
+           git_ ["pull"]
       git_ ["submodule", "update", "--init", "--recursive"]
+    initGhcjsBoot = sub $ do
+      git_ ["reset", "HEAD", "--hard"]
+      git_ ["clean", "-f", "-d"]
       mapM_ patchPackage =<< allPackages
       preparePrimops
       buildGenPrim
