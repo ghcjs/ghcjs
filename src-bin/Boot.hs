@@ -582,6 +582,7 @@ installDevelopmentTree = subTop $ do
            git_ ["pull"]
       git_ ["submodule", "update", "--init", "--recursive"]
     initGhcjsBoot = sub $ do
+      cd "ghcjs-boot"
       git_ ["reset", "HEAD", "--hard"]
       git_ ["clean", "-f", "-d"]
       mapM_ patchPackage =<< allPackages
