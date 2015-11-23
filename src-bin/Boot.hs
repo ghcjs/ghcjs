@@ -583,8 +583,11 @@ installDevelopmentTree = subTop $ do
       git_ ["submodule", "update", "--init", "--recursive"]
     initGhcjsBoot = sub $ do
       cd "ghcjs-boot"
+      -- cleanup first, make it reenterable.
       git_ ["reset", "HEAD", "--hard"]
       git_ ["clean", "-f", "-d"]
+      git_ ["submodule", "deinit", "-f", "."]
+      git_ ["submodule", "update", "--init"]
       mapM_ patchPackage =<< allPackages
       preparePrimops
       buildGenPrim
