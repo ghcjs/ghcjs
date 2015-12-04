@@ -144,8 +144,8 @@ Applications that use the following libraries should compile with GHCJS
 and run in a modern web browser and interface with DOM and JavaScript
 in the browser.
  * [webkit](https://patch-tag.com/r/hamish/webkit) - Bindings for WebKitGTK+ that provide a low level DOM interface.
- * [webkit-javascriptcore](https://github.com/ghcjs/webkit-javascriptcore) - Low level bindings for JavaScriptCore
- * [jsc](https://github.com/ghcjs/jsc) - Higher level interface for JavaScriptCore
+ * [webkit-javascriptcore](https://github.com/gtk2hs/webkit-javascriptcore) - Low level bindings for JavaScriptCore
+ * [jsc](https://github.com/ghcjs/jsaddle) - Higher level interface for JavaScriptCore
 
 You can use these libraries without GHCJS to build a native version of
 your application (it will use WebKitGTK+ to run without a browser).
