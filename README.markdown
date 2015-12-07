@@ -82,6 +82,10 @@ Use `ghcjs-boot` to build the base libraries for `GHCJS`:
 
 Some distros install node.js as `nodejs` instead of `node`. Add `--with-node nodejs` to the `ghcjs-boot` command in that case.
 
+#### Usage in a Stack Project
+
+GHCJS can be used with Stack. Stack can also automatically setup GHCJS. It is also possible to configure a Stack based project to be built with both GHC and GHCJS. For instructions, see http://docs.haskellstack.org/en/stable/ghcjs.html.
+
 Usage
 =====
 
