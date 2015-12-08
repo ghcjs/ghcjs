@@ -84,7 +84,8 @@ Some distros install node.js as `nodejs` instead of `node`. Add `--with-node nod
 
 #### Usage in a Stack Project
 
-GHCJS can be used with Stack. Stack can also automatically setup GHCJS. It is also possible to configure a Stack based project to be built with both GHC and GHCJS. For instructions, see http://docs.haskellstack.org/en/stable/ghcjs.html.
+Stack can be used to build projects with GHCJS, including dependencies from Hackage or from git.  
+Stack can also automatically install GHCJS from a specific sdist tarball.
 
 Usage
 =====
