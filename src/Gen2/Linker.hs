@@ -551,7 +551,7 @@ readSystemDeps :: DynFlags
                -> IO ([PackageKey], Set Fun)
 readSystemDeps dflags depsName requiredFor file = do
   b  <- B.readFile (getLibDir dflags </> file)
-  wi <- readSystemWiredIn dflags
+  wi <- M.toList <$> readSystemWiredIn dflags
   case Yaml.decodeEither b of
     Left err -> error $ "could not read " ++ depsName ++
                         " dependencies from " ++ file ++ ":\n" ++ err
@@ -565,16 +565,22 @@ readSystemDeps dflags depsName requiredFor file = do
 
 
 
-readSystemWiredIn :: DynFlags -> IO [(Text, PackageKey)]
+readSystemWiredIn :: DynFlags -> IO (Map Text PackageKey)
 readSystemWiredIn dflags = do
-  b <- B.readFile filename
-  case Yaml.decodeEither b of
-     Left err -> error $ "could not read wired-in package keys from " ++ filename
-     Right m  -> return . M.toList
-                        . M.union ghcWiredIn -- GHC wired-in package keys override those in the file
-                        . fmap stringToPackageKey $ m
+  wips <- B.readFile filename
+  pkgNakes <- case Yaml.decodeEither wips of
+    Left err   -> fail
+      $ "error parsing wired-in packages file wiredinpkgs.yaml\n" <> err
+    Right p -> return p
+  cfgs <- Packages.readPackageConfigs dflags
+  kvs <- forM pkgNakes $ \name -> case filter ((== name) . Packages.packageNameString) cfgs of
+      []    -> fail $ "Core pkg `" ++ name ++ " is not installed"
+      [pkg] -> return (T.pack name, pkg)
+      _     -> fail $ "Core pkg `" ++ name ++ " is installed multiples times, not sure which one to use"
+  return $ M.union ghcWiredIn -- GHC wired-in package keys override ours
+     $ M.map Packages.packageKey $ M.fromList kvs
   where
-    filename = getLibDir dflags </> "wiredinkeys" <.> "yaml"
+    filename = getLibDir dflags </> "wiredinpkgs" <.> "yaml"
     ghcWiredIn :: Map Text PackageKey
     ghcWiredIn = M.fromList $ map (\k -> (T.pack (packageKeyString k), k))
 #if __GLASGOW_HASKELL__ >= 709
