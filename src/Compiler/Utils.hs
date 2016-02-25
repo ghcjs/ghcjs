@@ -27,6 +27,8 @@ module Compiler.Utils
     , doCpp
       -- * Error messages
     , simpleSrcErr
+      -- * Background processes
+    , runWorkerProcess
     ) where
 
 import           DynFlags
@@ -47,6 +49,7 @@ import           Control.Monad.IO.Class
 
 import           Data.Char
 import           Data.List         (isPrefixOf, foldl')
+import           Data.Maybe
 import           Data.Monoid
 import           Data.Text         (Text)
 import qualified Data.Text         as T
@@ -54,7 +57,9 @@ import qualified Data.Text         as T
 import           System.Directory  (doesFileExist, copyFile)
 import           System.Environment
 import           System.FilePath
-
+import           System.IO
+import           System.Process (proc, CreateProcess(..), StdStream(..), ProcessHandle)
+import           System.Process.Internals (createProcess_)
 import           Gen2.Utils
 
 touchFile :: DynFlags -> FilePath -> IO ()
@@ -234,3 +239,22 @@ substPatterns single double = unmatched
                 | otherwise            = a <> unmatched d
           where (a,b)  = T.breakOn "{{" l
                 (_c,d) = T.breakOn "}}" b
+
+
+runWorkerProcess :: FilePath                -- ^ Filename of the executable (see 'RawCommand' for details)
+                 -> [String]                -- ^ Arguments to pass to the executable
+                 -> Maybe FilePath          -- ^ Optional path to the working directory
+                 -> Maybe [(String,String)] -- ^ Optional environment (otherwise inherit)
+                 -> IO (Handle,Handle,Handle,ProcessHandle)
+runWorkerProcess cmd args mb_cwd mb_env = do
+  (mb_in, mb_out, mb_err, p) <-
+    createProcess_ "runWorkerProcess" $
+      (proc cmd args) { std_in        = CreatePipe
+                      , std_out       = CreatePipe
+                      , std_err       = CreatePipe
+                      , cwd           = mb_cwd
+                      , env           = mb_env
+                      , delegate_ctlc = False
+                      , create_group  = True
+                      }               
+  return (fromJust mb_in, fromJust mb_out, fromJust mb_err, p)

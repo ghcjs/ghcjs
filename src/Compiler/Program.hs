@@ -33,9 +33,9 @@ import LoadIface        ( showIface )
 import HscMain          ( newHscEnv )
 import DriverPipeline   ( compileFile )
 import DriverMkDepend   ( doMkDependHS )
-#ifdef GHCI
-import InteractiveUI    ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
-#endif
+-- #ifdef GHCI
+import Compiler.InteractiveUI    ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
+-- #endif
 
 
 -- Various other random stuff that we need
@@ -300,11 +300,11 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   return skipJs
 
 ghciUI :: [(FilePath, Maybe Phase)] -> Maybe [String] -> Ghc ()
-#ifndef GHCI
-ghciUI _ _ = throwGhcException (CmdLineError "not built for interactive use")
-#else
+-- #ifndef GHCI
+-- ghciUI _ _ = throwGhcException (CmdLineError "not built for interactive use")
+-- #else
 ghciUI     = interactiveUI defaultGhciSettings
-#endif
+-- #endif
 
 -- -----------------------------------------------------------------------------
 -- Splitting arguments into source files and object files.  This is where we
@@ -375,16 +375,18 @@ checkOptions settings mode dflags srcs objs js_objs = do
    when (notNull (filter wayRTSOnly (ways dflags))
          && isInterpretiveMode mode) $
         hPutStrLn stderr ("Warning: -debug, -threaded and -ticky are ignored by GHCi")
-
+{-
    when (isInterpretiveMode mode) $
       do throwGhcException (UsageError
                    "--interactive is not yet supported.")
-
+-}
         -- -prof and --interactive are not a good combination
+        {-
    when ((filter (not . wayRTSOnly) (ways dflags) /= interpWays)
          && isInterpretiveMode mode) $
       do throwGhcException (UsageError
                    "--interactive can't be used with -prof or -unreg.")
+           -}
         -- -ohi sanity check
    if (isJust (outputHi dflags) &&
       (isCompManagerMode mode || srcs `lengthExceeds` 1))
@@ -575,11 +577,11 @@ isDoMakeMode :: Mode -> Bool
 isDoMakeMode (Right (Right DoMake)) = True
 isDoMakeMode _ = False
 
-#ifdef GHCI
+-- #ifdef GHCI
 isInteractiveMode :: PostLoadMode -> Bool
 isInteractiveMode DoInteractive = True
 isInteractiveMode _             = False
-#endif
+-- #endif
 
 -- isInterpretiveMode: byte-code compiler involved
 isInterpretiveMode :: PostLoadMode -> Bool
@@ -809,10 +811,10 @@ showBanner :: PostLoadMode -> DynFlags -> IO ()
 showBanner _postLoadMode dflags = do
    let verb = verbosity dflags
 
-#ifdef GHCI
+-- #ifdef GHCI
    -- Show the GHCi banner
    when (isInteractiveMode _postLoadMode && verb >= 1) $ putStrLn ghciWelcomeMsg
-#endif
+-- #endif
 
    -- Display details of the configuration in verbose mode
    when (verb >= 2) $

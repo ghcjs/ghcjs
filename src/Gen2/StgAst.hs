@@ -40,6 +40,8 @@ import qualified Var
 import           Coercion
 import           CoAxiom
 import           Gen2.Utils
+import qualified CoreSyn as Core
+import Coercion
 
 -- this is a hack to be able to use pprShow in a Show instance, should be removed
 {-# NOINLINE hackPprDflags #-}
@@ -84,7 +86,7 @@ instance Show OccName where show = occNameString
 instance Show DataCon where show d = show (dataConName d)
 instance Show Var where show v = "(" ++ show (Var.varName v) ++ "[" ++
                                  encodeUnique (getKey (getUnique v))
-                                 ++ "] <" ++ show (idDetails v) ++ "> :: " ++ show (Var.varType v) ++ ")"
+                                 ++ "] <" {- ++ show (idDetails v) -} ++ "> :: " ++ show (Var.varType v) ++ ")"
 instance Show IdDetails where
   show VanillaId          = "VanillaId"
   show (RecSelId {})      = "RecSelId"
