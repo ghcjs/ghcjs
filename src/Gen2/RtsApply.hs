@@ -156,7 +156,7 @@ genericStackApply dflags s =
             var p = h$paps[myRegs];
             var dat = [`R1`,(((`arity` >> 8)-myRegs))*256+ar-myAr];
             for(var i=0;i<myRegs;i++) {
-               dat.push(`Stack`[`Sp`-i-1]);
+               dat.push(`Stack`[`Sp`-i-2]);
             }
             `Sp` = `Sp` - myRegs - 2;
             `R1` = `initClosure dflags p dat jCurrentCCS`;
