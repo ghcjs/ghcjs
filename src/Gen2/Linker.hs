@@ -203,14 +203,14 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
       c   <- newMVar M.empty
       let rtsPkgs     =  map stringToPackageKey
                              ["@rts", "@rts_" ++ rtsBuildTag dflags]
-          pkgs'       = nub (rtsPkgs ++ rdPkgs ++ objPkgs ++ pkgs)
+          pkgs'       = nub (rtsPkgs ++ rdPkgs ++ reverse objPkgs ++ reverse pkgs)
           pkgs''      = filter (not . (isAlreadyLinked base)) pkgs'
           pkgLibPaths = mkPkgLibPaths pkgs'
           getPkgLibPaths :: PackageKey -> ([FilePath],[String])
-          getPkgLibPaths k = fromMaybe ([],[]) (M.lookup k pkgLibPaths)
+          getPkgLibPaths k = fromMaybe ([],[]) (lookup k pkgLibPaths)
       (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps env =<<
-          getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs')
-      pkgArchs <- getPackageArchives dflags (M.elems $ mkPkgLibPaths pkgs'')
+          getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs')
+      pkgArchs <- getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs'')
       (allDeps, code) <-
         collectDeps dflags
                     (objDepsMap `M.union` archsDepsMap)
@@ -232,10 +232,9 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
     isAlreadyLinked :: Base -> PackageKey -> Bool
     isAlreadyLinked b pkg = mkPackage pkg `elem` basePkgs b
 
-    mkPkgLibPaths :: [PackageKey] -> Map PackageKey ([FilePath],[String])
+    mkPkgLibPaths :: [PackageKey] -> [(PackageKey, ([FilePath],[String]))]
     mkPkgLibPaths
-      = M.fromList
-      . map (\k -> ( k
+      = map (\k -> ( k
                    , (getPackageLibDirs dflags k, getPackageHsLibs dflags k)
                    ))
 
