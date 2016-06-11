@@ -206,8 +206,6 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
           pkgs'       = nub (rtsPkgs ++ rdPkgs ++ reverse objPkgs ++ reverse pkgs)
           pkgs''      = filter (not . (isAlreadyLinked base)) pkgs'
           pkgLibPaths = mkPkgLibPaths pkgs'
-          getPkgLibPaths :: PackageKey -> ([FilePath],[String])
-          getPkgLibPaths k = fromMaybe ([],[]) (lookup k pkgLibPaths)
       (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps env =<<
           getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs')
       pkgArchs <- getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs'')
