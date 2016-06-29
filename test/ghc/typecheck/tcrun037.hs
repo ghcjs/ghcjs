@@ -1,4 +1,4 @@
-
+{-# LANGUAGE ConstrainedClassMethods #-}
 
 module Main where
 
@@ -11,3 +11,4 @@ instance C Bool where
   op x y = show x ++ " " ++ show y
 
 main = do { putStrLn (op True 'x'); putStrLn (op False (3::Int)) } 
+

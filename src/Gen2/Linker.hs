@@ -16,7 +16,10 @@ module Gen2.Linker where
 import           DynFlags
 import           Encoding
 import           Panic
-#if __GLASGOW_HASKELL__ >= 709
+#if __GLASGOW_HASKELL__ >= 711
+import           Module (mkModuleName, wiredInUnitIds)
+import           PackageConfig (sourcePackageId, unitId)
+#elif __GLASGOW_HASKELL__ >= 709
 import           Module (mkModuleName, wiredInPackageKeys)
 import           PackageConfig (sourcePackageId, packageKey)
 #else
@@ -190,7 +193,6 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
             concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
           rootMods = map (T.unpack . head) . group . sort . map funModule . S.toList $ roots
           objPkgs = map toPackageKey $ nub (map fst $ M.keys objDepsMap)
-      -- putStrLn ("objects: " ++ show (traverse . _1 %~ packageKeyString $ pkgs))
       compilationProgressMsg dflags $
         case gsGenBase settings of
           Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ baseMod ++ ")"
@@ -577,7 +579,9 @@ readSystemWiredIn dflags = do
     filename = getLibDir dflags </> "wiredinkeys" <.> "yaml"
     ghcWiredIn :: Map Text PackageKey
     ghcWiredIn = M.fromList $ map (\k -> (T.pack (packageKeyString k), k))
-#if __GLASGOW_HASKELL__ >= 709
+#if __GLASGOW_HASKELL__ >= 711
+                                  wiredInUnitIds
+#elif __GLASGOW_HASKELL__ >= 709
                                   wiredInPackageKeys
 #else
                                   [ Mod.primPackageId, Mod.integerPackageId, Mod.basePackageId
@@ -628,7 +632,9 @@ staticDeps dflags wiredin sdeps = mkDeps sdeps
                                   T.unpack p ++ "' could not be found: "  ++
                                   packageKeyString k
                Just conf ->
-#if __GLASGOW_HASKELL__ >= 709
+#if __GLASGOW_HASKELL__ >= 711
+                 let k' = unitId conf
+#elif __GLASGOW_HASKELL__ >= 709
                  let k' = packageKey conf
 #else
                  let k' = Packages.packageConfigId conf
@@ -651,7 +657,12 @@ closePackageDeps dflags pkgs
     notFound = error "closePackageDeps: package not found"
     deps :: PackageKey -> [PackageKey]
     deps =
-#if __GLASGOW_HASKELL__ >= 709
+#if __GLASGOW_HASKELL__ >= 711
+--           map (Packages.resolveInstalledPackageId dflags)
+           Packages.depends
+         . fromMaybe notFound
+         . Packages.lookupPackage dflags
+#elif __GLASGOW_HASKELL__ >= 709
            map (Packages.resolveInstalledPackageId dflags)
          . Packages.depends
          . fromMaybe notFound
@@ -688,8 +699,9 @@ loadArchiveDeps' :: [FilePath]
                  -> IO (Map (Package, Module) (Deps, DepsLocation), [LinkableUnit])
 loadArchiveDeps' archives = do
   archDeps <- forM archives $ \file ->
-    Ar.withAllObjects file $ \modulename h _len -> (,ArchiveFile file) <$>
-        hReadDeps (file ++ ':':moduleNameString modulename) h
+    Ar.withAllObjects file $ \modulename h _len ->
+        (,ArchiveFile file) <$>
+          hReadDeps (file ++ ':':moduleNameString modulename) h
   return (prepareLoadedDeps $ concat archDeps)
 
 prepareLoadedDeps :: [(Deps, DepsLocation)]

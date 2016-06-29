@@ -1,1 +1,3 @@
 Void ==
+CallStack (from HasCallStack):
+  error, called at t5628.hs:5:1 in main:Main

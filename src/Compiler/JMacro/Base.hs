@@ -55,7 +55,6 @@ import qualified Data.Text as T
 import Data.Data
 import Data.Hashable (Hashable)
 import Data.Monoid (Monoid, mappend, mempty)
-import Data.Text.Binary ()
 
 import GHC.Generics
 

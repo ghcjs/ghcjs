@@ -86,6 +86,8 @@ import qualified Gen2.Object    as Object
 import           Gen2.Sinker
 import           Gen2.Profiling
 
+import qualified Debug.Trace
+
 data DependencyDataCache = DDC
          { _ddcModule   :: !(IntMap        Object.Package)  -- Unique Module -> Object.Package
          , _ddcId       :: !(IntMap        Object.Fun)      -- Unique Id     -> Object.Fun (only to other modules)
@@ -475,9 +477,9 @@ genToplevelDecl i rhs = do
 
 genToplevelConEntry :: Id -> StgRhs -> C
 genToplevelConEntry i (StgRhsCon _cc con _args)
-    | i `elem` dataConImplicitIds con = genSetConInfo i con NoSRT
+    | i `elem` [ i' | AnId i' <- dataConImplicitTyThings con ] = genSetConInfo i con NoSRT
 genToplevelConEntry i (StgRhsClosure _cc _bi [] _upd_flag srt _args (StgConApp dc _cargs))
-    | i `elem` dataConImplicitIds dc = genSetConInfo i dc srt
+    | i `elem` [ i' | AnId i' <- dataConImplicitTyThings dc ] = genSetConInfo i dc srt
 genToplevelConEntry _ _ = mempty
 
 genStaticRefs :: SRT -> G CIStatic
@@ -486,8 +488,10 @@ genStaticRefs (SRTEntries s) = do
   unfloated <- use gsUnfloated
   let xs = filter (\x -> not $ elemUFM x unfloated) (uniqSetToList s)
   CIStaticRefs <$> mapM getStaticRef xs
+#if __GLASGOW_HASKELL__ < 711
 genStaticRefs (SRT{}) =
   panic "genStaticRefs: unexpected SRT"
+#endif
 
 getStaticRef :: Id -> G Text
 getStaticRef = fmap (itxt.head) . genIdsI
@@ -495,10 +499,11 @@ getStaticRef = fmap (itxt.head) . genIdsI
 genToplevelRhs :: Id
                -> StgRhs
                -> C
+-- genTopLevelRhs _ _ | Debug.Trace.trace "genToplevelRhs" False = error "genTopLevelRhs"
 -- special cases
 genToplevelRhs i (StgRhsClosure cc _bi _ upd _ args body)
   -- foreign exports
-  | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget t _ _) _ _)) _)
+  | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _)) _)
      [StgLitArg (MachInt _is_js_conv), StgLitArg (MachStr _js_name), StgVarArg _tgt] _) <- body,
      t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
   -- top-level strings
@@ -549,28 +554,37 @@ loadLiveFun l = do
 dataFields :: Array Int Ident
 dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..1024])
 
-genBody :: ExprCtx -> Id -> StgReg -> [Id] -> StgExpr -> C
-genBody ctx i startReg args e = do
+genBody ctx i startReg args e =
+  {- Debug.Trace.trace ("genBody: " ++ show args) -} (genBody0 ctx i startReg args e)
+
+genBody0 :: ExprCtx -> Id -> StgReg -> [Id] -> StgExpr -> C
+genBody0 ctx i startReg args e = do
   la <- loadArgs startReg args
   let ids = take (resultSize args $ idType i) (map toJExpr $ enumFrom R1)
   (e, _r) <- genExpr (ctx & ctxTarget .~ ids) e
   return $ la <> e <> [j| return `Stack`[`Sp`]; |]
 
 -- find the result type after applying the function to the arguments
-resultSize :: [Id] -> Type -> Int
-resultSize (x:xs) t
-  | UbxTupleRep _ <- repType (idType x) = panic "genBody: unboxed tuple argument"
-  | otherwise =
+resultSize xs t = {- Debug.Trace.trace "resultSize" -} (resultSize0 xs t)
+
+resultSize0 :: [Id] -> Type -> Int
+resultSize0 (x:xs) t
+  | UbxTupleRep _ <- {- Debug.Trace.trace "resultSize0 ubx" -} (repType (idType x)) = panic "genBody: unboxed tuple argument"
+  | otherwise = {- Debug.Trace.trace "resultSize0 not" $ -}
       case repType t of
        (UnaryRep t') | isFunTy t' ->
                          let (fa,fr) = splitFunTy t'
                              t''     = mkFunTys (flattenRepType $ repType fa) fr
-                         in  resultSize xs (snd . splitFunTy $ t'')
+                         in  {- Debug.Trace.trace ("resultSize0 fun: " ++ show (fa, fr)) $ -}
+                             resultSize0 xs (snd . splitFunTy $ t'')
        _                          -> 1 -- possibly newtype family, must be boxed
-resultSize [] t =
+resultSize0 [] t
+  | isRuntimeRepKindedTy t = 0
+  | isRuntimeRepTy t = 0
+  | otherwise = {- Debug.Trace.trace "resultSize0 eol" $ -}
   case repType t of
-    UnaryRep t'     -> typeSize t'
-    UbxTupleRep tys -> sum (map typeSize tys)
+    UnaryRep t'     -> {- Debug.Trace.trace ("resultSize0 eol2: " ++ show t') $ -} typeSize t'
+    UbxTupleRep tys -> {- Debug.Trace.trace ("resultSize0 eol3: " ++ show tys) $ -} sum (map typeSize tys)
 
 loadArgs :: StgReg -> [Id] -> C
 loadArgs start args = do
@@ -594,7 +608,7 @@ branchResult (_:es)
   | otherwise             = ExprInline Nothing
 
 genExpr :: ExprCtx -> StgExpr -> G (JStat, ExprResult)
-genExpr top (StgApp f args) = genApp top f args
+genExpr top (StgApp f args) = {- Debug.Trace.trace "genExpr -> genApp" -} (genApp top f args)
 genExpr top (StgLit l) = (,ExprInline Nothing)
                              . assignAllCh ("genExpr StgLit " ++ show (top ^. ctxTarget))
                                            (top ^. ctxTarget)
@@ -885,9 +899,11 @@ genEntry ctx i (StgRhsClosure cc _bi live upd_flag srt args body) = resetSlots $
 
 genEntryType :: [Id] -> G CIType
 genEntryType []   = return CIThunk
-genEntryType args = do
+genEntryType args0 = {- Debug.Trace.trace "genEntryType" $ -} do
   args' <- mapM genIdArg args
   return $ CIFun (length args) (length $ concat args')
+  where
+    args = filter (not . isRuntimeRepKindedTy . idType) args0
 
 genSetConInfo :: Id -> DataCon -> SRT -> C
 genSetConInfo i d srt = do
@@ -1093,7 +1109,7 @@ genAlts :: ExprCtx        -- ^ lhs to assign expression result to
         -> [StgAlt]       -- ^ the alternatives
         -> G (JStat, ExprResult)
 genAlts top e PolyAlt _ [alt] = (\(_,s,r) -> (s,r)) <$> mkAlgBranch top e alt
-genAlts _   _ PolyAlt _ _ = error "genAlts: multiple polyalt"
+genAlts _   _ PolyAlt _ _ = panic "genAlts: multiple polyalt"
 genAlts top e (PrimAlt _tc) _ [(_, bs, _use, expr)] = do
   ie       <- genIds e
   dids     <- mconcat (map declIds bs)
@@ -1110,7 +1126,7 @@ genAlts top e (UbxTupAlt n) _ [(_, bs, _use, expr)] = do
   l        <- loadUbxTup eids bs n
   (ej, er) <- genExpr top expr
   return (l <> ej, er)
-genAlts _   _ (AlgAlt tc) _ [_alt] | isUnboxedTupleTyCon tc = error "genAlts: unexpected unboxed tuple"
+genAlts _   _ (AlgAlt tc) _ [_alt] | isUnboxedTupleTyCon tc = panic "genAlts: unexpected unboxed tuple"
 genAlts top _ (AlgAlt _tc) (Just es) [(DataAlt dc, bs, use, expr)] | not (isUnboxableCon dc) = do
   bsi <- mapM genIdsI bs
   let bus  = concat $ zipWith (\bss u -> zip bss (repeat u)) bsi use
@@ -1136,7 +1152,7 @@ genAlts top e (AlgAlt _tc) _ alts = do
       return (mkSwitch [je| `ei`.f.a |] brs, r)
 genAlts _  _ a _ l = do
   ap <- showPpr' a
-  error $ "genAlts: unhandled case variant: " ++ ap ++ " (" ++ show (length l) ++ ")"
+  panic $ "genAlts: unhandled case variant: " ++ ap ++ " (" ++ show (length l) ++ ")"
 
 -- if one branch ends in a continuation but another is inline, we need to adjust the inline branch
 -- to use the continuation convention
@@ -1165,26 +1181,26 @@ mkSwitch e cases
     | [(Just c1,s1,_),(_,s2,_)] <- n, null d = IfStat [je| `e` === `c1` |] s1 s2
     | null d                                 = SwitchStat e (map addBreak (init n)) (last n ^. _2)
     | [(_,d0,_)] <- d                        = SwitchStat e (map addBreak n) d0
-    | otherwise                              = error "mkSwitch: multiple default cases"
+    | otherwise                              = panic "mkSwitch: multiple default cases"
     where
       addBreak (Just c, s, _) = (c, s <> [j| break; |])
-      addBreak _              = error "mkSwitch: addBreak"
+      addBreak _              = panic "mkSwitch: addBreak"
       (n,d) = partition (isJust . (^. _1)) cases
 
 -- if/else for pattern matching on things that js cannot switch on
 mkIfElse :: [JExpr] -> [(Maybe [JExpr], JStat, ExprResult)] -> JStat
 mkIfElse e s = go (reverse $ sort s)
     where
-      go [] = error "mkIfElse: empty expression list"
+      go [] = panic "mkIfElse: empty expression list"
       go [(_, s, _)] = s -- only one 'nothing' allowed
       go ((Just e0, s, _):xs) =
           [j| if( `mkEq e e0` ) { `s` } else { `go xs` } |]
-      go _ = error "mkIfElse: multiple DEFAULT cases"
+      go _ = panic "mkIfElse: multiple DEFAULT cases"
 
 mkEq :: [JExpr] -> [JExpr] -> JExpr
 mkEq es1 es2
   | length es1 == length es2 = foldl1 and (zipWith eq es1 es2)
-  | otherwise                = error "mkEq: incompatible expressions"
+  | otherwise                = panic "mkEq: incompatible expressions"
     where
       and e1 e2 = [je| `e1` && `e2`  |]
       eq  e1 e2 = [je| `e1` === `e2` |]
@@ -1293,7 +1309,7 @@ genArg a@(StgVarArg i) = do
            e  <- enterDataCon dc
            cs <- use gsSettings
            return [allocDynamicE cs e as Nothing] -- FIXME: ccs
-     unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
+     unfloated x = panic ("genArg: unexpected unfloated expression: " ++ show x)
 
 genStaticArg :: StgArg -> G [StaticArg]
 genStaticArg (StgLitArg l) = map StaticLitArg <$> genStaticLit l
@@ -1321,7 +1337,7 @@ genStaticArg a@(StgVarArg i) = do
            as       <- concat <$> mapM genStaticArg args
            (TxtI e) <- enterDataConI dc
            return [StaticConArg e as]
-     unfloated x = error ("genArg: unexpected unfloated expression: " ++ show x)
+     unfloated x = panic ("genArg: unexpected unfloated expression: " ++ show x)
 
 allocateStaticList :: [StgArg] -> StgArg -> G StaticVal
 allocateStaticList xs a@(StgVarArg i)
@@ -1342,8 +1358,8 @@ allocateStaticList xs a@(StgVarArg i)
       r' <- genStaticArg r
       case r' of
         [StaticObjArg ri] -> return (StaticList as (Just ri))
-        _                 -> error ("allocateStaticList: invalid argument (tail): " ++ show xs ++ " " ++ show r)
-allocateStaticList _ _ = error "allocateStaticList: unexpected literal in list"
+        _                 -> panic ("allocateStaticList: invalid argument (tail): " ++ show xs ++ " " ++ show r)
+allocateStaticList _ _ = panic "allocateStaticList: unexpected literal in list"
 
 -- generate arg to be passed to FFI call, with marshalling JStat to be run before the call
 -- currently marshalling:
@@ -1353,7 +1369,7 @@ genFFIArg :: StgArg -> G (JStat, [JExpr])
 genFFIArg (StgLitArg (MachStr str)) =
   case decodeModifiedUTF8 str of
     Just t -> return (mempty, [toJExpr $ T.unpack t])
-    _      -> error "genFFIArg: cannot encode FFI string literal"
+    _      -> panic "genFFIArg: cannot encode FFI string literal"
 genFFIArg (StgLitArg l) = (mempty,) <$> genLit l
 genFFIArg a@(StgVarArg i)
     | isVoid r                  = return (mempty, [])
@@ -1427,7 +1443,7 @@ genLit (MachDouble r)    = return [ [je| `r2d r` |] ]
 genLit (MachLabel name _size fod)
   | fod == IsFunction = return [ [je| h$mkFunctionPtr(`TxtI . T.pack $ "h$" ++ unpackFS name`) |], [je| 0 |] ]
   | otherwise         = return [ iex (TxtI . T.pack $ "h$" ++ unpackFS name), [je| 0 |] ]
-genLit (LitInteger _i _id) = error ("genLit: LitInteger") -- removed by CorePrep
+genLit (LitInteger _i _id) =panic ("genLit: LitInteger") -- removed by CorePrep
 
 -- | generate a literal for the static init tables
 genStaticLit :: Literal -> G [StaticLit]
@@ -1445,7 +1461,7 @@ genStaticLit (MachFloat r)        = return [ DoubleLit . SaneDouble . r2d $ r ]
 genStaticLit (MachDouble r)       = return [ DoubleLit . SaneDouble . r2d $ r ]
 genStaticLit (MachLabel name _size fod) =
   return [ LabelLit (fod == IsFunction) (T.pack $ "h$" ++ unpackFS name) , IntLit 0 ]
-genStaticLit l = error ("genStaticLit: " ++ show l)
+genStaticLit l = panic ("genStaticLit: " ++ show l)
 
 -- make a signed 32 bit int from this unsigned one, lower 32 bits
 toSigned :: Integer -> Integer
@@ -1461,18 +1477,19 @@ genSingleLit l = do
   es <- genLit l
   case es of
     [e] -> return e
-    _   -> error "genSingleLit: expected single-variable literal"
+    _   -> panic "genSingleLit: expected single-variable literal"
 
 genCon :: ExprCtx -> DataCon -> [JExpr] -> C
 genCon tgt con args
   | isUnboxedTupleCon con && length (tgt^.ctxTarget) == length args =
       return $ assignAll (tgt ^. ctxTarget) args
 genCon tgt con args | isUnboxedTupleCon con =
-  error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt ^. ctxTop, length args))
+  panic ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt ^. ctxTop, length args))
 genCon tgt con args | [ValExpr (JVar tgti)] <- tgt ^. ctxTarget =
   allocCon tgti con currentCCS args
 genCon tgt con args =
-  error ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt ^. ctxTop, length args))
+  return mempty -- fixme, do we get missing VecRep things because of this?
+  -- panic ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt ^. ctxTop, length args))
 
 allocCon :: Ident -> DataCon -> CostCentreStack -> [JExpr] -> C
 allocCon to con cc xs
@@ -1503,7 +1520,7 @@ allocUnboxedConStatic con []
 allocUnboxedConStatic _   [a@(StaticLitArg (IntLit _i))]    = a
 allocUnboxedConStatic _   [a@(StaticLitArg (DoubleLit _d))] = a
 allocUnboxedConStatic con _                                =
-  error ("allocUnboxedConStatic: not an unboxed constructor: " ++ show con)
+  panic ("allocUnboxedConStatic: not an unboxed constructor: " ++ show con)
 
 allocConStatic :: Ident -> CostCentreStack -> DataCon -> [GenStgArg Id] {- -> Bool -} -> G ()
 allocConStatic (TxtI to) cc con args -- isRecursive
@@ -1527,7 +1544,7 @@ allocConStatic (TxtI to) cc con args -- isRecursive
           StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i) cc'
           StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b) cc'
           StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d) cc'
-          _                          -> error $ "allocConStatic: invalid unboxed literal: " ++ show x
+          _                          -> panic $ "allocConStatic: invalid unboxed literal: " ++ show x
     allocConStatic' cc' xs =
            if con == consDataCon
               then flip (emitStatic to) cc' =<< allocateStaticList [args !! 0] (args !! 1)
@@ -1599,7 +1616,7 @@ argJSStringLitUnfolding (StgVarArg v)
 argJSStringLitUnfolding _ = Nothing
 
 genForeignCall :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, ExprResult)
-genForeignCall (CCall (CCallSpec (StaticTarget tgt Nothing True) JavaScriptCallConv PlayRisky)) t [obj] args
+genForeignCall (CCall (CCallSpec (StaticTarget _ tgt Nothing True) JavaScriptCallConv PlayRisky)) t [obj] args
   | tgt == fsLit "h$buildObject", Just pairs <- getObjectKeyValuePairs args = do
       pairs' <- mapM (\(k,v) -> genArg v >>= \([v']) -> return (k,v')) pairs
       return (assignj obj (ValExpr (JHash $ M.fromList pairs')), ExprInline Nothing)
@@ -1608,7 +1625,7 @@ genForeignCall (CCall (CCallSpec ccTarget cconv safety)) t tgt args =
   where
     isJsCc = cconv == JavaScriptCallConv
 
-    lbl | (StaticTarget clbl _mpkg _isFunPtr) <- ccTarget
+    lbl | (StaticTarget _ clbl _mpkg _isFunPtr) <- ccTarget
             = let clbl' = unpackFS clbl
               in  if | isJsCc -> clbl'
                      | wrapperPrefix `L.isPrefixOf` clbl' ->

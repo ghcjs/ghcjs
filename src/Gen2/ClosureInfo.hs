@@ -84,7 +84,7 @@ varSize AddrV = 2 -- obj/array, offset
 varSize _     = 1
 
 typeSize :: Type -> Int
-typeSize = sum . map varSize . typeVt
+typeSize t = sum . map varSize . typeVt $ t
 
 isVoid :: VarType -> Bool
 isVoid VoidV = True
@@ -113,15 +113,18 @@ idVt :: Id -> [VarType]
 idVt = typeVt . idType
 
 typeVt :: Type -> [VarType]
+typeVt t | isRuntimeRepKindedTy t || isRuntimeRepTy t = []
 typeVt t = case repType t of
-             UbxTupleRep uts   -> concatMap typeVt uts
+             UbxTupleRep uts   -> concatMap typeVt (dropRuntimeRepArgs uts)
              UnaryRep ut       -> [uTypeVt ut]
 
 -- only use if you know it's not an unboxed tuple
 uTypeVt :: UnaryType -> VarType
 uTypeVt ut
+  | isRuntimeRepKindedTy ut = VoidV
+  | isRuntimeRepTy ut = VoidV
   | isPrimitiveType ut = primTypeVt ut
-  | otherwise          = primRepVt . typePrimRep $ ut
+  | otherwise          = primRepVt . typePrimRep' $ ut
   where
     primRepVt VoidRep    = VoidV
     primRepVt PtrRep     = PtrV -- fixme does ByteArray# ever map to this?
@@ -133,6 +136,36 @@ uTypeVt ut
     primRepVt FloatRep   = DoubleV
     primRepVt DoubleRep  = DoubleV
     primRepVt (VecRep{}) = error "uTypeVt: vector types are unsupported"
+
+typePrimRep' :: UnaryType -> PrimRep
+typePrimRep' ty = kindPrimRep' (typeKind ty)
+
+-- | Find the primitive representation of a 'TyCon'. Defined here to
+-- avoid module loops. Call this only on unlifted tycons.
+tyConPrimRep' :: TyCon -> PrimRep
+tyConPrimRep' tc = kindPrimRep' res_kind
+  where
+    res_kind = tyConResKind tc
+
+-- | Take a kind (of shape @TYPE rr@) and produce the 'PrimRep' of values
+-- of types of this kind.
+kindPrimRep' :: Kind -> PrimRep
+kindPrimRep' ki | Just ki' <- coreViewOneStarKind ki = kindPrimRep' ki'
+kindPrimRep' ki -- (TyConApp typ [runtime_rep])
+  | Just (typ, [runtime_rep]) <- repSplitTyConApp_maybe ki
+  = -- ASSERT( typ `hasKey` tYPETyConKey )
+    go runtime_rep
+  where
+    go rr | Just rr' <- coreView rr = go rr'
+    go rr
+--     (TyConApp rr_dc args)
+      | Just (rr_dc, args) <- repSplitTyConApp_maybe rr
+      , RuntimeRep fun <- tyConRuntimeRepInfo rr_dc
+      = fun args
+    go rr = PtrRep -- pprPanic "kindPrimRep.go" (ppr rr)
+kindPrimRep' ki = -- WARN( True
+                    -- , text "kindPrimRep defaulting to PtrRep on" <+> ppr ki )
+                 PtrRep  -- this can happen legitimately for, e.g., Any
 
 primTypeVt :: Type -> VarType
 primTypeVt t = case repType t of

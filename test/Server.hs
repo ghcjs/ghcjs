@@ -39,9 +39,6 @@ import           Data.Int
 
 import           Text.Read
 
-import           Prelude hiding (FilePath)
-import           Filesystem.Path
-
 {-
    Start the test server with static file root path on the next
    available port number. Returns the port number

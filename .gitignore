@@ -2,6 +2,8 @@
 /utils/patch/dist
 /vendor/
 /GNUmakefile
+TAGS
+cabal.sandbox.config
 *.js_hi
 *.hi
 *.o
@@ -14,3 +16,5 @@
 .#*
 /lib/cache/build
 .stack-work/
+.cabal-sandbox/
+

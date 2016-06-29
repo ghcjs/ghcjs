@@ -13,6 +13,11 @@ ghc-prim:
   GHC.Types:
     - ":"
     - "[]"
+integer-gmp:
+  GHC.Integer.Type:
+    - "S#"
+    - "Jp#"
+    - "Jn#"
 ghcjs-prim:
   GHCJS.Prim:
     - JSVal

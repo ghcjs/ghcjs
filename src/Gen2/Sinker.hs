@@ -10,7 +10,7 @@ import Id
 import Name
 import Module
 import Literal
-import Digraph
+import Gen2.GHC.Digraph
 
 import Control.Applicative
 import Control.Lens
@@ -163,3 +163,4 @@ topSortDecls _m binds = rest ++ nr'
     nr' | (not . null) [()| CyclicSCC _ <- stronglyConnCompG g]
             = error "topSortDecls: unexpected cycle"
         | otherwise = map fst (topologicalSortG g)
+

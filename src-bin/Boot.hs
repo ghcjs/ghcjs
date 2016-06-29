@@ -23,7 +23,7 @@
 {-# LANGUAGE CPP, ExtendedDefaultRules, OverloadedStrings, ScopedTypeVariables,
              TemplateHaskell, LambdaCase, FlexibleInstances, DeriveDataTypeable,
              GeneralizedNewtypeDeriving, NoMonomorphismRestriction, FlexibleContexts,
-             ImpredicativeTypes, TupleSections
+             RankNTypes, TupleSections
   #-}
 module Main where
 
@@ -145,9 +145,9 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
 
      files may have multiple locations, they're tried in order until one succeeds
 
-     locations are typically read from boot-sources.yaml, customize the defaults
-     in lib/etc/boot-sources.yaml in the installed data dir, or use
-     the --sources or --datadir options
+     locations are typically read from the sources section in boot.yaml,
+     customize the defaults in lib/etc/boot.yaml in the installed data dir,
+     or use the --sources or --datadir options
  -}
 data BootSources = BootSources { _bsrcShims                 :: [Text]
                                , _bsrcBoot                  :: [Text]
@@ -155,6 +155,7 @@ data BootSources = BootSources { _bsrcShims                 :: [Text]
                                , _bsrcEtc                   :: [Text]
                                , _bsrcDoc                   :: [Text]
                                , _bsrcGhcjsPrim             :: [Text]
+                               , _bsrcGhcjsTh               :: [Text]
                                , _bsrcInclude               :: [Text]
                                , _bsrcShimsDev              :: [Text]
                                , _bsrcShimsDevBranch        :: Text
@@ -173,6 +174,7 @@ data BootStages = BootStages { _bstStage1a   :: Stage
                              , _bstStage2    :: Stage
                              , _bstPretend   :: [Package] -- ^ packages we pretend to have in stage one, but actually hand off to GHC
                              , _bstCabal     :: Package   -- ^ installed between 1b and 2, only when doing a full boot
+                             , _bstGhcjsTh :: Package -- ^ installed between 1b and 2
                              , _bstGhcjsPrim :: Package   -- ^ installed between 1a and 1b
                              , _bstGhcPrim   :: Package   -- ^ installed before stage 1a
                              } deriving (Data, Typeable)
@@ -297,7 +299,7 @@ main = do
       installEtc
       installDocs
       installTests
-      copyGhcjsPrim
+      copyGhcjsIntree
       copyIncludes
       let base = e ^. beLocations . blGhcjsLibDir
       setenv "CFLAGS" $ "-I" <> toTextI (base </> "include")
@@ -325,7 +327,8 @@ instance Yaml.FromJSON BootSources where
   parseJSON (Yaml.Object v) = BootSources
     <$> v ..: "shims" <*> v ..: "boot" <*> v ..: "test"
     <*> v ..: "etc"                    <*> v ..: "doc"
-    <*> v ..: "ghcjs-prim"             <*> v ..: "include"
+    <*> v ..: "ghcjs-prim"             <*> v ..: "ghcjs-th"
+    <*> v ..: "include"
     <*> v ..: "shims-dev"              <*> v  .: "shims-dev-branch"
     <*> v ..: "ghcjs-boot-dev"         <*> v  .: "ghcjs-boot-dev-branch"
     <*> v ..: "buildtools-windows"     <*> v ..: "buildtools-boot-windows"
@@ -353,7 +356,8 @@ instance Yaml.FromJSON BootPrograms where
 instance Yaml.FromJSON BootStages where
   parseJSON (Yaml.Object v) = BootStages
     <$> v ..: "stage1a"             <*> v ..: "stage1b" <*> v ..: "stage2"
-    <*> v .:: "stage1PretendToHave" <*> v  .: "cabal"   <*> v  .: "ghcjs-prim"
+    <*> v .:: "stage1PretendToHave" <*> v  .: "cabal"
+    <*> v  .: "ghcjs-th"            <*> v  .: "ghcjs-prim"
     <*> v  .: "ghc-prim"
     where
       o .:: p = ((:[])<$>o.:p) <|> o.:p
@@ -623,8 +627,8 @@ preparePrimops = subTop' ("ghcjs-boot" </> "data") . checkpoint' "primops" "prim
 buildGenPrim :: B ()
 buildGenPrim = subTop' ("ghcjs-boot" </> "utils" </> "genprimopcode") $ do
   make "genprimopcode" [] $ do
-    make "Lexer.hs"  ["Lexer.x"]  (alex_ ["Lexer.x"])
-    make "Parser.hs" ["Parser.y"] (happy_ ["Parser.y"])
+    make "Lexer.hs"  ["Lexer.x"]  (alex_ ["-g", "-o", "Lexer.hs", "Lexer.x"])
+    make "Parser.hs" ["Parser.y"] (happy_ ["-agc", "-o", "Parser.hs", "Parser.y"])
     ghc_   ["-o", "genprimopcode", "-O", "Main.hs", "+RTS", "-K128M"]
 
 -- fixme this hardcodes the location of integer-gmp
@@ -700,13 +704,18 @@ installRts = subTop' "ghcjs-boot" $ do
   ghcjsTop <- view (beLocations . blGhcjsTopDir)
   let inc       = ghcjsLib </> "include"
       incNative = ghcjsLib </> "include_native"
+#if __GLASGOW_HASKELL__ >= 711
+      rtsConfFile   = "rts.conf"
+#else
+      rtsConfFile   = "builtin_rts.conf"
+#endif
 #if __GLASGOW_HASKELL__ >= 709
       rtsLib    = ghcjsLib </> "rts"
 #else
       rtsLib    = ghcjsLib </> "rts-1.0"
 #endif
-  rtsConf <- readfile (ghcLib </> "package.conf.d" </> "builtin_rts.conf")
-  writefile (globalDB </> "builtin_rts.conf") (fixRtsConf (toTextI inc) (toTextI rtsLib) rtsConf)
+  rtsConf <- readfile (ghcLib </> "package.conf.d" </> rtsConfFile)
+  writefile (globalDB </> rtsConfFile) (fixRtsConf (toTextI inc) (toTextI rtsLib) rtsConf)
   ghcjs_pkg_ ["recache", "--global", "--no-user-package-db"]
   forM_ [ghcjsLib, inc, incNative] mkdir_p
   sub $ cd (ghcLib </> "include") >> cp_r "." incNative
@@ -718,10 +727,19 @@ installRts = subTop' "ghcjs-boot" $ do
   sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
   cp (ghcLib </> "settings")          (ghcjsLib </> "settings")
   cp (ghcLib </> "platformConstants") (ghcjsLib </> "platformConstants")
+#if __GLASGOW_HASKELL__ >= 711
+  let unlitDest    = ghcjsLib </> "bin" </> exe "unlit"
+#else
   let unlitDest    = ghcjsLib </> exe "unlit"
+#endif
       ghcjsRunDest = ghcjsLib </> exe "ghcjs-run"
   ghcjsRunSrc <- view (bePrograms . bpGhcjsRun . pgmLoc . to fromJust)
+#if __GLASGOW_HASKELL__ >= 711
+  mkdir_p (ghcjsLib </> "bin")
+  cp (ghcLib </> "bin" </> exe "unlit") unlitDest
+#else
   cp (ghcLib </> exe "unlit") unlitDest
+#endif
   cp ghcjsRunSrc ghcjsRunDest
   mapM_ (liftIO . Cabal.setFileExecutable . toStringI) [unlitDest, ghcjsRunDest]
   writefile (ghcjsLib </> "node") <^> bePrograms . bpNode . pgmLoc . to (maybe "-" toTextI)
@@ -736,7 +754,12 @@ installRts = subTop' "ghcjs-boot" $ do
   subTop $ do
     writefile "empty.c" ""
     ghc_ ["-c", "empty.c"]
-  when isWindows $ cp (ghcLib </> exe "touchy") (ghcjsLib </> exe "touchy")
+  when isWindows $
+#if __GLASGOW_HASKELL__ >= 711
+    cp (ghcLib </> "bin" </> exe "touchy") (ghcjsLib </> "bin" </> exe "touchy")
+#else
+    cp (ghcLib </> exe "touchy") (ghcjsLib </> exe "touchy")
+#endif
   msg info "RTS prepared"
 
 installPlatformIncludes :: FilePath -> FilePath -> B ()
@@ -763,9 +786,10 @@ installPlatformIncludes inc incNative = do
 exe :: FilePath -> FilePath
 exe = bool isWindows (<.>"exe") id
 
-copyGhcjsPrim :: B ()
-copyGhcjsPrim = checkpoint' "ghcjs-prim" "ghcjs-prim" $
+copyGhcjsIntree :: B ()
+copyGhcjsIntree = checkpoint' "ghcjs-intree" "ghcjs-intree" $ do
   install' "ghcjs-prim package sources" <$^> beLocations . blGhcjsLibDir . to (</> "ghcjs-prim") <<*^> beSources . bsrcGhcjsPrim
+  install' "ghcjs-prim package sources" <$^> beLocations . blGhcjsLibDir . to (</> "ghcjs-th") <<*^> beSources . bsrcGhcjsTh
 
 copyIncludes :: B ()
 copyIncludes = checkpoint' "includes" "includes" $
@@ -818,6 +842,13 @@ installGhcjsPrim = do
   preparePackage prim
   cabalStage1 [prim]
 
+installGhcjsTh :: B ()
+installGhcjsTh = do
+  msg info "installing ghcjs-th"
+  prim <- view (beStages . bstGhcjsTh)
+  preparePackage prim
+  cabalStage1 [prim]
+
 installStage1 :: B ()
 installStage1 = subTop' "ghcjs-boot" $ do
   prim <- view (beStages . bstGhcPrim)
@@ -828,6 +859,7 @@ installStage1 = subTop' "ghcjs-boot" $ do
   when (s ^. beSettings . bsGmpInTree && s ^. beLocations . blNativeToo) installInTreeGmp
   installGhcjsPrim
   installStage "1b" =<< stagePackages bstStage1b
+  installGhcjsTh
   resolveWiredInPackages
     where
       fixGhcPrim = do
@@ -915,22 +947,46 @@ installFakes = silently $ do
           Just pkgId -> do
             globalDB <- view (beLocations . blGlobalDB)
             libDir   <- view (beLocations . blGhcjsLibDir)
+#if __GLASGOW_HASKELL__ >= 711
+            pkgAbi <- findPkgAbi pkgId
+            let conf = fakeConf libDir libDir pkg version pkgId pkgAbi
+#else
             let conf = fakeConf libDir libDir pkg version pkgId
+#endif
             writefile (globalDB </> fromText pkgId <.> "conf") conf
   ghcjs_pkg_ ["recache", "--global", "--no-user-package-db"]
 
 findPkgId:: [Text] -> Text -> Text -> Maybe Text
 findPkgId dump pkg version =
-  listToMaybe (filter (pkgVer `T.isPrefixOf`) ids)
+  listToMaybe (filter (\i -> i == pkgVer || pkgVer' `T.isPrefixOf` i) ids)
     where
-      pkgVer = pkg <> "-" <> version <> "-"
+      pkgVer  = pkg <> "-" <> version
+      pkgVer' = pkgVer <> "-"
       ids = map (T.dropWhile isSpace . T.drop 3) $ filter ("id:" `T.isPrefixOf`) dump
 
+#if __GLASGOW_HASKELL__ >= 711
+findPkgAbi :: Text -> B Text
+findPkgAbi pkgId = do
+  dumped <- T.lines <$> ghc_pkg ["field", pkgId, "abi"]
+  case catMaybes (map (T.stripPrefix "abi:") dumped) of
+    (x:_) -> return (T.strip x)
+    _     -> failWith ("cannot find abi hash of package " <> pkgId)
+#endif
+
+#if __GLASGOW_HASKELL__ >= 711
+fakeConf :: FilePath -> FilePath -> Text -> Text -> Text -> Text -> Text
+fakeConf incl lib name version pkgId pkgAbi = T.unlines
+#else
 fakeConf :: FilePath -> FilePath -> Text -> Text -> Text -> Text
 fakeConf incl lib name version pkgId = T.unlines
+#endif
             [ "name:           " <> name
             , "version:        " <> version
             , "id:             " <> pkgId
+#if __GLASGOW_HASKELL__ >= 711
+            , "key:            " <> pkgId
+            , "abi:            " <> pkgAbi
+#endif
             , "license:        BSD3"
             , "maintainer:     stegeman@gmail.com"
             , "import-dirs:    " <> toTextI incl
@@ -1369,13 +1425,13 @@ reportProgramLocation bs p
 checkProgramVersions :: BootSettings -> BootPrograms -> IO BootPrograms
 checkProgramVersions bs pgms = do
   pgms' <- foldrM verifyVersion pgms
-    [ (bpGhcjs,    "--numeric-version",       Just Info.getCompilerVersion,    True)
-    , (bpGhcjs,    "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
-    , (bpGhc,      "--numeric-version",       Just Info.getGhcCompilerVersion, True)
-    , (bpGhcjsPkg, "--numeric-ghcjs-version", Nothing,                         True)
-    , (bpGhcjsPkg, "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
-    , (bpCabal,    "--numeric-version",       Nothing,                         True)
-    , (bpNode,     "--version",               Nothing,                         True)
+    [ (view bpGhcjs, set bpGhcjs,   "--numeric-version",       Just Info.getCompilerVersion,    True)
+    , (view bpGhcjs, set bpGhcjs,   "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
+    , (view bpGhc, set bpGhc,      "--numeric-version",       Just Info.getGhcCompilerVersion, True)
+    , (view bpGhcjsPkg, set bpGhcjsPkg, "--numeric-ghcjs-version", Nothing,                         True)
+    , (view bpGhcjsPkg, set bpGhcjsPkg, "--numeric-ghc-version",   Just Info.getGhcCompilerVersion, False)
+    , (view bpCabal, set bpCabal,   "--numeric-version",       Nothing,                         True)
+    , (view bpNode, set bpNode,    "--version",               Nothing,                         True)
     ]
   verifyNotProfiled
   verifyNodeVersion pgms'
@@ -1385,16 +1441,20 @@ checkProgramVersions bs pgms = do
     --  res <- T.strip <$> run' bs (pgms ^. bpGhcjs) ["--ghcjs-booting-print", "--print-rts-profiled"]
     --  when (res /= "False") $ failWith ("GHCJS program " <> pgms ^. bpGhcjs . pgmLocText <>
     --                                    " has been installed with executable profiling.\n" <>
-    --                                    "You need a non-profiled executable to boot")
-    verifyVersion :: (Lens' BootPrograms (Program a), Text, Maybe String, Bool) -> BootPrograms -> IO BootPrograms
-    verifyVersion (l, arg :: Text, expected :: Maybe String, update :: Bool) ps = do
-      res <- T.strip <$> run' bs (ps ^. l) [arg]
+      --                                    "u need a non-profiled executable to boot")
+--    verifyVersion :: (Lens' BootPrograms (Program Required), Text, Maybe String, Bool) -> BootPrograms -> IO BootPrograms
+    verifyVersion :: forall a. (BootPrograms -> Program a, Program a -> BootPrograms -> BootPrograms, Text, Maybe String, Bool) -> BootPrograms -> IO BootPrograms
+    verifyVersion (g, s, arg :: Text, expected :: Maybe String, update :: Bool) ps = do
+      res <- T.strip <$> run' bs (g ps) [arg]
       case expected of
         Nothing -> return ()
         Just exp -> when (res /= T.pack exp) $
-          failWith ("version mismatch for program " <> ps ^. l . pgmName <> " at " <> ps ^. l . pgmLocText
+          failWith ("version mismatch for program " <> (g ps) ^. pgmName <> " at " <> (g ps ^. pgmLocText)
                       <> ", expected " <> T.pack exp <> " but got " <> res)
-      return $ (if update then (l . pgmVersion .~ Just res) else id) ps
+      return $
+        if update then s (pgmVersion .~ Just res $ g ps) ps
+                  else ps
+--          (l . pgmVersion .~ Just res) 
     verifyNodeVersion pgms = do
       let verTxt = fromMaybe "-" (pgms ^. bpNode . pgmVersion)
           v      = mapM (readMaybe . T.unpack . T.dropWhile (== 'v')) . T.splitOn "." . T.takeWhile (/='-') $ verTxt :: Maybe [Integer]
@@ -1467,6 +1527,7 @@ printBootEnvSummary after be = do
     p ["stage 1a"] >> l (stg bstStage1a)
     p ["ghcjs-prim:  " ++ be ^. beStages . bstGhcjsPrim . to str]
     p ["stage 1b"] >> l (stg bstStage1b)
+    p ["ghcjs-th:  " ++ be ^. beStages . bstGhcjsTh . to str]
     when (not isQuick) $ do
         p ["Cabal:  " ++ be ^. beStages . bstCabal . to str]
         p ["stage 2"] >> l (stg bstStage2)

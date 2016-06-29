@@ -137,6 +137,11 @@ instance TH.Quasi GHCJSQ where
   qReifyModule m = do
     ReifyModule' mi <- sendRequestQ (ReifyModule m)
     return mi
+#if MIN_VERSION_template_haskell(2,11,0)
+  qReifyFixity m = do
+    ReifyFixity' mi <- sendRequestQ (ReifyFixity m)
+    return mi
+#endif
   qLocation = fromMaybe noLoc . qsLocation <$> getState
   qRunIO m = GHCJSQ $ \s -> fmap (,s) m
   qAddDependentFile file = do

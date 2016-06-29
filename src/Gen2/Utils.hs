@@ -156,7 +156,7 @@ buildingProf dflags = WayProf `elem` ways dflags
 -- use instead of ErrUtils variant to prevent being suppressed
 compilationProgressMsg :: DynFlags -> String -> IO ()
 compilationProgressMsg dflags msg
-  = ifVerbose dflags 1 (log_action dflags dflags SevOutput ghcjsSrcSpan defaultUserStyle (text msg))
+  = ifVerbose dflags 1 (log_action dflags dflags NoReason SevOutput ghcjsSrcSpan defaultUserStyle (text msg))
 
 ifVerbose :: DynFlags -> Int -> IO () -> IO ()
 ifVerbose dflags val act

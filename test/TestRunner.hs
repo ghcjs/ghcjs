@@ -11,7 +11,7 @@ import           Control.Concurrent
 import           Data.Char (isLower, toLower, isDigit, isSpace)
 import           Data.IORef
 import qualified Data.HashMap.Strict as HM
-import           Data.List (partition, isPrefixOf)
+import           Data.List (partition, isPrefixOf, isInfixOf)
 import           Data.Maybe
 import           Data.Monoid
 import           Data.Traversable (sequenceA)
@@ -102,9 +102,9 @@ setupTests tmpDir = do
       runhaskell = fromString (taWithRunhaskell testArgs)
   checkBooted ghcjs
   testDir       <- maybe (getTestDir ghcjs) (return . fromString) (taWithTests testArgs)
-  nodePgm       <- checkProgram "node" (taWithNode testArgs)           ["--help"]
-  smPgm         <- checkProgram "js"   (taWithSpiderMonkey testArgs)   ["--help"]
-  jscPgm        <- checkProgram "jsc"  (taWithJavaScriptCore testArgs) ["--help"]
+  nodePgm       <- checkProgram "node" (taWithNode testArgs)           ["--help"] ("Node.js" `isInfixOf`)
+  smPgm         <- checkProgram "js"   (taWithSpiderMonkey testArgs)   ["--help"] ("JavaScript-C" `isInfixOf`)
+  jscPgm        <- checkProgram "jsc"  (taWithJavaScriptCore testArgs) ["--help"] ("JSC VM" `isInfixOf`)
   -- fixme use command line options instead
   onlyOptEnv    <- getEnvOpt "GHCJS_TEST_ONLYOPT"
   onlyUnoptEnv  <- getEnvOpt "GHCJS_TEST_ONLYUNOPT"
@@ -162,7 +162,7 @@ startBrowserSessions testRoot serverRoot mbSeleniumHost mbSeleniumPort = do
       seleniumPort = fromMaybe 4444        mbSeleniumPort
   wdRunMain  <- B.readFile (toStringIgnore $ testRoot </> "wdrunmain.js")
   wdHtml     <- B.readFile (toStringIgnore $ testRoot </> "wdindex.html")
-  serverPort <- Server.startServer serverRoot -- wdScript
+  serverPort <- Server.startServer (encodeString serverRoot) -- wdScript
   wdStart    <- T.readFile (toStringIgnore $ testRoot </> "wdstart.js")
   sess <- Client.startSessions (Client.Server serverPort wdStart)
                                (T.pack seleniumHost)
@@ -194,10 +194,12 @@ checkBooted ghcjs = check `C.catch` \(e::C.SomeException) -> cantRun e
 
 -- find programs at the start so we don't try to run a nonexistent program over and over again
 -- temporary workaround, process-1.2.0.0 leaks when trying to run a nonexistent program
-checkProgram :: FilePath -> Maybe String -> [String] -> IO (Maybe FilePath)
-checkProgram _ (Just "none") _ = return Nothing
-checkProgram defName userName testArgs = do
-  let testProg p as = either (\(e::C.SomeException) -> False) (const True) <$>
+checkProgram :: FilePath -> Maybe String -> [String] -> (String -> Bool) -> IO (Maybe FilePath)
+checkProgram _ (Just "none") _ _ = return Nothing
+checkProgram defName userName testArgs testP = do
+  let checkOutput (ExitFailure _, _, _) = False
+      checkOutput (_, sout, serr)       = testP sout || testP serr
+      testProg p as = either (\(e::C.SomeException) -> False) checkOutput <$>
                         C.try (readProcessWithExitCode' "/" p as "")
   findExecutable (fromMaybe (encodeString defName) userName) >>= \case
     Nothing | Just n <- userName -> error ("could not find program " ++ toStringIgnore defName ++ " at " ++ n)
@@ -313,7 +315,7 @@ instance FromJSON TestSuite where
 testCaseLog :: TestOpts -> TestName -> Assertion -> Test
 testCaseLog opts name assertion = testCase name assertion'
   where
-    assertion'   = assertion `C.catch` \e@(HUnitFailure msg) -> do
+    assertion'   = assertion `C.catch` \e@(HUnitFailure _ msg) -> do
       let errMsg = listToMaybe (filter (not . null) (lines msg))
           err    = name ++ maybe "" (\x -> " (" ++ trunc (dropName x) ++ ")") errMsg
           trunc xs | length xs > 43 = take 40 xs ++ "..."
@@ -531,8 +533,8 @@ unmangleJscResult :: StdioResult -> StdioResult
 unmangleJscResult (StdioResult exit out err)
   | (x:xs) <- reverse (T.lines err)
   , Just code <- T.stripPrefix "--> GHCJS JSC exit status: " x
-    = StdioResult (parseExit code) out (T.unlines . reverse $ map unmangle xs)
-  | otherwise = StdioResult exit out (T.unlines . map unmangle . T.lines $ err)
+    = StdioResult (parseExit code) out (T.strip . T.unlines . reverse $ map unmangle xs)
+  | otherwise = StdioResult exit out (T.strip . T.unlines . map unmangle . T.lines $ err)
   where
     unmangle xs = fromMaybe xs (T.stripPrefix "--> " xs)
     parseExit x = case reads (T.unpack x) of

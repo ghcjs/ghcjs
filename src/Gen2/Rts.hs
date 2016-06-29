@@ -794,7 +794,14 @@ fun h$printReg r {
     } else if(r.f.t === `Blackhole` && r.x) {
       return ("blackhole: -> " + h$printReg({ f: r.x.x1, d: r.d1.x2 }) + ")");
     } else {
-      return ((r.alloc ? r.alloc + ': ' : '') + r.f.n + " (" + h$closureTypeName(r.f.t) + ", " + r.f.a + ")");
+      var iv = "";
+      if(r.f.n === "integer-gmp:GHC.Integer.Type.Jp#" ||
+         r.f.n === "integer-gmp:GHC.Integer.Type.Jn#") {
+         iv = ' [' + r.d1.join(',') + '](' + h$ghcjsbn_tmp_toJSBN(r.d1).toString() + ')'
+      } else if(r.f.n === "integer-gmp:GHC.Integer.Type.S#") {
+         iv = ' (S: ' + r.d1 + ')';
+      }
+      return ((r.alloc ? r.alloc + ': ' : '') + r.f.n + " (" + h$closureTypeName(r.f.t) + ", " + r.f.a + ")" + iv);
     }
   } else if(typeof r === 'object') {
     var res = h$collectProps(r);
@@ -893,7 +900,14 @@ fun h$dumpStackTop stack start sp {
                  if(s.f.t === `Blackhole` && s.d1 && s.d1.x1 && s.d1.x1.n) {
                    h$log("stack[" + i + "] = blackhole -> " + s.d1.x1.n);
                  } else {
-                   h$log("stack[" + i + "] = -> " + (s.alloc ? s.alloc + ': ' : '') + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")");
+                   var iv = "";
+                   if(s.f.n === "integer-gmp:GHC.Integer.Type.Jp#" ||
+                     s.f.n === "integer-gmp:GHC.Integer.Type.Jn#") {
+                     iv = ' [' + s.d1.join(',') + '](' + h$ghcjsbn_tmp_toJSBN(s.d1).toString() + ')'
+                   } else if(s.f.n === "integer-gmp:GHC.Integer.Type.S#") {
+                     iv = ' (S: ' + s.d1 + ')';
+                   }
+                   h$log("stack[" + i + "] = -> " + (s.alloc ? s.alloc + ': ' : '') + s.f.n + " (" + h$closureTypeName(s.f.t) + ", a: " + s.f.a + ")" + iv);
                  }
                }
              } else if(h$isInstanceOf(s,h$MVar)) {
@@ -903,6 +917,8 @@ fun h$dumpStackTop stack start sp {
                h$log("stack[" + i + "] = MVar " + val);
              } else if(h$isInstanceOf(s,h$MutVar)) {
                h$log("stack[" + i + "] = IORef -> " + (typeof s.val === 'object' ? (s.val.f.n + " (" + h$closureTypeName(s.val.f.t) + ", a: " + s.val.f.a + ")") : s.val));
+             } else if(Array.isArray(s)) {
+               h$log("stack[" + i + "] = " + ("[" + s.join(",") + "]").substring(0,50));
              } else if(typeof s === 'object') {
                h$log("stack[" + i + "] = " + h$collectProps(s).substring(0,50));
              } else if(typeof s === 'function') {

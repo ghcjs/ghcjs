@@ -21,6 +21,19 @@ import           ErrUtils (fatalErrorMsg'')
 import           Panic (handleGhcException)
 import           Exception
 import           Packages (initPackages)
+#if __GLASGOW_HASKELL__ >= 711
+import           PrelNames
+import           THNames
+import           TyCon
+import           ConLike
+import           DataCon
+import           Id
+import           Constants
+import           BasicTypes (Boxity(..))
+import           TcTypeNats
+import           TysWiredIn
+import           TysPrim
+#endif
 
 import           Control.Applicative
 import           Control.Concurrent.MVar (readMVar)
@@ -182,13 +195,88 @@ fixNameCache = do
   liftIO $ modifyIORef (hsc_EPS sess) $ \eps ->
     eps { eps_rule_base = mkRuleBase Gen2.GHC.PrelRules.builtinRules }
     where
+#if __GLASGOW_HASKELL__ >= 711
+      knownNames = knownKeyNames' ++
+#else
       knownNames = map getName (filter (not.isPrimOp) wiredInThings) ++
                       basicKnownKeyNames ++
+#endif
                       templateHaskellNames ++
                       map (getName . AnId . Gen2.mkGhcjsPrimOpId) allThePrimOps
-      isPrimOp (AnId i) = isPrimOpId i
-      isPrimOp _        = False
+      isPrimOp i {-(AnId i)-} = isPrimOpId i
+--       isPrimOp _        = False
 
+#if __GLASGOW_HASKELL__ >= 711
+-- knownKeyNames without the primop names
+knownKeyNames' :: [Name]
+-- This list is used to ensure that when you say "Prelude.map"
+--  in your source code, or in an interface file,
+-- you get a Name with the correct known key
+-- (See Note [Known-key names] in PrelNames)
+knownKeyNames'
+  = concat [ tycon_kk_names funTyCon
+           , concatMap tycon_kk_names primTyCons
+
+           , concatMap tycon_kk_names wiredInTyCons
+             -- Does not include tuples
+
+           , concatMap tycon_kk_names typeNatTyCons
+
+           , concatMap (rep_names . tupleTyCon Boxed) [2..mAX_TUPLE_SIZE]  -- Yuk
+
+           , cTupleTyConNames
+             -- Constraint tuples are known-key but not wired-in
+             -- They can't show up in source code, but can appear
+             -- in intreface files
+
+           , map idName wiredInIds
+--           , map (idName . primOpId) allThePrimOps
+           , basicKnownKeyNames ]
+  where
+    -- "kk" short for "known-key"
+  tycon_kk_names :: TyCon -> [Name]
+  tycon_kk_names tc = tyConName tc : (rep_names tc ++ concatMap thing_kk_names (implicitTyConThings tc))
+
+  datacon_kk_names dc
+   = dataConName dc : rep_names (promoteDataCon dc)
+
+  thing_kk_names :: TyThing -> [Name]
+  thing_kk_names (ATyCon tc)                 = tycon_kk_names tc
+  thing_kk_names (AConLike (RealDataCon dc)) = datacon_kk_names dc
+  thing_kk_names thing                       = [getName thing]
+
+  -- The TyConRepName for a known-key TyCon has a known key,
+  -- but isn't itself an implicit thing.  Yurgh.
+  -- NB: if any of the wired-in TyCons had record fields, the record
+  --     field names would be in a similar situation.  Ditto class ops.
+  --     But it happens that there aren't any
+  rep_names tc = case tyConRepName_maybe tc of
+                       Just n  -> [n]
+                       Nothing -> []
+{-
+    -- "kk" short for "known-key"
+    tycon_kk_names :: TyCon -> [Name]
+    tycon_kk_names tc = tyConName tc : (rep_names tc ++ concatMap thing_kk_names (implicitTyConThings tc))
+
+    datacon_kk_names dc
+      | Promoted tc <- promoteDataCon_maybe dc = dataConName dc : rep_names tc
+      | otherwise                              = [dataConName dc]
+
+    thing_kk_names :: TyThing -> [Name]
+    thing_kk_names (ATyCon tc)                 = tycon_kk_names tc
+    thing_kk_names (AConLike (RealDataCon dc)) = datacon_kk_names dc
+    thing_kk_names thing                       = [getName thing]
+
+    -- The TyConRepName for a known-key TyCon has a known key,
+    -- but isn't itself an implicit thing.  Yurgh.
+    -- NB: if any of the wired-in TyCons had record fields, the record
+    --     field names would be in a similar situation.  Ditto class ops.
+    --     But it happens that there aren't any
+    rep_names tc = case tyConRepName_maybe tc of
+                         Just n  -> [n]
+                         Nothing -> []
+-}
+#endif
 
 checkIsBooted :: Maybe String -> IO ()
 checkIsBooted mbMinusB = do
@@ -330,7 +418,11 @@ ghcjsErrorHandler fm (FlushOut flushOut) inner =
             (\ge -> liftIO $ do
                 flushOut
                 case ge of
+#if __GLASGOW_HASKELL__ >= 711
+                     ProgramError _ -> exitWith (ExitFailure 1)
+#else
                      PhaseFailed _ code -> exitWith code
+#endif
                      Signal _ -> exitWith (ExitFailure 1)
                      _ -> do fatalErrorMsg'' fm (ghcjsShowException $ toException ge)
                              exitWith (ExitFailure 1)

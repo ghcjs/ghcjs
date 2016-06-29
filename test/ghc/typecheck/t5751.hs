@@ -1,8 +1,6 @@
 {-# LANGUAGE FlexibleContexts, FlexibleInstances, GeneralizedNewtypeDeriving, OverlappingInstances, UndecidableInstances #-}
 module Main where
 
-import Control.Applicative
-
 class (Monad m) => MonadIO m where
     -- | Lift a computation from the 'IO' monad.
     liftIO :: IO a -> m a
@@ -27,7 +25,7 @@ main =
 class (Widgets x) => MonadRender x
 class (XMLGenerator m)  => Widgets m
 -- instance Widgets (IdentityT IO) -- if you uncomment this, it will work
-instance MonadRender m => Widgets m
+instance (XMLGenerator m, MonadRender m) => Widgets m
 instance MonadRender (IdentityT IO)
 
 web :: ( MonadIO m
@@ -38,3 +36,4 @@ web =
     do liftIO $ putStrLn "before"
        genElement (Nothing, "p")
        return ()
+

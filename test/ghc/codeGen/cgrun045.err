@@ -1,1 +1,3 @@
 hello world!
+CallStack (from HasCallStack):
+  error, called at cgrun045.hs:6:13 in main:Main

@@ -60,7 +60,9 @@ instance Show Type where
 instance Show CostCentre where show _ = "CostCentre"
 instance Show CostCentreStack where show _ = "CostCentreStack"
 instance Show StgBinderInfo where show _ = "StgBinderInfo"
-#if __GLASGOW_HASKELL__ >= 709
+#if __GLASGOW_HASKELL__ >= 711
+instance Show Module where show m = unitIdString (moduleUnitId m) ++ ":" ++ moduleNameString (moduleName m)
+#elif __GLASGOW_HASKELL__ >= 709
 instance Show Module where show m = packageKeyString (modulePackageKey m) ++ ":" ++ moduleNameString (moduleName m)
 #else
 instance Show Module where show m = packageIdString (modulePackageId m) ++ ":" ++ moduleNameString (moduleName m)
@@ -70,8 +72,12 @@ instance Show TyCon where show = show . tyConName
 instance Show SRT where
   show NoSRT = "SRT:NO"
   show (SRTEntries e) = "SRT:" ++ show e
+#if __GLASGOW_HASKELL__ < 711
   show (SRT i j _b) = "SRT:BMP" ++ show [i,j]
-#if __GLASGOW_HASKELL__ >= 709
+#endif
+#if __GLASGOW_HASKELL__ >= 711
+instance Show UnitId where show = unitIdString
+#elif __GLASGOW_HASKELL__ >= 709
 instance Show PackageKey where show = packageKeyString
 #else
 instance Show PackageId where show = packageIdString
@@ -95,7 +101,11 @@ instance Show IdDetails where
   show (FCallId {})       = "FCallId"
   show (TickBoxOpId {})   = "VanillaId"
   show (DFunId {})        = "DFunId"
-
+#if __GLASGOW_HASKELL__ < 711
+  show (PatSynId {})      = "PatSynId"
+  show (DefMethId {})     = "DefMethId"
+  show (ReflectionId {})  = "ReflectionId"
+#endif
 
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat
@@ -117,7 +127,11 @@ deriving instance Show StgOp
 deriving instance Show a => Show (Tickish a)
 #endif
 -- 
+#if __GLASGOW_HASKELL__ >= 711
+instance Show Coercion where show co = showPpr hackPprDflags co
+#else
 deriving instance Show Coercion
+#endif
 deriving instance Show a => Show (Expr a)
 deriving instance Show a => Show (Bind a)
 instance Show CoAxiomRule where show _ = "CoAxiomRule"
@@ -143,11 +157,11 @@ bindingRefs u (StgRec bs)       = l (rhsRefs u . snd) bs
 
 rhsRefs :: UniqFM StgExpr -> StgRhs -> Set Id
 rhsRefs u (StgRhsClosure _ _ _ _ _ _ body) = exprRefs u body
-rhsRefs u (StgRhsCon _ d args) = l s (dataConImplicitIds d) <> l (argRefs u) args
+rhsRefs u (StgRhsCon _ d args) = l s [ i | AnId i <- dataConImplicitTyThings d] <> l (argRefs u) args
 
 exprRefs :: UniqFM StgExpr -> StgExpr -> Set Id
 exprRefs u (StgApp f args) = s f <> l (argRefs u) args
-exprRefs u (StgConApp d args) = l s (dataConImplicitIds d) <> l (argRefs u) args
+exprRefs u (StgConApp d args) = l s [ i | AnId i <- dataConImplicitTyThings d] <> l (argRefs u) args
 exprRefs u (StgOpApp _ args _) = l (argRefs u) args
 exprRefs _ (StgLit {}) = mempty
 exprRefs _ (StgLam {}) = mempty
