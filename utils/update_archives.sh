@@ -94,8 +94,8 @@ prepare_packages() {
 prepare_primops() {
     echo "preparing parser and lexer for the genprimopcode tool"
     ( cd "utils/genprimopcode"
-      alex Lexer.x
-      happy Parser.y
+      alex -g -o Lexer.hs Lexer.x
+      happy -agc -o Parser.hs Parser.y
     )
 } 
 
