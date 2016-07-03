@@ -365,8 +365,10 @@ fun h$true_e { return `Stack`[`Sp`]; }
 
 fun h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e { return `Stack`[`Sp`]; }
 `ClosureInfo "h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e" (CIRegs 0 [PtrV]) "GHC.Integer.Type.S#" (CILayoutFixed 1 [IntV]) (CICon 1) noStatic`;
-fun h$integerzmgmpZCGHCziIntegerziTypeziJzh_con_e { return `Stack`[`Sp`]; }
-`ClosureInfo "h$integerzmgmpZCGHCziIntegerziTypeziJzh_con_e" (CIRegs 0 [PtrV]) "GHC.Integer.Type.J#" (CILayoutFixed 2 [IntV, ObjV]) (CICon 2) noStatic`;
+fun h$integerzmgmpZCGHCziIntegerziTypeziJpzh_con_e { return `Stack`[`Sp`]; }
+`ClosureInfo "h$integerzmgmpZCGHCziIntegerziTypeziJpzh_con_e" (CIRegs 0 [PtrV]) "GHC.Integer.Type.Jp#" (CILayoutFixed 1 [ObjV]) (CICon 2) noStatic`;
+fun h$integerzmgmpZCGHCziIntegerziTypeziJnzh_con_e { return `Stack`[`Sp`]; }
+`ClosureInfo "h$integerzmgmpZCGHCziIntegerziTypeziJnzh_con_e" (CIRegs 0 [PtrV]) "GHC.Integer.Type.Jn#" (CILayoutFixed 1 [ObjV]) (CICon 3) noStatic`;
 
 // generic data constructor with 1 non-heapobj field
 fun h$data1_e { return `Stack`[`Sp`]; }
