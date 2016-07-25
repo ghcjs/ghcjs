@@ -16,6 +16,7 @@ import           DynFlags
 import           StaticFlags
 
 import           Documentation.Haddock
+import           ResponseFile (expandResponse)
 
 import qualified Compiler.Info          as Info
 import qualified Compiler.GhcjsProgram  as Ghcjs
@@ -25,7 +26,7 @@ import qualified Compiler.Settings      as Ghcjs
 main :: IO ()
 main = do
   args <- Info.getFullArguments -- adds wrapper arguments for Windows
-  haddockWithGhc withGhcjs args
+  haddockWithGhc withGhcjs =<< expandResponse args
 
 withGhcjs :: [Flag] -> Ghc a -> IO a
 withGhcjs flags action = do
