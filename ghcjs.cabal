@@ -191,7 +191,7 @@ Executable haddock-ghcjs
       cpp-options: -DWINDOWS
     Main-Is:        Haddock.hs
     Default-Language: Haskell2010
-    hs-source-dirs: src-bin
+    hs-source-dirs: src-bin, src-bin/haddock
     Build-Depends:  base                >= 4    &&  < 5,
                     process,
                     ghc,
