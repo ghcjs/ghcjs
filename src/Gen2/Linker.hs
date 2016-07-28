@@ -47,6 +47,7 @@ import           Data.Array
 import           Data.Binary
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
+import qualified Data.ByteString.Builder  as BB
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Char                (toLower, chr)
 import           Data.Function            (on)
@@ -68,6 +69,7 @@ import qualified Data.Text.IO             as T
 import qualified Data.Text.Lazy           as TL
 import qualified Data.Text.Lazy.IO        as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
+import           Data.Traversable
 import qualified Data.Vector              as V
 
 import           Data.Yaml                (FromJSON(..), Value(..))
@@ -85,7 +87,7 @@ import           System.FilePath
 import           System.Directory
   (createDirectoryIfMissing, doesDirectoryExist, canonicalizePath
   ,doesFileExist, getDirectoryContents, getCurrentDirectory, copyFile)
-import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
+-- import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
 import           Compiler.Compat
 import           Compiler.Info
@@ -98,11 +100,18 @@ import           Gen2.Base
 import           Gen2.ClosureInfo         hiding (Fun)
 import qualified Gen2.Compactor           as Compactor
 import           Gen2.Object
-import           Gen2.Printer             (pretty)
+-- import           Gen2.Printer             (pretty)
 import           Gen2.Rts                 (rtsText, rtsDeclsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
 import           System.Exit (exitFailure)
+
+import qualified GHCJS.Tyr.JMacro    as Tyr
+import qualified GHCJS.Tyr.Arthur    as Tyr
+import qualified GHCJS.Tyr.Render    as Tyr
+import qualified GHCJS.Tyr.Doc       as Tyr
+import qualified GHCJS.Tyr.Base      as Tyr
+import qualified GHCJS.Tyr.SourceMap as Tyr
 
 type LinkableUnit = (Package, Module, Int) -- ^ module and the index of the block in the object file
 type Module       = Text
@@ -112,13 +121,14 @@ type LinkerStats  = Map (Package, Module) Int64
 
 -- | result of a link pass
 data LinkResult = LinkResult
-  { linkOut         :: BL.ByteString -- ^ compiled Haskell code
-  , linkOutStats    :: LinkerStats   -- ^ statistics about generated code
-  , linkOutMetaSize :: Int64         -- ^ size of packed metadata in generated code
-  , linkLibRTS      :: [FilePath]    -- ^ library code to load with the RTS
-  , linkLibA        :: [FilePath]    -- ^ library code to load after RTS
-  , linkLibAArch    :: [FilePath]    -- ^ library code to load from archives after RTS
-  , linkBase        :: Base          -- ^ base metadata to use if we want to link incrementally against this result
+  { linkOut         :: BL.ByteString       -- ^ compiled Haskell code
+  , linkOutMap      :: Maybe BL.ByteString -- ^ source map, if available
+  , linkOutStats    :: LinkerStats         -- ^ statistics about generated code
+  , linkOutMetaSize :: Int64               -- ^ size of packed metadata in generated code
+  , linkLibRTS      :: [FilePath]          -- ^ library code to load with the RTS
+  , linkLibA        :: [FilePath]          -- ^ library code to load after RTS
+  , linkLibAArch    :: [FilePath]          -- ^ library code to load from archives after RTS
+  , linkBase        :: Base                -- ^ base metadata to use if we want to link incrementally against this result
   } deriving (Generic)
 
 instance Binary LinkResult
@@ -139,7 +149,7 @@ link :: DynFlags
 link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
   | gsNoJSExecutables settings = return ()
   | otherwise = do
-      LinkResult lo lstats lmetasize llW lla llarch lbase <-
+      LinkResult lo mlom lstats lmetasize llW lla llarch lbase <-
         link' dflags env settings out include pkgs objFiles jsFiles
               isRootFun extraStaticDeps
       let genBase = isJust (gsGenBase settings)
@@ -147,6 +157,7 @@ link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStatic
                 | otherwise = "js"
       createDirectoryIfMissing False out
       BL.writeFile (out </> "out" <.> jsExt) lo
+      maybe (return ()) (BL.writeFile (out </> "out" <.> jsExt <.> "map")) mlom
       when (not $ gsOnlyOut settings) $ do
         when (not $ gsNoStats settings) $ do
           let statsFile = if genBase then "out.base.stats" else "out.stats"
@@ -220,13 +231,13 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
                     (baseUnits base)
                     (roots `S.union` rds `S.union` extraStaticDeps)
                     (archsRequiredUnits ++ objRequiredUnits)
-      let (outJs, metaSize, compactorState, stats) =
+      let (outJs, outJsMap, metaSize, compactorState, stats) =
              renderLinker settings dflags (baseCompactorState base) code
           base'  = Base compactorState (nub $ basePkgs base ++ map mkPackage pkgs'')
                          (allDeps `S.union` baseUnits base)
       (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims dflags [] (filter (isAlreadyLinked base) pkgs')
       (shimsBefore, shimsAfter) <- getShims dflags jsFiles pkgs''
-      return $ LinkResult outJs stats metaSize
+      return $ LinkResult outJs outJsMap stats metaSize
                  (filter (`notElem` alreadyLinkedBefore) shimsBefore)
                  (filter (`notElem` alreadyLinkedAfter)  shimsAfter)
                  pkgArchs base'
@@ -244,15 +255,41 @@ renderLinker :: GhcjsSettings
              -> DynFlags
              -> CompactorState
              -> [(Package, Module, JStat, [ClosureInfo], [StaticInfo])] -- ^ linked code per module
-             -> (BL.ByteString, Int64, CompactorState, LinkerStats)
+             -> (BL.ByteString, Maybe BL.ByteString, Int64, CompactorState, LinkerStats)
 renderLinker settings dflags renamerState code =
   let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map (\(_,_,s,ci,si) -> (s,ci,si)) code)
-      pe = TLE.encodeUtf8 . (<>"\n") . displayT . renderPretty 0.8 150 . pretty
+      fd =
+           (if gsMinify settings
+            then Tyr.formatCompact 132
+            else Tyr.formatIndent 0.8 100) . Tyr.renderS False . Tyr.jstatToArthur
+      pe = (_1 %~ BB.toLazyByteString) .
+           (if gsSourceMap settings
+            then Tyr.buildDocWithMap
+            else (nomappings . Tyr.buildDoc)) .
+           fd
+      nomappings x = (x, Tyr.Pos 1 1, [])
+      rendered :: [(BL.ByteString, Tyr.Pos, [(Tyr.L, Tyr.Span)])]
       rendered  = parMap rdeepseq pe compacted
+      renderedMeta :: (BL.ByteString, Tyr.Pos, [(Tyr.L, Tyr.Span)])
       renderedMeta = pe meta
-      mkStat (p,m,_,_,_) b = ((p,m), BL.length b)
-  in ( mconcat rendered <> renderedMeta
-     , BL.length renderedMeta
+      renderedSourceMap :: BL.ByteString
+      renderedSourceMap = Tyr.makeSourceMap "out.js" (concat adjustedOffsets)
+        where
+          adjustedOffsets :: [[(Tyr.L, Tyr.Span)]]
+          adjustedOffsets = snd (mapAccumL adjustOffset 0 rendered)
+          adjustOffset :: Int -> (a, Tyr.Pos, [(Tyr.L, Tyr.Span)]) ->
+                          (Int, [(Tyr.L, Tyr.Span)])
+          adjustOffset offset (_code, Tyr.Pos l _, mappings) =
+            let offset' = offset + l
+            in  (offset', map (_2 %~ adjustSpan offset) mappings)
+          adjustSpan :: Int -> Tyr.Span -> Tyr.Span
+          adjustSpan o (Tyr.Span l1 c1 l2 c2) = Tyr.Span (l1+o) c1 (l2+o) c2
+      mkStat (p,m,_,_,_) (b,_,_) = ((p,m), BL.length b)
+  in ( (mconcat . map (\(x,_,_) -> x <> "\n") $ rendered) <>
+       (renderedMeta ^. _1) <>
+       if gsSourceMap settings then "\n//# sourceMappingUrl=out.js.map" else mempty
+     , if gsSourceMap settings then Just renderedSourceMap else Nothing
+     , BL.length (renderedMeta ^. _1)
      , renamerState'
      , M.fromList $ zipWith mkStat code rendered
      )

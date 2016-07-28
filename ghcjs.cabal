@@ -122,10 +122,29 @@ Library
                      Compiler.JMacro.QQ,
                      Compiler.JMacro.ParseTH,
                      Compiler.JMacro.Util,
-                     GHCJS,
+                     GHCJS.Tyr.Arthur,
+                     GHCJS.Tyr.Base,
+                     GHCJS.Tyr.Build,
+                     GHCJS.Tyr.Builtin,
+                     GHCJS.Tyr.Doc,
+                     GHCJS.Tyr.LeParser,
+                     GHCJS.Tyr.Lint,
+                     GHCJS.Tyr.Number,
+                     GHCJS.Tyr.Operators,
+                     GHCJS.Tyr.Parser,
+                     GHCJS.Tyr.Pretty,
+                     GHCJS.Tyr.Quasi,
+                     GHCJS.Tyr.Render,
+                     GHCJS.Tyr.SourceMap,
+                     GHCJS.Tyr.Types,
+                     -- transitional
+                     GHCJS.Tyr.JMacro,
                      -- shared code from the ghcjs-th package, found in lib/ghcjs-th
                      GHCJS.Prim.TH.Types,
-                     GHCJS.Prim.TH.Serialized
+                     GHCJS.Prim.TH.Serialized,
+                     --
+                     GHCJS
+
     other-modules: Paths_ghcjs
     build-depends: base           >= 4        && < 5,
                    Cabal          >= 1.23     && < 1.25,
@@ -164,6 +183,10 @@ Library
                    optparse-applicative       >= 0.11 && < 0.13,
                    stringsearch               >= 0.3 && < 0.4,
                    base16-bytestring          >= 0.1 && < 0.2,
+                   -- new for tyr
+                   language-ecmascript        >= 0.17,
+                   sourcemap                  >= 0.1.6,
+                   bifunctors                 >= 5.3,
                    -- for JMacro
                    regex-posix                >= 0.90 && < 0.100,
                    safe                       >= 0.3  && < 0.4,

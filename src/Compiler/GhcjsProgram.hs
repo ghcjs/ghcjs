@@ -119,6 +119,8 @@ getGhcjsSettings args =
                  , "-only-out"
                  , "-no-rts"
                  , "-no-stats"
+                 , "-minify"
+                 , "-source-map"
                  ]
     ghcjsOpts = [ "-strip-program"
                 , "-log-commandline"
@@ -144,6 +146,8 @@ getGhcjsSettings args =
                                 <*> pure Nothing
                                 <*> pure Nothing
                                 <*> pure []
+                                <*> pure False
+                                <*> pure False
 
 optParser' :: ParserInfo GhcjsSettings
 optParser' = info (helper <*> optParser) fullDesc
@@ -165,6 +169,8 @@ optParser = GhcjsSettings
             <*> optStr ( long "link-js-lib" )
             <*> optStr ( long "js-lib-outputdir" )
             <*> (maybe [] (:[]) <$> optStr ( long "js-lib-src" )) -- fixme!
+            <*> switch ( long "minify" )
+            <*> switch ( long "source-map" )
 
 optStr :: Mod OptionFields String -> Parser (Maybe String)
 optStr = optional . option str

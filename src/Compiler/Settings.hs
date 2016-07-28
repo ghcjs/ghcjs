@@ -60,6 +60,8 @@ data GhcjsSettings =
                 , gsLinkJsLib          :: Maybe String
                 , gsJsLibOutputDir     :: Maybe FilePath
                 , gsJsLibSrcs          :: [FilePath]
+                , gsMinify             :: Bool
+                , gsSourceMap          :: Bool
                 }
 
 usingBase :: GhcjsSettings -> Bool
@@ -80,9 +82,9 @@ generateAllJs s
   settings, but it doesn't work very well. find something better.
  -}
 instance Monoid GhcjsSettings where
-  mempty = GhcjsSettings False False False False Nothing Nothing Nothing False False False Nothing NoBase Nothing Nothing []
-  mappend (GhcjsSettings ne1 nn1 bc1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1 ljsl1 jslo1 jslsrc1)
-          (GhcjsSettings ne2 nn2 bc2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2 ljsl2 jslo2 jslsrc2) =
+  mempty = GhcjsSettings False False False False Nothing Nothing Nothing False False False Nothing NoBase Nothing Nothing [] False False
+  mappend (GhcjsSettings ne1 nn1 bc1 nj1 sp1 lc1 gh1 oo1 nr1 ns1 gb1 ub1 ljsl1 jslo1 jslsrc1 mi1 ma1)
+          (GhcjsSettings ne2 nn2 bc2 nj2 sp2 lc2 gh2 oo2 nr2 ns2 gb2 ub2 ljsl2 jslo2 jslsrc2 mi2 ma2) =
           GhcjsSettings (ne1 || ne2)
                         (nn1 || nn2)
                         (bc1 || bc2)
@@ -98,6 +100,8 @@ instance Monoid GhcjsSettings where
                         (ljsl1 <> ljsl2)
                         (jslo1 <> jslo2)
                         (jslsrc1 <> jslsrc2)
+                        (mi1 || mi2)
+                        (ma1 || ma2)
 
 data ThRunner =
   ThRunner { thrProcess        :: ProcessHandle
