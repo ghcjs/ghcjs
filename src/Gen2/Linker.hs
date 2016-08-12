@@ -157,7 +157,7 @@ link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStatic
         lla'    <- mapM (tryReadShimFile dflags) lla
         llarch' <- mapM (readShimsArchive dflags) llarch
         BL.writeFile (out </> "lib" <.> jsExt)
-                     (BL.fromChunks $ lla' ++ llarch')
+                     (BL.fromChunks $ llarch' ++ lla')
         if genBase
           then generateBase out lbase
           else when (not (gsOnlyOut settings) &&
