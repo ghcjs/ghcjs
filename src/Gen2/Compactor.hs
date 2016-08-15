@@ -492,7 +492,7 @@ dedupe rtsDeps input
   map (\(st,cis,sis) -> dedupeBlock idx st cis sis) input
   where
     idx    = HashIdx hashes hr
-    hashes0 = buildHashes input
+    hashes0 = buildHashes rtsDeps input
     hashes  = foldl' (flip M.delete) hashes0 rtsDeps
     hr     = fmap pickShortest
              (M.fromListWith (++) $
@@ -582,7 +582,7 @@ instance Monoid HashBuilder where
   mappend (HashBuilder b1 l1) (HashBuilder b2 l2) =
     HashBuilder (b1 <> b2) (l1 <> l2)
 
-{-
+
 dumpHashIdx :: HashIdx -> Bool
 dumpHashIdx hi@(HashIdx ma mb) =
   let ks = M.keys ma
@@ -595,6 +595,7 @@ dumpHashIdx hi@(HashIdx ma mb) =
   in unsafePerformIO writeHashIdx `seq` True
 
 -- debug thing
+{-
 dumpHashes' :: [(JStat, [ClosureInfo], [StaticInfo])] -> Bool
 dumpHashes' input =
   let hashes      = buildHashes input
@@ -604,12 +605,12 @@ dumpHashes' input =
   in unsafePerformIO writeHashes `seq` True
 -}
 
-buildHashes :: [(JStat, [ClosureInfo], [StaticInfo])] -> Map Text Hash
-buildHashes xss
+buildHashes :: [Text] -> [(JStat, [ClosureInfo], [StaticInfo])] -> Map Text Hash
+buildHashes rtsDeps xss
 --  | dumpHashes0 hashes0
   = fixHashes (fmap finalizeHash hashes0)
   where
-    globals = findAllGlobals xss
+    globals = foldl' (flip S.delete) (findAllGlobals xss) rtsDeps
     hashes0 = (M.unions (map buildHashesBlock xss))
     buildHashesBlock (st, cis, sis) =
       let hdefs = hashDefinitions globals st
@@ -663,7 +664,7 @@ combineHashes x y = M.toList $ M.intersectionWith (<>) (M.fromList x) (M.fromLis
     f (tx, hbx) = fmap ((tx,) . mappend)
     m = M.fromList y -}
   -- M.toList $ M.fromListWith mappend (x ++ y)
-{-
+
 dumpHashes0 :: Map Text HashBuilder -> Bool
 dumpHashes0 hashes = unsafePerformIO writeHashes `seq` True
   where
@@ -686,7 +687,6 @@ dumpHashes idx = toJSON iidx
        iidx :: Map Text [(Text, [Text])]
        iidx = M.fromListWith (++) $
          map (\(t, (b, deps)) -> (TE.decodeUtf8 (B16.encode b), [(t,deps)])) (M.toList idx)
--}
 
 ht :: Int8 -> HashBuilder
 ht x = HashBuilder (BB.int8 x) []
@@ -726,10 +726,13 @@ findDefinitions (AssignStat (ValExpr (JVar i)) e) = [(i,e)]
 findDefinitions _                                 = []
 
 hashSingleDefinition :: Set Text -> Ident -> JExpr -> (Text, HashBuilder)
-hashSingleDefinition globals (TxtI i) expr = (i, ht 0 <> render st)
+hashSingleDefinition globals (TxtI i) expr = (i, ht 0 <> render st <> mconcat (map hobj globalRefs))
   where
-    st     = AssignStat (ValExpr (JVar (TxtI "dummy"))) expr
-    render = htxt . TL.toStrict . displayT . renderPretty 0.8 150 . pretty
+    globalRefs = nub $ filter (`S.member` globals) (map (\(TxtI i) -> i) (expr ^.. identsE))
+    globalMap  = M.fromList $ zip globalRefs (map (T.pack . ("h$$$global_"++) . show) [(1::Int)..])
+    expr'      = expr & identsE %~ (\i@(TxtI t) -> maybe i TxtI (M.lookup t globalMap))
+    st         = AssignStat (ValExpr (JVar (TxtI "dummy"))) expr'
+    render     = htxt . TL.toStrict . displayT . renderPretty 0.8 150 . pretty
 
 hashClosureInfo :: ClosureInfo -> (Text, HashBuilder)
 hashClosureInfo (ClosureInfo civ cir cin cil cit cis) =
