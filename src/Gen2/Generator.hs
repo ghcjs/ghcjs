@@ -538,7 +538,10 @@ genToplevelRhs i (StgRhsClosure cc _bi [] _upd_flag srt args body) = do
   (static, regs, upd) <-
         if et == CIThunk
           then (StaticThunk (Just (eidt, map StaticObjArg lidents')), CIRegs 0 [PtrV],) <$> updateThunk
-          else return (StaticFun eidt (map StaticObjArg lidents'), CIRegs 1 (concatMap idVt args), mempty)
+          else return (StaticFun eidt (map StaticObjArg lidents'),
+                      (if null lidents then CIRegs 1 (concatMap idVt args)
+                                       else CIRegs 0 (PtrV : concatMap idVt args))
+                        , mempty)
   setcc <- ifProfiling $
              if et == CIThunk
                then enterCostCentreThunk
