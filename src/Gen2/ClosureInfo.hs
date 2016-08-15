@@ -381,8 +381,8 @@ data StaticInfo = StaticInfo { siVar    :: !Text          -- ^ global object
 
 instance NFData StaticInfo
 
-data StaticVal = StaticFun     !Text                     -- ^ heap object for function
-               | StaticThunk   !(Maybe Text)             -- ^ heap object for CAF (field is Nothing when thunk is initialized in an alternative way, like string thunks through h$str)
+data StaticVal = StaticFun     !Text   [StaticArg]       -- ^ heap object for function
+               | StaticThunk   !(Maybe (Text,[StaticArg]))-- ^ heap object for CAF (field is Nothing when thunk is initialized in an alternative way, like string thunks through h$str)
                | StaticUnboxed !StaticUnboxed            -- ^ unboxed constructor (Bool, Int, Double etc)
                | StaticData    !Text [StaticArg]         -- ^ regular datacon app
                | StaticList    [StaticArg] (Maybe Text)  -- ^ list initializer (with optional tail)
@@ -453,10 +453,10 @@ staticInitStat :: Bool         -- ^ profiling enabled
 staticInitStat _prof (StaticInfo i sv cc) =
   case sv of
     StaticData con args  -> ApplStat (jvar "h$sti") $ [jvar i, jvar con, toJExpr args] ++ ccArg
-    StaticFun f          -> ApplStat (jvar "h$sti") $ [jvar i, jvar f, [je| [] |]] ++ ccArg
+    StaticFun f args     -> ApplStat (jvar "h$sti") $ [jvar i, jvar f, toJExpr args] ++ ccArg
     StaticList args mt   ->
       ApplStat (jvar "h$stl") $ [jvar i, toJExpr args, toJExpr $ maybe jnull (toJExpr . TxtI) mt] ++ ccArg
-    StaticThunk (Just f) -> ApplStat (jvar "h$stc") $ [jvar i, jvar f] ++ ccArg
+    StaticThunk (Just (f,args)) -> ApplStat (jvar "h$stc") $ [jvar i, jvar f, toJExpr args] ++ ccArg
     _                    -> mempty
   where
     ccArg = maybeToList (fmap toJExpr cc)
@@ -508,3 +508,8 @@ dfCgSettings df = def { csTraceRts  = "-DGHCJS_TRACE_RTS"  `elem` opt_P df
                       , csProf      = WayProf `elem` ways df
                                       -- FIXME: this part is inlined from Settings.hs to avoid circular imports
                       }
+
+
+returnStack :: JStat
+-- returnStack = [j| return `Stack`[`Sp`]; |]
+returnStack = [j| return h$rs(); |]

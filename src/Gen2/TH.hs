@@ -697,7 +697,7 @@ thSettings :: GhcjsSettings
 thSettings = GhcjsSettings False True False False Nothing
                            Nothing Nothing True True True
                            Nothing NoBase
-                           Nothing Nothing []
+                           Nothing Nothing [] False
 
 startThRunner :: DynFlags -> GhcjsEnv -> HscEnv -> IO ThRunner
 startThRunner dflags js_env hsc_env = do

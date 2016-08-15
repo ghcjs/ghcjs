@@ -85,6 +85,7 @@ import qualified Gen2.Optimizer as O
 import qualified Gen2.Object    as Object
 import           Gen2.Sinker
 import           Gen2.Profiling
+import qualified Gen2.Compactor as Compactor
 
 import qualified Debug.Trace
 
@@ -519,22 +520,82 @@ genToplevelRhs i (StgRhsCon cc con args) = do
 genToplevelRhs i (StgRhsClosure cc _bi [] _upd_flag srt args body) = do
   eid@(TxtI eidt) <- jsEnIdI i
   (TxtI idt)   <- jsIdI i
+--  pushGlobalRefs
   body <- genBody (ExprCtx i [] emptyUniqSet emptyUniqSet emptyUFM []) i R2 args body
-  sr <- genStaticRefs srt
+  (lidents, lids) <- unzip <$> liftToGlobal (jsSaturate (Just . T.pack $ "ghcjs_tmp_sat_") body)
+  let lidents' = map (\(TxtI t) -> t) lidents
+--  li
+--  refs <- popGlobalRefs
+  CIStaticRefs sr0 <- genStaticRefs srt
+  let sri = filter (`notElem` lidents') sr0
+      sr   = CIStaticRefs sri
+
+--  emitToplevel $ AssignStat (ValExpr (JVar $ TxtI ("h$globalRefs_" <> idt)))
+--                            (ValExpr (JList $ map (ValExpr . JVar) lidents ++ [jnull] ++ map (ValExpr . JVar . TxtI) sri))
+
   et <- genEntryType args
+  ll <- loadLiveFun lids
   (static, regs, upd) <-
         if et == CIThunk
-          then (StaticThunk (Just eidt), CIRegs 0 [PtrV],) <$> updateThunk
-          else return (StaticFun eidt, CIRegs 1 (concatMap idVt args), mempty)
+          then (StaticThunk (Just (eidt, map StaticObjArg lidents')), CIRegs 0 [PtrV],) <$> updateThunk
+          else return (StaticFun eidt (map StaticObjArg lidents'), CIRegs 1 (concatMap idVt args), mempty)
   setcc <- ifProfiling $
              if et == CIThunk
                then enterCostCentreThunk
                else enterCostCentreFun cc
-  emitClosureInfo (ClosureInfo eidt regs idt (CILayoutFixed 0 []) et sr)
+  emitClosureInfo (ClosureInfo eidt
+                               regs
+                               idt
+                               (fixedLayout $ map (uTypeVt . idType) lids) -- (CILayoutFixed 0 [])
+                               et
+                               sr)
   ccId <- costCentreStackLbl cc
   emitStatic idt static ccId
-  return $ eid ||= JFunc [] (upd <> setcc <> body)
+  return $ eid ||= JFunc [] (ll <> upd <> setcc <> body)
 genToplevelRhs _ _ = panic "genToplevelRhs: top-level values cannot have live variables"
+
+dumpGlobalIdCache :: Text -> G ()
+dumpGlobalIdCache itxt = do
+  GlobalIdCache gidc <- use globalIdCache
+  let i  = TxtI ("h$globalIdCache_" <> itxt)
+      vs = M.keys
+  emitToplevel [j| `i` = `M.keys gidc`; |]
+{-  emitToplevel $ [j|
+
+                   AssignStat (ValExpr (JVar . TxtI $ "h$globalIdCache_" <> idt))
+                            (ValExpr (JList
+-}
+
+liftToGlobal :: JStat -> G [(Ident, Id)]
+liftToGlobal jst = do
+  GlobalIdCache gidc <- use globalIdCache
+  let sids  = filter (`M.member` gidc) (jst ^.. Compactor.identsS)
+      cnt   = M.fromListWith (+) (map (,1) sids)
+      sids' = sortBy (compare `on` (cnt M.!)) (nub' sids)
+  pure $ map (\s -> (s, snd $ gidc M.! s)) sids'
+
+nub' :: (Ord a, Eq a) => [a] -> [a]
+nub' xs = go S.empty xs
+  where
+    go _ []     = []
+    go s xxs@(x:xs) | S.member x s = go s xs
+                    | otherwise    = x : go (S.insert x s) xs
+--       ids  = filter M.member gidc
+{-
+  algorithm:
+   - collect all Id refs that are in the cache, count usage
+   - order by increasing use
+   - prepend loading lives var to body: body can stay the same
+-}
+
+{-
+   todo for stack frames:
+    - change calling convention?
+    - return stack[sp] -> return stack[sp].f ?
+       -> no we miss the continuation object then
+       -> set h$rS
+       -> return h$rs(); instead
+ -}
 
 loadLiveFun :: [Id] -> C
 loadLiveFun l = do
@@ -562,7 +623,7 @@ genBody0 ctx i startReg args e = do
   la <- loadArgs startReg args
   let ids = take (resultSize args $ idType i) (map toJExpr $ enumFrom R1)
   (e, _r) <- genExpr (ctx & ctxTarget .~ ids) e
-  return $ la <> e <> [j| return `Stack`[`Sp`]; |]
+  return $ la <> e <> returnStack -- [j| return `Stack`[`Sp`]; |]
 
 -- find the result type after applying the function to the arguments
 resultSize xs t = {- Debug.Trace.trace "resultSize" -} (resultSize0 xs t)
@@ -870,7 +931,7 @@ genEntryLne ctx i (StgRhsCon cc con args) = resetSlots $ do
   args' <- concatMapM genArg args
   ac    <- allocCon ii con cc args'
   emitToplevel $ ei ||= JFunc []
-    (decl ii <> p <> ac <> [j| `R1` = `ii`; return `Stack`[`Sp`]; |])
+    (decl ii <> p <> ac <> [j| `R1` = `ii`; |] <> returnStack) -- return `Stack`[`Sp`]; |])
 
 -- generate the entry function for a local closure
 genEntry :: ExprCtx -> Id -> StgRhs -> G ()
@@ -921,7 +982,7 @@ genSetConInfo i d srt = do
       fields = concatMap (flattenRepType . repType) (dataConRepArgTys d)
 
 mkDataEntry :: JExpr
-mkDataEntry = ValExpr $ JFunc [] [j| return `Stack`[`Sp`]; |]
+mkDataEntry = ValExpr $ JFunc [] returnStack
 
 genUpdFrame :: UpdateFlag -> Id -> C
 genUpdFrame u i
@@ -1037,7 +1098,7 @@ genRet ctx e at as l srt = withNewIdent f
       rlne          <- popLneFrame False lneLive ctx'
       (alts, _altr) <- genAlts ctx' e at Nothing as
       return $ decs <> load  <> ras <> restoreCCS <> rlne <> alts <>
-               [j| return `Stack`[`Sp`]; |]
+               returnStack
 
 
 -- 2-var values might have been moved around separately, use DoubleV as substitute
