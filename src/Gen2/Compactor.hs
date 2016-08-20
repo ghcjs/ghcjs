@@ -2,6 +2,7 @@
              BangPatterns,
              ScopedTypeVariables,
              TemplateHaskell,
+             TupleSections,
              OverloadedStrings #-}
 
 {-
@@ -19,6 +20,7 @@ module Gen2.Compactor where
 import           DynFlags
 
 import           Control.Applicative
+import           Control.Arrow
 import           Control.Lens
 import           Control.Monad.State.Strict
 
@@ -32,6 +34,7 @@ import qualified Data.ByteString.Builder as BB
 import           Data.ByteString.Builder (Builder)
 import           Data.Char (chr, ord)
 import           Data.Function (on)
+import qualified Data.Graph as G
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map.Strict as M
@@ -81,9 +84,9 @@ renameInternals :: GhcjsSettings
                 -> (CompactorState, [JStat], JStat)
 renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
   where
-    -- hashes = buildHashes stats0a
-    stats0 :: [(JStat, [ClosureInfo], [StaticInfo])]
-    stats0 = (if gsDedupe settings then dedupe rtsDeps else id) stats0a
+    (stbs, stats0) = (if gsDedupe settings
+                      then dedupeBodies rtsDeps . dedupe rtsDeps
+                      else (mempty,)) stats0a
     ((stats, meta), cs) = runState renamed cs0
     renamed :: State CompactorState ([JStat], JStat)
     renamed
@@ -94,6 +97,7 @@ renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
             infos        = map (renameClosureInfo cs) $ concatMap (\(_,x,_) -> x) stats0
             -- render metadata as individual statements
             meta = mconcat (map staticDeclStat statics) <>
+                   (stbs & identsS %~ lookupRenamed cs) <>
                    mconcat (map (staticInitStat $ buildingProf dflags) statics) <>
                    mconcat (map (closureInfoStat True) infos)
         return (renamedStats, meta)
@@ -114,7 +118,8 @@ renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
             ss           = concatMap (\(_,_,xs) -> map (renameStaticInfo cs) xs) stats0
             infoBlock    = encodeStr (concatMap (encodeInfo cs) sortedInfo)
             staticBlock  = encodeStr (concatMap (encodeStatic cs) ss)
-            staticDecls  = mconcat (map staticDeclStat ss)
+            stbs'        = stbs & identsS %~ lookupRenamed cs
+            staticDecls  = mconcat (map staticDeclStat ss) <> stbs'
             meta = staticDecls <>
                    [j| h$scheduleInit(`entryArr`, h$staticDelayed, `lblArr`, `infoBlock`, `staticBlock`);
                        h$staticDelayed = [];
@@ -476,10 +481,180 @@ compact :: GhcjsSettings
 compact settings dflags rs rtsDeps input
 --  | dumpHashes' input
   =
-  renameInternals settings dflags rs rtsDeps input
+  let rtsDeps' = rtsDeps ++ map (<> "_e") rtsDeps ++ map (<> "_con_e") rtsDeps
+  in  renameInternals settings dflags rs rtsDeps' input
 
 
 -- hash compactification
+
+dedupeBodies :: [Text]
+             -> [(JStat, [ClosureInfo], [StaticInfo])]
+             -> (JStat, [(JStat, [ClosureInfo], [StaticInfo])])
+dedupeBodies rtsDeps input = (renderBuildFunctions bfN bfCB, input')
+  where
+    (bfN, bfCB, input') = rewriteBodies globals hdefsR hdefs input
+    hdefs   = M.fromListWith (\(s,ks1) (_,ks2) -> (s, ks1++ks2))
+                             (map (\(k, s, bs) -> (bs, (s, [k]))) hdefs0)
+    hdefsR  = M.fromList $ map (\(k, _, bs) -> (k, bs)) hdefs0
+    hdefs0 :: [(Text, Int, BS.ByteString)]
+    hdefs0  = concatMap (\(b,_,_) -> (map (\(k,h) ->
+                                        let (s,fh, _deps) = finalizeHash' h
+                                        in (k, s, fh)) . hashDefinitions globals) b) input
+    globals = foldl' (flip S.delete) (findAllGlobals input) rtsDeps
+
+renderBuildFunctions :: [BuildFunction] -> [BuildFunction] -> JStat
+renderBuildFunctions normalBfs cycleBreakerBfs =
+  cycleBr1 <> mconcat (map renderBuildFunction normalBfs) <> cycleBr2
+  where
+    renderCbr f = mconcat (zipWith f cycleBreakerBfs [1..])
+    cbName :: Int -> Text
+    cbName = T.pack . ("h$$$cb"++) . show
+    cycleBr1 = renderCbr $ \bf n ->
+      let args = map (TxtI . T.pack . ('a':) . show) [1..bfArgs bf]
+          body = ReturnStat $ ApplExpr (ValExpr (JVar (TxtI $ cbName n)))
+                                       (map (ValExpr . JVar) args)
+      in  DeclStat (TxtI (bfName bf)) <>
+          AssignStat (ValExpr (JVar (TxtI (bfName bf))))
+                     (ValExpr (JFunc args body))
+    cycleBr2 = renderCbr $ \bf n -> renderBuildFunction (bf { bfName = cbName n })
+
+data BuildFunction = BuildFunction
+  { bfName    :: !Text
+  , bfBuilder :: !Ident
+  , bfDeps    :: [Text]
+  , bfArgs    :: !Int
+  } deriving (Eq, Ord, Show)
+
+{-
+  Stack frame initialization order is important when code is reused:
+    all dependencies have to be ready when the closure is built.
+
+  This function sorts the initializers and returns an additional list
+    of cycle breakers, which are built in a two-step fashion
+ -}
+sortBuildFunctions :: [BuildFunction] -> ([BuildFunction], [BuildFunction])
+sortBuildFunctions bfs = (map snd normBFs, map snd cbBFs)
+  where
+    (normBFs, cbBFs) = partition (not.fst) . concatMap fromSCC $ sccs bfs
+    bfm :: Map Text BuildFunction
+    bfm = M.fromList (map (\x -> (bfName x, x)) bfs)
+    fromSCC :: G.SCC Text -> [(Bool, BuildFunction)]
+    fromSCC (G.AcyclicSCC x) = [(False, bfm M.! x)]
+    fromSCC (G.CyclicSCC xs) = breakCycles xs
+    sccs :: [BuildFunction] -> [G.SCC Text]
+    sccs b = G.stronglyConnComp $ map (\bf -> let n = bfName bf in (n, n, bfDeps bf)) b
+    {-
+       finding the maximum acyclic subgraph is the Minimum Feedback Arc Set problem,
+       which is NP-complete. We use an approximation here.
+     -}
+    breakCycles :: [Text] -> [(Bool, BuildFunction)]
+    breakCycles nodes = (True, bfm M.! selected)
+                      : concatMap fromSCC (sccs $ (map (bfm M.!) $ filter (/=selected) nodes))
+      where
+        outDeg, inDeg :: Map Text Int
+        outDeg = M.fromList $ map (\n -> (n, length (bfDeps (bfm M.! n)))) nodes
+        inDeg  = M.fromListWith (+) (map (,1) . concatMap (bfDeps . (bfm M.!)) $ nodes)
+        -- ELS heuristic (Eades et. al.)
+        selected :: Text
+        selected = maximumBy (compare `on` (\x -> outDeg M.! x - inDeg M.! x)) nodes
+
+rewriteBodies :: Set Text
+              -> Map Text BS.ByteString
+              -> Map BS.ByteString (Int, [Text])
+              -> [(JStat, [ClosureInfo], [StaticInfo])]
+              -> ([BuildFunction], [BuildFunction], [(JStat, [ClosureInfo], [StaticInfo])])
+rewriteBodies globals idx1 idx2 input = (bfsNormal, bfsCycleBreaker, input')
+  where
+    (bfs1, input')               = unzip (map rewriteBlock input)
+    (bfsNormal, bfsCycleBreaker) = sortBuildFunctions (concat bfs1)
+
+    -- this index only contains the entries we actually want to dedupe
+    idx2' :: Map BS.ByteString (Int, [Text])
+    idx2' = M.filter (\(s, xs) -> dedupeBody (length xs) s) idx2
+
+    rewriteBlock :: (JStat, [ClosureInfo], [StaticInfo])
+                 -> ([BuildFunction], (JStat, [ClosureInfo], [StaticInfo]))
+    rewriteBlock (st, cis, sis) =
+      let (bfs, st') = rewriteFunctions st
+      in  (bfs, (st', cis, sis))
+
+    rewriteFunctions :: JStat -> ([BuildFunction], JStat)
+    rewriteFunctions (BlockStat ss) = let (bfs, ss') = unzip (map rewriteFunctions ss)
+                                      in  (concat bfs, BlockStat ss')
+    rewriteFunctions (DeclStat (TxtI i))
+      | Just h         <- M.lookup i idx1
+      , M.member h idx2' = ([], mempty) -- also remove the decl for everything we dedupe
+    rewriteFunctions (AssignStat (ValExpr (JVar (TxtI i))) (ValExpr (JFunc args st)))
+      | Just h         <- M.lookup i idx1
+      , Just (_s, his) <- M.lookup h idx2' =
+          let (bf, st') = rewriteFunction i h his args st in ([bf], st')
+    rewriteFunctions x = ([], x)
+
+    rewriteFunction :: Text -> BS.ByteString -> [Text] -> [Ident] -> JStat -> (BuildFunction, JStat)
+    rewriteFunction i h his args body
+      | i == iFirst = (bf, createFunction i idx g args body)
+      | otherwise   = (bf, mempty)
+       where
+          bf :: BuildFunction
+          bf       = BuildFunction i (buildFunId idx) g (length args)
+          g :: [Text]
+          g        = findGlobals globals body
+          iFirst   = head his
+          Just idx = M.lookupIndex h idx2'
+
+    createFunction :: Text -> Int -> [Text] -> [Ident] -> JStat -> JStat
+    createFunction i idx g args body =
+      DeclStat bi <>
+      AssignStat (ValExpr (JVar bi))
+                 (ValExpr (JFunc bargs bbody))
+      where
+        ng    = length g
+        bi    = buildFunId idx
+        bargs :: [Ident]
+        bargs = map (TxtI . T.pack . ("h$$$g"++) . show) [1..ng]
+        bgm :: Map Text Ident
+        bgm   = M.fromList (zip g bargs)
+        bbody :: JStat
+        bbody = ReturnStat (ValExpr $ JFunc args ibody)
+        ibody :: JStat
+        ibody = body & identsS %~ \ti@(TxtI i) -> fromMaybe ti (M.lookup i bgm)
+
+renderBuildFunction :: BuildFunction -> JStat
+renderBuildFunction (BuildFunction i bfid deps _nargs) =
+  DeclStat (TxtI i) <>
+  AssignStat (ValExpr (JVar (TxtI i)))
+             (ApplExpr (ValExpr (JVar bfid)) (map (ValExpr . JVar . TxtI) deps))
+
+dedupeBody :: Int -> Int -> Bool
+dedupeBody n size
+  | n < 2          = False
+  | size * n > 200 = True
+  | n > 6          = True
+  | otherwise      = False
+
+buildFunId :: Int -> Ident
+buildFunId i = TxtI (T.pack $ "h$$$f" ++ show i)
+
+-- result is ordered, does not contain duplicates
+findGlobals :: Set Text -> JStat -> [Text]
+findGlobals globals stat = nub'
+  (filter isGlobal . map (\(TxtI i) -> i) $ stat ^.. identsS)
+  where
+    locals     = S.fromList (findLocals stat)
+    isGlobal i = i `S.member` globals && i `S.notMember` locals
+
+findLocals :: JStat -> [Text]
+findLocals (BlockStat ss)      = concatMap findLocals ss
+findLocals (DeclStat (TxtI i)) = [i]
+findLocals _                   = []
+
+nub' :: Ord a => [a] -> [a]
+nub' = go S.empty
+  where
+    go _ []            = []
+    go s (x:xs)
+      | x `S.member` s = go s xs
+      | otherwise      = x : go (S.insert x s) xs
 
 data HashIdx = HashIdx (Map Text Hash) (Map Hash Text)
 
@@ -562,16 +737,6 @@ toCanon (HashIdx a b) t
 
 toCanonI :: HashIdx -> Ident -> Ident
 toCanonI hi (TxtI x) = TxtI (toCanon hi x)
-{-
-mapDefinitions :: (Ident -> JExpr -> JStat) -> JStat -> JStat
-mapDefinitions f s = go s
-  where
-    go (BlockStat ss)                    = BlockStat (map go ss)
-    go (AssignStat (ValExpr (JVar i)) e) = f i e
-    go s                                 = s
--}
-
--- still need to rename all idents in CI / SI
 
 type Hash = (BS.ByteString, [Text])
 
@@ -582,7 +747,7 @@ instance Monoid HashBuilder where
   mappend (HashBuilder b1 l1) (HashBuilder b2 l2) =
     HashBuilder (b1 <> b2) (l1 <> l2)
 
-
+{-
 dumpHashIdx :: HashIdx -> Bool
 dumpHashIdx hi@(HashIdx ma mb) =
   let ks = M.keys ma
@@ -592,8 +757,11 @@ dumpHashIdx hi@(HashIdx ma mb) =
         putStrLn "writing hash idx"
         T.writeFile "hashidx.txt"
           (T.unlines . sort $ mapMaybe (\i -> fmap ((i <> " -> ") <>) (difCanon i)) ks)
+        putStrLn "writing full hash idx"
+        T.writeFile "hashIdxFull.txt"
+          (T.unlines . sort $ M.keys ma)
   in unsafePerformIO writeHashIdx `seq` True
-
+-}
 -- debug thing
 {-
 dumpHashes' :: [(JStat, [ClosureInfo], [StaticInfo])] -> Bool
@@ -604,10 +772,9 @@ dumpHashes' input =
         BL.writeFile "hashes.json" (Aeson.encode $ dumpHashes hashes)
   in unsafePerformIO writeHashes `seq` True
 -}
-
 buildHashes :: [Text] -> [(JStat, [ClosureInfo], [StaticInfo])] -> Map Text Hash
 buildHashes rtsDeps xss
---  | dumpHashes0 hashes0
+  -- - | dumpHashes0 hashes0
   = fixHashes (fmap finalizeHash hashes0)
   where
     globals = foldl' (flip S.delete) (findAllGlobals xss) rtsDeps
@@ -629,22 +796,69 @@ fixHashes :: Map Text Hash -> Map Text Hash
 fixHashes hashes = fmap (\(bs,h) -> (bs, map replaceHash h)) hashes
   where
     replaceHash h = fromMaybe h (M.lookup h finalHashes)
-    hashText  bs = "h$$$" <> TE.decodeUtf8 (B16.encode bs) -- go (BS.unpack bs)
-    finalHashes  = fmap hashText (fixHashesIter 500 (M.keys hashes) hashes M.empty)
+    hashText  bs = "h$$$" <> TE.decodeUtf8 (B16.encode bs)
+    sccs :: [[Text]]
+    sccs         = map fromSCC $
+                   G.stronglyConnComp (map (\(k, (_bs, deps)) -> (k, k, deps)) (M.toList hashes))
+    ks           = M.keys hashes
+    invDeps      = M.fromListWith (++) (concatMap mkInvDeps $ M.toList hashes)
+    mkInvDeps (k, (_, ds)) = map (,[k]) ds
+    finalHashes  = fmap hashText (fixHashesIter 500 invDeps ks ks sccs hashes mempty)
 
-fixHashesIter :: Int -> [Text] -> Map Text Hash -> Map Text BS.ByteString -> Map Text BS.ByteString
-fixHashesIter n keys hashes finalHashes
---  | unsafePerformIO (putStrLn ("fixHashesIter: " ++ show n)) `seq` False = undefined
-  | n < 0 || null newHashes = finalHashes
-  | otherwise               = fixHashesIter (n-1) keys hashes
+fromSCC :: G.SCC a -> [a]
+fromSCC (G.AcyclicSCC x) = [x]
+fromSCC (G.CyclicSCC xs) = xs
+
+fixHashesIter :: Int
+              -> Map Text [Text]
+              -> [Text]
+              -> [Text]
+              -> [[Text]]
+              -> Map Text Hash
+              -> Map Text BS.ByteString
+              -> Map Text BS.ByteString
+fixHashesIter n invDeps allKeys checkKeys sccs hashes finalHashes
+  -- - | unsafePerformIO (putStrLn ("fixHashesIter: " ++ show n)) `seq` False = undefined
+  | n < 0                = finalHashes
+  | not (null newHashes) = fixHashesIter (n-1) invDeps allKeys checkKeys' sccs hashes
       (M.union finalHashes $ M.fromList newHashes)
+  -- - | unsafePerformIO (putStrLn ("fixHashesIter killing cycles:\n" ++ show rootSCCs)) `seq` False = undefined
+  | not (null rootSCCs)  = fixHashesIter (n {- -1 -}) invDeps allKeys allKeys sccs hashes
+      (M.union finalHashes (M.fromList $ concatMap hashRootSCC rootSCCs))
+  | otherwise            = finalHashes
   where
+    checkKeys' | length newHashes > (M.size hashes `div` 10) = allKeys
+               | otherwise = S.toList . S.fromList $ concatMap newHashDeps newHashes
+    newHashDeps (k, _) = fromMaybe [] (M.lookup k invDeps)
     mkNewHash k | M.notMember k finalHashes
                 , Just (hb, htxt) <- M.lookup k hashes
                 , Just bs <- mapM (`M.lookup` finalHashes) htxt =
                   Just (k, makeFinalHash hb bs)
                 | otherwise = Nothing
-    newHashes = mapMaybe mkNewHash keys
+    newHashes :: [(Text, BS.ByteString)]
+    newHashes = mapMaybe mkNewHash checkKeys
+    rootSCCs :: [[Text]]
+    rootSCCs = filter isRootSCC sccs
+    isRootSCC :: [Text] -> Bool
+    isRootSCC scc = not (all (`M.member` finalHashes) scc) && all check scc
+      where
+        check n = let Just (_bs, out) = M.lookup n hashes
+                  in  all checkEdge out
+        checkEdge e = e `S.member` s || e `M.member` finalHashes
+        s = S.fromList scc
+    hashRootSCC :: [Text] -> [(Text,BS.ByteString)]
+    hashRootSCC scc = map makeHash toHash
+      where
+        makeHash k = let (bs,deps) = hashes M.! k
+                     in (k, makeFinalHash bs (map lookupDep deps))
+        lookupDep :: Text -> BS.ByteString
+        lookupDep d | Just b <- M.lookup d finalHashes = b
+                    | Just i <- M.lookup d toHashIdx = TE.encodeUtf8 . T.pack . show $ i
+                    | otherwise = Panic.panic ("Gen2.Compactor.hashRootSCC: unknown key: " ++ T.unpack d)
+        toHashIdx :: M.Map Text Integer
+        toHashIdx = M.fromList $ zip toHash [1..]
+        toHash :: [Text]
+        toHash = sortBy (compare `on` (fst . (hashes M.!))) (filter (`M.notMember` finalHashes) scc)
 
 makeFinalHash :: BS.ByteString -> [BS.ByteString] -> BS.ByteString
 makeFinalHash b bs = SHA256.hash (mconcat (b:bs))
@@ -654,17 +868,11 @@ ignoreStatic :: StaticInfo -> Bool
 ignoreStatic (StaticInfo _ (StaticThunk {}) _) = True
 ignoreStatic _                                 = False
 
--- combine hashes from x and y, leaving only those which haven an entry in both
+-- combine hashes from x and y, leaving only those which have an entry in both
 combineHashes :: [(Text, HashBuilder)] -> [(Text, HashBuilder)] -> [(Text, HashBuilder)]
 combineHashes x y = M.toList $ M.intersectionWith (<>) (M.fromList x) (M.fromList y)
-{-  f hbx hby =
-  mapMaybe f x
-  where
-    f :: (Text, HashBuilder) -> Maybe (Text, HashBuilder)
-    f (tx, hbx) = fmap ((tx,) . mappend)
-    m = M.fromList y -}
-  -- M.toList $ M.fromListWith mappend (x ++ y)
 
+{-
 dumpHashes0 :: Map Text HashBuilder -> Bool
 dumpHashes0 hashes = unsafePerformIO writeHashes `seq` True
   where
@@ -687,6 +895,7 @@ dumpHashes idx = toJSON iidx
        iidx :: Map Text [(Text, [Text])]
        iidx = M.fromListWith (++) $
          map (\(t, (b, deps)) -> (TE.decodeUtf8 (B16.encode b), [(t,deps)])) (M.toList idx)
+-}
 
 ht :: Int8 -> HashBuilder
 ht x = HashBuilder (BB.int8 x) []
@@ -761,7 +970,7 @@ hashCILayout (CILayoutUnknown size) = ht 2 <> hi size
 hashCILayout (CILayoutFixed n l)    = ht 3 <> hi n <> hashList hashVT l
 
 hashCIStatic :: CIStatic -> HashBuilder
-hashCIStatic (CIStaticRefs xs) = hashList hobj xs
+hashCIStatic (CIStaticRefs xs) = mempty -- hashList hobj xs -- we get these from the code
 
 hashList :: (a -> HashBuilder) -> [a] -> HashBuilder
 hashList f xs = hi (length xs) <> mconcat (map f xs)
@@ -806,4 +1015,13 @@ hashSaneDouble :: SaneDouble -> HashBuilder
 hashSaneDouble (SaneDouble sd) = hd sd
 
 finalizeHash :: HashBuilder -> Hash
-finalizeHash (HashBuilder hb tt) = (SHA256.hash (BL.toStrict $ BB.toLazyByteString hb), tt)
+finalizeHash (HashBuilder hb tt) =
+  let h = SHA256.hash (BL.toStrict $ BB.toLazyByteString hb)
+  in  h `seq` (h, tt)
+
+finalizeHash' :: HashBuilder -> (Int, BS.ByteString, [Text])
+finalizeHash' (HashBuilder hb tt) =
+  let b  = BL.toStrict (BB.toLazyByteString hb)
+      bl = BS.length b
+      h  = SHA256.hash b
+  in  h `seq` bl `seq` (bl, h, tt)
