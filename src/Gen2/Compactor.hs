@@ -576,14 +576,19 @@ rewriteBodies globals idx1 idx2 input = (bfsNormal, bfsCycleBreaker, input')
                  -> ([BuildFunction], (JStat, [ClosureInfo], [StaticInfo]))
     rewriteBlock (st, cis, sis) =
       let (bfs, st') = rewriteFunctions st
-      in  (bfs, (st', cis, sis))
+      -- remove the declarations for things that we just deduped
+          st''       = removeDecls (S.fromList $ map bfName bfs) st'
+      in  (bfs, (st'', cis, sis))
+
+    removeDecls :: Set Text -> JStat -> JStat
+    removeDecls t (BlockStat ss) = BlockStat (map (removeDecls t) ss)
+    removeDecls t (DeclStat (TxtI i))
+      | i `S.member` t = mempty
+    removeDecls _ s = s
 
     rewriteFunctions :: JStat -> ([BuildFunction], JStat)
     rewriteFunctions (BlockStat ss) = let (bfs, ss') = unzip (map rewriteFunctions ss)
                                       in  (concat bfs, BlockStat ss')
-    rewriteFunctions (DeclStat (TxtI i))
-      | Just h         <- M.lookup i idx1
-      , M.member h idx2' = ([], mempty) -- also remove the decl for everything we dedupe
     rewriteFunctions (AssignStat (ValExpr (JVar (TxtI i))) (ValExpr (JFunc args st)))
       | Just h         <- M.lookup i idx1
       , Just (_s, his) <- M.lookup h idx2' =
