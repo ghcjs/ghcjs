@@ -852,18 +852,27 @@ fixHashesIter n invDeps allKeys checkKeys sccs hashes finalHashes
         checkEdge e = e `S.member` s || e `M.member` finalHashes
         s = S.fromList scc
     hashRootSCC :: [Text] -> [(Text,BS.ByteString)]
-    hashRootSCC scc = map makeHash toHash
+    hashRootSCC scc
+      | any (`M.member` finalHashes) scc = Panic.panic "Gen2.Compactor.hashRootSCC: has finalized nodes"
+      | otherwise = map makeHash toHash
       where
-        makeHash k = let (bs,deps) = hashes M.! k
-                     in (k, makeFinalHash bs (map lookupDep deps))
+        makeHash k = let Just (bs,deps) = M.lookup k hashes
+                         luds           = map lookupDep deps
+                     in (k, makeFinalHash bs luds)
         lookupDep :: Text -> BS.ByteString
         lookupDep d | Just b <- M.lookup d finalHashes = b
-                    | Just i <- M.lookup d toHashIdx = TE.encodeUtf8 . T.pack . show $ i
+                    | Just i <- M.lookup d toHashIdx = grpHash <> (TE.encodeUtf8 . T.pack . show $ i)
                     | otherwise = Panic.panic ("Gen2.Compactor.hashRootSCC: unknown key: " ++ T.unpack d)
         toHashIdx :: M.Map Text Integer
         toHashIdx = M.fromList $ zip toHash [1..]
+        grpHash :: BS.ByteString
+        grpHash = BL.toStrict . BB.toLazyByteString $ mconcat (map (mkGrpHash . (hashes M.!)) toHash)
+        mkGrpHash (h, deps) = let deps' = mapMaybe (`M.lookup` finalHashes) deps
+                              in  BB.byteString h <>
+                                  BB.int64LE (fromIntegral $ length deps') <>
+                                  mconcat (map BB.byteString deps')
         toHash :: [Text]
-        toHash = sortBy (compare `on` (fst . (hashes M.!))) (filter (`M.notMember` finalHashes) scc)
+        toHash = sortBy (compare `on` (fst . (hashes M.!))) scc
 
 makeFinalHash :: BS.ByteString -> [BS.ByteString] -> BS.ByteString
 makeFinalHash b bs = SHA256.hash (mconcat (b:bs))
@@ -924,7 +933,7 @@ htxt x = HashBuilder (BB.int64LE (fromIntegral $ BS.length bs) <> BB.byteString 
     bs = TE.encodeUtf8 x
 
 hobj :: Text -> HashBuilder
-hobj x = HashBuilder mempty [x]
+hobj x = HashBuilder (BB.int8 127) [x]
 
 hb :: BS.ByteString -> HashBuilder
 hb x = HashBuilder (BB.int64LE (fromIntegral $ BS.length x) <> BB.byteString x) []
