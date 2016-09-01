@@ -306,7 +306,8 @@ linkTh env settings js_files dflags pkgs hpt code = do
       -- deps  = map (\pkg -> (pkg, packageLibPaths pkg)) pkgs'
       cache_key = T.pack $
         (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++
-        show (ways dflags')
+        show (ways dflags') ++
+        show (topDir dflags)
   if isJust code
      then link
      else Gen2.getCached dflags' "template-haskell" cache_key >>= \case
