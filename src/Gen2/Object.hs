@@ -780,13 +780,13 @@ instance Objectable StaticInfo where
   get = StaticInfo <$> get <*> get <*> get
 
 instance Objectable StaticVal where
-  put (StaticFun f)        = tag 1 >> put f
+  put (StaticFun f args)   = tag 1 >> put f  >> put args
   put (StaticThunk t)      = tag 2 >> put t
   put (StaticUnboxed u)    = tag 3 >> put u
   put (StaticData dc args) = tag 4 >> put dc >> put args
   put (StaticList xs t)    = tag 5 >> put xs >> put t
   get = getTag >>= \case
-                      1 -> StaticFun     <$> get
+                      1 -> StaticFun     <$> get <*> get
                       2 -> StaticThunk   <$> get
                       3 -> StaticUnboxed <$> get
                       4 -> StaticData    <$> get <*> get

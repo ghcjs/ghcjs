@@ -160,9 +160,11 @@ genericStackApply dflags s =
             }
             `Sp` = `Sp` - myRegs - 2;
             `R1` = `initClosure dflags p dat jCurrentCCS`;
-            return `Stack`[`Sp`];
+            `returnStack`;
           }
         |]
+--            return `Stack`[`Sp`];
+
 {-
   generic fast apply: can handle anything (slowly)
   signature tag in argument
@@ -253,9 +255,11 @@ genericFastApply dflags s =
               }
               `R1` = `initClosure dflags p dat jCurrentCCS`;
             }
-            return `Stack`[`Sp`];
+            `returnStack`;
           }
         |]
+--                  return `Stack`[`Sp`];
+
     pushAllRegs :: JExpr -> JStat
     pushAllRegs tag =
       [j| var regs = `tag` >> 8;
@@ -332,7 +336,7 @@ stackApply dflags s r n =
                       `mkPap dflags s pap (toJExpr R1) (toJExpr n) stackArgs`;
                       `Sp` = `Sp` - `r+1`;
                       `R1` = `pap`;
-                      return `Stack`[`Sp`];
+                      `returnStack`;
                     }
                   |]
     funCase :: JExpr -> JStat
@@ -350,9 +354,10 @@ stackApply dflags s r n =
                       `mkPap dflags s pap (toJExpr R1) (toJExpr n) stackArgs`;
                       `Sp` = `Sp` - `r+1`;
                       `R1` = `pap`;
-                      return `Stack`[`Sp`];
+                      `returnStack`;
                     }
                   |]
+--                      return `Stack`[`Sp`];
 
     -- oversat: call the function but keep enough on the stack for the next
     oversatCase :: JExpr -- function
@@ -432,7 +437,7 @@ fastApply dflags s r n =
               `traceRts s (funName <> ": undersat")`;
               `mkPap dflags s pap (toJExpr R1) (toJExpr n) (map toJExpr regArgs)`;
               `R1` = `pap`;
-              return `Stack`[`Sp`];
+              `returnStack`;
             }
           |]
       oversatCase :: JExpr -> JExpr -> JStat
@@ -483,12 +488,12 @@ zeroApply s =
 enter :: CgSettings -> JExpr -> JStat
 enter s e =
          [j| if(typeof `e` !== 'object') {
-                return `Stack`[`Sp`];
+                `returnStack`;
               }
               var c = `e`.f;
               if(c === h$unbox_e) {
                 `R1` = `e`.d1;
-                return `Stack`[`Sp`];
+                `returnStack`;
               }
               switch(c.t) {
                 case `Con`:
@@ -496,7 +501,7 @@ enter s e =
                 case `Fun`:
                   `(mempty :: JStat)`;
                 case `Pap`:
-                  return `Stack`[`Sp`];
+                  `returnStack`;
                 case `Blackhole`:
                   `push' s [jsv "h$ap_0_0", e, jsv "h$return"]`;
                   return h$blockOnBlackhole(`e`);
@@ -534,7 +539,7 @@ updates _dflags s =
         }
         `adjSpN' 2`;
         `traceRts s $ t"h$upd_frame: updating: " |+ updatee |+ t" -> " |+ R1`;
-        return `Stack`[`Sp`];
+        `returnStack`;
       };
       `ClosureInfo "h$upd_frame" (CIRegs 0 [PtrV]) "h$upd_frame" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
 
@@ -544,7 +549,7 @@ updates _dflags s =
          `Stack`[updateePos] = `R1`;
          `adjSpN' 2`;
          `traceRts s $ t"h$upd_frame_lne: updating: " |+ updateePos |+ t" -> " |+ R1`;
-         return `Stack`[`Sp`];
+         `returnStack`;
       }
       `ClosureInfo "h$upd_frame_lne" (CIRegs 0 [PtrV]) "h$upd_frame_lne" (CILayoutFixed 1 [PtrV]) CIStackFrame noStatic`;
   |]

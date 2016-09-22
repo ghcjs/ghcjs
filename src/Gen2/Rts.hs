@@ -176,7 +176,7 @@ bhLneStats _s p frameSize =
         } else {
           `R1` = v;
           `Sp` -= `frameSize`;
-          return `Stack`[`Sp`];
+          `returnStack`;
         }
       } else {
         `Stack`[`p`] = h$blackhole;

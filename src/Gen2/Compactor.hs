@@ -2,6 +2,7 @@
              BangPatterns,
              ScopedTypeVariables,
              TemplateHaskell,
+             TupleSections,
              OverloadedStrings #-}
 
 {-
@@ -19,6 +20,7 @@ module Gen2.Compactor where
 import           DynFlags
 
 import           Control.Applicative
+import           Control.Arrow
 import           Control.Lens
 import           Control.Monad.State.Strict
 
@@ -27,16 +29,26 @@ import qualified Data.Binary.Put as DB
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Builder as BB
+import           Data.ByteString.Builder (Builder)
 import           Data.Char (chr, ord)
 import           Data.Function (on)
+import qualified Data.Graph as G
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
+import qualified Data.Map.Strict as M
+import           Data.Map (Map)
 import           Data.Int
 import           Data.List
 import           Data.Maybe
 import           Data.Monoid
+import qualified Data.Set as S
+import           Data.Set (Set)
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
+import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Encoding as TE
 
 import           Compiler.JMacro
@@ -45,6 +57,16 @@ import           Compiler.Settings
 import           Gen2.Base
 import           Gen2.ClosureInfo
 import           Gen2.Utils (buildingProf, buildingDebug)
+import           Gen2.Printer             (pretty)
+import qualified Panic
+import           Text.PrettyPrint.Leijen.Text (renderPretty, displayT)
+import qualified Crypto.Hash.SHA256 as SHA256
+import           Data.Aeson (ToJSON(..), Value)
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Base16 as B16
+
+import System.IO.Unsafe (unsafePerformIO)
+
 
 -- | collect global objects (data / CAFs). rename them and add them to the table
 collectGlobals :: [StaticInfo]
@@ -57,10 +79,14 @@ debugShowStat (_s, cis, sis) = "closures:\n" ++ unlines (map show cis) ++ "\nsta
 renameInternals :: GhcjsSettings
                 -> DynFlags
                 -> CompactorState
+                -> [Text]
                 -> [(JStat, [ClosureInfo], [StaticInfo])]
                 -> (CompactorState, [JStat], JStat)
-renameInternals _settings dflags cs0 stats0 = (cs, stats, meta)
+renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
   where
+    (stbs, stats0) = (if gsDedupe settings
+                      then dedupeBodies rtsDeps . dedupe rtsDeps
+                      else (mempty,)) stats0a
     ((stats, meta), cs) = runState renamed cs0
     renamed :: State CompactorState ([JStat], JStat)
     renamed
@@ -71,6 +97,7 @@ renameInternals _settings dflags cs0 stats0 = (cs, stats, meta)
             infos        = map (renameClosureInfo cs) $ concatMap (\(_,x,_) -> x) stats0
             -- render metadata as individual statements
             meta = mconcat (map staticDeclStat statics) <>
+                   (stbs & identsS %~ lookupRenamed cs) <>
                    mconcat (map (staticInitStat $ buildingProf dflags) statics) <>
                    mconcat (map (closureInfoStat True) infos)
         return (renamedStats, meta)
@@ -91,7 +118,8 @@ renameInternals _settings dflags cs0 stats0 = (cs, stats, meta)
             ss           = concatMap (\(_,_,xs) -> map (renameStaticInfo cs) xs) stats0
             infoBlock    = encodeStr (concatMap (encodeInfo cs) sortedInfo)
             staticBlock  = encodeStr (concatMap (encodeStatic cs) ss)
-            staticDecls  = mconcat (map staticDeclStat ss)
+            stbs'        = stbs & identsS %~ lookupRenamed cs
+            staticDecls  = mconcat (map staticDeclStat ss) <> stbs'
             meta = staticDecls <>
                    [j| h$scheduleInit(`entryArr`, h$staticDelayed, `lblArr`, `infoBlock`, `staticBlock`);
                        h$staticDelayed = [];
@@ -194,8 +222,8 @@ staticIdents :: Traversal' StaticInfo Text
 staticIdents f (StaticInfo i v cc) = StaticInfo <$> f i <*> staticIdentsV f v <*> pure cc
 
 staticIdentsV :: Traversal' StaticVal Text
-staticIdentsV f (StaticFun i)          = StaticFun <$> f i
-staticIdentsV f (StaticThunk (Just i)) = StaticThunk . Just <$> f i
+staticIdentsV f (StaticFun i args)     = StaticFun <$> f i <*> traverse (staticIdentsA f) args
+staticIdentsV f (StaticThunk (Just (i, args))) = StaticThunk . Just <$> liftA2 (,) (f i) (traverse (staticIdentsA f) args)
 staticIdentsV f (StaticData con args)  = StaticData <$> f con <*> traverse (staticIdentsA f) args
 staticIdentsV f (StaticList xs t)      = StaticList <$> traverse (staticIdentsA f) xs <*> traverse f t
 staticIdentsV _ x                      = pure x
@@ -290,8 +318,8 @@ encodeStatic :: CompactorState
              -> StaticInfo
              -> [Int]
 encodeStatic cs (StaticInfo _to sv _)
-    | StaticFun f <- sv                           = [1, entry f]
-    | StaticThunk (Just t) <- sv                  = [2, entry t]
+    | StaticFun f args <- sv                      = [1, entry f, length args] ++ concatMap encodeArg args
+    | StaticThunk (Just (t, args)) <- sv          = [2, entry t, length args] ++ concatMap encodeArg args
     | StaticThunk Nothing <- sv                   = [0]
     | StaticUnboxed (StaticUnboxedBool b) <- sv   = [3 + fromEnum b]
     | StaticUnboxed (StaticUnboxedInt i) <- sv    = [5] -- ++ encodeInt i
@@ -447,8 +475,567 @@ identsV _ (UnsatVal{})   = error "identsV: UnsatVal"
 compact :: GhcjsSettings
         -> DynFlags
         -> CompactorState
+        -> [Text]
         -> [(JStat, [ClosureInfo], [StaticInfo])]
         -> (CompactorState, [JStat], JStat) -- ^ renamer state, statements for each unit, metadata
-compact settings dflags rs input =
-  renameInternals settings dflags rs input
+compact settings dflags rs rtsDeps input
+--  | dumpHashes' input
+  =
+  let rtsDeps' = rtsDeps ++ map (<> "_e") rtsDeps ++ map (<> "_con_e") rtsDeps
+  in  renameInternals settings dflags rs rtsDeps' input
 
+
+-- hash compactification
+
+dedupeBodies :: [Text]
+             -> [(JStat, [ClosureInfo], [StaticInfo])]
+             -> (JStat, [(JStat, [ClosureInfo], [StaticInfo])])
+dedupeBodies rtsDeps input = (renderBuildFunctions bfN bfCB, input')
+  where
+    (bfN, bfCB, input') = rewriteBodies globals hdefsR hdefs input
+    hdefs   = M.fromListWith (\(s,ks1) (_,ks2) -> (s, ks1++ks2))
+                             (map (\(k, s, bs) -> (bs, (s, [k]))) hdefs0)
+    hdefsR  = M.fromList $ map (\(k, _, bs) -> (k, bs)) hdefs0
+    hdefs0 :: [(Text, Int, BS.ByteString)]
+    hdefs0  = concatMap (\(b,_,_) -> (map (\(k,h) ->
+                                        let (s,fh, _deps) = finalizeHash' h
+                                        in (k, s, fh)) . hashDefinitions globals) b) input
+    globals = foldl' (flip S.delete) (findAllGlobals input) rtsDeps
+
+renderBuildFunctions :: [BuildFunction] -> [BuildFunction] -> JStat
+renderBuildFunctions normalBfs cycleBreakerBfs =
+  cycleBr1 <> mconcat (map renderBuildFunction normalBfs) <> cycleBr2
+  where
+    renderCbr f = mconcat (zipWith f cycleBreakerBfs [1..])
+    cbName :: Int -> Text
+    cbName = T.pack . ("h$$$cb"++) . show
+    cycleBr1 = renderCbr $ \bf n ->
+      let args = map (TxtI . T.pack . ('a':) . show) [1..bfArgs bf]
+          body = ReturnStat $ ApplExpr (ValExpr (JVar (TxtI $ cbName n)))
+                                       (map (ValExpr . JVar) args)
+      in  DeclStat (TxtI (bfName bf)) <>
+          AssignStat (ValExpr (JVar (TxtI (bfName bf))))
+                     (ValExpr (JFunc args body))
+    cycleBr2 = renderCbr $ \bf n -> renderBuildFunction (bf { bfName = cbName n })
+
+data BuildFunction = BuildFunction
+  { bfName    :: !Text
+  , bfBuilder :: !Ident
+  , bfDeps    :: [Text]
+  , bfArgs    :: !Int
+  } deriving (Eq, Ord, Show)
+
+{-
+  Stack frame initialization order is important when code is reused:
+    all dependencies have to be ready when the closure is built.
+
+  This function sorts the initializers and returns an additional list
+    of cycle breakers, which are built in a two-step fashion
+ -}
+sortBuildFunctions :: [BuildFunction] -> ([BuildFunction], [BuildFunction])
+sortBuildFunctions bfs = (map snd normBFs, map snd cbBFs)
+  where
+    (normBFs, cbBFs) = partition (not.fst) . concatMap fromSCC $ sccs bfs
+    bfm :: Map Text BuildFunction
+    bfm = M.fromList (map (\x -> (bfName x, x)) bfs)
+    fromSCC :: G.SCC Text -> [(Bool, BuildFunction)]
+    fromSCC (G.AcyclicSCC x) = [(False, bfm M.! x)]
+    fromSCC (G.CyclicSCC xs) = breakCycles xs
+    sccs :: [BuildFunction] -> [G.SCC Text]
+    sccs b = G.stronglyConnComp $ map (\bf -> let n = bfName bf in (n, n, bfDeps bf)) b
+    {-
+       finding the maximum acyclic subgraph is the Minimum Feedback Arc Set problem,
+       which is NP-complete. We use an approximation here.
+     -}
+    breakCycles :: [Text] -> [(Bool, BuildFunction)]
+    breakCycles nodes = (True, bfm M.! selected)
+                      : concatMap fromSCC (sccs $ (map (bfm M.!) $ filter (/=selected) nodes))
+      where
+        outDeg, inDeg :: Map Text Int
+        outDeg = M.fromList $ map (\n -> (n, length (bfDeps (bfm M.! n)))) nodes
+        inDeg  = M.fromListWith (+) (map (,1) . concatMap (bfDeps . (bfm M.!)) $ nodes)
+        -- ELS heuristic (Eades et. al.)
+        selected :: Text
+        selected = maximumBy (compare `on` (\x -> outDeg M.! x - inDeg M.! x)) nodes
+
+rewriteBodies :: Set Text
+              -> Map Text BS.ByteString
+              -> Map BS.ByteString (Int, [Text])
+              -> [(JStat, [ClosureInfo], [StaticInfo])]
+              -> ([BuildFunction], [BuildFunction], [(JStat, [ClosureInfo], [StaticInfo])])
+rewriteBodies globals idx1 idx2 input = (bfsNormal, bfsCycleBreaker, input')
+  where
+    (bfs1, input')               = unzip (map rewriteBlock input)
+    (bfsNormal, bfsCycleBreaker) = sortBuildFunctions (concat bfs1)
+
+    -- this index only contains the entries we actually want to dedupe
+    idx2' :: Map BS.ByteString (Int, [Text])
+    idx2' = M.filter (\(s, xs) -> dedupeBody (length xs) s) idx2
+
+    rewriteBlock :: (JStat, [ClosureInfo], [StaticInfo])
+                 -> ([BuildFunction], (JStat, [ClosureInfo], [StaticInfo]))
+    rewriteBlock (st, cis, sis) =
+      let (bfs, st') = rewriteFunctions st
+      -- remove the declarations for things that we just deduped
+          st''       = removeDecls (S.fromList $ map bfName bfs) st'
+      in  (bfs, (st'', cis, sis))
+
+    removeDecls :: Set Text -> JStat -> JStat
+    removeDecls t (BlockStat ss) = BlockStat (map (removeDecls t) ss)
+    removeDecls t (DeclStat (TxtI i))
+      | i `S.member` t = mempty
+    removeDecls _ s = s
+
+    rewriteFunctions :: JStat -> ([BuildFunction], JStat)
+    rewriteFunctions (BlockStat ss) = let (bfs, ss') = unzip (map rewriteFunctions ss)
+                                      in  (concat bfs, BlockStat ss')
+    rewriteFunctions (AssignStat (ValExpr (JVar (TxtI i))) (ValExpr (JFunc args st)))
+      | Just h         <- M.lookup i idx1
+      , Just (_s, his) <- M.lookup h idx2' =
+          let (bf, st') = rewriteFunction i h his args st in ([bf], st')
+    rewriteFunctions x = ([], x)
+
+    rewriteFunction :: Text -> BS.ByteString -> [Text] -> [Ident] -> JStat -> (BuildFunction, JStat)
+    rewriteFunction i h his args body
+      | i == iFirst = (bf, createFunction i idx g args body)
+      | otherwise   = (bf, mempty)
+       where
+          bf :: BuildFunction
+          bf       = BuildFunction i (buildFunId idx) g (length args)
+          g :: [Text]
+          g        = findGlobals globals body
+          iFirst   = head his
+          Just idx = M.lookupIndex h idx2'
+
+    createFunction :: Text -> Int -> [Text] -> [Ident] -> JStat -> JStat
+    createFunction i idx g args body =
+      DeclStat bi <>
+      AssignStat (ValExpr (JVar bi))
+                 (ValExpr (JFunc bargs bbody))
+      where
+        ng    = length g
+        bi    = buildFunId idx
+        bargs :: [Ident]
+        bargs = map (TxtI . T.pack . ("h$$$g"++) . show) [1..ng]
+        bgm :: Map Text Ident
+        bgm   = M.fromList (zip g bargs)
+        bbody :: JStat
+        bbody = ReturnStat (ValExpr $ JFunc args ibody)
+        ibody :: JStat
+        ibody = body & identsS %~ \ti@(TxtI i) -> fromMaybe ti (M.lookup i bgm)
+
+renderBuildFunction :: BuildFunction -> JStat
+renderBuildFunction (BuildFunction i bfid deps _nargs) =
+  DeclStat (TxtI i) <>
+  AssignStat (ValExpr (JVar (TxtI i)))
+             (ApplExpr (ValExpr (JVar bfid)) (map (ValExpr . JVar . TxtI) deps))
+
+dedupeBody :: Int -> Int -> Bool
+dedupeBody n size
+  | n < 2          = False
+  | size * n > 200 = True
+  | n > 6          = True
+  | otherwise      = False
+
+buildFunId :: Int -> Ident
+buildFunId i = TxtI (T.pack $ "h$$$f" ++ show i)
+
+-- result is ordered, does not contain duplicates
+findGlobals :: Set Text -> JStat -> [Text]
+findGlobals globals stat = nub'
+  (filter isGlobal . map (\(TxtI i) -> i) $ stat ^.. identsS)
+  where
+    locals     = S.fromList (findLocals stat)
+    isGlobal i = i `S.member` globals && i `S.notMember` locals
+
+findLocals :: JStat -> [Text]
+findLocals (BlockStat ss)      = concatMap findLocals ss
+findLocals (DeclStat (TxtI i)) = [i]
+findLocals _                   = []
+
+nub' :: Ord a => [a] -> [a]
+nub' = go S.empty
+  where
+    go _ []            = []
+    go s (x:xs)
+      | x `S.member` s = go s xs
+      | otherwise      = x : go (S.insert x s) xs
+
+data HashIdx = HashIdx (Map Text Hash) (Map Hash Text)
+
+dedupe :: [Text]
+       -> [(JStat, [ClosureInfo], [StaticInfo])]
+       -> [(JStat, [ClosureInfo], [StaticInfo])]
+dedupe rtsDeps input
+--  | dumpHashIdx idx
+  =
+  map (\(st,cis,sis) -> dedupeBlock idx st cis sis) input
+  where
+    idx    = HashIdx hashes hr
+    hashes0 = buildHashes rtsDeps input
+    hashes  = foldl' (flip M.delete) hashes0 rtsDeps
+    hr     = fmap pickShortest
+             (M.fromListWith (++) $
+             map (\(i, h) -> (h, [i])) (M.toList hashes))
+    pickShortest :: [Text] -> Text
+    pickShortest = head . sortBy (compare `on` T.length)
+
+dedupeBlock :: HashIdx -> JStat -> [ClosureInfo] -> [StaticInfo] -> (JStat, [ClosureInfo], [StaticInfo])
+dedupeBlock hi st ci si =
+  (dedupeStat hi st, mapMaybe (dedupeClosureInfo hi) ci, mapMaybe (dedupeStaticInfo hi) si)
+
+dedupeStat :: HashIdx -> JStat -> JStat
+dedupeStat hi st = go st
+  where
+    go (BlockStat ss) = BlockStat (map go ss)
+    go s@(DeclStat (TxtI i))
+      | not (isCanon hi i) = mempty
+      | otherwise          = s
+    go s@(AssignStat v@(ValExpr (JVar (TxtI i))) e)
+      | not (isCanon hi i) = mempty
+      | otherwise          = AssignStat v (e & identsE %~ toCanonI hi)
+    -- rewrite identifiers in e
+    go s = s & identsS %~ toCanonI hi
+
+dedupeClosureInfo :: HashIdx -> ClosureInfo -> Maybe ClosureInfo
+dedupeClosureInfo hi (ClosureInfo i rs n l ty st)
+  | isCanon hi i = Just (ClosureInfo i rs n l ty (dedupeCIStatic hi st))
+dedupeClosureInfo _ _ = Nothing
+
+dedupeStaticInfo :: HashIdx -> StaticInfo -> Maybe StaticInfo
+dedupeStaticInfo hi (StaticInfo i val ccs)
+  | isCanon hi i = Just (StaticInfo i (dedupeStaticVal hi val) ccs)
+dedupeStaticInfo _ _ = Nothing
+
+dedupeCIStatic :: HashIdx -> CIStatic -> CIStatic
+dedupeCIStatic hi (CIStaticRefs refs) = CIStaticRefs (nub $ map (toCanon hi) refs)
+
+dedupeStaticVal :: HashIdx -> StaticVal -> StaticVal
+dedupeStaticVal hi (StaticFun t args) =
+  StaticFun (toCanon hi t) (map (dedupeStaticArg hi) args)
+dedupeStaticVal hi (StaticThunk (Just (o, args))) =
+  StaticThunk (Just (toCanon hi o, map (dedupeStaticArg hi) args))
+dedupeStaticVal hi (StaticData dcon args) =
+  StaticData (toCanon hi dcon) (map (dedupeStaticArg hi) args)
+dedupeStaticVal hi (StaticList args lt) =
+  StaticList (map (dedupeStaticArg hi) args) (fmap (toCanon hi) lt)
+dedupeStaticVal _ v = v -- unboxed value or thunk with alt init, no rewrite needed
+
+dedupeStaticArg :: HashIdx -> StaticArg -> StaticArg
+dedupeStaticArg hi (StaticObjArg o)      = StaticObjArg (toCanon hi o)
+dedupeStaticArg hi (StaticConArg c args) = StaticConArg (toCanon hi c) (map (dedupeStaticArg hi) args)
+dedupeStaticArg hi a@(StaticLitArg{})    = a
+
+isCanon :: HashIdx -> Text -> Bool
+isCanon (HashIdx a b) t
+  | Nothing <- la = True
+  | Just h  <- la
+  , Just t' <- M.lookup h b = t == t'
+  | otherwise = False
+  where la = M.lookup t a
+
+toCanon :: HashIdx -> Text -> Text
+toCanon (HashIdx a b) t
+  | Just h  <- M.lookup t a
+  , Just t' <- M.lookup h b = t'
+  | otherwise = t
+
+toCanonI :: HashIdx -> Ident -> Ident
+toCanonI hi (TxtI x) = TxtI (toCanon hi x)
+
+type Hash = (BS.ByteString, [Text])
+
+data HashBuilder = HashBuilder !BB.Builder ![Text]
+
+instance Monoid HashBuilder where
+  mempty = HashBuilder mempty mempty
+  mappend (HashBuilder b1 l1) (HashBuilder b2 l2) =
+    HashBuilder (b1 <> b2) (l1 <> l2)
+
+{-
+dumpHashIdx :: HashIdx -> Bool
+dumpHashIdx hi@(HashIdx ma mb) =
+  let ks = M.keys ma
+      difCanon i = let i' = toCanon hi i
+                   in if i == i' then Nothing else Just i'
+      writeHashIdx = do
+        putStrLn "writing hash idx"
+        T.writeFile "hashidx.txt"
+          (T.unlines . sort $ mapMaybe (\i -> fmap ((i <> " -> ") <>) (difCanon i)) ks)
+        putStrLn "writing full hash idx"
+        T.writeFile "hashIdxFull.txt"
+          (T.unlines . sort $ M.keys ma)
+  in unsafePerformIO writeHashIdx `seq` True
+-}
+-- debug thing
+{-
+dumpHashes' :: [(JStat, [ClosureInfo], [StaticInfo])] -> Bool
+dumpHashes' input =
+  let hashes      = buildHashes input
+      writeHashes = do
+        putStrLn "writing hashes"
+        BL.writeFile "hashes.json" (Aeson.encode $ dumpHashes hashes)
+  in unsafePerformIO writeHashes `seq` True
+-}
+buildHashes :: [Text] -> [(JStat, [ClosureInfo], [StaticInfo])] -> Map Text Hash
+buildHashes rtsDeps xss
+  -- - | dumpHashes0 hashes0
+  = fixHashes (fmap finalizeHash hashes0)
+  where
+    globals = foldl' (flip S.delete) (findAllGlobals xss) rtsDeps
+    hashes0 = (M.unions (map buildHashesBlock xss))
+    buildHashesBlock (st, cis, sis) =
+      let hdefs = hashDefinitions globals st
+          hcis  = map hashClosureInfo cis
+          hsis  = map hashStaticInfo (filter (not . ignoreStatic) sis)
+      in  M.fromList (combineHashes hdefs hcis ++ hsis)
+
+findAllGlobals :: [(JStat, [ClosureInfo], [StaticInfo])] -> Set Text
+findAllGlobals xss = S.fromList $ concatMap f xss
+  where
+    f (_, cis, sis) =
+      map (\(ClosureInfo i _ _ _ _ _) -> i) cis ++
+      map (\(StaticInfo i _ _) -> i) sis
+
+fixHashes :: Map Text Hash -> Map Text Hash
+fixHashes hashes = fmap (\(bs,h) -> (bs, map replaceHash h)) hashes
+  where
+    replaceHash h = fromMaybe h (M.lookup h finalHashes)
+    hashText  bs = "h$$$" <> TE.decodeUtf8 (B16.encode bs)
+    sccs :: [[Text]]
+    sccs         = map fromSCC $
+                   G.stronglyConnComp (map (\(k, (_bs, deps)) -> (k, k, deps)) (M.toList hashes))
+    ks           = M.keys hashes
+    invDeps      = M.fromListWith (++) (concatMap mkInvDeps $ M.toList hashes)
+    mkInvDeps (k, (_, ds)) = map (,[k]) ds
+    finalHashes  = fmap hashText (fixHashesIter 500 invDeps ks ks sccs hashes mempty)
+
+fromSCC :: G.SCC a -> [a]
+fromSCC (G.AcyclicSCC x) = [x]
+fromSCC (G.CyclicSCC xs) = xs
+
+fixHashesIter :: Int
+              -> Map Text [Text]
+              -> [Text]
+              -> [Text]
+              -> [[Text]]
+              -> Map Text Hash
+              -> Map Text BS.ByteString
+              -> Map Text BS.ByteString
+fixHashesIter n invDeps allKeys checkKeys sccs hashes finalHashes
+  -- - | unsafePerformIO (putStrLn ("fixHashesIter: " ++ show n)) `seq` False = undefined
+  | n < 0                = finalHashes
+  | not (null newHashes) = fixHashesIter (n-1) invDeps allKeys checkKeys' sccs hashes
+      (M.union finalHashes $ M.fromList newHashes)
+  -- - | unsafePerformIO (putStrLn ("fixHashesIter killing cycles:\n" ++ show rootSCCs)) `seq` False = undefined
+  | not (null rootSCCs)  = fixHashesIter (n {- -1 -}) invDeps allKeys allKeys sccs hashes
+      (M.union finalHashes (M.fromList $ concatMap hashRootSCC rootSCCs))
+  | otherwise            = finalHashes
+  where
+    checkKeys' | length newHashes > (M.size hashes `div` 10) = allKeys
+               | otherwise = S.toList . S.fromList $ concatMap newHashDeps newHashes
+    newHashDeps (k, _) = fromMaybe [] (M.lookup k invDeps)
+    mkNewHash k | M.notMember k finalHashes
+                , Just (hb, htxt) <- M.lookup k hashes
+                , Just bs <- mapM (`M.lookup` finalHashes) htxt =
+                  Just (k, makeFinalHash hb bs)
+                | otherwise = Nothing
+    newHashes :: [(Text, BS.ByteString)]
+    newHashes = mapMaybe mkNewHash checkKeys
+    rootSCCs :: [[Text]]
+    rootSCCs = filter isRootSCC sccs
+    isRootSCC :: [Text] -> Bool
+    isRootSCC scc = not (all (`M.member` finalHashes) scc) && all check scc
+      where
+        check n = let Just (_bs, out) = M.lookup n hashes
+                  in  all checkEdge out
+        checkEdge e = e `S.member` s || e `M.member` finalHashes
+        s = S.fromList scc
+    hashRootSCC :: [Text] -> [(Text,BS.ByteString)]
+    hashRootSCC scc
+      | any (`M.member` finalHashes) scc = Panic.panic "Gen2.Compactor.hashRootSCC: has finalized nodes"
+      | otherwise = map makeHash toHash
+      where
+        makeHash k = let Just (bs,deps) = M.lookup k hashes
+                         luds           = map lookupDep deps
+                     in (k, makeFinalHash bs luds)
+        lookupDep :: Text -> BS.ByteString
+        lookupDep d | Just b <- M.lookup d finalHashes = b
+                    | Just i <- M.lookup d toHashIdx = grpHash <> (TE.encodeUtf8 . T.pack . show $ i)
+                    | otherwise = Panic.panic ("Gen2.Compactor.hashRootSCC: unknown key: " ++ T.unpack d)
+        toHashIdx :: M.Map Text Integer
+        toHashIdx = M.fromList $ zip toHash [1..]
+        grpHash :: BS.ByteString
+        grpHash = BL.toStrict . BB.toLazyByteString $ mconcat (map (mkGrpHash . (hashes M.!)) toHash)
+        mkGrpHash (h, deps) = let deps' = mapMaybe (`M.lookup` finalHashes) deps
+                              in  BB.byteString h <>
+                                  BB.int64LE (fromIntegral $ length deps') <>
+                                  mconcat (map BB.byteString deps')
+        toHash :: [Text]
+        toHash = sortBy (compare `on` (fst . (hashes M.!))) scc
+
+makeFinalHash :: BS.ByteString -> [BS.ByteString] -> BS.ByteString
+makeFinalHash b bs = SHA256.hash (mconcat (b:bs))
+
+-- do not deduplicate thunks
+ignoreStatic :: StaticInfo -> Bool
+ignoreStatic (StaticInfo _ (StaticThunk {}) _) = True
+ignoreStatic _                                 = False
+
+-- combine hashes from x and y, leaving only those which have an entry in both
+combineHashes :: [(Text, HashBuilder)] -> [(Text, HashBuilder)] -> [(Text, HashBuilder)]
+combineHashes x y = M.toList $ M.intersectionWith (<>) (M.fromList x) (M.fromList y)
+
+{-
+dumpHashes0 :: Map Text HashBuilder -> Bool
+dumpHashes0 hashes = unsafePerformIO writeHashes `seq` True
+  where
+    hashLine (n, HashBuilder bb txt) =
+      n <> " ->\n    " <>
+      escapeBS (BB.toLazyByteString bb) <> "\n    [" <> T.intercalate " " txt <> "]\n"
+    escapeBS :: BL.ByteString -> T.Text
+    escapeBS = T.pack . concatMap escapeCH . BL.unpack
+    escapeCH c | c < 32 || c > 127 = '\\' : show c
+               | c == 92           = "\\\\"
+               | otherwise         = [chr (fromIntegral c)]
+
+    writeHashes = do
+      putStrLn "writing hashes0"
+      T.writeFile "hashes0.dump" (T.unlines $ map hashLine (M.toList hashes))
+
+dumpHashes :: Map Text Hash -> Value
+dumpHashes idx = toJSON iidx
+   where
+       iidx :: Map Text [(Text, [Text])]
+       iidx = M.fromListWith (++) $
+         map (\(t, (b, deps)) -> (TE.decodeUtf8 (B16.encode b), [(t,deps)])) (M.toList idx)
+-}
+
+ht :: Int8 -> HashBuilder
+ht x = HashBuilder (BB.int8 x) []
+
+hi :: Int -> HashBuilder
+hi x = HashBuilder (BB.int64LE $ fromIntegral x) []
+
+hi' :: (Show a, Integral a) => a -> HashBuilder
+hi' x | x' > toInteger (maxBound :: Int64) || x' < toInteger (minBound :: Int64) =
+        Panic.panic $ "Gen2.Compactor.hi': integer out of range: " ++ show x
+      | otherwise = HashBuilder (BB.int64LE $ fromInteger x') []
+  where
+    x' = toInteger x
+
+hd :: Double -> HashBuilder
+hd d = HashBuilder (BB.doubleLE d) []
+
+htxt :: Text -> HashBuilder
+htxt x = HashBuilder (BB.int64LE (fromIntegral $ BS.length bs) <> BB.byteString bs) []
+  where
+    bs = TE.encodeUtf8 x
+
+hobj :: Text -> HashBuilder
+hobj x = HashBuilder (BB.int8 127) [x]
+
+hb :: BS.ByteString -> HashBuilder
+hb x = HashBuilder (BB.int64LE (fromIntegral $ BS.length x) <> BB.byteString x) []
+
+hashDefinitions :: Set Text -> JStat -> [(Text, HashBuilder)]
+hashDefinitions globals st =
+  let defs = findDefinitions st
+  in  map (uncurry (hashSingleDefinition globals)) defs
+
+findDefinitions :: JStat -> [(Ident, JExpr)]
+findDefinitions (BlockStat ss)                    = concatMap findDefinitions ss
+findDefinitions (AssignStat (ValExpr (JVar i)) e) = [(i,e)]
+findDefinitions _                                 = []
+
+hashSingleDefinition :: Set Text -> Ident -> JExpr -> (Text, HashBuilder)
+hashSingleDefinition globals (TxtI i) expr = (i, ht 0 <> render st <> mconcat (map hobj globalRefs))
+  where
+    globalRefs = nub $ filter (`S.member` globals) (map (\(TxtI i) -> i) (expr ^.. identsE))
+    globalMap  = M.fromList $ zip globalRefs (map (T.pack . ("h$$$global_"++) . show) [(1::Int)..])
+    expr'      = expr & identsE %~ (\i@(TxtI t) -> maybe i TxtI (M.lookup t globalMap))
+    st         = AssignStat (ValExpr (JVar (TxtI "dummy"))) expr'
+    render     = htxt . TL.toStrict . displayT . renderPretty 0.8 150 . pretty
+
+hashClosureInfo :: ClosureInfo -> (Text, HashBuilder)
+hashClosureInfo (ClosureInfo civ cir cin cil cit cis) =
+  (civ, ht 1 <> hashCIRegs cir <> hashCILayout cil <> hashCIType cit <> hashCIStatic cis)
+
+hashStaticInfo :: StaticInfo -> (Text, HashBuilder)
+hashStaticInfo (StaticInfo sivr sivl sicc) =
+  (sivr, ht 2 <> hashStaticVal sivl)
+
+hashCIType :: CIType -> HashBuilder
+hashCIType (CIFun a r)  = ht 1 <> hi a <> hi r
+hashCIType CIThunk      = ht 2
+hashCIType (CICon c)    = ht 3 <> hi c
+hashCIType CIPap        = ht 4
+hashCIType CIBlackhole  = ht 5
+hashCIType CIStackFrame = ht 6
+
+
+hashCIRegs :: CIRegs -> HashBuilder
+hashCIRegs CIRegsUnknown   = ht 1
+hashCIRegs (CIRegs sk tys) = ht 2 <> hi sk <> hashList hashVT tys
+
+hashCILayout :: CILayout -> HashBuilder
+hashCILayout CILayoutVariable       = ht 1
+hashCILayout (CILayoutUnknown size) = ht 2 <> hi size
+hashCILayout (CILayoutFixed n l)    = ht 3 <> hi n <> hashList hashVT l
+
+hashCIStatic :: CIStatic -> HashBuilder
+hashCIStatic (CIStaticRefs xs) = mempty -- hashList hobj xs -- we get these from the code
+
+hashList :: (a -> HashBuilder) -> [a] -> HashBuilder
+hashList f xs = hi (length xs) <> mconcat (map f xs)
+
+hashVT :: VarType -> HashBuilder
+hashVT = hi . fromEnum
+
+hashStaticVal :: StaticVal -> HashBuilder
+hashStaticVal (StaticFun t args)      = ht 1 <> hobj t <> hashList hashStaticArg args
+hashStaticVal (StaticThunk mtn)       = ht 2 <> hashMaybe htobj mtn
+  where
+    htobj (o, args) = hobj o <> hashList hashStaticArg args
+hashStaticVal (StaticUnboxed su)      = ht 3 <> hashStaticUnboxed su
+hashStaticVal (StaticData dcon args)  = ht 4 <> hobj dcon <> hashList hashStaticArg args
+hashStaticVal (StaticList args lt)    = ht 5 <> hashList hashStaticArg args <> hashMaybe hobj lt
+
+hashMaybe :: (a -> HashBuilder) -> Maybe a -> HashBuilder
+hashMaybe _ Nothing  = ht 1
+hashMaybe f (Just x) = ht 2 <> f x
+
+hashStaticUnboxed :: StaticUnboxed -> HashBuilder
+hashStaticUnboxed (StaticUnboxedBool b)    = ht 1 <> hi (fromEnum b)
+hashStaticUnboxed (StaticUnboxedInt iv)    = ht 2 <> hi' iv
+hashStaticUnboxed (StaticUnboxedDouble sd) = ht 3 <> hashSaneDouble sd
+
+
+hashStaticArg :: StaticArg -> HashBuilder
+hashStaticArg (StaticObjArg t)       = ht 1 <> hobj t
+hashStaticArg (StaticLitArg sl)      = ht 2 <> hashStaticLit sl
+hashStaticArg (StaticConArg cn args) = ht 3 <> hobj cn <> hashList hashStaticArg args
+
+hashStaticLit :: StaticLit -> HashBuilder
+hashStaticLit (BoolLit b)       = ht 1 <> hi (fromEnum b)
+hashStaticLit (IntLit iv)       = ht 2 <> hi (fromIntegral iv)
+hashStaticLit  NullLit          = ht 3
+hashStaticLit (DoubleLit d)     = ht 4 <> hashSaneDouble d
+hashStaticLit (StringLit tt)    = ht 5 <> htxt tt
+hashStaticLit (BinLit bs)       = ht 6 <> hb bs
+hashStaticLit (LabelLit bb ln)  = ht 7 <> hi (fromEnum bb) <> htxt ln
+
+hashSaneDouble :: SaneDouble -> HashBuilder
+hashSaneDouble (SaneDouble sd) = hd sd
+
+finalizeHash :: HashBuilder -> Hash
+finalizeHash (HashBuilder hb tt) =
+  let h = SHA256.hash (BL.toStrict $ BB.toLazyByteString hb)
+  in  h `seq` (h, tt)
+
+finalizeHash' :: HashBuilder -> (Int, BS.ByteString, [Text])
+finalizeHash' (HashBuilder hb tt) =
+  let b  = BL.toStrict (BB.toLazyByteString hb)
+      bl = BS.length b
+      h  = SHA256.hash b
+  in  h `seq` bl `seq` (bl, h, tt)

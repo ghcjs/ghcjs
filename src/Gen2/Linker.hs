@@ -221,7 +221,7 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
                     (roots `S.union` rds `S.union` extraStaticDeps)
                     (archsRequiredUnits ++ objRequiredUnits)
       let (outJs, metaSize, compactorState, stats) =
-             renderLinker settings dflags (baseCompactorState base) code
+             renderLinker settings dflags (baseCompactorState base) rds code
           base'  = Base compactorState (nub $ basePkgs base ++ map mkPackage pkgs'')
                          (allDeps `S.union` baseUnits base)
       (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims dflags [] (filter (isAlreadyLinked base) pkgs')
@@ -243,10 +243,11 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
 renderLinker :: GhcjsSettings
              -> DynFlags
              -> CompactorState
+             -> Set Fun
              -> [(Package, Module, JStat, [ClosureInfo], [StaticInfo])] -- ^ linked code per module
              -> (BL.ByteString, Int64, CompactorState, LinkerStats)
-renderLinker settings dflags renamerState code =
-  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map (\(_,_,s,ci,si) -> (s,ci,si)) code)
+renderLinker settings dflags renamerState rtsDeps code =
+  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,ci,si) -> (s,ci,si)) code)
       pe = TLE.encodeUtf8 . (<>"\n") . displayT . renderPretty 0.8 150 . pretty
       rendered  = parMap rdeepseq pe compacted
       renderedMeta = pe meta
