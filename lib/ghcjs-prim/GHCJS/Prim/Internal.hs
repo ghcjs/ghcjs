@@ -2,6 +2,8 @@
 
  -}
 
+#include "foreign-compat.h"
+
 module GHCJS.Prim.Internal ( blockedIndefinitelyOnMVar
                            , blockedIndefinitelyOnSTM
                            , wouldBlock
@@ -39,19 +41,7 @@ setCurrentThreadResultException e
 setCurrentThreadResultValue :: IO JSVal -> IO ()
 setCurrentThreadResultValue x = js_setCurrentThreadResultValue =<< x
 
-foreign import javascript unsafe
-  "h$setCurrentThreadResultWouldBlock();"
-  js_setCurrentThreadResultWouldBlock :: IO ()
-
-foreign import javascript unsafe
-  "h$setCurrentThreadResultJSException($1);"
-  js_setCurrentThreadResultJSException :: JSVal -> IO ()
-
-foreign import javascript unsafe
-  "h$setCurrentThreadResultHaskellException($1);"
-  js_setCurrentThreadResultHaskellException :: JSVal -> IO ()
-
-foreign import javascript unsafe
-  "h$setCurrentThreadResultValue($1);"
-  js_setCurrentThreadResultValue :: JSVal -> IO ()
-
+FOREIGN_IMPORT(unsafe, js_setCurrentThreadResultWouldBlock, IO (), "h$setCurrentThreadResultWouldBlock();")
+FOREIGN_IMPORT(unsafe, js_setCurrentThreadResultJSException, JSVal -> IO (), "h$setCurrentThreadResultJSException($1);")
+FOREIGN_IMPORT(unsafe, js_setCurrentThreadResultHaskellException, JSVal -> IO (), "h$setCurrentThreadResultHaskellException($1);")
+FOREIGN_IMPORT(unsafe, js_setCurrentThreadResultValue, JSVal -> IO (), "h$setCurrentThreadResultValue($1);")
