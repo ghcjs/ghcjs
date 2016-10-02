@@ -357,6 +357,8 @@ genPrim _ _ CopyByteArrayOp [] [a1,o1,a2,o2,n] =
                  }
                |]
 genPrim d t CopyMutableByteArrayOp [] xs@[_a1,_o1,_a2,_o2,_n] = genPrim d t CopyByteArrayOp [] xs
+genPrim d t CopyByteArrayToAddrOp [] xs@[_a1,_o1,_a2,_o2,_n] = genPrim d t CopyByteArrayOp [] xs
+genPrim d t CopyMutableByteArrayToAddrOp [] xs@[_a1,_o1,_a2,_o2,_n] = genPrim d t CopyByteArrayOp [] xs
 genPrim _ _ SetByteArrayOp [] [a,o,n,v] =
   PrimInline [j| for(var i=0;i<`n`;i++) {
                    `a`.u8[`o`+i] = `v`;
