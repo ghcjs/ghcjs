@@ -105,6 +105,8 @@ instance Show IdDetails where
   show (PatSynId {})      = "PatSynId"
   show (DefMethId {})     = "DefMethId"
   show (ReflectionId {})  = "ReflectionId"
+#else
+  show CoVarId            = "CoVarId"
 #endif
 
 deriving instance Show UpdateFlag
