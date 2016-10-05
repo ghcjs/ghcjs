@@ -479,9 +479,13 @@ genToplevelDecl i rhs = do
 genToplevelConEntry :: Id -> StgRhs -> C
 genToplevelConEntry i (StgRhsCon _cc con _args)
     | i `elem` [ i' | AnId i' <- dataConImplicitTyThings con ] = genSetConInfo i con NoSRT
-genToplevelConEntry i (StgRhsClosure _cc _bi [] _upd_flag srt _args (StgConApp dc _cargs))
+genToplevelConEntry i (StgRhsClosure _cc _bi [] _upd_flag srt _args (removeTick -> StgConApp dc _cargs))
     | i `elem` [ i' | AnId i' <- dataConImplicitTyThings dc ] = genSetConInfo i dc srt
 genToplevelConEntry _ _ = mempty
+
+removeTick :: StgExpr -> StgExpr
+removeTick (StgTick _ e) = e
+removeTick e             = e
 
 genStaticRefs :: SRT -> G CIStatic
 genStaticRefs NoSRT = return noStatic
