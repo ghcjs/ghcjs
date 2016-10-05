@@ -8,11 +8,26 @@ base:
   GHC.TopHandler:
     - runMainIO
     - topHandler
-  GHC.Base:               $fMonadIO
+  GHC.Base:
+    - $fMonadIO
+    - Nothing
+    - Just
+  GHC.Ptr:
+    - Ptr
 ghc-prim:
   GHC.Types:
     - ":"
     - "[]"
+  GHC.Tuple:
+    - "(,)"
+    - "(,,)"
+    - "(,,,)"
+    - "(,,,,)"
+    - "(,,,,,)"
+    - "(,,,,,,)"
+    - "(,,,,,,,)"
+    - "(,,,,,,,,)"
+    - "(,,,,,,,,,)"
 integer-gmp:
   GHC.Integer.Type:
     - "S#"
