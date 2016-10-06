@@ -93,6 +93,13 @@ for example:
     $ node helloWorld.jsexe/all.js
     Hello world!
 
+### Stack support
+
+[stack](https://github.com/commercialhaskell/stack) supports setting up the
+GHCJS compiler and building your code. See stack's
+[ghcjs documentation](https://docs.haskellstack.org/en/stable/ghcjs/) for
+information on how to do this.
+
 ### Cabal support
 
 Use `cabal install --ghcjs packageName` to install a package
