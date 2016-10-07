@@ -30,19 +30,20 @@ module Gen2.Prim where
 
 import           DynFlags
 import           PrimOp
-import           TcType
+import           TcType hiding (Check)
 import           Type
 import           TyCon
 
 import           Data.Monoid
 import qualified Data.Set as S
 
-import           Compiler.JMacro (j, je, JExpr(..), JStat(..))
+import           Compiler.JMacro (j, je, JExpr(..), JStat(..), Ident(..))
 
 import           Gen2.Profiling
 import           Gen2.RtsTypes
 import           Gen2.Utils
 
+import qualified Data.Text as T
 
 data PrimRes = PrimInline JStat  -- ^ primop is inline, result is assigned directly
              | PRPrimCall JStat  -- ^ primop is async call, primop returns the next
@@ -63,6 +64,7 @@ isInlinePrimOp p = p `S.notMember` notInlinePrims
       , KillThreadOp
       , YieldOp
       , SeqOp
+      , ForkOp, ForkOnOp
       ]
 
 
@@ -121,6 +123,9 @@ genPrim _ _ WordAdd2Op      [h,l] [x,y] = PrimInline [j| `h` = h$wordAdd2(`x`,`y
                                                          `l` = `Ret1`;
                                                        |]
 genPrim _ _ WordSubOp         [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
+#if __GLASGOW_HASKELL__ >= 711
+-- genPrim _ _ WordSubCOp        [r,c] [x,y] = error "Gen2.Prim.WordSubCOp"
+#endif
 genPrim _ _ WordMulOp         [r] [x,y] =
   PrimInline [j| `r` = h$mulWord32(`x`,`y`); |]
 genPrim _ _ WordMul2Op      [h,l] [x,y] =
@@ -209,6 +214,11 @@ genPrim _ _ DoubleDecode_2IntOp [s,h,l,e] [x] =
                  `h` = `Ret1`;
                  `l` = `Ret2`;
                  `e` = `Ret3`;
+               |]
+genPrim _ _ DoubleDecode_Int64Op [s1,s2,e] [d] =
+  PrimInline [j| `e`  = h$decodeDoubleInt64(`d`);
+                 `s1` = `Ret1`;
+                 `s2` = `Ret2`;
                |]
 genPrim _ _ FloatGtOp         [r] [x,y] = PrimInline [j| `r` = (`x` > `y`) ? 1 : 0 |]
 genPrim _ _ FloatGeOp         [r] [x,y] = PrimInline [j| `r` = (`x` >= `y`) ? 1 : 0 |]
@@ -516,7 +526,12 @@ genPrim _ _ AtomicallyOp [_r] [a] = PRPrimCall [j| return h$atomically(`a`); |]
 genPrim _ _ RetryOp [_r] [] = PRPrimCall [j| return h$stmRetry(); |]
 genPrim _ _ CatchRetryOp [_r] [a,b] = PRPrimCall [j| return h$stmCatchRetry(`a`,`b`); |]
 genPrim _ _ CatchSTMOp [_r] [a,h] = PRPrimCall [j| return h$catchStm(`a`,`h`); |]
-genPrim _ _ Check [r] [a] = PrimInline [j| `r` = h$stmCheck(`a`); |]
+#if __GLASGOW_HASKELL__ >= 800
+genPrim _ _ Check [] [a] = PrimInline [j| h$stmCheck(`a`); |] -- fixme is this correct?
+--   PRPrimCall [j| return h$stmCheck(`a`); |]
+#else
+genPrim _ _ Check [r] [a] = PrimInline [j| `r` = h$stmCheck(`a`); |] -- shouldn't be used anymore for GHC 8
+#endif
 genPrim _ _ NewTVarOp [tv] [v] = PrimInline [j| `tv` = h$newTVar(`v`); |]
 genPrim _ _ ReadTVarOp [r] [tv] = PrimInline [j| `r` = h$readTVar(`tv`); |]
 genPrim _ _ ReadTVarIOOp [r] [tv] = PrimInline [j| `r` = h$readTVarIO(`tv`); |]
@@ -542,8 +557,8 @@ genPrim _ _ IsEmptyMVarOp [r] [m]  =
 genPrim _ _ DelayOp [] [t] = PRPrimCall [j| return h$delayThread(`t`); |]
 genPrim _ _ WaitReadOp [] [fd] = PRPrimCall [j| return h$waitRead(`fd`); |]
 genPrim _ _ WaitWriteOp [] [fd] = PRPrimCall [j| return h$waitWrite(`fd`); |]
-genPrim _ _ ForkOp [tid] [x] = PrimInline [j| `tid` = h$fork(`x`, true); |]
-genPrim _ _ ForkOnOp [tid] [_p,x] = PrimInline [j| `tid` = h$fork(`x`, true); |] -- ignore processor argument
+genPrim _ _ ForkOp [_tid] [x] = PRPrimCall [j| return h$fork(`x`, true); |]
+genPrim _ _ ForkOnOp [_tid] [_p,x] = PRPrimCall [j| return h$fork(`x`, true); |] -- ignore processor argument
 genPrim _ _ KillThreadOp [] [tid,ex] =
   PRPrimCall [j| return h$killThread(`tid`,`ex`); |]
 genPrim _ _ YieldOp [] [] = PRPrimCall [j| return h$yield(); |]
@@ -595,7 +610,22 @@ ParAtAbsOp
 ParAtRelOp
 ParAtForNowOp
 CopyableOp
-NowFollowOp
+NoFollowOp
+-}
+{-
+PrefetchByteArrayOp3
+PrefetchMutableByteArrayOp3
+PrefetchAddrOp3
+PrefetchValueOp3
+PrefetchByteArrayOp2
+PrefetchMutableByteArrayOp2
+PrefetchAddrOp2
+PrefetchValueOp2
+PrefetchByteArrayOp1
+PrefetchMutableByteArrayOp1
+PrefetchAddrOp1
+PrefetchValueOp1
+
 -}
 -- data may be the following:
 -- false/true: bool
@@ -605,7 +635,7 @@ genPrim _ t DataToTagOp [r] [d]
   | isBoolTy t        = PrimInline [j| `r` = `d`?1:0; |]
   | Just (tc, _) <- splitTyConApp_maybe t, isProductTyCon tc
                       = PrimInline [j| `r` = 0; |]
-  | isAlgType t && not (isUnLiftedType t)
+  | isAlgType t && not (isUnliftedType t)
                       = PrimInline [j| `r` = `d`.f.a-1; |]
   | otherwise         =
       PrimInline [j| `r` = (`d`===true)?1:((typeof `d` === 'object')?(`d`.f.a-1):0) |]
@@ -682,16 +712,15 @@ genPrim _ _ Ctz64Op                    [r]   [x1,x2]       = PrimInline [j| `r` 
 
 #endif
 
-genPrim _ _ op rs as = PrimInline [j| throw `"unhandled primop: " ++ show op ++ " " ++ show (length rs, length as)`; |]
-{-
-genPrim _ op rs as = PrimInline [j| log(`"warning, unhandled primop: "++show op++" "++show (length rs, length as)`);
+-- genPrim _ _ op rs as = PrimInline [j| throw `"unhandled primop: " ++ show op ++ " " ++ show (length rs, length as)`; |]
+
+genPrim _ _ op rs as = PrimInline [j| h$log(`"warning, unhandled primop: "++show op++" "++show (length rs, length as)`);
   `f`;
   `copyRes`;
 |]
   where
-    f = ApplStat (iex . TxtI . T.pack $ "h$prim_" ++ show op) as
+    f = ApplStat (iex . TxtI . T.pack $ "h$primop_" ++ show op) as
     copyRes = mconcat $ zipWith (\r reg -> [j| `r` = `reg`; |]) rs (enumFrom Ret1)
--}
 
 newByteArray :: JExpr -> JExpr -> JStat
 newByteArray tgt len = [j| `tgt` = h$newByteArray(`len`); |]

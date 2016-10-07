@@ -85,7 +85,6 @@ import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Text.Binary ()
 import qualified Data.Text.Lazy as TL
 import           Data.Word
 
@@ -418,12 +417,16 @@ getSymbolTable bs = SymbolTableR (listArray (0,n-1) xs) (listArray (0,n-1) (map 
       (l',) <$> replicateM l' DB.get
 
 putSymbolTable :: SymbolTable -> ByteString
-putSymbolTable (SymbolTable _ hm)
---  | trace "putting symbol table" False = undefined
-  | otherwise = DB.runPut $ do
-  DB.putWord32le (fromIntegral $ length xs)
-  mapM_ DB.put xs
+putSymbolTable (SymbolTable _ hm) = {- trace ("putting symbol table: " ++ show xs ++ " -> " ++ show (B.unpack st)) -} st
+--  | trace ("putting symbol table: " ++ show hm) False = undefined
+--  | otherwise =
     where
+      st = DB.runPut $ do
+              DB.putWord32le (fromIntegral $ length xs)
+              mapM_ DB.put xs
+              -- fixme: this is a workaround for some weird issue sometimes causing zero-length
+              --        strings when using the Data.Text instance directly
+              -- mapM_ (DB.put . TE.encodeUtf8) xs
       xs :: [Text]
       xs = map fst . sortBy (compare `on` snd) . HM.toList $ hm
 
@@ -777,13 +780,13 @@ instance Objectable StaticInfo where
   get = StaticInfo <$> get <*> get <*> get
 
 instance Objectable StaticVal where
-  put (StaticFun f)        = tag 1 >> put f
+  put (StaticFun f args)   = tag 1 >> put f  >> put args
   put (StaticThunk t)      = tag 2 >> put t
   put (StaticUnboxed u)    = tag 3 >> put u
   put (StaticData dc args) = tag 4 >> put dc >> put args
   put (StaticList xs t)    = tag 5 >> put xs >> put t
   get = getTag >>= \case
-                      1 -> StaticFun     <$> get
+                      1 -> StaticFun     <$> get <*> get
                       2 -> StaticThunk   <$> get
                       3 -> StaticUnboxed <$> get
                       4 -> StaticData    <$> get <*> get

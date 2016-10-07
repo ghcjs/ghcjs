@@ -1,0 +1,22 @@
+primOpStrictness CatchOp =  \ _arity -> mkClosedStrictSig [ catchArgDmd
+                                                 , lazyApply2Dmd
+                                                 , topDmd] topRes 
+primOpStrictness RaiseOp =  \ _arity -> mkClosedStrictSig [topDmd] exnRes 
+primOpStrictness RaiseIOOp =  \ _arity -> mkClosedStrictSig [topDmd, topDmd] exnRes 
+primOpStrictness MaskAsyncExceptionsOp =  \ _arity -> mkClosedStrictSig [strictApply1Dmd,topDmd] topRes 
+primOpStrictness MaskUninterruptibleOp =  \ _arity -> mkClosedStrictSig [strictApply1Dmd,topDmd] topRes 
+primOpStrictness UnmaskAsyncExceptionsOp =  \ _arity -> mkClosedStrictSig [strictApply1Dmd,topDmd] topRes 
+primOpStrictness AtomicallyOp =  \ _arity -> mkClosedStrictSig [strictApply1Dmd,topDmd] topRes 
+primOpStrictness RetryOp =  \ _arity -> mkClosedStrictSig [topDmd] botRes 
+primOpStrictness CatchRetryOp =  \ _arity -> mkClosedStrictSig [ catchArgDmd
+                                                 , lazyApply1Dmd
+                                                 , topDmd ] topRes 
+primOpStrictness CatchSTMOp =  \ _arity -> mkClosedStrictSig [ catchArgDmd
+                                                 , lazyApply2Dmd
+                                                 , topDmd ] topRes 
+primOpStrictness DataToTagOp =  \ _arity -> mkClosedStrictSig [evalDmd] topRes 
+primOpStrictness PrefetchValueOp3 =  \ _arity -> mkClosedStrictSig [botDmd, topDmd] topRes 
+primOpStrictness PrefetchValueOp2 =  \ _arity -> mkClosedStrictSig [botDmd, topDmd] topRes 
+primOpStrictness PrefetchValueOp1 =  \ _arity -> mkClosedStrictSig [botDmd, topDmd] topRes 
+primOpStrictness PrefetchValueOp0 =  \ _arity -> mkClosedStrictSig [botDmd, topDmd] topRes 
+primOpStrictness _ =  \ arity -> mkClosedStrictSig (replicate arity topDmd) topRes 

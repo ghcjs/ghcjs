@@ -5,6 +5,7 @@ module Main (main) where
 
 import GHC.Base
 import GHC.Integer
+import Data.Int
 
 main :: IO ()
 main = case i of
@@ -13,5 +14,5 @@ main = case i of
 
 {-# NOINLINE i #-}
 i :: Int
-i = minBound
+i = fromIntegral (minBound::Int32)
 

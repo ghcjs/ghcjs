@@ -1,10 +1,12 @@
-t7861.hs:11:5:
-    Couldn't match type ‘a’ with ‘[a]’
-      ‘a’ is a rigid type variable bound by
-          the type signature for f :: A a -> a at t7861.hs:10:6
-    Expected type: A a -> a
-      Actual type: A a -> [a]
-    Relevant bindings include f :: A a -> a (bound at t7861.hs:11:1)
-    In the expression: doA
-    In an equation for ‘f’: f = doA
+t7861.hs:15:13: error:
+    • Cannot instantiate unification variable ‘t0’
+      with a type involving foralls:
+        (forall (b :: GHC.Prim.Any). a1) -> a1
+        GHC doesn't yet support impredicative polymorphism
+    • In the first argument of ‘seq’, namely ‘f’
+      In a stmt of a 'do' block: f `seq` print "Hello 2"
+      In the expression:
+        do { print "Hello 1";
+             f `seq` print "Hello 2";
+             f (error "urk") `seq` print "Bad" }
 (deferred type error)

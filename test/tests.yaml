@@ -37,7 +37,6 @@ requiredPackages:
   - parallel
   - ghcjs-base
   - QuickCheck
-  - old-time
   - vector
   - stm
   - parsec

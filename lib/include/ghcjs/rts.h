@@ -66,12 +66,19 @@
 #endif
 
 // GHC.Integer.GMP.Internals
+#define IS_INTEGER_S(cl) ((cl).f === h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e)
+#define IS_INTEGER_Jp(cl) ((cl).f === h$integerzmgmpZCGHCziIntegerziTypeziJpzh_con_e)
+#define IS_INTEGER_Jn(cl) ((cl).f === h$integerzmgmpZCGHCziIntegerziTypeziJnzh_con_e)
+#define INTEGER_S_DATA(cl) ((cl).d1)
+#define INTEGER_J_DATA(cl) ((cl).d1)
 #ifdef GHCJS_PROF
-#define MK_INTEGER_S(iii) (h$c2(h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e, (iii), h$CCS_SYSTEM));
-#define MK_INTEGER_J(iii) (h$c2(h$integerzmgmpZCGHCziIntegerziTypeziJzh_con_e, 0, (iii), h$CCS_SYSTEM));
+#define MK_INTEGER_S(iii) (h$c1(h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e, (iii), h$CCS_SYSTEM));
+#define MK_INTEGER_Jp(iii) (h$c1(h$integerzmgmpZCGHCziIntegerziTypeziJpzh_con_e, (iii), h$CCS_SYSTEM));
+#define MK_INTEGER_Jn(iii) (h$c1(h$integerzmgmpZCGHCziIntegerziTypeziJnzh_con_e, (iii), h$CCS_SYSTEM));
 #else
-#define MK_INTEGER_S(iii) (h$c2(h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e, (iii)));
-#define MK_INTEGER_J(iii) (h$c2(h$integerzmgmpZCGHCziIntegerziTypeziJzh_con_e, 0, (iii)));
+#define MK_INTEGER_S(iii) (h$c1(h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e, (iii)));
+#define MK_INTEGER_Jp(iii) (h$c1(h$integerzmgmpZCGHCziIntegerziTypeziJpzh_con_e, (iii)));
+#define MK_INTEGER_Jn(iii) (h$c1(h$integerzmgmpZCGHCziIntegerziTypeziJnzh_con_e, (iii)));
 #endif
 
 // Data.Maybe.Maybe

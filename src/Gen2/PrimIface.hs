@@ -39,22 +39,29 @@ ghcjsPrimIface
         mi_fix_fn  = mkIfaceFixCache fixities
     }
   where
+#if __GLASGOW_HASKELL__ >= 711
+    fixities = (getOccName seqId, Fixity "0" 0 InfixR)  -- seq is infixr 0
+#else
     fixities = (getOccName seqId, Fixity 0 InfixR)  -- seq is infixr 0
+#endif
+             : (occName funTyConName, funTyFixity)  -- trac #10145
              : mapMaybe mkFixity allThePrimOps
     mkFixity op = (,) (primOpOcc op) <$> primOpFixity op
 
 ghcjsPrimExports :: [IfaceExport]
 ghcjsPrimExports
- = map (Avail . idName) ghcPrimIds ++
-   map (Avail . idName . mkGhcjsPrimOpId) allThePrimOps ++
-   [ AvailTC n [n]
-   | tc <- funTyCon : coercibleTyCon : primTyCons, let n = tyConName tc  ]
+ = map (avail . idName) ghcPrimIds ++
+   map (avail . idName . mkGhcjsPrimOpId) allThePrimOps ++
+   [ AvailTC n [n] []
+   | tc <- funTyCon : primTyCons, let n = tyConName tc  ]
 
 -- include our own primop type list, this must match the host
 -- compiler version and be processed with WORD_SIZE_IN_BITS=32
 primOpInfo :: PrimOp -> PrimOpInfo
-#if __GLASGOW_HASKELL__ >= 711
+#if __GLASGOW_HASKELL__ >= 801
 #error "unsupported GHC version"
+#elif __GLASGOW_HASKELL__ >= 711
+#include "prim/primop-primop-info-800.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 709
 #include "prim/primop-primop-info-710.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 707
@@ -64,8 +71,10 @@ primOpInfo :: PrimOp -> PrimOpInfo
 #endif
 
 primOpStrictness :: PrimOp -> Arity -> StrictSig
-#if __GLASGOW_HASKELL__ >= 711
+#if __GLASGOW_HASKELL__ >= 801
 #error "unsupported GHC version"
+#elif __GLASGOW_HASKELL__ >= 711
+#include "prim/primop-strictness-800.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 709
 #include "prim/primop-strictness-710.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 707
@@ -74,22 +83,31 @@ primOpStrictness :: PrimOp -> Arity -> StrictSig
 #error "unsupported GHC version"
 #endif
 
+
 mkGhcjsPrimOpId :: PrimOp -> Id
 mkGhcjsPrimOpId prim_op
   = id
   where
     (tyvars,arg_tys,res_ty, arity, strict_sig) = ghcjsPrimOpSig prim_op
+#if __GLASGOW_HASKELL__ >= 711
+    ty   = mkSpecForAllTys tyvars (mkFunTys arg_tys res_ty)
+#else
     ty   = mkForAllTys tyvars (mkFunTys arg_tys res_ty)
+#endif
     name = mkWiredInName gHC_PRIM (primOpOcc prim_op)
                          (mkPrimOpIdUnique (primOpTag prim_op + 500000)) -- do not clash, does this help?
                          (AnId id) UserSyntax
     id   = mkGlobalId (PrimOpId prim_op) name ty info
 
     info = noCafIdInfo
-           `setSpecInfo`          mkSpecInfo (maybeToList $ primOpRules name prim_op)
+           `setRuleInfo`          mkRuleInfo (maybeToList $ primOpRules name prim_op)
            `setArityInfo`         arity
            `setStrictnessInfo`    strict_sig
            `setInlinePragInfo`    neverInlinePragma
+               -- We give PrimOps a NOINLINE pragma so that we don't
+               -- get silly warnings from Desugar.dsRule (the inline_shadows_rule
+               -- test) about a RULE conflicting with a possible inlining
+               -- cf Trac #7287
 
 -- get the type sig from our local primop list
 ghcjsPrimOpSig :: PrimOp -> ([TyVar], [Type], Type, Arity, StrictSig)

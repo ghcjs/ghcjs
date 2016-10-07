@@ -1,7 +1,7 @@
 {-# LANGUAGE ConstraintKinds, TypeFamilies, FlexibleInstances #-}
 module Main where
 
-import GHC.Prim (Constraint)
+import GHC.Exts (Constraint)
 
 import Prelude hiding (Functor, fmap)
 
@@ -26,3 +26,4 @@ testList = fmap (+1) [1,2,3]
 testSet  = fmap (+1) (S.fromList [1,2,3])
 
 main = do { print testList; print testSet }
+

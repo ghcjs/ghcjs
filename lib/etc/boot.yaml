@@ -27,6 +27,7 @@ packages:
   ghc-prim:   ./boot/ghc-prim
 
   ghcjs-prim: ../ghcjs-prim
+  ghcjs-th:   ../ghcjs-th
 
   cabal:      ./boot/cabal/Cabal
 
@@ -42,25 +43,27 @@ packages:
   # before this
 
   stage1a:
-    - ./boot/array
     - ./boot/base
-    - ./boot/binary
-    - ./boot/bytestring
-    - ./boot/containers
-    - ./boot/deepseq
     - ./boot/integer-gmp
-    - ./boot/pretty
     - ./boot/primitive
-    - ./boot/template-haskell
     - ./boot/transformers
 
   # after stage 1a, ghcjs-boot installs ghcjs-prim and
   # continues with stage 1b
 
   stage1b:
+    - ./boot/array
+    - ./boot/binary
+    - ./boot/bytestring
+    - ./boot/containers
+    - ./boot/deepseq
     - ./boot/directory
     - ./boot/filepath
-    - ./boot/old-locale
+    - ./boot/ghc-boot
+    - ./boot/ghc-boot-th
+    - ./boot/ghci
+    - ./boot/pretty
+    - ./boot/template-haskell
     - ./boot/process
     - ./boot/time
     - IfUnix:    ./boot/unix
@@ -85,13 +88,14 @@ packages:
     - ./boot/case-insensitive
     - ./boot/dlist
     - ./boot/extensible-exceptions
+    - ./boot/fail
     - ./boot/hashable
     - ./boot/mtl
-    - ./boot/old-time
     - ./boot/parallel
     - ./boot/scientific
     - ./boot/stm
     - ./boot/syb
+    - ./boot/tagged
     - ./boot/text
     - ./boot/unordered-containers
     - ./boot/vector
@@ -123,6 +127,7 @@ sources:
   doc:        "{datadir}/doc"
   etc:        "{datadir}/lib/etc"
   ghcjs-prim: "{datadir}/lib/ghcjs-prim"
+  ghcjs-th:   "{datadir}/lib/ghcjs-th"
   include:    "{datadir}/lib/include"
 
   # git repositories for the rts and boot libraries

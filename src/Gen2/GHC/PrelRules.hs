@@ -1,9 +1,6 @@
-Included in GHCJS to work around a bug in logical right shifts
-----
+{-
+(c) The GRASP/AQUA Project, Glasgow University, 1992-1998
 
-%
-% (c) The GRASP/AQUA Project, Glasgow University, 1992-1998
-%
 \section[ConFold]{Constant Folder}
 
 Conceptually, constant folding should be parameterized with the kind
@@ -13,17 +10,18 @@ and runtime. We cheat a little bit here...
 ToDo:
    check boundaries before folding, e.g. we can fold the Float addition
    (i1 + i2) only if it results in a valid Float.
+-}
 
-\begin{code}
-{-# LANGUAGE RankNTypes, CPP #-}
-{-# OPTIONS -optc-DNON_POSIX_SOURCE #-}
+{-# LANGUAGE CPP, RankNTypes #-}
+{-# OPTIONS_GHC -optc-DNON_POSIX_SOURCE #-}
 
-module Gen2.GHC.PrelRules ( primOpRules, builtinRules, mkGhcjsPrimOpId ) where
+module Gen2.GHC.PrelRules ( primOpRules, builtinRules ) where
 
-#include "HsVersions.h"
+-- #include "HsVersions.h"
 -- #include "../includes/MachDeps.h"
 
-import MkId ( {- mkPrimOpId, -} magicDictId )
+import {- {-# SOURCE #-} -} MkId ( {- mkPrimOpId, -} magicDictId )
+import {-# SOURCE #-} Gen2.PrimIface
 
 import CoreSyn
 import MkCore
@@ -38,7 +36,6 @@ import DataCon     ( dataConTag, dataConTyCon, dataConWorkId )
 import CoreUtils   ( cheapEqExpr, exprIsHNF )
 import CoreUnfold  ( exprIsConApp_maybe )
 import Type
-import TypeRep
 import OccName     ( occNameFS )
 import PrelNames
 import Maybes      ( orElse )
@@ -51,20 +48,23 @@ import Platform
 import Util
 import Coercion     (mkUnbranchedAxInstCo,mkSymCo,Role(..))
 
----- for GHCJS primops
-import {-# SOURCE #-} Gen2.PrimIface
-----
-
+#if __GLASGOW_HASKELL__ >= 709
+import Control.Applicative ( Alternative(..) )
+#else
 import Control.Applicative ( Applicative(..), Alternative(..) )
+#endif
+
 import Control.Monad
+#if __GLASGOW_HASKELL__ > 710
+import qualified Control.Monad.Fail as MonadFail
+#endif
 import Data.Bits as Bits
 import qualified Data.ByteString as BS
 import Data.Int
 import Data.Ratio
 import Data.Word
-\end{code}
 
-
+{-
 Note [Constant folding]
 ~~~~~~~~~~~~~~~~~~~~~~~
 primOpRules generates a rewrite rule for each primop
@@ -79,9 +79,8 @@ more like
 where the (+#) on the rhs is done at compile time
 
 That is why these rules are built in here.
+-}
 
-
-\begin{code}
 primOpRules :: Name -> PrimOp -> Maybe CoreRule
     -- ToDo: something for integer-shift ops?
     --       NotOp
@@ -118,13 +117,15 @@ primOpRules nm OrIOp       = mkPrimOpRule nm 2 [ binaryLit (intOp2 (.|.))
 primOpRules nm XorIOp      = mkPrimOpRule nm 2 [ binaryLit (intOp2 xor)
                                                , identityDynFlags zeroi
                                                , equalArgs >> retLit zeroi ]
+primOpRules nm NotIOp      = mkPrimOpRule nm 1 [ unaryLit complementOp
+                                               , inversePrimOp NotIOp ]
 primOpRules nm IntNegOp    = mkPrimOpRule nm 1 [ unaryLit negOp
                                                , inversePrimOp IntNegOp ]
 primOpRules nm ISllOp      = mkPrimOpRule nm 2 [ binaryLit (intOp2 Bits.shiftL)
                                                , rightIdentityDynFlags zeroi ]
 primOpRules nm ISraOp      = mkPrimOpRule nm 2 [ binaryLit (intOp2 Bits.shiftR)
                                                , rightIdentityDynFlags zeroi ]
-primOpRules nm ISrlOp      = mkPrimOpRule nm 2 [ binaryLit (intOp2 shiftRightLogical)
+primOpRules nm ISrlOp      = mkPrimOpRule nm 2 [ binaryLit (intOp2' shiftRightLogical)
                                                , rightIdentityDynFlags zeroi ]
 
 -- Word operations
@@ -138,7 +139,12 @@ primOpRules nm WordMulOp   = mkPrimOpRule nm 2 [ binaryLit (wordOp2 (*))
 primOpRules nm WordQuotOp  = mkPrimOpRule nm 2 [ nonZeroLit 1 >> binaryLit (wordOp2 quot)
                                                , rightIdentityDynFlags onew ]
 primOpRules nm WordRemOp   = mkPrimOpRule nm 2 [ nonZeroLit 1 >> binaryLit (wordOp2 rem)
-                                               , rightIdentityDynFlags onew ]
+                                               , leftZero zerow
+                                               , do l <- getLiteral 1
+                                                    dflags <- getDynFlags
+                                                    guard (l == onew dflags)
+                                                    retLit zerow
+                                               , equalArgs >> retLit zerow ]
 primOpRules nm AndOp       = mkPrimOpRule nm 2 [ binaryLit (wordOp2 (.&.))
                                                , idempotent
                                                , zeroElem zerow ]
@@ -148,7 +154,9 @@ primOpRules nm OrOp        = mkPrimOpRule nm 2 [ binaryLit (wordOp2 (.|.))
 primOpRules nm XorOp       = mkPrimOpRule nm 2 [ binaryLit (wordOp2 xor)
                                                , identityDynFlags zerow
                                                , equalArgs >> retLit zerow ]
-primOpRules nm SllOp       = mkPrimOpRule nm 2 [ wordShiftRule Bits.shiftL ]
+primOpRules nm NotOp       = mkPrimOpRule nm 1 [ unaryLit complementOp
+                                               , inversePrimOp NotOp ]
+primOpRules nm SllOp       = mkPrimOpRule nm 2 [ wordShiftRule (const Bits.shiftL) ]
 primOpRules nm SrlOp       = mkPrimOpRule nm 2 [ wordShiftRule shiftRightLogical ]
 
 -- coercions
@@ -241,19 +249,19 @@ primOpRules nm CharGeOp   = mkRelOpRule nm (>=) [ boundsCmp Ge ]
 primOpRules nm CharLeOp   = mkRelOpRule nm (<=) [ boundsCmp Le ]
 primOpRules nm CharLtOp   = mkRelOpRule nm (<)  [ boundsCmp Lt ]
 
-primOpRules nm FloatGtOp  = mkFloatingRelOpRule nm (>)  []
-primOpRules nm FloatGeOp  = mkFloatingRelOpRule nm (>=) []
-primOpRules nm FloatLeOp  = mkFloatingRelOpRule nm (<=) []
-primOpRules nm FloatLtOp  = mkFloatingRelOpRule nm (<)  []
-primOpRules nm FloatEqOp  = mkFloatingRelOpRule nm (==) [ litEq True ]
-primOpRules nm FloatNeOp  = mkFloatingRelOpRule nm (/=) [ litEq False ]
+primOpRules nm FloatGtOp  = mkFloatingRelOpRule nm (>)
+primOpRules nm FloatGeOp  = mkFloatingRelOpRule nm (>=)
+primOpRules nm FloatLeOp  = mkFloatingRelOpRule nm (<=)
+primOpRules nm FloatLtOp  = mkFloatingRelOpRule nm (<)
+primOpRules nm FloatEqOp  = mkFloatingRelOpRule nm (==)
+primOpRules nm FloatNeOp  = mkFloatingRelOpRule nm (/=)
 
-primOpRules nm DoubleGtOp = mkFloatingRelOpRule nm (>)  []
-primOpRules nm DoubleGeOp = mkFloatingRelOpRule nm (>=) []
-primOpRules nm DoubleLeOp = mkFloatingRelOpRule nm (<=) []
-primOpRules nm DoubleLtOp = mkFloatingRelOpRule nm (<)  []
-primOpRules nm DoubleEqOp = mkFloatingRelOpRule nm (==) [ litEq True ]
-primOpRules nm DoubleNeOp = mkFloatingRelOpRule nm (/=) [ litEq False ]
+primOpRules nm DoubleGtOp = mkFloatingRelOpRule nm (>)
+primOpRules nm DoubleGeOp = mkFloatingRelOpRule nm (>=)
+primOpRules nm DoubleLeOp = mkFloatingRelOpRule nm (<=)
+primOpRules nm DoubleLtOp = mkFloatingRelOpRule nm (<)
+primOpRules nm DoubleEqOp = mkFloatingRelOpRule nm (==)
+primOpRules nm DoubleNeOp = mkFloatingRelOpRule nm (/=)
 
 primOpRules nm WordGtOp   = mkRelOpRule nm (>)  [ boundsCmp Gt ]
 primOpRules nm WordGeOp   = mkRelOpRule nm (>=) [ boundsCmp Ge ]
@@ -269,15 +277,13 @@ primOpRules nm SparkOp    = mkPrimOpRule nm 4 [ sparkRule ]
 
 primOpRules _  _          = Nothing
 
-\end{code}
-
-%************************************************************************
-%*                                                                      *
+{-
+************************************************************************
+*                                                                      *
 \subsection{Doing the business}
-%*                                                                      *
-%************************************************************************
-
-\begin{code}
+*                                                                      *
+************************************************************************
+-}
 
 -- useful shorthands
 mkPrimOpRule :: Name -> Int -> [RuleM CoreExpr] -> Maybe CoreRule
@@ -286,29 +292,49 @@ mkPrimOpRule nm arity rules = Just $ mkBasicRule nm arity (msum rules)
 mkRelOpRule :: Name -> (forall a . Ord a => a -> a -> Bool)
             -> [RuleM CoreExpr] -> Maybe CoreRule
 mkRelOpRule nm cmp extra
-  = mkPrimOpRule nm 2 $ rules ++ extra
+  = mkPrimOpRule nm 2 $
+    binaryCmpLit cmp : equal_rule : extra
   where
-    rules = [ binaryCmpLit cmp
-            , do equalArgs
-              -- x `cmp` x does not depend on x, so
-              -- compute it for the arbitrary value 'True'
-              -- and use that result
-                 dflags <- getDynFlags
-                 return (if cmp True True
-                         then trueValInt  dflags
-                         else falseValInt dflags) ]
+        -- x `cmp` x does not depend on x, so
+        -- compute it for the arbitrary value 'True'
+        -- and use that result
+    equal_rule = do { equalArgs
+                    ; dflags <- getDynFlags
+                    ; return (if cmp True True
+                              then trueValInt  dflags
+                              else falseValInt dflags) }
 
--- Note [Rules for floating-point comparisons]
--- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
---
--- We need different rules for floating-point values because for floats
--- it is not true that x = x. The special case when this does not occur
--- are NaNs.
+{- Note [Rules for floating-point comparisons]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+We need different rules for floating-point values because for floats
+it is not true that x = x (for NaNs); so we do not want the equal_rule
+rule that mkRelOpRule uses.
+
+Note also that, in the case of equality/inequality, we do /not/
+want to switch to a case-expression.  For example, we do not want
+to convert
+   case (eqFloat# x 3.8#) of
+     True -> this
+     False -> that
+to
+  case x of
+    3.8#::Float# -> this
+    _            -> that
+See Trac #9238.  Reason: comparing floating-point values for equality
+delicate, and we don't want to implement that delicacy in the code for
+case expressions.  So we make it an invariant of Core that a case
+expression never scrutinises a Float# or Double#.
+
+This transformation is what the litEq rule does;
+see Note [The litEq rule: converting equality to case].
+So we /refrain/ from using litEq for mkFloatingRelOpRule.
+-}
 
 mkFloatingRelOpRule :: Name -> (forall a . Ord a => a -> a -> Bool)
-                    -> [RuleM CoreExpr] -> Maybe CoreRule
-mkFloatingRelOpRule nm cmp extra -- See Note [Rules for floating-point comparisons]
-  = mkPrimOpRule nm 2 $ binaryCmpLit cmp : extra
+                    -> Maybe CoreRule
+-- See Note [Rules for floating-point comparisons]
+mkFloatingRelOpRule nm cmp
+  = mkPrimOpRule nm 2 [binaryCmpLit cmp]
 
 -- common constants
 zeroi, onei, zerow, onew :: DynFlags -> Literal
@@ -352,19 +378,33 @@ negOp dflags (MachDouble d)   = Just (mkDoubleVal dflags (-d))
 negOp dflags (MachInt i)      = intResult dflags (-i)
 negOp _      _                = Nothing
 
+complementOp :: DynFlags -> Literal -> Maybe CoreExpr  -- Binary complement
+complementOp dflags (MachWord i) = wordResult dflags (complement i)
+complementOp dflags (MachInt i)  = intResult  dflags (complement i)
+complementOp _      _            = Nothing
+
 --------------------------
 intOp2 :: (Integral a, Integral b)
        => (a -> b -> Integer)
        -> DynFlags -> Literal -> Literal -> Maybe CoreExpr
-intOp2 op dflags (MachInt i1) (MachInt i2) = intResult dflags (fromInteger i1 `op` fromInteger i2)
-intOp2 _  _      _            _            = Nothing  -- Could find LitLit
+intOp2 = intOp2' . const
 
-shiftRightLogical :: Integer -> Int -> Integer
+intOp2' :: (Integral a, Integral b)
+        => (DynFlags -> a -> b -> Integer)
+        -> DynFlags -> Literal -> Literal -> Maybe CoreExpr
+intOp2' op dflags (MachInt i1) (MachInt i2) =
+  let o = op dflags
+  in  intResult dflags (fromInteger i1 `o` fromInteger i2)
+intOp2' _  _      _            _            = Nothing  -- Could find LitLit
+
+shiftRightLogical :: DynFlags -> Integer -> Int -> Integer
 -- Shift right, putting zeros in rather than sign-propagating as Bits.shiftR would do
 -- Do this by converting to Word and back.  Obviously this won't work for big
 -- values, but its ok as we use it here
-shiftRightLogical x n = fromIntegral (fromInteger x `shiftR` n :: Word32) -- changed to Word32 for GHCJS
-
+shiftRightLogical dflags x n
+  | wordSizeInBits dflags == 32 = fromIntegral (fromInteger x `shiftR` n :: Word32)
+  | wordSizeInBits dflags == 64 = fromIntegral (fromInteger x `shiftR` n :: Word64)
+  | otherwise = panic "shiftRightLogical: unsupported word size"
 
 --------------------------
 retLit :: (DynFlags -> Literal) -> RuleM CoreExpr
@@ -378,20 +418,21 @@ wordOp2 op dflags (MachWord w1) (MachWord w2)
     = wordResult dflags (fromInteger w1 `op` fromInteger w2)
 wordOp2 _ _ _ _ = Nothing  -- Could find LitLit
 
-wordShiftRule :: (Integer -> Int -> Integer) -> RuleM CoreExpr
-                 -- Shifts take an Int; hence second arg of op is Int
+wordShiftRule :: (DynFlags -> Integer -> Int -> Integer) -> RuleM CoreExpr
+                 -- Shifts take an Int; hence third arg of op is Int
 -- See Note [Guarding against silly shifts]
 wordShiftRule shift_op
   = do { dflags <- getDynFlags
        ; [e1, Lit (MachInt shift_len)] <- getArgs
        ; case e1 of
-           _ | shift_len == 0 
+           _ | shift_len == 0
              -> return e1
              | shift_len < 0 || wordSizeInBits dflags < shift_len
-             -> return (mkRuntimeErrorApp rUNTIME_ERROR_ID wordPrimTy 
+             -> return (mkRuntimeErrorApp rUNTIME_ERROR_ID wordPrimTy
                                         ("Bad shift length" ++ show shift_len))
            Lit (MachWord x)
-             -> liftMaybe $ wordResult dflags (x `shift_op` fromInteger shift_len) 
+             -> let op = shift_op dflags
+                in  liftMaybe $ wordResult dflags (x `op` fromInteger shift_len)
                     -- Do the shift at type Integer, but shift length is Int
            _ -> mzero }
 
@@ -415,24 +456,27 @@ doubleOp2 op dflags (MachDouble f1) (MachDouble f2)
 doubleOp2 _ _ _ _ = Nothing
 
 --------------------------
--- This stuff turns
---      n ==# 3#
--- into
---      case n of
---        3# -> True
---        m  -> False
---
--- This is a Good Thing, because it allows case-of case things
--- to happen, and case-default absorption to happen.  For
--- example:
---
---      if (n ==# 3#) || (n ==# 4#) then e1 else e2
--- will transform to
---      case n of
---        3# -> e1
---        4# -> e1
---        m  -> e2
--- (modulo the usual precautions to avoid duplicating e1)
+{- Note [The litEq rule: converting equality to case]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This stuff turns
+     n ==# 3#
+into
+     case n of
+       3# -> True
+       m  -> False
+
+This is a Good Thing, because it allows case-of case things
+to happen, and case-default absorption to happen.  For
+example:
+
+     if (n ==# 3#) || (n ==# 4#) then e1 else e2
+will transform to
+     case n of
+       3# -> e1
+       4# -> e1
+       m  -> e2
+(modulo the usual precautions to avoid duplicating e1)
+-}
 
 litEq :: Bool  -- True <=> equality, False <=> inequality
       -> RuleM CoreExpr
@@ -536,8 +580,8 @@ idempotent :: RuleM CoreExpr
 idempotent = do [e1, e2] <- getArgs
                 guard $ cheapEqExpr e1 e2
                 return e1
-\end{code}
 
+{-
 Note [Guarding against silly shifts]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Consider this code:
@@ -549,13 +593,13 @@ Consider this code:
 This optimises to:
 Shift.$wgo = \ (w_sCS :: GHC.Prim.Int#) (w1_sCT :: [GHC.Types.Bool]) ->
     case w1_sCT of _ {
-      [] -> __word 0;
+      [] -> 0##;
       : x_aAW xs_aAX ->
         case x_aAW of _ {
           GHC.Types.False ->
             case w_sCS of wild2_Xh {
               __DEFAULT -> Shift.$wgo (GHC.Prim.+# wild2_Xh 1) xs_aAX;
-              9223372036854775807 -> __word 0  };
+              9223372036854775807 -> 0## };
           GHC.Types.True ->
             case GHC.Prim.>=# w_sCS 64 of _ {
               GHC.Types.False ->
@@ -563,20 +607,20 @@ Shift.$wgo = \ (w_sCS :: GHC.Prim.Int#) (w1_sCT :: [GHC.Types.Bool]) ->
                   __DEFAULT ->
                     case Shift.$wgo (GHC.Prim.+# wild3_Xh 1) xs_aAX of ww_sCW { __DEFAULT ->
                       GHC.Prim.or# (GHC.Prim.narrow32Word#
-                                      (GHC.Prim.uncheckedShiftL# (__word 1) wild3_Xh))
+                                      (GHC.Prim.uncheckedShiftL# 1## wild3_Xh))
                                    ww_sCW
                      };
                   9223372036854775807 ->
                     GHC.Prim.narrow32Word#
-!!!!-->                  (GHC.Prim.uncheckedShiftL# (__word 1) 9223372036854775807)
+!!!!-->                  (GHC.Prim.uncheckedShiftL# 1## 9223372036854775807)
                 };
               GHC.Types.True ->
                 case w_sCS of wild3_Xh {
                   __DEFAULT -> Shift.$wgo (GHC.Prim.+# wild3_Xh 1) xs_aAX;
-                  9223372036854775807 -> __word 0
+                  9223372036854775807 -> 0##
                 } } } }
 
-Note the massive shift on line "!!!!".  It can't happen, because we've checked 
+Note the massive shift on line "!!!!".  It can't happen, because we've checked
 that w < 64, but the optimiser didn't spot that. We DO NO want to constant-fold this!
 Moreover, if the programmer writes (n `uncheckedShiftL` 9223372036854775807), we
 can't constant fold it, but if it gets to the assember we get
@@ -585,13 +629,13 @@ can't constant fold it, but if it gets to the assember we get
 So the best thing to do is to rewrite the shift with a call to error,
 when the second arg is stupid.
 
-%************************************************************************
-%*                                                                      *
+************************************************************************
+*                                                                      *
 \subsection{Vaguely generic functions}
-%*                                                                      *
-%************************************************************************
+*                                                                      *
+************************************************************************
+-}
 
-\begin{code}
 mkBasicRule :: Name -> Int -> RuleM CoreExpr -> CoreRule
 -- Gives the Rule the same name as the primop itself
 mkBasicRule op_name n_args rm
@@ -607,15 +651,20 @@ instance Functor RuleM where
     fmap = liftM
 
 instance Applicative RuleM where
-    pure = return
+    pure x = RuleM $ \_ _ _ -> Just x
     (<*>) = ap
 
 instance Monad RuleM where
-  return x = RuleM $ \_ _ _ -> Just x
+  return = pure
   RuleM f >>= g = RuleM $ \dflags iu e -> case f dflags iu e of
     Nothing -> Nothing
     Just r -> runRuleM (g r) dflags iu e
   fail _ = mzero
+
+#if __GLASGOW_HASKELL__ > 710
+instance MonadFail.MonadFail RuleM where
+    fail _ = mzero
+#endif
 
 instance Alternative RuleM where
     empty = mzero
@@ -642,16 +691,14 @@ liftLitDynFlags f = do
   [Lit lit] <- getArgs
   return $ Lit (f dflags lit)
 
--- since JavaScript numbers are not really 32 bit, we shouldn't remove things like NarrowOp
--- even though we use WORD_SIZE_IN_BITS = 32
 removeOp32 :: RuleM CoreExpr
--- #if WORD_SIZE_IN_BITS == 32
--- removeOp32 = do
---  [e] <- getArgs
---  return e
--- #else
-removeOp32 = mzero
--- #endif
+removeOp32 = do
+  dflags <- getDynFlags
+  if wordSizeInBits dflags == 32
+  then do
+    [e] <- getArgs
+    return e
+  else mzero
 
 getArgs :: RuleM [CoreExpr]
 getArgs = RuleM $ \_ _ args -> Just args
@@ -814,13 +861,12 @@ matchPrimOpId op id = do
   op' <- liftMaybe $ isPrimOpId_maybe id
   guard $ op == op'
 
-\end{code}
-
-%************************************************************************
-%*                                                                      *
+{-
+************************************************************************
+*                                                                      *
 \subsection{Special rules for seq, tagToEnum, dataToTag}
-%*                                                                      *
-%************************************************************************
+*                                                                      *
+************************************************************************
 
 Note [tagToEnum#]
 ~~~~~~~~~~~~~~~~~
@@ -842,8 +888,8 @@ because we don't expect the user to call tagToEnum# at all; we merely
 generate calls in derived instances of Enum.  So we compromise: a
 rewrite rule rewrites a bad instance of tagToEnum# to an error call,
 and emits a warning.
+-}
 
-\begin{code}
 tagToEnumRule :: RuleM CoreExpr
 -- If     data T a = A | B | C
 -- then   tag2Enum# (T ty) 2# -->  B ty
@@ -854,21 +900,20 @@ tagToEnumRule = do
       let tag = fromInteger i
           correct_tag dc = (dataConTag dc - fIRST_TAG) == tag
       (dc:rest) <- return $ filter correct_tag (tyConDataCons_maybe tycon `orElse` [])
-      ASSERT(null rest) return ()
+      -- ASSERT(null rest) return ()
       return $ mkTyApps (Var (dataConWorkId dc)) tc_args
 
     -- See Note [tagToEnum#]
-    _ -> WARN( True, ptext (sLit "tagToEnum# on non-enumeration type") <+> ppr ty )
+    _ -> -- WARN( True, text "tagToEnum# on non-enumeration type" <+> ppr ty )
          return $ mkRuntimeErrorApp rUNTIME_ERROR_ID ty "tagToEnum# on non-enumeration type"
-\end{code}
 
-
+{-
 For dataToTag#, we can reduce if either
 
         (a) the argument is a constructor
         (b) the argument is a variable whose unfolding is a known constructor
+-}
 
-\begin{code}
 dataToTagRule :: RuleM CoreExpr
 dataToTagRule = a `mplus` b
   where
@@ -882,37 +927,36 @@ dataToTagRule = a `mplus` b
       [_, val_arg] <- getArgs
       in_scope <- getInScopeEnv
       (dc,_,_) <- liftMaybe $ exprIsConApp_maybe in_scope val_arg
-      ASSERT( not (isNewTyCon (dataConTyCon dc)) ) return ()
+      -- ASSERT( not (isNewTyCon (dataConTyCon dc)) ) return ()
       return $ mkIntVal dflags (toInteger (dataConTag dc - fIRST_TAG))
-\end{code}
 
-%************************************************************************
-%*                                                                      *
+{-
+************************************************************************
+*                                                                      *
 \subsection{Rules for seq# and spark#}
-%*                                                                      *
-%************************************************************************
+*                                                                      *
+************************************************************************
+-}
 
-\begin{code}
 -- seq# :: forall a s . a -> State# s -> (# State# s, a #)
 seqRule :: RuleM CoreExpr
 seqRule = do
-  [ty_a, Type ty_s, a, s] <- getArgs
+  [Type ty_a, Type ty_s, a, s] <- getArgs
   guard $ exprIsHNF a
-  return $ mkConApp (tupleCon UnboxedTuple 2)
-    [Type (mkStatePrimTy ty_s), ty_a, s, a]
+  return $ mkCoreUbxTup [mkStatePrimTy ty_s, ty_a] [s, a]
 
 -- spark# :: forall a s . a -> State# s -> (# State# s, a #)
 sparkRule :: RuleM CoreExpr
 sparkRule = seqRule -- reduce on HNF, just the same
   -- XXX perhaps we shouldn't do this, because a spark eliminated by
   -- this rule won't be counted as a dud at runtime?
-\end{code}
 
-%************************************************************************
-%*                                                                      *
+{-
+************************************************************************
+*                                                                      *
 \subsection{Built in rules}
-%*                                                                      *
-%************************************************************************
+*                                                                      *
+************************************************************************
 
 Note [Scoping for Builtin rules]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -939,9 +983,8 @@ rewriting so again we are fine.
 
 (This whole thing doesn't show up for non-built-in rules because their dependencies
 are explicit.)
+-}
 
-
-\begin{code}
 builtinRules :: [CoreRule]
 -- Rules for non-primops that can't be expressed using a RULE pragma
 builtinRules
@@ -957,14 +1000,24 @@ builtinRules
      ]
  ++ builtinIntegerRules
 
+mkWordLitWord' :: DynFlags -> Word -> Expr b
+mkWordLitWord' dflags w =
+  let w32 = fromIntegral w :: Word32
+  in  mkWordLitWord dflags (fromIntegral w32)
+
+mkIntLitInt' :: DynFlags -> Int -> Expr b
+mkIntLitInt' dflags i =
+  let i32 = fromIntegral i :: Int32
+  in  mkIntLitInt dflags (fromIntegral i32)
+
 builtinIntegerRules :: [CoreRule]
 builtinIntegerRules =
  [rule_IntToInteger   "smallInteger"        smallIntegerName,
   rule_WordToInteger  "wordToInteger"       wordToIntegerName,
   rule_Int64ToInteger  "int64ToInteger"     int64ToIntegerName,
   rule_Word64ToInteger "word64ToInteger"    word64ToIntegerName,
-  rule_convert        "integerToWord"       integerToWordName       mkWordLitWord,
-  rule_convert        "integerToInt"        integerToIntName        mkIntLitInt,
+  rule_convert        "integerToWord"       integerToWordName       mkWordLitWord',
+  rule_convert        "integerToInt"        integerToIntName        mkIntLitInt',
   rule_convert        "integerToWord64"     integerToWord64Name     (\_ -> mkWord64LitWord64),
   rule_convert        "integerToInt64"      integerToInt64Name      (\_ -> mkInt64LitInt64),
   rule_binop          "plusInteger"         plusIntegerName         (+),
@@ -995,7 +1048,8 @@ builtinIntegerRules =
   rule_unop           "complementInteger"   complementIntegerName   complement,
   rule_Int_binop      "shiftLInteger"       shiftLIntegerName       shiftL,
   rule_Int_binop      "shiftRInteger"       shiftRIntegerName       shiftR,
-  -- See Note [Integer division constant folding] in libraries/base/GHC/Real.lhs
+  rule_bitInteger     "bitInteger"          bitIntegerName,
+  -- See Note [Integer division constant folding] in libraries/base/GHC/Real.hs
   rule_divop_one      "quotInteger"         quotIntegerName         quot,
   rule_divop_one      "remInteger"          remIntegerName          rem,
   rule_divop_one      "divInteger"          divIntegerName          div,
@@ -1031,6 +1085,9 @@ builtinIntegerRules =
           rule_unop str name op
            = BuiltinRule { ru_name = fsLit str, ru_fn = name, ru_nargs = 1,
                            ru_try = match_Integer_unop op }
+          rule_bitInteger str name
+           = BuiltinRule { ru_name = fsLit str, ru_fn = name, ru_nargs = 1,
+                           ru_try = match_IntToInteger_unop (bit . fromIntegral) }
           rule_binop str name op
            = BuiltinRule { ru_name = fsLit str, ru_fn = name, ru_nargs = 2,
                            ru_try = match_Integer_binop op }
@@ -1081,7 +1138,7 @@ match_append_lit [Type ty1,
                    ]
   | unpk `hasKey` unpackCStringFoldrIdKey &&
     c1 `cheapEqExpr` c2
-  = ASSERT( ty1 `eqType` ty2 )
+  = -- ASSERT( ty1 `eqType` ty2 )
     Just (Var unpk `App` Type ty1
                    `App` Lit (MachStr (s1 `BS.append` s2))
                    `App` c1
@@ -1126,7 +1183,7 @@ match_inline (Type _ : e : _)
 match_inline _ = Nothing
 
 
--- See Note [magicDictId magic] in `basicTypes/MkId.lhs`
+-- See Note [magicDictId magic] in `basicTypes/MkId.hs`
 -- for a description of what is going on here.
 match_magicDict :: [Expr CoreBndr] -> Maybe (Expr CoreBndr)
 match_magicDict [Type _, Var wrap `App` Type a `App` Type _ `App` f, x, y ]
@@ -1135,7 +1192,7 @@ match_magicDict [Type _, Var wrap `App` Type a `App` Type _ `App` f, x, y ]
   , Just dictTc         <- tyConAppTyCon_maybe dictTy
   , Just (_,_,co)       <- unwrapNewTyCon_maybe dictTc
   = Just
-  $ f `App` Cast x (mkSymCo (mkUnbranchedAxInstCo Representational co [a]))
+  $ f `App` Cast x (mkSymCo (mkUnbranchedAxInstCo Representational co [a] []))
       `App` y
 
 match_magicDict _ = Nothing
@@ -1147,20 +1204,13 @@ match_magicDict _ = Nothing
 -- Similarly Int64, Word64
 
 match_IntToInteger :: RuleFun
-match_IntToInteger _ id_unf fn [xl]
-  | Just (MachInt x) <- exprIsLiteral_maybe id_unf xl
-  = case idType fn of
-    FunTy _ integerTy ->
-        Just (Lit (LitInteger x integerTy))
-    _ ->
-        panic "match_IntToInteger: Id has the wrong type"
-match_IntToInteger _ _ _ _ = Nothing
+match_IntToInteger = match_IntToInteger_unop id
 
 match_WordToInteger :: RuleFun
 match_WordToInteger _ id_unf id [xl]
   | Just (MachWord x) <- exprIsLiteral_maybe id_unf xl
-  = case idType id of
-    FunTy _ integerTy ->
+  = case splitFunTy_maybe (idType id) of
+    Just (_, integerTy) ->
         Just (Lit (LitInteger x integerTy))
     _ ->
         panic "match_WordToInteger: Id has the wrong type"
@@ -1169,8 +1219,8 @@ match_WordToInteger _ _ _ _ = Nothing
 match_Int64ToInteger :: RuleFun
 match_Int64ToInteger _ id_unf id [xl]
   | Just (MachInt64 x) <- exprIsLiteral_maybe id_unf xl
-  = case idType id of
-    FunTy _ integerTy ->
+  = case splitFunTy_maybe (idType id) of
+    Just (_, integerTy) ->
         Just (Lit (LitInteger x integerTy))
     _ ->
         panic "match_Int64ToInteger: Id has the wrong type"
@@ -1179,8 +1229,8 @@ match_Int64ToInteger _ _ _ _ = Nothing
 match_Word64ToInteger :: RuleFun
 match_Word64ToInteger _ id_unf id [xl]
   | Just (MachWord64 x) <- exprIsLiteral_maybe id_unf xl
-  = case idType id of
-    FunTy _ integerTy ->
+  = case splitFunTy_maybe (idType id) of
+    Just (_, integerTy) ->
         Just (Lit (LitInteger x integerTy))
     _ ->
         panic "match_Word64ToInteger: Id has the wrong type"
@@ -1201,6 +1251,32 @@ match_Integer_unop unop _ id_unf _ [xl]
   = Just (Lit (LitInteger (unop x) i))
 match_Integer_unop _ _ _ _ _ = Nothing
 
+{- Note [Rewriting bitInteger]
+
+For most types the bitInteger operation can be implemented in terms of shifts.
+The integer-gmp package, however, can do substantially better than this if
+allowed to provide its own implementation. However, in so doing it previously lost
+constant-folding (see Trac #8832). The bitInteger rule above provides constant folding
+specifically for this function.
+
+There is, however, a bit of trickiness here when it comes to ranges. While the
+AST encodes all integers (even MachInts) as Integers, `bit` expects the bit
+index to be given as an Int. Hence we coerce to an Int in the rule definition.
+This will behave a bit funny for constants larger than the word size, but the user
+should expect some funniness given that they will have at very least ignored a
+warning in this case.
+-}
+
+match_IntToInteger_unop :: (Integer -> Integer) -> RuleFun
+match_IntToInteger_unop unop _ id_unf fn [xl]
+  | Just (MachInt x) <- exprIsLiteral_maybe id_unf xl
+  = case splitFunTy_maybe (idType fn) of
+    Just (_, integerTy) ->
+        Just (Lit (LitInteger (unop x) integerTy))
+    _ ->
+        panic "match_IntToInteger_unop: Id has the wrong type"
+match_IntToInteger_unop _ _ _ _ _ = Nothing
+
 match_Integer_binop :: (Integer -> Integer -> Integer) -> RuleFun
 match_Integer_binop binop _ id_unf _ [xl,yl]
   | Just (LitInteger x i) <- exprIsLiteral_maybe id_unf xl
@@ -1216,11 +1292,7 @@ match_Integer_divop_both divop _ id_unf _ [xl,yl]
   , Just (LitInteger y _) <- exprIsLiteral_maybe id_unf yl
   , y /= 0
   , (r,s) <- x `divop` y
-  = Just $ mkConApp (tupleCon UnboxedTuple 2)
-                    [Type t,
-                     Type t,
-                     Lit (LitInteger r t),
-                     Lit (LitInteger s t)]
+  = Just $ mkCoreUbxTup [t,t] [Lit (LitInteger r t), Lit (LitInteger s t)]
 match_Integer_divop_both _ _ _ _ _ = Nothing
 
 -- This helper is used for the quot and rem functions
@@ -1288,17 +1360,17 @@ match_rationalTo _ _ _ _ _ = Nothing
 match_decodeDouble :: RuleFun
 match_decodeDouble _ id_unf fn [xl]
   | Just (MachDouble x) <- exprIsLiteral_maybe id_unf xl
-  = case idType fn of
-    FunTy _ (TyConApp _ [integerTy, intHashTy]) ->
-        case decodeFloat (fromRational x :: Double) of
-        (y, z) ->
-            Just $ mkConApp (tupleCon UnboxedTuple 2)
-                            [Type integerTy,
-                             Type intHashTy,
-                             Lit (LitInteger y integerTy),
-                             Lit (MachInt (toInteger z))]
+  = case splitFunTy_maybe (idType fn) of
+    Just (_, res)
+      | Just [_lev1, _lev2, integerTy, intHashTy] <- tyConAppArgs_maybe res
+      -> case decodeFloat (fromRational x :: Double) of
+           (y, z) ->
+             Just $ mkCoreUbxTup [integerTy, intHashTy]
+                                 [Lit (LitInteger y integerTy),
+                                  Lit (MachInt (toInteger z))]
     _ ->
-        panic "match_decodeDouble: Id has the wrong type"
+        pprPanic "match_decodeDouble: Id has the wrong type"
+          (ppr fn <+> dcolon <+> ppr (idType fn))
 match_decodeDouble _ _ _ _ = Nothing
 
 match_XToIntegerToX :: Name -> RuleFun
@@ -1312,6 +1384,3 @@ match_smallIntegerTo primOp _ _ _ [App (Var x) y]
   | idName x == smallIntegerName
   = Just $ App (Var (mkGhcjsPrimOpId primOp)) y
 match_smallIntegerTo _ _ _ _ _ = Nothing
-\end{code}
-
-
