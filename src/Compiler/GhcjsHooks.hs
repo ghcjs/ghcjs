@@ -29,6 +29,7 @@ import           System.FilePath
 import           Compiler.Settings
 import qualified Compiler.Utils       as Utils
 import           Compiler.Variants
+import qualified Compiler.Plugins     as Plugins
 
 import qualified Gen2.DynamicLinking  as Gen2
 import qualified Gen2.Foreign         as Gen2
@@ -37,8 +38,6 @@ import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.TH              as Gen2TH
 
 import           System.IO.Error
-
-import           TcRnTypes
 
 #if __GLASGOW_HASKELL__ >= 711
 import qualified GHC.LanguageExtensions as Ext
@@ -53,14 +52,8 @@ installGhcjsHooks env settings js_objs dflags =
     where
       addHooks h = h
         { linkHook               = Just (Gen2.ghcjsLink env settings js_objs True)
-#if __GLASGOW_HASKELL__ < 711
-        , getValueSafelyHook     = Just (Gen2TH.ghcjsGetValueSafely settings)
-#endif
-#if __GLASGOW_HASKELL__ >= 709
+        , getValueSafelyHook     = Just (Plugins.getValueSafely dflags env)
         , runMetaHook            = Just (Gen2TH.ghcjsRunMeta env settings)
-#else
-        , hscCompileCoreExprHook = Just (Gen2TH.ghcjsCompileCoreExpr env settings)
-#endif
         }
 
 installNativeHooks :: GhcjsEnv -> GhcjsSettings -> DynFlags -> DynFlags

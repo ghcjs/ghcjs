@@ -112,6 +112,7 @@ Library
                      Compiler.GhcjsHooks,
                      Compiler.GhcjsPlatform,
                      Compiler.Info,
+                     Compiler.Plugins,
                      Compiler.Program,
                      Compiler.GhcjsProgram,
                      Compiler.Settings,

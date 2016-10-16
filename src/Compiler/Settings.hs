@@ -24,6 +24,7 @@ import           System.Process
 import           Module
 import           TcRnTypes
 import           ErrUtils
+import           HscTypes
 
 {- | We can link incrementally against a base bundle, where we assume
      that the symbols from the bundle and their dependencies have already
@@ -124,6 +125,7 @@ data GhcjsEnv = GhcjsEnv
                                         (Object.Deps, DepsLocation), [(Object.Package, Text, Int)]
                                    )
                               )
+  , pluginState       :: MVar (Maybe HscEnv)
   }
 
 newGhcjsEnv :: IO GhcjsEnv
@@ -131,6 +133,7 @@ newGhcjsEnv = GhcjsEnv <$> newMVar M.empty
                        <*> newMVar M.empty
                        <*> newMVar 0
                        <*> newMVar M.empty
+                       <*> newMVar Nothing
 
 -- an object file that's either already in memory (with name) or on disk
 data LinkedObj = ObjFile   FilePath          -- load from this file

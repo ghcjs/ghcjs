@@ -59,6 +59,7 @@ packages:
     - ./boot/deepseq
     - ./boot/directory
     - ./boot/filepath
+    - ./boot/ghc
     - ./boot/ghc-boot
     - ./boot/ghc-boot-th
     - ./boot/ghci

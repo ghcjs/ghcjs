@@ -760,6 +760,7 @@ installRts = subTop' "ghcjs-boot" $ do
 #else
     cp (ghcLib </> exe "touchy") (ghcjsLib </> exe "touchy")
 #endif
+  writefile (ghcjsLib </> "ghc_libdir") (toTextI ghcLib)
   msg info "RTS prepared"
 
 installPlatformIncludes :: FilePath -> FilePath -> B ()
