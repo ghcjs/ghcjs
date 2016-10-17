@@ -421,11 +421,6 @@ ghcjsErrorHandler fm (FlushOut flushOut) inner =
             (\ge -> liftIO $ do
                 flushOut
                 case ge of
-#if __GLASGOW_HASKELL__ >= 711
-                     ProgramError _ -> exitWith (ExitFailure 1)
-#else
-                     PhaseFailed _ code -> exitWith code
-#endif
                      Signal _ -> exitWith (ExitFailure 1)
                      _ -> do fatalErrorMsg'' fm (ghcjsShowException $ toException ge)
                              exitWith (ExitFailure 1)
