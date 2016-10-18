@@ -1183,7 +1183,6 @@ cabalInstallFlags parmakeGhcjs = do
 #endif
            , bool prof "--enable-library-profiling" "--disable-library-profiling"
            ] ++
-           bool isWindows [] ["--root-cmd", toTextI (instDir </> "run" <.> "sh")] ++
            -- workaround for Cabal bug?
            bool isWindows ["--disable-executable-stripping", "--disable-library-stripping"] [] ++
            catMaybes [ (((bool parmakeGhcjs "--ghcjs-options=-j" "-j")<>) . showT) <$> j
