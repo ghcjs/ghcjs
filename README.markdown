@@ -137,6 +137,12 @@ will need to run `ghcjs-boot --init` again.
 
 See [GHCJS introduction](http://weblog.luite.com/wordpress/?p=14) for more examples.
 
+Differences from GHC
+====================
+
+* [Foreign Function Interface (FFI)](doc/foreign-function-interface.md)
+* [Marshalling between Haskell and Javascript](https://github.com/ghcjs/ghcjs-base)
+
 Hacking GHCJS
 =============
 
