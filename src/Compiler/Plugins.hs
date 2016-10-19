@@ -166,6 +166,10 @@ remapUnit :: DynFlags -> DynFlags -> ModuleName -> UnitId -> Maybe UnitId
 remapUnit src_dflags tgt_dflags module_name unit
   -- first try package with same unit id if possible
   | Just _ <- lookupPackage tgt_dflags unit = Just unit
+  -- if we're building the package, then we don't have a PackageConfig for it
+  | unit == thisPackage tgt_dflags
+  , tgt_config:_    <- searchPackageId tgt_dflags (SourcePackageId . mkFastString . unitToPkg . unitIdString $ unit) =
+    Just (unitId tgt_config)
   -- otherwise look up package with same package id (e.g. foo-0.1)
   | Just src_config <- lookupPackage src_dflags unit
   , tgt_config:_    <- searchPackageId tgt_dflags (sourcePackageId src_config) =
@@ -181,7 +185,7 @@ initPluginsEnv orig_dflags _ = do
   let dflags0 = orig_dflags { settings = ghcSettings }
       dflags1 = gopt_unset dflags0 Opt_HideAllPackages
       dflags2 = updateWays $
-         dflags1 { packageFlags = filterPackageFlags (packageFlags dflags1)
+         dflags1 { packageFlags = [] -- filterPackageFlags (packageFlags dflags1)
                  , extraPkgConfs = filterPackageConfs . extraPkgConfs dflags1
                  , ways = filter (/= WayCustom "js") (ways dflags1)
                  }
@@ -189,11 +193,19 @@ initPluginsEnv orig_dflags _ = do
   env <- newHscEnv dflags
   pure (Just env, env)
 
+{-
+Ignore package flags for now and. Perhaps we will need to restore this at
+some point for module renaming.
+
 filterPackageFlags :: [PackageFlag] -> [PackageFlag]
 filterPackageFlags = map fixPkg
   where
-    fixPkg (ExposePackage xs (UnitIdArg pkg) mr) = ExposePackage xs (PackageArg (unitToPkg pkg)) mr
+    fixPkg (ExposePackage xs (UnitIdArg uid) mr)
+      = let pkg = unitToPkg uid
+            xs' = "-package " ++ pkg
+        in  ExposePackage xs' (PackageArg pkg) mr
     fixPkg x = x
+-}
 
 unitToPkg :: String -> String
 unitToPkg xs
