@@ -145,7 +145,7 @@ foreign import javascript interruptible "setTimeout($c, $1);"
 If the callback receives an argument of type `a`, the return type is `IO a`.
 
 ```haskell
-foreign import javascript interruptible "setTimeout($c, $1, param1)"
+foreign import javascript interruptible "setTimeout($c, $1, param1);"
   delayWithOneParam :: Int -> IO TypeOfParam1
 ```
 
@@ -155,9 +155,11 @@ If the callback receives more than one argument, the return type is `IO (a, b, .
 import GHCJS.Types (JSString, JSVal)
 
 foreign import javascript interruptible
-  "require('fs').stat($1, function (err, stat) { $c(err, stat); })" -- node.js API
+  "require('fs').stat($1, function (err, stat) { $c(err, stat); });" -- node.js API
   js_fsStat :: JSString -> IO (JSVal, JSVal) -- IO (TypeOfErr, TypeOfStat)
 ```
+
+A caveat with `interruptible` is that it doesn't allow a simple javascript expression in the string part. Thus, a simple function call should be followed by a semicolon, `;`. A semicolon turns a javascript expression into a javascript statement.
 
 ### Size-2 types in Javascript FFI
 
