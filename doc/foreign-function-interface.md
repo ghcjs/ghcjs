@@ -199,7 +199,12 @@ recommended that you return `Double` or `JSVal` instead of `Float` in Javascript
 
 # Calling Haskell From Javascript
 
-It is possible to call haskell from javascript. But, as far as I know, there is no clean way to call haskell from javascript, yet. It's better to not think about it for now. If you think calling GHCJS from javascript is doable, feel free to modify this section.
+It is possible to call haskell from javascript. But, it is not as straightforward as calling Javascript from Haskell.
+
+TODO : Document how to call haskell from javascript
+
+However, it's relatively straightforward to pass a haskell callback to
+javascript functions. Refer to README on https://github.com/ghcjs/ghcjs-base for details.
 
 Right now, if you want to write javascript modules or javascript plugins in haskell, you should consider PureScript. It is similar to haskell and interfaces seamlessly with javascript.
 
@@ -221,8 +226,9 @@ library
                    jsbits/websocket.js
 ```
 
-When you upload your GHCJS library or program to hackage, the javascript files in `js-sources` will be uploaded to hackage, too.
-It's like `c-sources` for including snippets of C code in cabal packages. Strangely, `CPP` extension is enabled by default in `js-sources`, so you can include a C header in `js-sources`.
+When you upload your GHCJS library or program to hackage, the javascript files in `js-sources` will be uploaded to hackage, too. Currently, it seems that GHCJS doesn't detect duplicate names in the global scope.
+
+It's like `c-sources` for including snippets of C code in cabal packages. A CPP (C preprocessor) is used in `js-sources`, so if you wish, you can use header files and macros in your JS sources. The header file `ghcjs/rts.h` contains some useful macros that make constructing Haskell values in javascript a little easier.
 
 ```javascript
 /* https://github.com/ghcjs/ghcjs-base/blob/master/jsbits/array.js */
@@ -258,7 +264,7 @@ Following is the included header file `ghcjs/rts.h`
 /* ... */
 ```
 
-I don't know if it's a good idea to use `CPP` in `js-sources`. Use it at your discretion. Currently, it seems that GHCJS doesn't detect duplicate names in the global scope.
+I don't know if it's a good idea to use `CPP` in `js-sources`. Use it at your discretion.
 
 # Emulating C code with `foreign import ccall`
 
