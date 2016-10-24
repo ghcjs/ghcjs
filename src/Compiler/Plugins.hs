@@ -182,14 +182,18 @@ initPluginsEnv orig_dflags _ = do
   let trim = let f = reverse . dropWhile isSpace in f . f
   ghcTopDir   <- readFile (topDir orig_dflags </> "ghc_libdir")
   ghcSettings <- SysTools.initSysTools (Just $ trim ghcTopDir)
-  let dflags0 = orig_dflags { settings = ghcSettings }
+  let removeJsPrefix xs = fromMaybe xs (stripPrefix "js_" xs)
+      dflags0 = orig_dflags { settings = ghcSettings }
       dflags1 = gopt_unset dflags0 Opt_HideAllPackages
       dflags2 = updateWays $
-         dflags1 { packageFlags = [] -- filterPackageFlags (packageFlags dflags1)
+         dflags1 { packageFlags  = [] -- filterPackageFlags (packageFlags dflags1)
                  , extraPkgConfs = filterPackageConfs . extraPkgConfs dflags1
-                 , ways = filter (/= WayCustom "js") (ways dflags1)
+                 , ways          = filter (/= WayCustom "js") (ways dflags1)
+                 , hiSuf         = removeJsPrefix (hiSuf dflags1)
+                 , dynHiSuf      = removeJsPrefix (dynHiSuf dflags1)
                  }
-  (dflags, units) <- initPackages dflags2
+  dflags3 <- initDynFlags dflags2
+  (dflags, units) <- initPackages dflags3
   env <- newHscEnv dflags
   pure (Just env, env)
 
