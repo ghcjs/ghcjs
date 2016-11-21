@@ -24,6 +24,10 @@ import           SrcLoc
 import           Outputable (defaultUserStyle, text)
 import           ErrUtils (Severity(..))
 import           FastString
+import           Id
+import           Module
+import           Name
+import           Unique
 
 insertAt :: Int -> a -> [a] -> [a]
 insertAt 0 y xs             = y:xs
@@ -165,3 +169,10 @@ ifVerbose dflags val act
 
 ghcjsSrcSpan :: SrcSpan
 ghcjsSrcSpan = UnhelpfulSpan (mkFastString "<GHCJS>")
+
+globaliseIdWith :: Module -> Id -> Id
+globaliseIdWith m i =
+  let n  = idName i
+      u' = let (c,k) = unpkUnique (nameUnique n) in mkUnique (succ c) k -- yuck!
+      nn = mkExternalName u' m (nameOccName n) (nameSrcSpan n)
+  in setIdExported (setIdName i nn)

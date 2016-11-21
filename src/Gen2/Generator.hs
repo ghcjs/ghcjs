@@ -1684,6 +1684,11 @@ argJSStringLitUnfolding (StgVarArg v)
 argJSStringLitUnfolding _ = Nothing
 
 genForeignCall :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, ExprResult)
+genForeignCall (CCall (CCallSpec (StaticTarget _ ccLbl Nothing True) PrimCallConv PlayRisky)) _ _ [StgVarArg i1, StgVarArg i2]
+  | ccLbl == fsLit "__ghcjsi_capture" = do
+      ii1 <- jsIdI i1
+      ii2 <- jsIdI i2
+      return ([j| `ii2` = `ii1`; |], ExprInline Nothing)
 genForeignCall (CCall (CCallSpec (StaticTarget _ tgt Nothing True) JavaScriptCallConv PlayRisky)) t [obj] args
   | tgt == fsLit "h$buildObject", Just pairs <- getObjectKeyValuePairs args = do
       pairs' <- mapM (\(k,v) -> genArg v >>= \([v']) -> return (k,v')) pairs

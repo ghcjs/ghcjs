@@ -421,7 +421,10 @@ getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun
     go' result open (f:fs) =
         let key = (funPackage f, funModule f)
         in  case M.lookup key lookup of
-              Nothing -> error ("getDeps.go': object file not loaded for:  " ++ show key)
+              Nothing ->
+                if funPackage f == Package "interactive"
+                  then go' result open fs
+                  else error ("getDeps.go': object file not loaded for:  " ++ show key)
               Just (Deps p m _r e b) ->
                  let lun :: Int
                      lun = fromMaybe (error $ "exported function not found: " ++ show f)
