@@ -82,6 +82,11 @@ Use `ghcjs-boot` to build the base libraries for `GHCJS`:
 
 Some distros install node.js as `nodejs` instead of `node`. Add `--with-node nodejs` to the `ghcjs-boot` command in that case.
 
+#### Usage in a Stack Project
+
+Stack can be used to build projects with GHCJS, including dependencies from Hackage or from git.  
+Stack can also automatically install GHCJS from a specific sdist tarball.
+
 Usage
 =====
 
