@@ -828,7 +828,6 @@ installStage1 = subTop' "ghcjs-boot" $ do
   when (s ^. beSettings . bsGmpInTree && s ^. beLocations . blNativeToo) installInTreeGmp
   installGhcjsPrim
   installStage "1b" =<< stagePackages bstStage1b
-  resolveWiredInPackages
     where
       fixGhcPrim = do
         descr <- T.lines <$> ghcjs_pkg ["describe", "ghc-prim", "--no-user-package-db"]
@@ -841,26 +840,6 @@ installStage1 = subTop' "ghcjs-boot" $ do
       installStage name s = do
         msg info ("installing stage " <> name)
         forM_ s preparePackage >> cabalStage1 s
-
-resolveWiredInPackages :: B ()
-resolveWiredInPackages = subTop $ do
-  wips <- readBinary ("wiredinpkgs" <.> "yaml")
-  case Yaml.decodeEither wips of
-   Left err   -> failWith ("error parsing wired-in packages file wiredinpkgs.yaml\n" <> T.pack err)
-   Right pkgs -> do
-     pkgs' <- forM pkgs $ \p ->
-       (p,) . T.strip <$> ghcjs_pkg [ "--simple-output"
-                                    , "field"
-                                    , p
-#if __GLASGOW_HASKELL__ >= 709
-                                    , "key"
-#else
-                                    , "id"
-#endif
-                                    ]
-     writefile ("wiredinkeys" <.> "yaml") $
-       T.unlines ("# resolved wired-in packages" :
-                  map (\(p,k) -> p <> ": " <> k) pkgs')
 
 -- fixme: urk, this is probably not how it's supposed to be done
 installInTreeGmp :: B ()
