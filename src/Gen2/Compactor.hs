@@ -41,6 +41,7 @@ import qualified Data.Map.Strict as M
 import           Data.Map (Map)
 import           Data.Int
 import           Data.List
+import           Data.List.Split
 import           Data.Maybe
 import           Data.Monoid
 import qualified Data.Set as S
@@ -111,9 +112,17 @@ renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
         -- sort our entries, store the results
         -- propagate all renamings throughtout the code
         cs <- get
+        let -- Safari on iOS 10 (64 bit only?) crashes on very long arrays
+            safariCrashWorkaround :: [Ident] -> JExpr
+            safariCrashWorkaround xs =
+              case chunksOf 10000 xs of
+                (y:ys) | not (null ys)
+                  -> ApplExpr (SelExpr (toJExpr y) (TxtI "concat")) (map toJExpr ys)
+                _      -> toJExpr xs
         let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs) stats0
             sortedInfo   = concatMap (\(_,xs,_) -> map (renameClosureInfo cs) xs) stats0
-            entryArr     = map (TxtI . fst) . sortBy (compare `on` snd) . HM.toList $ cs ^. entries
+            entryArr     = safariCrashWorkaround $
+                           map (TxtI . fst) . sortBy (compare `on` snd) . HM.toList $ cs ^. entries
             lblArr       = map (TxtI . fst) . sortBy (compare `on` snd) . HM.toList $ cs ^. labels
             ss           = concatMap (\(_,_,xs) -> map (renameStaticInfo cs) xs) stats0
             infoBlock    = encodeStr (concatMap (encodeInfo cs) sortedInfo)
