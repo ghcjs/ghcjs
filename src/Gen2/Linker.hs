@@ -171,6 +171,7 @@ link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStatic
                  writeRunMain dflags out
                  writeRunner settings dflags out
                  writeWebAppManifest dflags out
+                 writeExterns out
 
 -- | link in memory
 link' :: DynFlags
@@ -384,6 +385,15 @@ writeWebAppManifest df out = do
     B.readFile (getLibDir df </> "manifest.webapp") >>= B.writeFile manifestFile
   where
     manifestFile = out </> "manifest.webapp"
+
+rtsExterns :: Text
+rtsExterns =
+  "// GHCJS RTS externs for closure compiler ADVANCED_OPTIMIZATIONS\n\n" <>
+  mconcat (map (\x -> "/** @type {*} */\nObject.d" <> T.pack (show x) <> ";\n")
+               [(7::Int)..4096])
+
+writeExterns :: FilePath -> IO ()
+writeExterns out = T.writeFile (out </> "all.js.externs") rtsExterns
 
 -- | get all functions in a module
 modFuns :: Deps -> [Fun]
