@@ -89,6 +89,10 @@ Usage
 the shell with [Node.js](http://nodejs.org/) and [SpiderMonkey jsshell](http://download.cdn.mozilla.net/pub/firefox/nightly/latest-mozilla-central/).
 for example:
 
+    -- Contents of helloWorld.hs
+    main :: IO ()
+    main = print "Hello world!"
+
     $ ghcjs -o helloWorld helloWorld.hs
     $ node helloWorld.jsexe/all.js
     Hello world!
