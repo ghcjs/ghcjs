@@ -1,7 +1,7 @@
 Quick Start
 ===========
 
-Get GHC 7.10.2 ([MinGHC](https://www.haskell.org/downloads/windows) on Windows) and make sure that `happy` is installed. On linux you may need to install a package like `libtinfo-dev` to make the Haskell `terminfo` package work.
+Get GHC 7.10.2 ([MinGHC](https://www.haskell.org/downloads/windows) on Windows) and make sure that `happy` is installed. On Linux you may need to install a package like `libtinfo-dev` to make the Haskell `terminfo` package work.
 
 Now run the following to install the current snapshot of the `master` branch:
 ```
@@ -47,8 +47,8 @@ GHCJS can be installed with GHC 7.10.2 or later.
 #### Linux / OS X
 
  * A recent version of `alex` and `happy` need to be in your `PATH`
- * `git`, `make`, `cpp`, `autoreconf` need to be in your `PATH`
- * One of the dependencies is the `terminfo` Haskell package, which requires `libtinfo`. On
+ * `git`, `make`, `cpp`, and the tools from `autoconf` and `automake` need to be in your `PATH`
+ * An additional dependency on Linux is the `libtinfo`, required by the `terminfo` Haskell package. On
    Debian/Ubuntu this is provided by the `libtinfo-dev` package.
 
 #### Windows
