@@ -180,6 +180,10 @@ doCpp dflags raw strip_comments input_fn output_fn = do
                     ++ map SysTools.Option backend_defs
                     ++ map SysTools.Option hscpp_opts
                     ++ [ SysTools.Option "-undef" ] -- undefine host system definitions
+        -- CPP includes some headers(features.h and maybe others) by default,
+        -- which causes some comments to be included. This parameter disables that.
+        -- See also: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=59566
+                    ++ [ SysTools.Option "-nostdinc" ]
         -- Set the language mode to assembler-with-cpp when preprocessing. This
         -- alleviates some of the C99 macro rules relating to whitespace and the hash
         -- operator, which we tend to abuse. Clang in particular is not very happy
