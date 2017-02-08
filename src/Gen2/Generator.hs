@@ -1952,7 +1952,7 @@ isInlineExpr v (StgCase e _ _ b _ _ alts)         = let (_ve, ie)   = isInlineEx
                                                         vr         = foldl1' intersectUniqSets vas
                                                     in (vr, (ie || b `elementOfUniqSet` v) && and ias)
 isInlineExpr v (StgLet b e)                       = isInlineExpr (inspectInlineBinding v b) e
-isInlineExpr v (StgLetNoEscape _ _ b e)           = isInlineExpr (inspectInlineBinding v b) e
+isInlineExpr v (StgLetNoEscape _ _ b e)           = isInlineExpr v e
 #if __GLASGOW_HASKELL__ < 709
 isInlineExpr v (StgSCC _ _ _ e)                   = isInlineExpr v e
 isInlineExpr v (StgTick _ _ e)                    = isInlineExpr v e
