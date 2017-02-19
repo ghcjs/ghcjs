@@ -35,6 +35,8 @@ Installation
 
 GHCJS can be installed with GHC 7.10.2 or later.
 
+(Experimental GHC 8 support is in the `ghc-8.0` branch).
+
 ### Requirements
 
  - GHC 7.10.2 or higher
