@@ -692,13 +692,16 @@ liftLitDynFlags f = do
   return $ Lit (f dflags lit)
 
 removeOp32 :: RuleM CoreExpr
-removeOp32 = do
+removeOp32 = mzero
+{- removed for GHCJS
+  do
   dflags <- getDynFlags
   if wordSizeInBits dflags == 32
   then do
     [e] <- getArgs
     return e
   else mzero
+-}
 
 getArgs :: RuleM [CoreExpr]
 getArgs = RuleM $ \_ _ args -> Just args
