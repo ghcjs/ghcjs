@@ -1,0 +1,40 @@
+jsu_int: 123456 True
+jsu_int32: 123456 True
+jsu_int16: -7616 True
+jsu_int8: 64 True
+jsu_intIO: 123456 True
+jsu_int32IO: 123456 True
+jsu_int16IO: -7616 True
+jsu_int8IO: 64 True
+jsu_word: 123456 True
+jsu_word32: 123456 True
+jsu_word16: 57920 True
+jsu_word8: 64 True
+jsu_wordIO: 123456 True
+jsu_word32IO: 123456 True
+jsu_word16IO: 57920 True
+jsu_word8IO: 64 True
+jss_int: 123456 True
+jss_int32: 123456 True
+jss_int16: -7616 True
+jss_int8: 64 True
+jss_intIO: 123456 True
+jss_int32IO: 123456 True
+jss_int16IO: -7616 True
+jss_int8IO: 64 True
+jss_word: 123456 True
+jss_word32: 123456 True
+jss_word16: 57920 True
+jss_word8: 64 True
+jss_wordIO: 123456 True
+jss_word32IO: 123456 True
+jss_word16IO: 57920 True
+jss_word8IO: 64 True
+jsu_bone: True False True
+jss_bone: True False True
+jsu_boneIO: True False True
+jss_boneIO: True False True
+jsu_bzero: False True False
+jss_bzero: False True False
+jsu_bzeroIO: False True False
+jss_bzeroIO: False True False
