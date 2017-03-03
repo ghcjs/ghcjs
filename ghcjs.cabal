@@ -175,7 +175,7 @@ Library
                    haskell-src-meta           >= 0.6.0.3  && < 0.8
     exposed: True
     buildable: True
-    hs-source-dirs: src lib/ghcjs-prim
+    hs-source-dirs: src lib/ghcjs-th
     include-dirs: include
     GHC-Options: -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-unused-do-bind -auto-all -fprof-auto
 
@@ -273,6 +273,7 @@ Executable ghcjs-boot
                       unordered-containers,
                       vector,
                       filepath,
+                      aeson,
                       text                 >= 0.11   && < 1.3,
                       bytestring           >= 0.10   && < 0.11,
                       system-filepath      >= 0.4    && < 0.5,

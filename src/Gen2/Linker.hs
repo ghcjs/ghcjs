@@ -64,6 +64,7 @@ import           Data.Set                 (Set)
 import qualified Data.Set                 as S
 import           Data.Text                (Text)
 import qualified Data.Text                as T
+import qualified Data.Text.Encoding       as TE
 import qualified Data.Text.IO             as T
 import qualified Data.Text.Lazy           as TL
 import qualified Data.Text.Lazy.IO        as TL
@@ -341,15 +342,16 @@ writeRunner :: GhcjsSettings -> DynFlags -> FilePath -> IO ()
 writeRunner settings dflags out = when (gsBuildRunner settings) $ do
   cd    <- getCurrentDirectory
   let runner = cd </> addExeExtension (dropExtension out)
+  nodeSettings <- readNodeSettings dflags
 #ifdef mingw32_HOST_OS
   src   <- B.readFile (cd </> out </> "all" <.> "js")
-  node  <- B.readFile (topDir dflags </> "node")
   templ <- T.readFile (topDir dflags </> "runner.c-tmpl")
   runnerSrc <- SysTools.newTempName dflags "c"
+  -- FIXME: this does not take the node extra arguments into account
   T.writeFile runnerSrc $
     substPatterns [] [ ("js",     bsLit src)
                      , ("jsSize", T.pack (show $ B.length src))
-                     , ("node",   bsLit node)
+                     , ("node",   bsLit (nodeProgram nodeSettings))
                      ] templ
   SysTools.runCc dflags [ Option "-o"
                         , FileOption "" runner
@@ -371,9 +373,9 @@ writeRunner settings dflags out = when (gsBuildRunner settings) $ do
         let x' = showOct x []
         in  replicate (3-length x') '0' ++ x'
 #else
-  src   <- B.readFile (cd </> out </> "all" <.> "js")
-  node  <- B.readFile (topDir dflags </> "node")
-  B.writeFile runner ("#!" <> node <> "\n" <> src)
+  src <- B.readFile (cd </> out </> "all" <.> "js")
+  let pgm = TE.encodeUtf8 (T.pack $ nodeProgram nodeSettings)
+  B.writeFile runner ("#!" <> pgm <> "\n" <> src)
   Cabal.setFileExecutable runner
 #endif
 

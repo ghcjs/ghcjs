@@ -32,10 +32,10 @@ data THResultType = THExp | THPat | THType | THDec | THAnnWrapper
 data Message
   -- | compiler to node requests
   = RunTH THResultType ByteString (Maybe TH.Loc)
-  | FinishTH
+  | FinishTH          Bool       -- ^ also stop runner (False to just clean up at end of module)
   -- | node to compiler responses
   | RunTH'            ByteString -- ^ serialized result
-  | FinishTH'
+  | FinishTH'         Int        -- ^ memory consumption
   -- | node to compiler requests
   | NewName           String
   | Report            Bool String
@@ -45,9 +45,7 @@ data Message
   | ReifyRoles        TH.Name
   | ReifyAnnotations  TH.AnnLookup
   | ReifyModule       TH.Module
-#if MIN_VERSION_template_haskell(2,11,0)
   | ReifyFixity       TH.Name
-#endif
   | AddDependentFile  FilePath
   | AddTopDecls       [TH.Dec]
   -- | compiler to node responses
@@ -59,9 +57,7 @@ data Message
   | ReifyRoles'       [TH.Role]
   | ReifyAnnotations' [ByteString]
   | ReifyModule'      TH.ModuleInfo
-#if MIN_VERSION_template_haskell(2,11,0)
   | ReifyFixity'      (Maybe TH.Fixity)
-#endif
   | AddDependentFile'
   | AddTopDecls'
   | QFail'
@@ -208,4 +204,3 @@ instance Binary TH.Strict
 #else
 #error "unsupported template-haskell version"
 #endif
-

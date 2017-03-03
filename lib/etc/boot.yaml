@@ -185,6 +185,7 @@ programs:
   ghc:        ghc
   ghc-pkg:    ghc-pkg
   node:       node
+  npm:        npm
   bash:       bash
   make:       make
   cpp:        cpp
@@ -195,4 +196,3 @@ programs:
 
   # ghcjs-boot has a built-in unpacker for uncompressed tar, this is only used for tar.gz, tar.bz2, tar.xz
   tar:        tar
-

@@ -40,6 +40,7 @@ import           Control.Lens                    hiding ((<.>))
 import           Control.Monad                   (void, when, unless, mplus, join)
 import           Control.Monad.Reader            (MonadReader, ReaderT(..), MonadIO, ask, local, lift, liftIO)
 
+import qualified Data.Aeson                      as Aeson
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
 import           Data.Char
@@ -92,7 +93,8 @@ import           Text.Read                       (readEither, readMaybe)
 --
 import           Compiler.GhcjsProgram           (printVersion)
 import qualified Compiler.Info                   as Info
-import           Compiler.Utils                  as Utils
+import qualified Compiler.Utils                  as Utils
+import           Compiler.Settings               (NodeSettings(..))
 
 default (Text)
 
@@ -132,6 +134,9 @@ data BootSettings = BootSettings { _bsClean        :: Bool       -- ^ remove exi
                                  , _bsWithGhc      :: Maybe Text -- ^ location of GHC compiler (must have a GHCJS-compatible Cabal library installed. ghcjs-boot copies some files from this compiler)
                                  , _bsWithGhcPkg   :: Maybe Text -- ^ location of ghc-pkg program
                                  , _bsWithNode     :: Maybe Text -- ^ location of the node.js program
+                                 , _bsWithNodePath :: Maybe Text -- ^ NODE_PATH to use when running node.js Template Haskell or REPL
+                                                                 --      (if unspecified, GHCJS uses bundled packages)
+                                 , _bsNodeExtraArgs :: Maybe Text -- ^ extra node arguments
                                  , _bsWithDataDir  :: Maybe Text -- ^ override data dir
                                  , _bsWithConfig   :: Maybe Text -- ^ installation source configuration (default: lib/etc/boot-sources.yaml in data dir)
                                  , _bsShimsDevRepo   :: Maybe Text -- ^ override shims repository
@@ -223,6 +228,7 @@ data BootPrograms = BootPrograms { _bpGhcjs      :: Program Required
                                  , _bpCabal      :: Program Required
                                  , _bpNode       :: Program Required
                                  , _bpHaddock    :: Program Required
+                                 , _bpNpm        :: Program Optional
                                  , _bpGit        :: Program Optional
                                  , _bpAlex       :: Program Optional
                                  , _bpHappy      :: Program Optional
@@ -342,7 +348,7 @@ instance Yaml.FromJSON BootPrograms where
     <$> v ..: "ghcjs" <*> v ..: "ghcjs-pkg" <*> v ..: "ghcjs-run"
     <*> v ..: "ghc"   <*> v ..: "ghc-pkg"
     <*> v ..: "cabal" <*> v ..: "node"      <*> v ..: "haddock-ghcjs"
-    <*> v ..: "git"   <*> v ..: "alex"
+    <*> v ..: "npm"   <*> v ..: "git"   <*> v ..: "alex"
     <*> v ..: "happy" <*> v ..: "tar"
     <*> v ..: "cpp"   <*> v ..: "bash"      <*> v ..: "autoreconf"
     <*> v ..: "make"
@@ -511,6 +517,10 @@ optParser = BootSettings
                   help "ghc-pkg program to use" )
             <*> (optional . fmap T.pack . strOption) ( long "with-node" <> metavar "PROGRAM" <>
                   help "node.js program to use" )
+            <*> (optional . fmap T.pack . strOption) ( long "with-node-path" <> metavar "PATH" <>
+                  help "value of NODE_PATH environment variable when running Template Haskell or GHCJSi" )
+            <*> (optional . fmap T.pack . strOption) ( long "extra-node-args" <> metavar "ARGS" <>
+                  help "extra arguments to pass to node.js")
             <*> (optional . fmap T.pack . strOption) ( long "with-datadir" <> metavar "DIR" <>
                   help "data directory with libraries and configuration files" )
             <*> (optional . fmap T.pack . strOption) ( long "with-config" <> metavar "FILE" <>
@@ -742,7 +752,7 @@ installRts = subTop' "ghcjs-boot" $ do
 #endif
   cp ghcjsRunSrc ghcjsRunDest
   mapM_ (liftIO . Cabal.setFileExecutable . toStringI) [unlitDest, ghcjsRunDest]
-  writefile (ghcjsLib </> "node") <^> bePrograms . bpNode . pgmLoc . to (maybe "-" toTextI)
+  prepareNodeJs
   when (not isWindows) $ do
     let runSh = ghcjsLib </> "run" <.> "sh"
     writefile runSh "#!/bin/sh\nCOMMAND=$1\nshift\n\"$COMMAND\" \"$@\"\n"
@@ -762,6 +772,29 @@ installRts = subTop' "ghcjs-boot" $ do
 #endif
   writefile (ghcjsLib </> "ghc_libdir") (toTextI ghcLib)
   msg info "RTS prepared"
+
+prepareNodeJs :: B ()
+prepareNodeJs = do
+  ghcjsLib <- view (beLocations . blGhcjsLibDir)
+  nodeProgram <- view (bePrograms . bpNode . pgmLoc . to (maybe "-" toTextI))
+  mbNodePath  <- view (beSettings . bsWithNodePath)
+  extraArgs   <- view (beSettings . bsNodeExtraArgs)
+  -- If no setting for NODE_PATH is specified, we use the libraries bundled
+  -- with the ghcjs-boot repo. We must run "npm rebuild" to build
+  -- any sytem-specific components.
+  when (isNothing mbNodePath) $ do
+    npmProgram <- view (bePrograms . bpNpm)
+    subTop $ cp_r ("ghcjs-boot" </> "ghcjs-node") "ghcjs-node"
+    subTop' "ghcjs-node" $ npm_ ["rebuild"]
+  -- write nodeSettings.json file
+  let nodeSettings = NodeSettings
+       { nodeProgram         = T.unpack nodeProgram
+       , nodePath            = mbNodePath
+       , nodeExtraArgs       = maybeToList extraArgs
+       , nodeKeepAliveMaxMem = 536870912
+       }
+  liftIO $ BL.writeFile (T.unpack . toTextI $ ghcjsLib </> "nodeSettings.json")
+                        (Aeson.encode $ Aeson.toJSON nodeSettings)
 
 installPlatformIncludes :: FilePath -> FilePath -> B ()
 installPlatformIncludes inc incNative = do
@@ -1080,6 +1113,7 @@ git_         = runE_ bpGit
 cpp          = runE  bpCpp
 cabal        = runE  bpCabal
 cabal_       = runE_ bpCabal
+npm_         = runE_ bpNpm
 
 runE  g a = view (bePrograms . g) >>= flip run  a
 runE_ g a = view (bePrograms . g) >>= flip run_ a
@@ -1454,7 +1488,7 @@ checkProgramVersions bs pgms = do
       return $
         if update then s (pgmVersion .~ Just res $ g ps) ps
                   else ps
---          (l . pgmVersion .~ Just res) 
+--          (l . pgmVersion .~ Just res)
     verifyNodeVersion pgms = do
       let verTxt = fromMaybe "-" (pgms ^. bpNode . pgmVersion)
           v      = mapM (readMaybe . T.unpack . T.dropWhile (== 'v')) . T.splitOn "." . T.takeWhile (/='-') $ verTxt :: Maybe [Integer]
