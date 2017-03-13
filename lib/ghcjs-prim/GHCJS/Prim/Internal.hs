@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {- | Code used by the RTS
 
  -}
@@ -27,6 +28,7 @@ blockedIndefinitelyOnSTM = toException BlockedIndefinitelyOnSTM
 ignoreException :: SomeException -> IO ()
 ignoreException _ = return ()
 
+#ifdef ghcjs_HOST_OS
 setCurrentThreadResultException :: SomeException -> IO ()
 setCurrentThreadResultException e
   | Just WouldBlockException <- fromException e =
@@ -35,10 +37,15 @@ setCurrentThreadResultException e
       js_setCurrentThreadResultJSException v
   | otherwise =
       js_setCurrentThreadResultHaskellException (toJSString (show e))
+#else
+setCurrentThreadResultException =
+  error "setCurrentThreadResultException: can only be used with GHCJS"
+#endif
 
 setCurrentThreadResultValue :: IO JSVal -> IO ()
 setCurrentThreadResultValue x = js_setCurrentThreadResultValue =<< x
 
+#ifdef ghcjs_HOST_OS
 foreign import javascript unsafe
   "h$setCurrentThreadResultWouldBlock();"
   js_setCurrentThreadResultWouldBlock :: IO ()
@@ -54,4 +61,13 @@ foreign import javascript unsafe
 foreign import javascript unsafe
   "h$setCurrentThreadResultValue($1);"
   js_setCurrentThreadResultValue :: JSVal -> IO ()
-
+#else
+js_setCurrentThreadResultWouldBlock =
+  error "js_setCurrentThreadResultWouldBlock: can only be used with GHCJS"
+js_setCurrentThreadResultJSException =
+  error "js_setCurrentThreadResultJSException: can only be used with GHCJS"
+js_setCurrentThreadResultHaskellException =
+  error "js_setCurrentThreadResultHaskellException: can only be used with GHCJS"
+js_setCurrentThreadResultValue =
+  error "js_setCurrentThreadResultValue: can only be used with GHCJS"
+#endif
