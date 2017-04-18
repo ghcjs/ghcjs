@@ -75,7 +75,7 @@ Use `ghcjs-boot` to build the base libraries for `GHCJS`:
     $ ghcjs-boot --dev
 
     if you are doing a development build from a different branch than `master`, you need to tell `ghcjs-boot` to use the correct branch of the `ghcjs-boot` and `shims` repositories:
-    $ ghcjs-boot --dev --ghcjs-boot-dev-branch somebranch --shims-dev-branch
+    $ ghcjs-boot --dev --ghcjs-boot-dev-branch somebranch --shims-dev-branch somebranch
 
     if you are installing from hackage, the ghcjs source distribution package already includes the correct libraries. run:
     $ ghcjs-boot
