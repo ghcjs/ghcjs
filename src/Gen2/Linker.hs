@@ -47,6 +47,7 @@ import           Data.Array
 import           Data.Binary
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
+import qualified Data.ByteString.Char8    as BC
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Char                (toLower, chr)
 import           Data.Function            (on)
@@ -351,7 +352,7 @@ writeRunner settings dflags out = when (gsBuildRunner settings) $ do
   T.writeFile runnerSrc $
     substPatterns [] [ ("js",     bsLit src)
                      , ("jsSize", T.pack (show $ B.length src))
-                     , ("node",   bsLit (nodeProgram nodeSettings))
+                     , ("node",   bsLit (BC.pack $ nodeProgram nodeSettings))
                      ] templ
   SysTools.runCc dflags [ Option "-o"
                         , FileOption "" runner
