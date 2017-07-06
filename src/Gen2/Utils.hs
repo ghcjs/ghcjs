@@ -24,10 +24,6 @@ import           SrcLoc
 import           Outputable (defaultUserStyle, text)
 import           ErrUtils (Severity(..))
 import           FastString
-import           Id
-import           Module
-import           Name
-import           Unique
 
 insertAt :: Int -> a -> [a] -> [a]
 insertAt 0 y xs             = y:xs
@@ -160,7 +156,7 @@ buildingProf dflags = WayProf `elem` ways dflags
 -- use instead of ErrUtils variant to prevent being suppressed
 compilationProgressMsg :: DynFlags -> String -> IO ()
 compilationProgressMsg dflags msg
-  = ifVerbose dflags 1 (log_action dflags dflags SevOutput ghcjsSrcSpan defaultUserStyle (text msg))
+  = ifVerbose dflags 1 (log_action dflags dflags NoReason SevOutput ghcjsSrcSpan defaultUserStyle (text msg))
 
 ifVerbose :: DynFlags -> Int -> IO () -> IO ()
 ifVerbose dflags val act
@@ -169,10 +165,3 @@ ifVerbose dflags val act
 
 ghcjsSrcSpan :: SrcSpan
 ghcjsSrcSpan = UnhelpfulSpan (mkFastString "<GHCJS>")
-
-globaliseIdWith :: Module -> Id -> Id
-globaliseIdWith m i =
-  let n  = idName i
-      u' = let (c,k) = unpkUnique (nameUnique n) in mkUnique (succ c) k -- yuck!
-      nn = mkExternalName u' m (nameOccName n) (nameSrcSpan n)
-  in setIdExported (setIdName i nn)

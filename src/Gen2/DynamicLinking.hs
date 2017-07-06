@@ -5,8 +5,10 @@
  -}
 
 module Gen2.DynamicLinking ( ghcjsLink
+#if __GLASGOW_HASKELL__ < 711
                            , ghcjsCompileCoreExpr
                            , ghcjsGetValueSafely
+#endif
                            , ghcjsDoLink
                            , isGhcjsPrimPackage
                            , ghcjsPrimPackage
@@ -203,7 +205,7 @@ link' env settings extraJs buildJs dflags batch_attempt_linking hpt
 
             -- the linkables to link
             linkables = map (expectJust "link".hm_linkable) home_mod_infos
-
+        debugTraceMsg dflags 3 (text "link: pkgdeps ..." $$ vcat (map ppr pkg_deps))
         debugTraceMsg dflags 3 (text "link: linkables are ..." $$ vcat (map ppr linkables))
 
         -- check for the -no-link flag
@@ -309,7 +311,7 @@ linkDynLibCheck :: DynFlags -> [String] -> [PackageKey] -> IO ()
 linkDynLibCheck dflags o_files dep_packages
  = do
     when (haveRtsOptsFlags dflags) $ do
-      log_action dflags dflags SevInfo noSrcSpan defaultUserStyle
+      log_action dflags dflags NoReason SevInfo noSrcSpan defaultUserStyle
           (text "Warning: -rtsopts and -with-rtsopts have no effect with -shared." $$
            text "    Call hs_init_ghc() from your main() function to set these options.")
 
@@ -324,7 +326,7 @@ linkStaticLibCheck dflags o_files dep_packages
 
 findHSLib :: DynFlags -> [String] -> String -> IO (Maybe FilePath)
 findHSLib dflags dirs lib = do
-  let batch_lib_file = if gopt Opt_Static dflags
+  let batch_lib_file = if ghcLink dflags == LinkStaticLib
                        then "lib" ++ lib <.> "a"
                        else mkSOName (targetPlatform dflags) lib
   found <- filterM doesFileExist (map (</> batch_lib_file) dirs)
@@ -343,6 +345,7 @@ haveRtsOptsFlags dflags =
                                         RtsOptsSafeOnly -> False
                                         _ -> True
 
+{-
 linkBinary' :: Bool -> DynFlags -> [FilePath] -> [PackageKey] -> IO ()
 linkBinary' staticLink dflags o_files dep_packages = do
     let platform = targetPlatform dflags
@@ -529,6 +532,189 @@ linkBinary' staticLink dflags o_files dep_packages = do
     success <- runPhase_MoveBinary dflags output_fn
     unless success $
         throwGhcExceptionIO (InstallationError ("cannot move binary"))
+-}
+
+-- linkBinary :: DynFlags -> [FilePath] -> [UnitId] -> IO ()
+-- linkBinary = linkBinary' False
+
+linkBinary' :: Bool -> DynFlags -> [FilePath] -> [UnitId] -> IO ()
+linkBinary' staticLink dflags o_files dep_packages = do
+    let platform = targetPlatform dflags
+        mySettings = settings dflags
+        verbFlags = getVerbFlags dflags
+        output_fn = exeFileName staticLink dflags
+
+    -- get the full list of packages to link with, by combining the
+    -- explicit packages with the auto packages and all of their
+    -- dependencies, and eliminating duplicates.
+
+    full_output_fn <- if isAbsolute output_fn
+                      then return output_fn
+                      else do d <- getCurrentDirectory
+                              return $ normalise (d </> output_fn)
+    pkg_lib_paths <- getPackageLibraryPath dflags dep_packages
+    let pkg_lib_path_opts = concatMap get_pkg_lib_path_opts pkg_lib_paths
+        get_pkg_lib_path_opts l
+         | osElfTarget (platformOS platform) &&
+           dynLibLoader dflags == SystemDependent &&
+           ghcLink dflags /= LinkStaticLib -- not (gopt Opt_Static dflags)
+            = let libpath = if gopt Opt_RelativeDynlibPaths dflags
+                            then "$ORIGIN" </>
+                                 (l `makeRelativeTo` full_output_fn)
+                            else l
+                  rpath = if gopt Opt_RPath dflags
+                          then ["-Wl,-rpath",      "-Wl," ++ libpath]
+                          else []
+                  -- Solaris 11's linker does not support -rpath-link option. It silently
+                  -- ignores it and then complains about next option which is -l<some
+                  -- dir> as being a directory and not expected object file, E.g
+                  -- ld: elf error: file
+                  -- /tmp/ghc-src/libraries/base/dist-install/build:
+                  -- elf_begin: I/O error: region read: Is a directory
+                  rpathlink = if (platformOS platform) == OSSolaris2
+                              then []
+                              else ["-Wl,-rpath-link", "-Wl," ++ l]
+              in ["-L" ++ l] ++ rpathlink ++ rpath
+         | osMachOTarget (platformOS platform) &&
+           dynLibLoader dflags == SystemDependent &&
+           ghcLink dflags /= LinkStaticLib && -- not (gopt Opt_Static dflags) &&
+           gopt Opt_RPath dflags
+            = let libpath = if gopt Opt_RelativeDynlibPaths dflags
+                            then "@loader_path" </>
+                                 (l `makeRelativeTo` full_output_fn)
+                            else l
+              in ["-L" ++ l] ++ ["-Wl,-rpath", "-Wl," ++ libpath]
+         | otherwise = ["-L" ++ l]
+
+    let lib_paths = libraryPaths dflags
+    let lib_path_opts = map ("-L"++) lib_paths
+
+    extraLinkObj <- mkExtraObjToLinkIntoBinary dflags
+    noteLinkObjs <- mkNoteObjsToLinkIntoBinary dflags dep_packages
+
+    pkg_link_opts <- do
+        (package_hs_libs, extra_libs, other_flags) <- getPackageLinkOpts dflags dep_packages
+        return $ if staticLink
+            then package_hs_libs -- If building an executable really means making a static
+                                 -- library (e.g. iOS), then we only keep the -l options for
+                                 -- HS packages, because libtool doesn't accept other options.
+                                 -- In the case of iOS these need to be added by hand to the
+                                 -- final link in Xcode.
+            else other_flags ++ package_hs_libs ++ extra_libs -- -Wl,-u,<sym> contained in other_flags
+                                                              -- needs to be put before -l<package>,
+                                                              -- otherwise Solaris linker fails linking
+                                                              -- a binary with unresolved symbols in RTS
+                                                              -- which are defined in base package
+                                                              -- the reason for this is a note in ld(1) about
+                                                              -- '-u' option: "The placement of this option
+                                                              -- on the command line is significant.
+                                                              -- This option must be placed before the library
+                                                              -- that defines the symbol."
+
+    -- frameworks
+    pkg_framework_opts <- getPkgFrameworkOpts dflags platform dep_packages
+    let framework_opts = getFrameworkOpts dflags platform
+
+        -- probably _stub.o files
+    let extra_ld_inputs = ldInputs dflags
+
+    -- Here are some libs that need to be linked at the *end* of
+    -- the command line, because they contain symbols that are referred to
+    -- by the RTS.  We can't therefore use the ordinary way opts for these.
+    let
+        debug_opts | WayDebug `elem` ways dflags = [
+#if defined(HAVE_LIBBFD)
+                        "-lbfd", "-liberty"
+#endif
+                         ]
+                   | otherwise            = []
+
+    let thread_opts
+         | WayThreaded `elem` ways dflags =
+            let os = platformOS (targetPlatform dflags)
+            in if os == OSOsf3 then ["-lpthread", "-lexc"]
+               else if os `elem` [OSMinGW32, OSFreeBSD, OSOpenBSD,
+                                  OSNetBSD, OSHaiku, OSQNXNTO, OSiOS, OSDarwin]
+               then []
+               else ["-lpthread"]
+         | otherwise               = []
+
+    rc_objs <- maybeCreateManifest dflags output_fn
+
+    let link = if staticLink
+                   then SysTools.runLibtool
+                   else SysTools.runLink
+    link dflags (
+                       map SysTools.Option verbFlags
+                      ++ [ SysTools.Option "-o"
+                         , SysTools.FileOption "" output_fn
+                         ]
+                      ++ map SysTools.Option (
+                         []
+
+                      -- Permit the linker to auto link _symbol to _imp_symbol.
+                      -- This lets us link against DLLs without needing an "import library".
+                      ++ (if platformOS platform == OSMinGW32
+                          then ["-Wl,--enable-auto-import"]
+                          else [])
+
+                      -- '-no_compact_unwind'
+                      -- C++/Objective-C exceptions cannot use optimised
+                      -- stack unwinding code. The optimised form is the
+                      -- default in Xcode 4 on at least x86_64, and
+                      -- without this flag we're also seeing warnings
+                      -- like
+                      --     ld: warning: could not create compact unwind for .LFB3: non-standard register 5 being saved in prolog
+                      -- on x86.
+                      ++ (if sLdSupportsCompactUnwind mySettings &&
+                             not staticLink &&
+                             (platformOS platform == OSDarwin || platformOS platform == OSiOS) &&
+                             case platformArch platform of
+                               ArchX86 -> True
+                               ArchX86_64 -> True
+                               ArchARM {} -> True
+                               ArchARM64  -> True
+                               _ -> False
+                          then ["-Wl,-no_compact_unwind"]
+                          else [])
+
+                      -- '-no_pie'
+                      -- iOS uses 'dynamic-no-pic', so we must pass this to ld to suppress a warning; see #7722
+                      ++ (if platformOS platform == OSiOS &&
+                             not staticLink
+                          then ["-Wl,-no_pie"]
+                          else [])
+
+                      -- '-Wl,-read_only_relocs,suppress'
+                      -- ld gives loads of warnings like:
+                      --     ld: warning: text reloc in _base_GHCziArr_unsafeArray_info to _base_GHCziArr_unsafeArray_closure
+                      -- when linking any program. We're not sure
+                      -- whether this is something we ought to fix, but
+                      -- for now this flags silences them.
+                      ++ (if platformOS   platform == OSDarwin &&
+                             platformArch platform == ArchX86 &&
+                             not staticLink
+                          then ["-Wl,-read_only_relocs,suppress"]
+                          else [])
+
+                      ++ (if sLdIsGnuLd mySettings
+                          then ["-Wl,--gc-sections"]
+                          else [])
+
+                      ++ o_files
+                      ++ lib_path_opts)
+                      ++ extra_ld_inputs
+                      ++ map SysTools.Option (
+                         rc_objs
+                      ++ framework_opts
+                      ++ pkg_lib_path_opts
+                      ++ extraLinkObj:noteLinkObjs
+                      ++ pkg_link_opts
+                      ++ pkg_framework_opts
+                      ++ debug_opts
+                      ++ thread_opts
+                    ))
+
 
 ghcjsDoLink :: GhcjsEnv -> GhcjsSettings -> Bool -> DynFlags -> Phase -> [FilePath] -> IO ()
 ghcjsDoLink env settings native dflags stop_phase o_files
@@ -550,9 +736,10 @@ ghcjsDoLink env settings native dflags stop_phase o_files
 --
 -- installed as a hook in HscMain,
 -- make sure we use our modified linker to load the correct shared libraries
-
+{-
 ghcjsCompileCoreExpr :: HscEnv -> SrcSpan -> CoreExpr -> IO HValue
 ghcjsCompileCoreExpr hsc_env srcspan ds_expr = error "ghcjsCompileCoreExpr"
+-}
 {-
   | rtsIsProfiled
     = throwIO (InstallationError "You can't call hscCompileCoreExpr in a profiled compiler")
@@ -579,6 +766,7 @@ ghcjsCompileCoreExpr hsc_env srcspan ds_expr = error "ghcjsCompileCoreExpr"
 -- installed as a hook in DynamicLoading
 -- use our own linker here instead
 
+{-
 ghcjsGetValueSafely :: HscEnv -> Name -> Type -> IO (Maybe HValue)
 ghcjsGetValueSafely hsc_env val_name expected_type = do
     forceLoadNameModuleInterface hsc_env (ptext (sLit "contains a name used in an invocation of getHValueSafely")) val_name
@@ -602,6 +790,7 @@ ghcjsGetValueSafely hsc_env val_name expected_type = do
              else return Nothing
         Just val_thing -> throwCmdLineErrorS dflags $ wrongTyThingError val_name val_thing
    where dflags = hsc_dflags hsc_env
+-}
 
 missingTyThingError :: Name -> SDoc
 missingTyThingError name = hsep [ptext (sLit "The name"), ppr name, ptext (sLit "is not in the type environment: are you sure it exists?")]

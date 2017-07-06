@@ -236,8 +236,13 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
     bind n u e = NonRec (thExpr n u) e
     mod n      = mkModule thrunnerPackage (mkModuleName $ "ThRunner" ++ show n)
 
+#if __GLASGOW_HASKELL__ >= 711
+thrunnerPackage :: UnitId
+thrunnerPackage = stringToUnitId "thrunner"
+#else
 thrunnerPackage :: PackageKey
 thrunnerPackage = stringToPackageKey "thrunner"
+#endif
 
 getThRunner :: GhcjsEnv -> HscEnv -> DynFlags -> Module -> TcM ThRunner
 getThRunner js_env hsc_env dflags m = do
@@ -259,7 +264,11 @@ linkTh :: GhcjsEnv
        -> GhcjsSettings        -- settings (contains the base state)
        -> [FilePath]           -- extra js files
        -> DynFlags             -- dynamic flags
+#if __GLASGOW_HASKELL__ >= 711
+       -> [UnitId]
+#else
        -> [PackageKey]         -- package dependencies
+#endif
        -> HomePackageTable     -- what to link
        -> Maybe ByteString     -- current module or Nothing to get the initial code + rts
        -> IO Gen2.LinkResult
@@ -288,12 +297,17 @@ linkTh env settings js_files dflags pkgs hpt code = do
                         (\b -> ObjLoaded "<Template Haskell>" b :
                                map ObjFile (concatMap getOfiles linkables))
                         code
+#if __GLASGOW_HASKELL__ >= 711
+      packageLibPaths :: UnitId -> [FilePath]
+#else
       packageLibPaths :: PackageKey -> [FilePath]
+#endif
       packageLibPaths pkg = maybe [] libraryDirs (lookupPackage dflags pkg)
       -- deps  = map (\pkg -> (pkg, packageLibPaths pkg)) pkgs'
       cache_key = T.pack $
         (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++
-        show (ways dflags')
+        show (ways dflags') ++
+        show (topDir dflags)
   if isJust code
      then link
      else Gen2.getCached dflags' "template-haskell" cache_key >>= \case
@@ -351,6 +365,9 @@ handleRunnerReq runner msg =
       TH.ReifyRoles n        -> TH.ReifyRoles'                    <$> TH.qReifyRoles n
       TH.ReifyAnnotations nn -> TH.ReifyAnnotations' . map B.pack <$> TH.qReifyAnnotations nn
       TH.ReifyModule m       -> TH.ReifyModule'                   <$> TH.qReifyModule m
+#if __GLASGOW_HASKELL__ >= 711
+      TH.ReifyFixity n       -> TH.ReifyFixity'                   <$> TH.qReifyFixity n
+#endif
       TH.AddDependentFile f  -> TH.qAddDependentFile f            >>  pure TH.AddDependentFile'
       TH.AddTopDecls decs    -> TH.qAddTopDecls decs              >>  pure TH.AddTopDecls'
       _                      -> term >> error "handleRunnerReq: unexpected request"
@@ -681,7 +698,7 @@ thSettings :: GhcjsSettings
 thSettings = GhcjsSettings False True False False Nothing
                            Nothing Nothing True True True
                            Nothing NoBase
-                           Nothing Nothing []
+                           Nothing Nothing [] False
 
 startThRunner :: DynFlags -> GhcjsEnv -> HscEnv -> IO ThRunner
 startThRunner dflags js_env hsc_env = do
@@ -704,6 +721,7 @@ startThRunner dflags js_env hsc_env = do
   sendToRunnerRaw r 0 (BL.toStrict $ rtsd <> fr <> rts <> fa <> aa <> Gen2.linkOut lr)
   return r
 
+#if __GLASGOW_HASKELL__ < 711
 ghcjsGetValueSafely :: GhcjsSettings
                     -> HscEnv
                     -> Name
@@ -711,4 +729,5 @@ ghcjsGetValueSafely :: GhcjsSettings
                     -> IO (Maybe HValue)
 ghcjsGetValueSafely _settings _hsc_env _name _t = do
   return Nothing -- fixme
+#endif
 

@@ -1,1 +1,3 @@
 OK
+CallStack (from HasCallStack):
+  error, called at cgrun051.hs:7:25 in main:Main

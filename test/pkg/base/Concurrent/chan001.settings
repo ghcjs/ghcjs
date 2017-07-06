@@ -1,3 +1,4 @@
 disableSpiderMonkey: true
+disableJavaScriptCore: true
 disableTravis: true
 

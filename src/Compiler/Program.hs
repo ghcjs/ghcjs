@@ -33,9 +33,9 @@ import LoadIface        ( showIface )
 import HscMain          ( newHscEnv )
 import DriverPipeline   ( compileFile )
 import DriverMkDepend   ( doMkDependHS )
--- #ifdef GHCI
-import Compiler.InteractiveUI    ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
--- #endif
+#ifdef GHCI
+import InteractiveUI    ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
+#endif
 
 
 -- Various other random stuff that we need
@@ -57,6 +57,7 @@ import Outputable
 import SrcLoc
 import Util
 import Panic
+import UniqSupply
 import MonadUtils       ( liftIO )
 
 -- Imports for --abi-hash
@@ -269,6 +270,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
     printInfoForUser (dflags6 { pprCols = 200 })
                      (pkgQual dflags6) (pprModuleMap dflags6)
 
+  liftIO $ initUniqSupply (initialUnique dflags6) (uniqueIncrement dflags6)
         ---------------- Final sanity checking -----------
   liftIO $ checkOptions ghcjsSettings postLoadMode dflags6 srcs objs (js_objs ++ Ghcjs.gsJsLibSrcs ghcjsSettings)
 
@@ -300,11 +302,11 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   return skipJs
 
 ghciUI :: [(FilePath, Maybe Phase)] -> Maybe [String] -> Ghc ()
--- #ifndef GHCI
--- ghciUI _ _ = throwGhcException (CmdLineError "not built for interactive use")
--- #else
+#ifndef GHCI
+ghciUI _ _ = throwGhcException (CmdLineError "not built for interactive use")
+#else
 ghciUI     = interactiveUI defaultGhciSettings
--- #endif
+#endif
 
 -- -----------------------------------------------------------------------------
 -- Splitting arguments into source files and object files.  This is where we
@@ -375,18 +377,16 @@ checkOptions settings mode dflags srcs objs js_objs = do
    when (notNull (filter wayRTSOnly (ways dflags))
          && isInterpretiveMode mode) $
         hPutStrLn stderr ("Warning: -debug, -threaded and -ticky are ignored by GHCi")
-{-
+
    when (isInterpretiveMode mode) $
       do throwGhcException (UsageError
                    "--interactive is not yet supported.")
--}
+
         -- -prof and --interactive are not a good combination
-        {-
    when ((filter (not . wayRTSOnly) (ways dflags) /= interpWays)
          && isInterpretiveMode mode) $
       do throwGhcException (UsageError
-                   "--interactive can't be used with -prof or -unreg.")
-           -}
+                   "--interactive can't be used with -prof or -static.")
         -- -ohi sanity check
    if (isJust (outputHi dflags) &&
       (isCompManagerMode mode || srcs `lengthExceeds` 1))
@@ -410,9 +410,14 @@ checkOptions settings mode dflags srcs objs js_objs = do
         then throwGhcException (UsageError "no input files")
         else do
 
+   case mode of
+      StopBefore HCc | hscTarget dflags /= HscC
+        -> throwGhcException $ UsageError $
+           "the option -C is only available with an unregisterised GHC"
+      _ -> return ()
+
      -- Verify that output files point somewhere sensible.
    verifyOutputFiles dflags
-
 
 -- Compiler output options
 
@@ -577,11 +582,15 @@ isDoMakeMode :: Mode -> Bool
 isDoMakeMode (Right (Right DoMake)) = True
 isDoMakeMode _ = False
 
--- #ifdef GHCI
+isDoEvalMode :: Mode -> Bool
+isDoEvalMode (Right (Right (DoEval _))) = True
+isDoEvalMode _ = False
+
+#ifdef GHCI
 isInteractiveMode :: PostLoadMode -> Bool
 isInteractiveMode DoInteractive = True
 isInteractiveMode _             = False
--- #endif
+#endif
 
 -- isInterpretiveMode: byte-code compiler involved
 isInterpretiveMode :: PostLoadMode -> Bool
@@ -721,6 +730,15 @@ setMode newMode newFlag = liftEwM $ do
                       | isShowGhcUsageMode newMode &&
                         isDoInteractiveMode oldMode ->
                             ((showGhciUsageMode, newFlag), [])
+
+                    -- If we have both -e and --interactive then -e always wins
+                    _ | isDoEvalMode oldMode &&
+                        isDoInteractiveMode newMode ->
+                            ((oldMode, oldFlag), [])
+                      | isDoEvalMode newMode &&
+                        isDoInteractiveMode oldMode ->
+                            ((newMode, newFlag), [])
+
                     -- Otherwise, --help/--version/--numeric-version always win
                       | isDominantFlag oldMode -> ((oldMode, oldFlag), [])
                       | isDominantFlag newMode -> ((newMode, newFlag), [])
@@ -769,7 +787,7 @@ doMake jsEnv settings native srcs  = do
         haskellish (f,Nothing) =
           looksLikeModuleName f || isHaskellUserSrcFilename f || '.' `notElem` f
         haskellish (_,Just phase) =
-          phase `notElem` [As False, As True, Cc, Cobjc, Cobjcpp, CmmCpp, Cmm, StopLn]
+          phase `notElem` [As False, As True, Cc, Cobjc, Cobjcxx, CmmCpp, Cmm, StopLn]
 
     hsc_env <- GHC.getSession
 
@@ -811,10 +829,10 @@ showBanner :: PostLoadMode -> DynFlags -> IO ()
 showBanner _postLoadMode dflags = do
    let verb = verbosity dflags
 
--- #ifdef GHCI
+#ifdef GHCI
    -- Show the GHCi banner
    when (isInteractiveMode _postLoadMode && verb >= 1) $ putStrLn ghciWelcomeMsg
--- #endif
+#endif
 
    -- Display details of the configuration in verbose mode
    when (verb >= 2) $
@@ -921,8 +939,8 @@ Generates a combined hash of the ABI for modules Data.Foo and
 System.Bar.  The modules must already be compiled, and appropriate -i
 options may be necessary in order to find the .hi files.
 
-This is used by Cabal for generating the InstalledPackageId for a
-package.  The InstalledPackageId must change when the visible ABI of
+This is used by Cabal for generating the ComponentId for a
+package.  The ComponentId must change when the visible ABI of
 the package chagnes, so during registration Cabal calls ghc --abi-hash
 to get a hash of the package's ABI.
 -}
@@ -964,6 +982,6 @@ unknownFlagsErr fs = throwGhcException $ UsageError $ concatMap oneError fs
   where
     oneError f =
         "unrecognised flag: " ++ f ++ "\n" ++
-        (case fuzzyMatch f (nub allFlags) of
+        (case fuzzyMatch f (nub allNonDeprecatedFlags) of
             [] -> ""
             suggs -> "did you mean one of:\n" ++ unlines (map ("  " ++) suggs))

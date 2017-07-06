@@ -5,6 +5,8 @@ module Main where
 import Foreign.Ptr
 import GHCJS.Types
 import GHCJS.Foreign
+import qualified Data.JSString as JSS
+import qualified Data.JSString.Text as JSS
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Encoding.Error as TE
@@ -24,7 +26,7 @@ y :: T.Text
 y = "In the programming-language world, one rule of survival is simple: dance or die."
 
 main = do
-  js_log . toJSString $ y
-  js_log . toJSString . mconcat . replicate 10 $ x
-  putStrLn . T.unpack . fromJSString =<< js_makeSomeStr 10
+  js_log . JSS.textToJSString $ y
+  js_log . JSS.textToJSString . mconcat . replicate 10 $ x
+  putStrLn . T.unpack . JSS.textFromJSString =<< js_makeSomeStr 10
   putStrLn . T.unpack . TE.decodeUtf8With TE.ignore . B.pack $ [63..80] ++ [194,162,226,130,172]

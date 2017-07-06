@@ -96,7 +96,7 @@ searchModule dflags
   = map ((\k -> (getPackageName dflags k, k)) . packageConfigId . fst)
   . lookupModuleInAllPackages dflags
 
-#else
+#elif !(__GLASGOW_HASKELL__ >= 711)
 
 getPackageName :: DynFlags -> PackageKey -> String
 getPackageName dflags
@@ -135,4 +135,51 @@ fromLookupResult (LookupHidden phs mhs) = concatMap fromModuleOrigin (phs ++ mhs
 fromModuleOrigin :: (Module, ModuleOrigin) -> [(Module, PackageConfig)]
 fromModuleOrigin (m, mo) = case mo of
   -}
+#else
+type PackageKey = UnitId
+
+packageKeyString :: PackageKey -> String
+packageKeyString = unitIdString
+
+modulePackageKey :: Module -> PackageKey
+modulePackageKey = moduleUnitId
+
+stringToPackageKey :: String -> PackageKey
+stringToPackageKey = stringToUnitId
+
+primPackageKey :: PackageKey
+primPackageKey = primUnitId
+
+mainPackageKey :: PackageKey
+mainPackageKey = mainUnitId
+
+getPackageName :: DynFlags -> PackageKey -> String
+getPackageName dflags
+  = maybe "" ((\(PackageName n) -> unpackFS n) . packageName)
+  . lookupPackage dflags
+
+modulePackageName :: DynFlags -> Module -> String
+modulePackageName dflags
+  = getPackageName dflags . moduleUnitId
+
+getPackageVersion :: DynFlags -> PackageKey -> Maybe Version
+getPackageVersion dflags
+  = fmap (convertVersion . packageVersion)
+  . lookupPackage dflags
+
+getPackageLibDirs :: DynFlags -> PackageKey -> [FilePath]
+getPackageLibDirs dflags
+  = maybe [] libraryDirs . lookupPackage dflags
+
+getPackageHsLibs :: DynFlags -> PackageKey -> [String]
+getPackageHsLibs dflags
+  = maybe [] hsLibraries . lookupPackage dflags
+
+searchModule :: DynFlags -> ModuleName -> [(String, PackageKey)]
+searchModule dflags
+  = map ((\k -> (getPackageName dflags k, k)) . unitId . snd)
+--  $ fromLookupResult
+--  $ lookupModuleWithSuggestions dflags mn Nothing
+  . lookupModuleInAllPackages dflags
+
 #endif

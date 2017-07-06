@@ -1,6 +1,6 @@
-{-# LANGUAGE GADTs, TypeFamilies, ConstraintKinds #-}
+	{-# LANGUAGE GADTs, TypeFamilies, ConstraintKinds #-}
 
-import GHC.Prim ( Constraint )
+import GHC.Exts ( Constraint )
 
 type Showish = Show
 
@@ -45,3 +45,4 @@ main = do
 
     print $ h 13
     print $ h 14.0
+

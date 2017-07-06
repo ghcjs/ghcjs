@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, GADTs, ScopedTypeVariables, ImpredicativeTypes, OverloadedStrings, TupleSections #-}
+{-# language CPP, GADTs, ScopedTypeVariables, ImpredicativeTypes, OverloadedStrings, TupleSections #-}
 module Compiler.GhcjsHooks where
 
 import           CorePrep             (corePrepPgm)
@@ -40,6 +40,10 @@ import           System.IO.Error
 
 import           TcRnTypes
 
+#if __GLASGOW_HASKELL__ >= 711
+import qualified GHC.LanguageExtensions as Ext
+#endif
+
 installGhcjsHooks :: GhcjsEnv
                   -> GhcjsSettings
                   -> [FilePath]  -- ^ JS objects
@@ -49,7 +53,9 @@ installGhcjsHooks env settings js_objs dflags =
     where
       addHooks h = h
         { linkHook               = Just (Gen2.ghcjsLink env settings js_objs True)
+#if __GLASGOW_HASKELL__ < 711
         , getValueSafelyHook     = Just (Gen2TH.ghcjsGetValueSafely settings)
+#endif
 #if __GLASGOW_HASKELL__ >= 709
         , runMetaHook            = Just (Gen2TH.ghcjsRunMeta env settings)
 #else
@@ -86,6 +92,13 @@ installDriverHooks settings env df = df { hooks = hooks' }
                             , ghcPrimIfaceHook = Just Gen2.ghcjsPrimIface
                             }
 
+haveCpp :: DynFlags -> Bool
+#if __GLASGOW_HASKELL__ >= 711
+haveCpp dflags = xopt Ext.Cpp dflags
+#else
+haveCpp dflags = xopt Opt_Cpp dflags
+#endif
+
 runGhcjsPhase :: GhcjsSettings
               -> GhcjsEnv
               -> PhasePlus -> FilePath -> DynFlags
@@ -99,7 +112,7 @@ runGhcjsPhase _settings _env (RealPhase (Cpp sf)) input_fn dflags0
        setDynFlags dflags1
        liftIO $ checkProcessArgsResult dflags1 unhandled_flags
 
-       if not (xopt Opt_Cpp dflags1) then do
+       if not (haveCpp dflags1) then do
            -- we have to be careful to emit warnings only once.
            unless (gopt Opt_Pp dflags1) $
                liftIO $ handleFlagWarnings dflags1 warns
@@ -149,7 +162,7 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
                    -- stamp file for the benefit of Make
                    liftIO $ touchObjectFile dflags o_file
                    return (RealPhase next_phase, o_file)
-#if MIN_VERSION_ghc(7,9,0)
+#if __GLASGOW_HASKELL__ >= 709
             HscUpdateSig ->
                 do -- We need to create a REAL but empty .o file
                    -- because we are going to attempt to put it in a library
@@ -226,17 +239,15 @@ ghcjsCompileModule settings jsEnv env core mod = do
         case M.lookup mod' m of
           Nothing -> return (m, compile)
           Just r  -> return (M.delete mod' m, return r)
-    mod'   = ms_mod mod
+    mod'  = ms_mod mod
     cms    = compiledModules jsEnv
     dflags = hsc_dflags env
     compile = do
 #if __GLASGOW_HASKELL__ < 709
-      core_binds <- corePrepPgm dflags env (cg_binds core) (cg_tycons core)
+      core_binds <- corePreppgm dflags env (cg_binds core) (cg_tycons core)
 #else
-      core_binds <- corePrepPgm env (ms_location mod) (cg_binds core) (cg_tycons core)
+      core_binds <- corePrepPgm env mod' (ms_location mod) (cg_binds core) (cg_tycons core)
 #endif
-      stg <- coreToStg dflags (cg_module core) core_binds
-      (stg', cCCs) <- stg2stg dflags (cg_module core) stg
-      return $ variantRender gen2Variant settings dflags (cg_module core) stg' cCCs
-
-
+      stg <- coreToStg dflags mod' core_binds
+      (stg', cCCs) <- stg2stg dflags mod' stg
+      return $ variantRender gen2Variant settings dflags mod' stg' cCCs

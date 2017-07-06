@@ -1,1 +1,3 @@
 Variable not found: (2) hello
+CallStack (from HasCallStack):
+  error, called at strun002.hs:7:11 in main:Main

@@ -23,6 +23,8 @@ main = do
   print z
   performGC
   addFinalizer z (putStrLn "finalizer z")
+  performGC
+  threadDelay 1000000
   print z
   performGC
   threadDelay 1000000

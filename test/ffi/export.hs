@@ -35,9 +35,11 @@ test1 = do
   w   <- mkWeakIORef ior (putStrLn "ioref finalized")
   r'  <- withExport ior $ \r -> do
     performGC
+    threadDelay 100000
     p w r
     return r
   performGC
+  threadDelay 100000
   p w r'
 
 -- export with unboxed representation

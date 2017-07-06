@@ -33,9 +33,11 @@ dropExeExtension x
       = dropExtension x
   | otherwise = x
 
+#if !MIN_VERSION_directory(1,2,4)
 exeExtension :: String
 #ifdef WINDOWS
 exeExtension = ".exe"
 #else
 exeExtension = ""
+#endif
 #endif

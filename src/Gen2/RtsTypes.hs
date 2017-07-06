@@ -31,7 +31,7 @@ import           Data.Default
 import           Data.Ix
 import qualified Data.List    as L
 import qualified Data.Map     as M
-import           Data.Maybe   (fromMaybe)
+import           Data.Maybe   (fromMaybe, listToMaybe, isJust)
 import           Data.Monoid
 import           Data.Set     (Set)
 import qualified Data.Set     as S
@@ -196,6 +196,11 @@ data IdType = IdPlain | IdEntry | IdConEntry deriving (Enum, Eq, Ord, Show)
 data IdKey = IdKey !Int !Int !IdType deriving (Eq, Ord)
 newtype IdCache = IdCache (M.Map IdKey Ident)
 
+newtype GlobalIdCache = GlobalIdCache (M.Map Ident (IdKey, Id))
+
+emptyGlobalIdCache :: GlobalIdCache
+emptyGlobalIdCache = GlobalIdCache M.empty
+
 data OtherSymb = OtherSymb !Module !Text
   deriving (Ord, Eq, Show)
 
@@ -221,10 +226,12 @@ data GenGroupState = GenGroupState
   , _ggsStack         :: [StackSlot]    -- ^ stack info for the current expression
   , _ggsStackDepth    :: Int            -- ^ current stack depth
   , _ggsExtraDeps     :: Set OtherSymb  -- ^ extra dependencies for the linkable unit that contains this group
+  , _ggsGlobalIdCache :: GlobalIdCache
+--  , _ggsGlobalRefs    :: [[Id]]
   }
 
 instance Default GenGroupState where
-  def = GenGroupState [] [] [] [] 0 S.empty
+  def = GenGroupState [] [] [] [] 0 S.empty emptyGlobalIdCache -- []
 
 type C = State GenState JStat
 type G = State GenState
@@ -281,6 +288,41 @@ addSlots xs = gsGroup . ggsStack %= (xs++)
 
 stackDepth :: Lens' GenState Int
 stackDepth = gsGroup . ggsStackDepth
+
+----------------------------------------------------------
+-- global to live floating
+{-
+globalRefs :: Lens' GenState [[Id]]
+globalRefs = gsGroup . ggsGlobalRefs
+
+pushGlobalRefs :: G ()
+pushGlobalRefs = globalRefs %= ([]:)
+
+-- fixme return slot
+popGlobalRefs :: G (Maybe [Id])
+popGlobalRefs = do
+  gr <- use globalRefs
+  globalRefs %= drop 1
+  return listToMaybe gr
+
+addGlobalRef :: Id -> G ()
+addGlobalRef i = globalRefs %= addRef
+  where
+    addRef []     = []
+    addRef (x:xs) = (i:x):xs
+-}
+{-
+
+  requirements for float:
+    - not unfloated (inline more efficient), although we might lose some sharing
+    -
+
+ -}
+--pushGlobalRefs = gsGroup .
+
+-- popGlobalRefs = undefined
+
+----------------------------------------------------------
 
 -- | run the action with no stack info
 resetSlots :: G a -> G a
@@ -608,15 +650,31 @@ moduleGlobalSymbol dflags m
 jsIdIdent :: Id -> Maybe Int -> IdType -> G Ident
 jsIdIdent i mi suffix = do
   IdCache cache <- use gsIdents
-  let key = IdKey (getKey . getUnique $ i) (fromMaybe 0 mi) suffix
   case M.lookup key cache of
-    Just ident -> return ident
+    Just ident -> updateGlobalIdCache ident
     Nothing -> do
       ident <- jsIdIdent' i mi suffix
       let cache' = key `seq` ident `seq` IdCache (M.insert key ident cache)
       gsIdents .= cache'
-      cache' `seq` return ident
+      cache' `seq` updateGlobalIdCache ident
+  where
+    key = IdKey (getKey . getUnique $ i) (fromMaybe 0 mi) suffix
+    updateGlobalIdCache :: Ident -> G Ident
+    updateGlobalIdCache ji
+      -- fixme also allow cashing entries for lifting?
+      | not (isGlobalId i) || isJust mi || suffix /= IdPlain = pure ji
+      | otherwise = do
+          GlobalIdCache gidc <- use globalIdCache
+          case M.lookup ji gidc of
+            Nothing -> do
+              globalIdCache .= GlobalIdCache (M.insert ji (key, i) gidc)
+              return ji
+            Just _  -> pure ji
 
+globalIdCache :: Lens' GenState GlobalIdCache
+globalIdCache = gsGroup . ggsGlobalIdCache
+
+-- uncached
 jsIdIdent' :: Id -> Maybe Int -> IdType -> G Ident
 jsIdIdent' i mn suffix0 = do
   dflags      <- use gsDynFlags
@@ -644,6 +702,7 @@ showModule dflags m = pkg ++ ":" ++ modName
 encodePackageKey :: DynFlags -> PackageKey -> String
 encodePackageKey dflags k
   | isGhcjsPrimPackage dflags k = "ghcjs-prim"
+  | isGhcjsThPackage dflags k   = "ghcjs-th"
   | otherwise                   = packageKeyString k
   where
     n = getPackageName dflags k
@@ -657,8 +716,16 @@ encodePackageKey dflags k
 isGhcjsPrimPackage :: DynFlags -> PackageKey -> Bool
 isGhcjsPrimPackage dflags pkgKey
   =  pn == "ghcjs-prim" ||
-     (null pn && pkgKey == thisPackage dflags && 
+     (null pn && pkgKey == thisPackage dflags &&
       any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
+  where
+    pn = getPackageName dflags pkgKey
+
+isGhcjsThPackage :: DynFlags -> PackageKey -> Bool
+isGhcjsThPackage dflags pkgKey
+  =  pn == "ghcjs-th" ||
+     (null pn && pkgKey == thisPackage dflags &&
+      any (=="-DBOOTING_PACKAGE=ghcjs-th") (opt_P dflags))
   where
     pn = getPackageName dflags pkgKey
 
@@ -670,6 +737,15 @@ ghcjsPrimPackage dflags =
   where
     prims = filter ((=="ghcjs-prim").fst)
                    (searchModule dflags (mkModuleName "GHCJS.Prim"))
+
+ghcjsThPackage :: DynFlags -> PackageKey
+ghcjsThPackage dflags =
+  case prims of
+    ((_,k):_) -> k
+    _         -> error "Package `ghcjs-th' is required to link executables"
+  where
+    prims = filter ((=="ghcjs-th").fst)
+                   (searchModule dflags (mkModuleName "GHCJS.Prim.TH.Eval"))
 
 {-
 wiredInPackages :: [String]
