@@ -7,6 +7,14 @@ author:              Luite Stegeman
 maintainer:          stegeman@gmail.com
 build-type:          Simple
 cabal-version:       >=1.10
+extra-source-files:  include/foreign-compat.h
+
+flag foreign-import-stubs
+  description:       Replace JavaScript foreign imports with stubbed
+                     declarations defined as errors. This allows the library to
+                     type-check with GHC.
+  default:           False
+  manual:            True
 
 library
   exposed-modules: GHCJS.Prim
@@ -17,6 +25,7 @@ library
                    GHCJS.Prim.TH.Types
 
   c-sources: cbits/ghcjs-prim.c
+  include-dirs: include
   build-depends:       base             >= 4 && < 5,
                        ghc-prim,
                        template-haskell >= 2.9 && < 2.11,
@@ -25,6 +34,8 @@ library
                        bytestring,
                        containers
   default-language:    Haskell2010
+  default-extensions: CPP
   ghc-options: -O2
   cpp-options: -DBOOTING_PACKAGE=ghcjs-prim
-
+  if flag(foreign-import-stubs)
+    cpp-options: -DFOREIGN_IMPORT_STUBS

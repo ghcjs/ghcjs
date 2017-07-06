@@ -1,12 +1,13 @@
-{-# LANGUAGE MagicHash, DeriveDataTypeable, CPP #-}
+{-# LANGUAGE MagicHash, DeriveDataTypeable #-}
 #ifdef __GHCJS__
 {-# LANGUAGE JavaScriptFFI, GHCForeignImportPrim #-}
 #endif
 
+#include "foreign-compat.h"
+
 module GHCJS.Prim ( JSVal(..)
                   , JSException(..)
                   , WouldBlockException(..)
-#ifdef ghcjs_HOST_OS
                   , mkJSException
                   , fromJSString
                   , toJSString
@@ -19,7 +20,6 @@ module GHCJS.Prim ( JSVal(..)
                   , jsNull
                   , getProp
                   , getProp'
-#endif
                   ) where
 
 import           Data.Typeable (Typeable)
@@ -50,8 +50,6 @@ instance Ex.Exception JSException
 
 instance Show JSException where
   show (JSException _ xs) = "JavaScript exception: " ++ xs
-
-#ifdef ghcjs_HOST_OS
 
 mkJSException :: JSVal -> IO JSException
 mkJSException ref =
@@ -103,11 +101,11 @@ jsNull = js_null
 {-# INLINE jsNull #-}
 
 getProp :: JSVal -> String -> IO JSVal
-getProp o p = js_getProp o (unsafeCoerce $ seqList p)
+getProp o p = js_getPropFromString o (unsafeCoerce $ seqList p)
 {-# INLINE getProp #-}
 
 getProp' :: JSVal -> JSVal -> IO JSVal
-getProp' o p = js_getProp' o p
+getProp' o p = js_getProp o p
 {-# INLINE getProp' #-}
 
 -- reduce the spine and all list elements to whnf
@@ -121,40 +119,17 @@ seqListSpine xs = go xs `seq` xs
   where go (x:xs) = go xs
         go []     = ()
 
-foreign import javascript unsafe "h$toHsString($1)"
-  js_fromJSString :: JSVal -> Exts.Any
-
-foreign import javascript unsafe "h$fromHsString($1)"
-  js_toJSString :: Exts.Any -> JSVal
-
-foreign import javascript unsafe "h$toHsListJSVal($1)"
-  js_fromJSArray :: JSVal -> IO Exts.Any
-
-foreign import javascript unsafe "h$fromHsListJSVal($1)"
-  js_toJSArray :: Exts.Any -> IO JSVal
-
-foreign import javascript unsafe "$1 === null"
-  js_isNull :: JSVal -> Bool
-
-foreign import javascript unsafe "$1 === undefined"
-  js_isUndefined :: JSVal -> Bool
-
-foreign import javascript unsafe "$r = typeof($1) === 'number' ? ($1|0) : 0;"
-  js_fromJSInt :: JSVal -> Int
-
-foreign import javascript unsafe "$r = $1;"
-  js_toJSInt :: Int -> JSVal
-
-foreign import javascript unsafe "$r = null;"
-  js_null :: JSVal
-
-foreign import javascript unsafe "$1[h$fromHsString($2)]"
-  js_getProp :: JSVal -> Exts.Any -> IO JSVal
-
-foreign import javascript unsafe "$1[$2]"
-  js_getProp' :: JSVal -> JSVal -> IO JSVal
-
-#endif
+FOREIGN_IMPORT(unsafe, js_fromJSString, JSVal -> Exts.Any, "h$toHsString($1)")
+FOREIGN_IMPORT(unsafe, js_toJSString, Exts.Any -> JSVal, "h$fromHsString($1)")
+FOREIGN_IMPORT(unsafe, js_fromJSArray, JSVal -> IO Exts.Any, "h$toHsListJSVal($1)")
+FOREIGN_IMPORT(unsafe, js_toJSArray, Exts.Any -> IO JSVal, "h$fromHsListJSVal($1)")
+FOREIGN_IMPORT(unsafe, js_isNull, JSVal -> Bool, "$1 === null")
+FOREIGN_IMPORT(unsafe, js_isUndefined, JSVal -> Bool, "$1 === undefined")
+FOREIGN_IMPORT(unsafe, js_fromJSInt, JSVal -> Int, "$r = typeof($1) === 'number' ? ($1|0) : 0;")
+FOREIGN_IMPORT(unsafe, js_toJSInt, Int -> JSVal, "$r = $1;")
+FOREIGN_IMPORT(unsafe, js_null, JSVal, "$r = null;")
+FOREIGN_IMPORT(unsafe, js_getPropFromString, JSVal -> Exts.Any {- String -} -> IO JSVal, "$1[h$fromHsString($2)]")
+FOREIGN_IMPORT(unsafe, js_getProp, JSVal -> JSVal -> IO JSVal, "$1[$2]")
 
 {- | If a synchronous thread tries to do something that can only
      be done asynchronously, and the thread is set up to not

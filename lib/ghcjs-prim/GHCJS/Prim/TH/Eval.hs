@@ -1,7 +1,9 @@
-{-# LANGUAGE CPP, LambdaCase, BangPatterns, MagicHash, TupleSections, ScopedTypeVariables, DeriveDataTypeable #-}
+{-# LANGUAGE LambdaCase, BangPatterns, MagicHash, TupleSections, ScopedTypeVariables, DeriveDataTypeable #-}
 #ifdef ghcjs_HOST_OS
 {-# LANGUAGE JavaScriptFFI #-}
 #endif
+
+#include "foreign-compat.h"
 
 {- |
      Evaluate Template Haskell splices on node.js
@@ -250,21 +252,14 @@ sendRequestQ msg = TH.qRunIO (sendRequest msg) >>= \case
      \s -> E.throw (GHCJSQException s (Just n) msg)
    response                 -> return response
 
-foreign import javascript interruptible "h$TH.sendRequest($1_1,$1_2,$2,$c);"
-  js_sendRequest :: Ptr Word8 -> Int -> IO (Ptr Word8)
+FOREIGN_IMPORT(interruptible, js_sendRequest, Ptr Word8 -> Int -> IO (Ptr Word8), "h$TH.sendRequest($1_1,$1_2,$2,$c);")
+FOREIGN_IMPORT(interruptible, js_sendMessage, Ptr Word8 -> Int -> IO (), "h$TH.sendMessage($1_1,$1_2,$2,0,$c);")
+FOREIGN_IMPORT(interruptible, js_awaitMessage, IO (Ptr Word8), "h$TH.awaitMessage(0,$c);")
 
-foreign import javascript interruptible "h$TH.sendMessage($1_1,$1_2,$2,0,$c);"
-  js_sendMessage :: Ptr Word8 -> Int -> IO ()
-
-foreign import javascript interruptible "h$TH.awaitMessage(0,$c);"
-  js_awaitMessage :: IO (Ptr Word8)
-
-foreign import javascript unsafe "h$TH.bufSize($1_1, $1_2)"
-  js_bufSize :: Ptr Word8 -> IO Int
+FOREIGN_IMPORT(unsafe, js_bufSize, Ptr Word8 -> IO Int, "h$TH.bufSize($1_1, $1_2)")
 
 -- | actually returns the heap object to be evaluated
-foreign import javascript unsafe "h$TH.loadCode($1_1,$1_2,$2)"
-  js_loadCode :: Ptr Word8 -> Int -> IO Double
+FOREIGN_IMPORT(unsafe, js_loadCode, Ptr Word8 -> Int -> IO Double, "h$TH.loadCode($1_1,$1_2,$2)")
 
 -- | only safe in JS
 fromBs :: ByteString -> IO (Ptr Word8)
