@@ -67,19 +67,26 @@ Get `ghcjs` from Github and install it:
     $ git clone https://github.com/ghcjs/ghcjs.git
     $ cabal install ./ghcjs
 
-#### Build the libraries
+#### Build the Base Libraries
 
-Use `ghcjs-boot` to build the base libraries for `GHCJS`:
+When installing from hackage, as shown above in the quickstart, the built base libraries are included in the source distribution package.
+```
+$ ghcjs-boot
+```
 
-    if you used the Git repository to install:
-    $ ghcjs-boot --dev
-
-    if you are doing a development build from a different branch than `master`, you need to tell `ghcjs-boot` to use the correct branch of the `ghcjs-boot` and `shims` repositories:
-    $ ghcjs-boot --dev --ghcjs-boot-dev-branch somebranch --shims-dev-branch
-
-    if you are installing from hackage, the ghcjs source distribution package already includes the correct libraries. run:
-    $ ghcjs-boot
-
+Alternately, if you used the [ghcjs](https://github.com/ghcjs/ghcjs) repository to install.
+* On the `master` branch.
+```
+$ git branch
+* master
+$ ghcjs-boot --dev
+```
+* On another branch, such as `ghc-8.0`, supply the branch names for repositories [ghcjs-boot](https://github.com/ghcjs/ghcjs-boot) and [shims](https://github.com/ghcjs/shims).
+```
+$ git branch
+* ghc-8.0
+$ ghcjs-boot --dev --ghcjs-boot-dev-branch ghc-8.0 --shims-dev-branch ghc-8.0
+```
 Some distros install node.js as `nodejs` instead of `node`. Add `--with-node nodejs` to the `ghcjs-boot` command in that case.
 
 Usage
