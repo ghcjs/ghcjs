@@ -392,7 +392,10 @@ finishTHModule :: DynFlags -> GhcjsEnv -> String -> THRunner -> IO ()
 finishTHModule dflags js_env m runner = do
   mr <- finishTHp js_env False m runner
   ns <- readNodeSettings dflags
-  when (fromIntegral mr > nodeKeepAliveMaxMem ns) (void $ finishTHp js_env True m runner)
+  modifyMVar_ ( thRunners js_env ) ( pure . deleteActiveRunner m )
+  if (fromIntegral mr > nodeKeepAliveMaxMem ns)
+    then void $ finishTHp js_env True m runner
+    else modifyMVar_ ( thRunners js_env ) ( pure . consIdleRunner runner )
 
 -- | instruct the runner to finish up
 finishTHp :: GhcjsEnv -> Bool -> String -> THRunner -> IO Int
@@ -403,10 +406,6 @@ finishTHp js_env endProcess m runner = do
   when endProcess $
     maybe (void $ terminateProcess ph)
       (\_ -> return ()) =<< timeout 30000000 (waitForProcess ph)
-  modifyMVar_ ( thRunners js_env )
-              ( pure
-              . if endProcess then id else consIdleRunner runner
-              . deleteActiveRunner m )
   return mu
 
 finishTHAll :: GhcjsEnv -> IO ()
