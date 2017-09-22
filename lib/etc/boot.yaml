@@ -98,6 +98,7 @@ packages:
     - ./boot/syb
     - ./boot/tagged
     - ./boot/text
+    - ./boot/time-locale-compat
     - ./boot/unordered-containers
     - ./boot/uuid/uuid-types
     - ./boot/vector
