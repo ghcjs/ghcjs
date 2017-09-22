@@ -99,6 +99,7 @@ packages:
     - ./boot/tagged
     - ./boot/text
     - ./boot/unordered-containers
+    - ./boot/uuid/uuid-types
     - ./boot/vector
     - ./ghcjs/ghcjs-base
 
