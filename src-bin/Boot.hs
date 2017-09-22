@@ -1141,7 +1141,7 @@ cabalStage1 pkgs = sub $ do
   globalFlags <- cabalGlobalFlags
   flags <- cabalInstallFlags (length pkgs == 1)
   let args = globalFlags ++ ("install" : pkgs) ++
-             [ "--solver=topdown" -- the modular solver refuses to install stage1 packages
+             [ "--allow-boot-library-installs"
              ] ++ map ("--configure-option="<>) configureOpts ++ flags
   checkInstallPlan pkgs args
   cabal_ args
@@ -1162,7 +1162,7 @@ cabalInstall pkgs = do
 -- uses somewhat fragile parsing of --dry-run output, find a better way
 checkInstallPlan :: [Package] -> [Text] -> B ()
 checkInstallPlan pkgs opts = do
-  plan <- cabal (opts ++ ["-v2", "--dry-run"])
+  plan <- cabal (opts ++ ["-vverbose+nowrap", "--dry-run"])
   when (hasReinstalls plan || hasUnexpectedInstalls plan || hasNewVersion plan) (err plan)
   where
     hasReinstalls = T.isInfixOf "(reinstall)"   -- reject reinstalls
@@ -1504,6 +1504,8 @@ checkCabalSupport bs pgms = do
   cbl <- run' bs (pgms ^. bpCabal) ["install", "--help"]
   when (not $ "--ghcjs" `T.isInfixOf` cbl) $
     failWith ("cabal-install program " <> pgms ^. bpCabal . pgmLocText <> " does not support GHCJS")
+  when (not $ "--allow-boot-library-installs" `T.isInfixOf` cbl) $
+    failWith ("cabal-install program " <> pgms ^. bpCabal . pgmLocText <> " does not support --allow-boot-library-installs (requires version 2.0.0.0 or newer)")
   void (run' bs (pgms ^. bpGhc) ["-e", "either error id (Text.Read.readEither \"GHCJS\" :: Either String Distribution.Simple.CompilerFlavor)"]) `Ex.catch`
     \(Ex.SomeException _) -> failWith
        ("GHC program " <> pgms ^. bpGhc . pgmLocText <> " does not have a Cabal library that supports GHCJS\n" <>

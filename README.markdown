@@ -38,7 +38,7 @@ GHCJS can be installed with GHC 7.10.2 or later.
 ### Requirements
 
  - GHC 7.10.2 or higher
- - Cabal 1.22.4 and cabal-install 1.22.3 or higher
+ - Cabal 2.0.0.2 and cabal-install 2.0.0.0 or higher
  - alex and happy
  - [node.js](http://nodejs.org) 0.10.28 or higher. GHCJS uses node.js for its build system and for running Template Haskell.
 
