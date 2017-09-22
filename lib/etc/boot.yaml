@@ -86,19 +86,24 @@ packages:
     - ./boot/async
     - ./boot/aeson
     - ./boot/attoparsec
+    - ./boot/base-compat
+    - ./boot/bytestring-builder
     - ./boot/case-insensitive
     - ./boot/dlist
     - ./boot/extensible-exceptions
     - ./boot/fail
     - ./boot/hashable
     - ./boot/mtl
+    - ./boot/nats
     - ./boot/parallel
     - ./boot/scientific
+    - ./boot/semigroups
     - ./boot/stm
     - ./boot/syb
     - ./boot/tagged
     - ./boot/text
     - ./boot/time-locale-compat
+    - ./boot/transformers-compat
     - ./boot/unordered-containers
     - ./boot/uuid/uuid-types
     - ./boot/vector
