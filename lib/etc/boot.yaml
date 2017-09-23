@@ -97,12 +97,14 @@ packages:
     - ./boot/mtl
     - ./boot/nats
     - ./boot/parallel
+    - ./boot/random
     - ./boot/scientific
     - ./boot/semigroups
     - ./boot/stm
     - ./boot/syb
     - ./boot/tagged
     - ./boot/text
+    - ./boot/th-abstraction
     - ./boot/time-locale-compat
     - ./boot/transformers-compat
     - ./boot/unordered-containers
