@@ -93,6 +93,7 @@ packages:
     - ./boot/extensible-exceptions
     - ./boot/fail
     - ./boot/hashable
+    - ./boot/integer-logarithms
     - ./boot/mtl
     - ./boot/nats
     - ./boot/parallel
