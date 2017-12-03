@@ -42,7 +42,6 @@ import           Packages          (getPackageIncludePath)
 import           Config            (cProjectVersionInt)
 import qualified SysTools
 
-import           Control.Applicative
 import qualified Control.Exception as Ex
 import           Control.Monad
 import           Control.Monad.IO.Class

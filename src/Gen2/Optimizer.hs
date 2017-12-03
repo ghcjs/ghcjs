@@ -19,7 +19,6 @@
 -}
 module Gen2.Optimizer where
 
-import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
 
@@ -732,7 +731,7 @@ normalizeReg cache g = rewriteOf template assoc . rewriteOf template comm . fold
     associates2b op1 op2 = (op1,op2) `elem` [(AddOp, SubOp)] -- , ("*", "/")] -- (a - b) + c  = a + (c - b)
     cf = rewriteOf template comm . foldExpr cache
     f  = Just . foldExpr cache
-    allowed e 
+    allowed e
         | IdxE (ValE (Var st)) e' <- e, Just st == stack = allowed' e'
         | otherwise                                      = allowed' e
        where

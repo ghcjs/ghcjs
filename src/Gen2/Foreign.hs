@@ -1,4 +1,3 @@
-{-# LANGUAGE CPP #-}
 {-
   This module takes over desugaring and typechecking foreign declarations and calls
   from GHC. foreign import javascript should be desugared differently
@@ -13,7 +12,7 @@ module Gen2.Foreign where
 import Control.Monad
 
 import Data.Maybe
-import Data.List (isPrefixOf, unzip4)
+import Data.List (unzip4)
 
 import Hooks
 import DynFlags
@@ -150,7 +149,7 @@ ghcjsDsFExport fn_id co ext_name cconv isDyn = -- return (empty, empty, [])
         bs  = mkFExportJsBits bnd dflags (cconv == JavaScriptCallConv) ext_name
                      (if isDyn then Nothing else Just fn_id)
                      fe_arg_tys orig_res_ty cconv u
-    
+
     return (empty, empty, bs)
 
 mkFExportJsBits :: Id
@@ -364,7 +363,7 @@ boxJsResult :: Type
 
 boxJsResult result_ty
   | Just (io_tycon, io_res_ty) <- tcSplitIOType_maybe result_ty
-        -- isIOType_maybe handles the case where the type is a 
+        -- isIOType_maybe handles the case where the type is a
         -- simple wrapping of IO.  E.g.
         --      newtype Wrap a = W (IO a)
         -- No coercion necessary because its a non-recursive newtype
@@ -421,7 +420,7 @@ mk_alt return_result (Nothing, wrap_result)
 
              ccall_res_ty = mkTyConApp unboxedSingletonTyCon [realWorldStatePrimTy]
              the_alt      = (DataAlt unboxedSingletonDataCon, [state_id], the_rhs)
-       
+
        return (ccall_res_ty, the_alt)
 
 mk_alt return_result (Just prim_res_ty, wrap_result)
@@ -459,7 +458,7 @@ fun_type_arg_stdcall_info _ _other_conv _ = Nothing
 
 jsResultWrapper :: Type
               -> DsM (Maybe Type,               -- Type of the expected result, if any
-                      CoreExpr -> CoreExpr)     -- Wrapper for the result 
+                      CoreExpr -> CoreExpr)     -- Wrapper for the result
 -- resultWrapper deals with the result *value*
 -- E.g. foreign import foo :: Int -> IO T
 -- Then resultWrapper deals with marshalling the 'T' part

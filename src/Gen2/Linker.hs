@@ -5,6 +5,7 @@
              LambdaCase,
              DeriveGeneric,
              TemplateHaskell #-}
+
 {- |
   GHCJS linker, collects dependencies from
     the object files (.js_o, js_p_o), which contain linkable
@@ -13,46 +14,43 @@
 
 module Gen2.Linker where
 
+-- windows specific imports
+#ifdef mingw32_HOST_OS
+-- import           Panic          -- NOTE (meiersi): might be needed
+import           Control.Lens             hiding ((<.>))
+
+import qualified Data.Text.IO             as T
+import           Data.Char                (chr)
+import           Numeric                  (showOct)
+
+import qualified SysTools
+#endif
+
 import           DynFlags
 import           Encoding
-import           Panic
-#if __GLASGOW_HASKELL__ >= 709
 import           Module (mkModuleName, wiredInPackageKeys)
-import           PackageConfig (sourcePackageId, packageKey)
-#else
-import           UniqFM
-import           Module (mkModuleName)
-import qualified Module as Mod
-import           PackageConfig (sourcePackageId)
-import           Data.Maybe (listToMaybe)
-import           Distribution.Package (InstalledPackageId(..))
-#endif
+import           PackageConfig (packageKey)
 import           Module (moduleNameString)
-import           Outputable (ppr, showSDoc)
+-- import           Outputable (ppr, showSDoc)
 import qualified Packages
-import qualified SysTools
 
-import           Control.Applicative
 import           Control.Concurrent.MVar
 import           Control.DeepSeq
 import           Control.Exception        (evaluate)
-import           Control.Lens             hiding ((<.>))
 import           Control.Monad
 import           Control.Parallel.Strategies
 
 import           Data.Array
 import           Data.Binary
-import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
-import           Data.Char                (toLower, chr)
 import           Data.Function            (on)
 import qualified Data.HashMap.Strict      as HM
 import           Data.Int
 import           Data.IntSet              (IntSet)
 import qualified Data.IntSet              as IS
 import           Data.List
-  (partition, nub, foldl', intercalate, group, sort, groupBy, find)
+  (partition, nub, foldl', intercalate, group, sort, groupBy)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe
@@ -61,7 +59,6 @@ import           Data.Set                 (Set)
 import qualified Data.Set                 as S
 import           Data.Text                (Text)
 import qualified Data.Text                as T
-import qualified Data.Text.IO             as T
 import qualified Data.Text.Lazy           as TL
 import qualified Data.Text.Lazy.IO        as TL
 import qualified Data.Text.Lazy.Encoding  as TLE
@@ -72,16 +69,15 @@ import qualified Data.Yaml                as Yaml
 
 import qualified Distribution.Simple.Utils as Cabal
 
-import           Numeric                  (showOct)
 
 import           GHC.Generics
 
 import           System.FilePath
-  (splitPath, (<.>), (</>), dropExtension, takeExtension)
+  (splitPath, (<.>), (</>), dropExtension)
 
 import           System.Directory
-  (createDirectoryIfMissing, doesDirectoryExist, canonicalizePath
-  ,doesFileExist, getDirectoryContents, getCurrentDirectory, copyFile)
+  (createDirectoryIfMissing, canonicalizePath
+  ,doesFileExist, getCurrentDirectory)
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
 import           Compiler.Compat
@@ -99,7 +95,6 @@ import           Gen2.Printer             (pretty)
 import           Gen2.Rts                 (rtsText, rtsDeclsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
-import           System.Exit (exitFailure)
 
 type LinkableUnit = (Package, Module, Int) -- ^ module and the index of the block in the object file
 type Module       = Text
@@ -577,14 +572,7 @@ readSystemWiredIn dflags = do
     filename = getLibDir dflags </> "wiredinkeys" <.> "yaml"
     ghcWiredIn :: Map Text PackageKey
     ghcWiredIn = M.fromList $ map (\k -> (T.pack (packageKeyString k), k))
-#if __GLASGOW_HASKELL__ >= 709
                                   wiredInPackageKeys
-#else
-                                  [ Mod.primPackageId, Mod.integerPackageId, Mod.basePackageId
-                                  , Mod.rtsPackageId, Mod.thPackageId, Mod.dphSeqPackageId
-                                  , Mod.dphParPackageId, Mod.thisGhcPackageId
-                                  ]
-#endif
 {- | read a static dependencies specification and give the roots
 
      if dependencies come from a versioned (non-hardwired) package
@@ -602,13 +590,6 @@ staticDeps :: DynFlags
                                       --   for which no package could be found
 staticDeps dflags wiredin sdeps = mkDeps sdeps
   where
-#if !(__GLASGOW_HASKELL__ >= 709)
-    lookupInstalledPackage :: Packages.PackageConfigMap -> PackageKey -> Maybe Packages.PackageConfig
-    lookupInstalledPackage pkgs ipid =
-      case filter ((==InstalledPackageId (packageKeyString ipid)) . Packages.installedPackageId) (eltsUFM pkgs) of
-        [conf] -> Just conf
-        _      -> Packages.lookupPackage pkgs ipid
-#endif
     zenc  = T.pack . zEncodeString . T.unpack
     mkDeps (StaticDeps ds) =
       let (u, p, r) = foldl' resolveDep ([], S.empty, S.empty) ds
@@ -619,20 +600,12 @@ staticDeps dflags wiredin sdeps = mkDeps sdeps
     resolveDep (unresolved, pkgs, resolved) dep@(p, m, s) =
       case lookup p wiredin of
              Nothing -> ( dep : unresolved, pkgs, resolved)
-#if __GLASGOW_HASKELL__ >= 709
              Just k  -> case Packages.lookupPackage dflags k of
-#else
-             Just k  -> case lookupInstalledPackage (Packages.pkgIdMap . pkgState $ dflags) k of
-#endif
                Nothing -> error $ "Package key for wired-in dependency `" ++
                                   T.unpack p ++ "' could not be found: "  ++
                                   packageKeyString k
                Just conf ->
-#if __GLASGOW_HASKELL__ >= 709
                  let k' = packageKey conf
-#else
-                 let k' = Packages.packageConfigId conf
-#endif
                  in  ( unresolved
                      , S.insert k' pkgs
                      , S.insert (Fun (mkPackage k') m $ mkSymb k' m s)
@@ -651,23 +624,10 @@ closePackageDeps dflags pkgs
     notFound = error "closePackageDeps: package not found"
     deps :: PackageKey -> [PackageKey]
     deps =
-#if __GLASGOW_HASKELL__ >= 709
            map (Packages.resolveInstalledPackageId dflags)
          . Packages.depends
          . fromMaybe notFound
          . Packages.lookupPackage dflags
-#else
-           map resolveDep
-         . Packages.depends
-         . fromMaybe notFound
-         . Packages.lookupPackage pkgMap
-    pkgMap = Packages.pkgIdMap (pkgState dflags)
-    allPkgs = eltsUFM pkgMap
-    resolveDep ipid =
-      maybe notFound
-            Packages.packageConfigId
-            (listToMaybe $ filter ((==ipid).Packages.installedPackageId) allPkgs)
-#endif
 
 -- read all dependency data from the to-be-linked files
 loadObjDeps :: [LinkedObj] -- ^ object files to link

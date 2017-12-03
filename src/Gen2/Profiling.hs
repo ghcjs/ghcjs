@@ -26,7 +26,6 @@ import           Encoding
 import           Module
 import           Outputable           hiding ((<>))
 
-import           Control.Applicative
 import           Control.Lens
 
 import           Data.Monoid

@@ -683,11 +683,11 @@ patchPackage pkg
           p       = "patches" </> fromText pkgName <.> "patch"
           applyPatch = do
             msg info ("applying patch: " <> toTextI p)
-	    cd (fromText pkg')
+            cd (fromText pkg')
             when isWindows (git_ ["config", "core.filemode", "false"])
-	    -- workaround for Windows MSYS2 git not liking our absolute paths
-	    git_ ["apply", T.replicate (1 + T.count "/" pkg') "../" <>
-	                   "patches/" <> pkgName <> ".patch"]
+            -- workaround for Windows MSYS2 git not liking our absolute paths
+            git_ ["apply", T.replicate (1 + T.count "/" pkg') "../" <>
+                           "patches/" <> pkgName <> ".patch"]
       in  sub $ cond applyPatch (msg info $ "no patch for package " <> pkgName <> " found") =<< test_f p
   | otherwise = return ()
 
@@ -700,21 +700,13 @@ installRts = subTop' "ghcjs-boot" $ do
   ghcjsTop <- view (beLocations . blGhcjsTopDir)
   let inc       = ghcjsLib </> "include"
       incNative = ghcjsLib </> "include_native"
-#if __GLASGOW_HASKELL__ >= 709
       rtsLib    = ghcjsLib </> "rts"
-#else
-      rtsLib    = ghcjsLib </> "rts-1.0"
-#endif
   rtsConf <- readfile (ghcLib </> "package.conf.d" </> "builtin_rts.conf")
   writefile (globalDB </> "builtin_rts.conf") (fixRtsConf (toTextI inc) (toTextI rtsLib) rtsConf)
   ghcjs_pkg_ ["recache", "--global", "--no-user-package-db"]
   forM_ [ghcjsLib, inc, incNative] mkdir_p
   sub $ cd (ghcLib </> "include") >> cp_r "." incNative
-#if __GLASGOW_HASKELL__ >= 709
   sub $ cd (ghcLib </> "rts") >> cp_r "." rtsLib
-#else
-  sub $ cd (ghcLib </> "rts-1.0") >> cp_r "." rtsLib
-#endif
   sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
   cp (ghcLib </> "settings")          (ghcjsLib </> "settings")
   cp (ghcLib </> "platformConstants") (ghcjsLib </> "platformConstants")
@@ -852,11 +844,7 @@ resolveWiredInPackages = subTop $ do
        (p,) . T.strip <$> ghcjs_pkg [ "--simple-output"
                                     , "field"
                                     , p
-#if __GLASGOW_HASKELL__ >= 709
                                     , "key"
-#else
-                                    , "id"
-#endif
                                     ]
      writefile ("wiredinkeys" <.> "yaml") $
        T.unlines ("# resolved wired-in packages" :

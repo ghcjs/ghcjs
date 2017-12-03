@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, QuasiQuotes, TupleSections, OverloadedStrings, LambdaCase, MultiWayIf, TemplateHaskell, ViewPatterns, BangPatterns #-}
+{-# LANGUAGE QuasiQuotes, TupleSections, OverloadedStrings, LambdaCase, MultiWayIf, TemplateHaskell, ViewPatterns, BangPatterns #-}
 
 {-
   Main generator module
@@ -57,7 +57,6 @@ import           Data.Monoid
 import           Data.Maybe (isJust, isNothing, catMaybes, fromMaybe, maybeToList, listToMaybe)
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.List (partition, intercalate, sort, sortBy, foldl')
 import qualified Data.List as L
@@ -68,7 +67,6 @@ import           Data.Text (Text)
 import           Compiler.JMacro
 import qualified Text.Parsec as P
 
-import           Compiler.Compat
 import           Compiler.Settings
 
 import           Gen2.Base
@@ -251,7 +249,6 @@ initStaticPtrs ptrs = mconcat <$> mapM initStatic ptrs
                |]
 
 collectStaticInfo :: StgPgm -> [SomeStaticPtr]
-#if __GLASGOW_HASKELL__ >= 709
 collectStaticInfo pgm = eltsUFM (collect collectStaticPtr emptyUFM pgm)
   where
     fingerprints :: UniqFM Fingerprint
@@ -278,12 +275,8 @@ collectStaticInfo pgm = eltsUFM (collect collectStaticPtr emptyUFM pgm)
       = let Just fp = lookupUFM fingerprints fpId
         in  addToUFM m b (SomeStaticPtr b info tgt fp)
     collectStaticPtr !m _ _ = m
-#else
-collectStaticInfo _pgm = []
-#endif
 
 hasExport :: StgBinding -> Bool
-#if __GLASGOW_HASKELL__ >= 709
 hasExport bnd =
   case bnd of
     StgNonRec b e -> isExportedBind b e
@@ -291,9 +284,6 @@ hasExport bnd =
   where
     isExportedBind _i (StgRhsCon _cc con _) = getUnique con == staticPtrDataConKey
     isExportedBind _ _ = False
-#else
-hasExport _bnd = False
-#endif
 
 {- |
    serialize the payload of a linkable unit in the object file, adding
@@ -621,19 +611,11 @@ genExpr top (StgLetNoEscape _ live b e) = do
   (b', top') <- genBindLne top live b
   (s, r)     <- genExpr top' e
   return (b' <> s, r)
-#if __GLASGOW_HASKELL__ < 709
-genExpr top (StgSCC cc tick push e) = do
-  setSCCstats <- ifProfilingM $ setCC cc tick push
-  (stats, result) <- genExpr top e
-  return (setSCCstats <> stats, result)
-genExpr top (StgTick _m _n e) = genExpr top e
-#else
 genExpr top (StgTick (ProfNote cc count scope) e) = do
   setSCCstats <- ifProfilingM $ setCC cc count scope
   (stats, result) <- genExpr top e
   return (setSCCstats <> stats, result)
 genExpr top (StgTick _m e) = genExpr top e
-#endif
 
 might_be_a_function :: Type -> Bool
 -- Return False only if we are *sure* it's a data type
@@ -1595,7 +1577,7 @@ getObjectKeyValuePairs [] = Just []
 getObjectKeyValuePairs (k:v:xs)
   | Just t <- argJSStringLitUnfolding k =
       fmap ((t,v):) (getObjectKeyValuePairs xs)
-getObjectKeyValuePairs _ = Nothing                                     
+getObjectKeyValuePairs _ = Nothing
 
 argJSStringLitUnfolding :: StgArg -> Maybe Text
 argJSStringLitUnfolding (StgVarArg v)
@@ -1877,12 +1859,7 @@ isInlineExpr v (StgCase e _ _ b _ _ alts)         = let (_ve, ie)   = isInlineEx
                                                     in (vr, (ie || b `elementOfUniqSet` v) && and ias)
 isInlineExpr v (StgLet b e)                       = isInlineExpr (inspectInlineBinding v b) e
 isInlineExpr v (StgLetNoEscape _ _ b e)           = isInlineExpr (inspectInlineBinding v b) e
-#if __GLASGOW_HASKELL__ < 709
-isInlineExpr v (StgSCC _ _ _ e)                   = isInlineExpr v e
-isInlineExpr v (StgTick _ _ e)                    = isInlineExpr v e
-#else
 isInlineExpr v (StgTick  _ e)                     = isInlineExpr v e
-#endif
 
 inspectInlineBinding :: UniqSet Id -> StgBinding -> UniqSet Id
 inspectInlineBinding v (StgNonRec i r) = inspectInlineRhs v i r
