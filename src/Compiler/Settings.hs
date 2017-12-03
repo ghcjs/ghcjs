@@ -5,7 +5,6 @@ module Compiler.Settings where
 import           Gen2.Base
 import qualified Gen2.Object as Object
 
-import           Control.Applicative
 import qualified Control.Exception as E
 import           Control.Concurrent.MVar
 import           Control.Monad
@@ -22,7 +21,6 @@ import           System.IO
 import           System.Process
 
 import           Module
-import           TcRnTypes
 import           ErrUtils
 
 {- | We can link incrementally against a base bundle, where we assume

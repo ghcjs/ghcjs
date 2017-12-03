@@ -18,7 +18,6 @@ module Gen2.Compactor where
 
 import           DynFlags
 
-import           Control.Applicative
 import           Control.Lens
 import           Control.Monad.State.Strict
 

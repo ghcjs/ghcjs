@@ -1,7 +1,6 @@
 {-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings, LambdaCase #-}
 module Compiler.Info where
 
-import           Control.Applicative
 import qualified Control.Exception as E
 
 import           Data.Function      (on)

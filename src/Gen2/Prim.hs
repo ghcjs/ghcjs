@@ -34,7 +34,6 @@ import           TcType
 import           Type
 import           TyCon
 
-import           Data.Monoid
 import qualified Data.Set as S
 
 import           Compiler.JMacro (j, je, JExpr(..), JStat(..))

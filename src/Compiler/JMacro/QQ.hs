@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverlappingInstances, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, GADTs, OverloadedStrings, PatternGuards #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances, TypeFamilies, TemplateHaskell, QuasiQuotes, RankNTypes, GADTs, OverloadedStrings, PatternGuards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 -----------------------------------------------------------------------------
 {- |
@@ -15,7 +15,6 @@ Simple EDSL for lightweight (untyped) programmatic generation of Javascript.
 module Compiler.JMacro.QQ (jmacro, jmacroE, parseJM, parseJME, expr2ident) where
 
 import Prelude hiding ((<*), tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
-import Control.Applicative hiding ((<|>), many, optional, (<*))
 import Control.Arrow (first)
 import Control.Lens ((^..))
 import Control.Lens.Plated (rewriteOn)
@@ -104,7 +103,7 @@ antiIdent :: JMacro a => String -> a -> a
 antiIdent s e = jfromGADT $ go (jtoGADT e)
     where go :: forall a. JMGadt a -> JMGadt a
           go (JMGStat (ForInStat b (TxtI s') e' st))
-             | s == T.unpack s' = JMGStat (ForInStat b (TxtI ("jmId_anti_" <> s')) 
+             | s == T.unpack s' = JMGStat (ForInStat b (TxtI ("jmId_anti_" <> s'))
                                               (antiIdent s e') (antiIdent s st))
           go (JMGExpr (ValExpr (JVar (TxtI s'))))
              | s == T.unpack s' = JMGExpr (AntiExpr . T.pack . fixIdent $ s)

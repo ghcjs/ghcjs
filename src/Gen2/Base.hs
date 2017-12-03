@@ -13,7 +13,6 @@ import qualified Gen2.Object          as Object
 
 import           Compiler.JMacro
 
-import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
 
