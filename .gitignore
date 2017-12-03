@@ -1,4 +1,7 @@
 /dist
+/dist-newstyle
+/.ghc.environment.*
+/cabal.project.local
 /utils/patch/dist
 /vendor/
 /GNUmakefile
