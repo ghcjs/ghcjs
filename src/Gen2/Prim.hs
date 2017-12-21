@@ -641,7 +641,7 @@ genPrim _ _ TraceMarkerOp [] [ed,eo] = PrimInline [j| h$traceMarker(`ed`, `eo`);
 
 #if __GLASGOW_HASKELL__ >= 709
 genPrim _ _ CasArrayOp                 [s,o] [a,i,old,new] = PrimInline [j| var x = `a`[`i`]; if(x === `old`) { `o` = `new`; `a`[`i`] = `new`; `s` = 0; } else { `s` = 1; `o` = x; } |]
-genPrim _ _ NewSmallArrayOp            [a]   [n,e]         = PrimInline [j| `a` = new Array(`n`); for(var i=0;i<`n`;i++) { `a`[i] = `e`; `a`.m = 0; `a`.__ghcjsArray = true; } |]
+genPrim _ _ NewSmallArrayOp            [a]   [n,e]         = PrimInline [j| `a` = new Array(`n`); for(var i=0;i<`n`;i++) { `a`[i] = `e`; }; `a`.m = 0; `a`.__ghcjsArray = true; |]
 genPrim _ _ SameSmallMutableArrayOp    [r]   [x,y]         = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0; |]
 genPrim _ _ ReadSmallArrayOp           [r]   [a,i]         = PrimInline [j| `r` = `a`[`i`]; |]
 genPrim _ _ WriteSmallArrayOp          []    [a,i,e]       = PrimInline [j| `a`[`i`] = `e`; |]
@@ -652,10 +652,10 @@ genPrim _ _ UnsafeFreezeSmallArrayOp   [r]   [a]           = PrimInline [j| `r` 
 genPrim _ _ UnsafeThawSmallArrayOp     [r]   [a]           = PrimInline [j| `r` = `a`; |]
 genPrim _ _ CopySmallArrayOp           []    [s,si,d,di,n] = PrimInline [j| for(var i=`n`-1;i>=0;i--) { `d`[`di`+i] = `s`[`si`+i]; } |]
 genPrim _ _ CopySmallMutableArrayOp    []    [s,si,d,di,n] = PrimInline [j| for(var i=`n`-1;i>=0;i--) { `d`[`di`+i] = `s`[`si`+i]; } |]
-genPrim _ _ CloneSmallArrayOp          [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); |]
-genPrim _ _ CloneSmallMutableArrayOp   [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); |]
-genPrim _ _ FreezeSmallArrayOp         [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); |]
-genPrim _ _ ThawSmallArrayOp           [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); |]
+genPrim _ _ CloneSmallArrayOp          [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); `r`.m = 0; `r`.__ghcjsArray = true; |]
+genPrim _ _ CloneSmallMutableArrayOp   [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); `r`.m = 0; `r`.__ghcjsArray = true; |]
+genPrim _ _ FreezeSmallArrayOp         [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); `r`.m = 0; `r`.__ghcjsArray = true; |]
+genPrim _ _ ThawSmallArrayOp           [r]   [a,o,n]       = PrimInline [j| `r` = `a`.slice(`o`,`o`+`n`); `r`.m = 0; `r`.__ghcjsArray = true; |]
 genPrim _ _ CasSmallArrayOp            [s,o] [a,i,old,new] = PrimInline [j| var x = `a`[`i`]; if(x === `old`) { `o` = `new`; `a`[`i`] = `new`; `s` = 0; } else { `s` = 1; `o` = x; } |]
 
 genPrim _ _ AtomicReadByteArrayOp_Int  [r]   [a,i]         = PrimInline [j| `r` = `a`.i3[`i`]; |]
