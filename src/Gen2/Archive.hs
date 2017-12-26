@@ -1,13 +1,12 @@
 {-# LANGUAGE DeriveDataTypeable, DeriveGeneric, TupleSections #-}
 
-module Gen2.Archive ( Entry(..), Index(..), IndexEntry(..), Meta(..)
+module Gen2.Archive ( Entry(..), Index, IndexEntry(..), Meta(..)
                     , buildArchive
                     , readMeta, readIndex
                     , readSource, readAllSources
                     , readObject, withObject, withAllObjects
                     ) where
 
-import           Control.Applicative
 import           Control.Monad
 
 import           Data.Binary
@@ -20,7 +19,6 @@ import           Data.Int
 import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Word
 
 import           GHC.Generics
 
@@ -32,8 +30,6 @@ import           Gen2.Object ( versionTag, versionTagLength )
 
 -- entry, offset in data section, length
 type Index = [IndexEntry]
-
-type ModuleName' = Text
 
 data IndexEntry = IndexEntry { ieEntry  :: Entry
                              , ieOffset :: Int64
@@ -67,7 +63,7 @@ sectionsLength :: Int
 sectionsLength = 24
 
 buildArchive :: Meta -> [(Entry, ByteString)] -> ByteString
-buildArchive meta entries = 
+buildArchive meta entries =
   versionTag <> sections <> index <> meta' <> entries'
   where
     bl       = fromIntegral . B.length

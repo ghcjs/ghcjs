@@ -10,17 +10,11 @@ module GHCJS.Prim.TH.Types ( Message(..)
                            , THResultType(..)
                            ) where
 
-import           Control.Applicative
-
 import           Data.Binary
 import           Data.ByteString (ByteString)
 import           Data.Data
-import           Data.Word
 
 import           GHC.Generics
-import           GHC.Exts
-
-import           GHCJS.Prim.TH.Serialized
 
 import qualified Language.Haskell.TH        as TH
 import qualified Language.Haskell.TH.Syntax as TH

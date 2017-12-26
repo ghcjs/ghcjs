@@ -19,7 +19,6 @@ import           Unique
 import           UniqFM
 import           SrcLoc
 
-import           Control.Applicative
 import qualified Control.Exception as Ex
 import           Control.Lens
 import           Control.Monad.State.Strict
@@ -657,7 +656,7 @@ encodePackageKey dflags k
 isGhcjsPrimPackage :: DynFlags -> PackageKey -> Bool
 isGhcjsPrimPackage dflags pkgKey
   =  pn == "ghcjs-prim" ||
-     (null pn && pkgKey == thisPackage dflags && 
+     (null pn && pkgKey == thisPackage dflags &&
       any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
   where
     pn = getPackageName dflags pkgKey

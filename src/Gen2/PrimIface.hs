@@ -6,7 +6,6 @@
 
 module Gen2.PrimIface (ghcjsPrimIface, mkGhcjsPrimOpId) where
 
-import Control.Applicative
 import Data.Maybe
 
 import Avail
@@ -57,8 +56,6 @@ primOpInfo :: PrimOp -> PrimOpInfo
 #error "unsupported GHC version"
 #elif __GLASGOW_HASKELL__ >= 709
 #include "prim/primop-primop-info-710.hs-incl"
-#elif __GLASGOW_HASKELL__ >= 707
-#include "prim/primop-primop-info-708.hs-incl"
 #else
 #error "unsupported GHC version"
 #endif
@@ -68,8 +65,6 @@ primOpStrictness :: PrimOp -> Arity -> StrictSig
 #error "unsupported GHC version"
 #elif __GLASGOW_HASKELL__ >= 709
 #include "prim/primop-strictness-710.hs-incl"
-#elif __GLASGOW_HASKELL__ >= 707
-#include "prim/primop-strictness-708.hs-incl"
 #else
 #error "unsupported GHC version"
 #endif

@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, NondecreasingIndentation, TupleSections #-}
+{-# LANGUAGE NondecreasingIndentation, TupleSections #-}
 {-
   Various utilities for building and loading dynamic libraries, to make Template Haskell
   work in GHCJS
@@ -17,22 +17,17 @@ import Name
 import Outputable hiding ((<>))
 import FastString
 import HscTypes
-import ByteCodeGen
-import VarEnv
 import Panic
 import Util
 import Exception
 import Packages
 import DynFlags
 import Type
-import CoreMonad hiding ( debugTraceMsg )
 import DynamicLoading
 import Module
 import SrcLoc
 import CoreSyn
 import BasicTypes
-import SimplCore
-import CoreTidy
 import SysTools hiding ( linkDynLib )
 import Platform
 import ErrUtils
@@ -41,13 +36,11 @@ import DriverPipeline hiding ( linkingNeeded )
 import UniqFM
 import Maybes hiding ( Succeeded )
 
-import           Control.Applicative
 import           Control.Monad
 
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString as BS
-import           Data.List ( isPrefixOf, sort, nub )
-import           Data.Monoid
+import           Data.List ( nub )
 import qualified Data.Set as S
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -61,13 +54,8 @@ import           Compiler.Variants
 import qualified Compiler.Utils as Utils
 import qualified Compiler.Info as Info
 
-#if __GLASGOW_HASKELL__ >= 709
 import           SysTools
 import           Linker
-#else
-import           Gen2.GHC.Linker -- use our own version!
-import           Gen2.GHC.SysTools ( ghcjsPackageHsLibs, linkDynLib )
-#endif
 
 import qualified Data.Yaml                as Yaml
 import Compiler.Info (getLibDir)
@@ -155,17 +143,12 @@ ghcjsLinkJsBinary env settings jsFiles dflags objs dep_pkgs =
       isRoot _ = True
       exe      = Utils.exeFileName dflags
       packageLibPaths :: PackageKey -> [FilePath]
-#if __GLASGOW_HASKELL__ >= 709
       packageLibPaths = maybe [] libraryDirs . lookupPackage dflags
-#else
-      packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
-      pidMap   = pkgIdMap (pkgState dflags)
-#endif
 
 isGhcjsPrimPackage :: DynFlags -> PackageKey -> Bool
 isGhcjsPrimPackage dflags pkgKey
   =  getPackageName dflags pkgKey == "ghcjs-prim" ||
-     (pkgKey == thisPackage dflags && 
+     (pkgKey == thisPackage dflags &&
       any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
 
 ghcjsPrimPackage :: DynFlags -> IO PackageKey
@@ -273,7 +256,6 @@ linkingNeeded dflags staticLink linkables pkg_deps = do
 
         -- next, check libraries. XXX this only checks Haskell libraries,
         -- not extra_libraries or -l things from the command line.
-#if __GLASGOW_HASKELL__ >= 709
         let pkg_hslibs  = [ (libraryDirs c, lib)
                           | Just c <- map (lookupPackage dflags) pkg_deps,
                             lib <- packageHsLibs dflags c ]
@@ -286,20 +268,6 @@ linkingNeeded dflags staticLink linkables pkg_deps = do
         if not (null lib_errs) || any (t <) lib_times
            then return True
            else checkLinkInfo dflags pkg_deps exe_file
-#else
-        let pkg_map = pkgIdMap (pkgState dflags)
-            pkg_hslibs  = [ (libraryDirs c, lib)
-                          | Just c <- map (lookupPackage pkg_map) pkg_deps,
-                            lib <- ghcjsPackageHsLibs dflags c ]
-        pkg_libfiles <- mapM (uncurry (findHSLib dflags)) pkg_hslibs
-        if any isNothing pkg_libfiles then return True else do
-        e_lib_times <- mapM (tryIO . getModificationUTCTime)
-                          (catMaybes pkg_libfiles)
-        let (lib_errs,lib_times) = splitEithers e_lib_times
-        if not (null lib_errs) || any (t <) lib_times
-           then return True
-           else checkLinkInfo dflags pkg_deps exe_file
-#endif
 
 panicBadLink :: GhcLink -> a
 panicBadLink other = panic ("link: GHC not built to link this way: " ++
@@ -566,7 +534,7 @@ ghcjsCompileCoreExpr hsc_env srcspan ds_expr = error "ghcjsCompileCoreExpr"
            {- Prepare for codegen -}
          ; prepd_expr <- corePrepExpr dflags hsc_env tidy_expr
            {- Lint if necessary -}
-         ; lintInteractiveExpr "hscCompileExpr" hsc_env prepd_expr 
+         ; lintInteractiveExpr "hscCompileExpr" hsc_env prepd_expr
            {- Convert to BCOs -}
          ; bcos <- coreExprToBCOs dflags (icInteractiveModule (hsc_IC hsc_env)) prepd_expr
            {- link it -}

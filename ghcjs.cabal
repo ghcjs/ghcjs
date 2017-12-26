@@ -41,7 +41,6 @@ extra-source-files:
                 include/prim/*.hs-incl
                 include/prim/*.txt
                 include/*.h
-                src-bin/Pkg-708.hs
                 README.markdown
                 test/LICENSE
                 test/ghcjs-testsuite.cabal
@@ -225,13 +224,6 @@ Executable hsc2hs-ghcjs
 Executable ghcjs-pkg
     if flag(compiler-only)
       Buildable:      False
-    -- cabal sdist is buggy when main-is is inside a conditional.
-    -- work around it by listing Pkg-708.hs in extra-source-files and
-    -- including that in Pkg.hs for older compilers
-    -- if impl(ghc >= 7.9)
-    --   Main-Is:          Pkg.hs
-    -- else
-    --  Main-Is:          Pkg-708.hs
     Main-Is: Pkg.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
