@@ -33,6 +33,7 @@ import           BasicTypes (Boxity(..))
 import           TcTypeNats
 import           TysWiredIn
 import           TysPrim
+import           NameCache
 #endif
 
 import           Control.Applicative
@@ -363,8 +364,8 @@ generateLib _settings = do
   dflags1 <- getSessionDynFlags
   liftIO $ do
     (dflags2, pkgs0) <- initPackages dflags1
-    let pkgs = catMaybes $ map (\p -> fmap (T.pack (getPackageName dflags2 p),)
-                                           (getPackageVersion dflags2 p))
+    let pkgs = catMaybes $ map (\p -> fmap (T.pack (getInstalledPackageName dflags2 p),)
+                                           (getInstalledPackageVersion dflags2 p))
                                pkgs0
         base = getDataDir (getLibDir dflags2) </> "shims"
         pkgs' :: [(T.Text, Version)]
@@ -444,7 +445,18 @@ ghcjsCleanupHandler :: (ExceptionMonad m, MonadIO m)
                     => DynFlags -> GhcjsEnv -> m a -> m a
 ghcjsCleanupHandler dflags env inner =
       defaultCleanupHandler dflags inner `gfinally`
-          (liftIO $ Gen2.finishTHAll env)
+          (liftIO $ do
+              runners <- readMVar (thRunners env)
+              forM_ (M.assocs runners) $ \(m,r) ->
+                getProcessExitCode (thrProcess r) >>= \case
+                  Just _ -> return ()
+                  Nothing ->
+                    (timeout 2000000 (Gen2.finishTh env m r) >>=
+                      maybe (terminate r) return)
+                      `catch` \(_::SomeException) -> terminate r
+          )
+  where
+    terminate r = terminateProcess (thrProcess r) `catch` \(_::SomeException) -> return ()
 
 runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
                    -- like GHC's -B argument

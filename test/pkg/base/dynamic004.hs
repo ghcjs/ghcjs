@@ -1,7 +1,6 @@
 module Main where
 
 import Data.Typeable
-import Data.Typeable.Internal
 import GHC.Fingerprint
 import Text.Printf
 
@@ -9,9 +8,9 @@ f :: Typeable a => Int -> a -> [TypeRep]
 f 0 a = []
 f n a = typeOf a : f (n-1) [a]
 
--- pointwise compare 100x101 TypeReps, there should be exactly 100 equalities
+-- pointwise compare 1000x1001 TypeReps, there should be exactly 1000 equalities
 -- (can be used as a benchmark)
-main = print $ length [ t1 | t1 <- f 20 (), t2 <- f 21 (), t1 == t2 ]
+main = print $ length [ t1 | t1 <- f 1000 (), t2 <- f 1001 (), t1 == t2 ]
 
 {-
  DEBUGGING code to help find bugs in the TypeRep implementation when

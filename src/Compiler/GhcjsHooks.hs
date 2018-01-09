@@ -1,4 +1,10 @@
-{-# language CPP, GADTs, ScopedTypeVariables, ImpredicativeTypes, OverloadedStrings, TupleSections #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE GADTs,
+             ScopedTypeVariables,
+             ImpredicativeTypes,
+             OverloadedStrings,
+             TupleSections
+  #-}
 module Compiler.GhcjsHooks where
 
 import           CorePrep             (corePrepPgm)
@@ -185,11 +191,12 @@ runGhcjsPhase _ _ (RealPhase ph) input _dflags
                 `catchIOError` \_ -> return ()
     return (RealPhase next, output)
   where
-#if MIN_VERSION_ghc(7,8,3)
-    skipPhases = [ (CmmCpp, Cmm), (Cmm, As False), (Cmm, As True), (As False, StopLn), (As True, StopLn) ]
-#else
-    skipPhases = [ (CmmCpp, Cmm), (Cmm, As), (As, StopLn) ]
-#endif
+    skipPhases = [ (CmmCpp, Cmm)
+                 , (Cmm, As False)
+                 , (Cmm, As True)
+                 , (As False, StopLn)
+                 , (As True, StopLn)
+                 ]
 
 -- otherwise use default
 runGhcjsPhase _ _ p input dflags = runPhase p input dflags
@@ -236,11 +243,7 @@ ghcjsCompileModule settings jsEnv env core mod = do
     cms    = compiledModules jsEnv
     dflags = hsc_dflags env
     compile = do
-#if __GLASGOW_HASKELL__ < 709
-      core_binds <- corePreppgm dflags env (cg_binds core) (cg_tycons core)
-#else
       core_binds <- corePrepPgm env mod' (ms_location mod) (cg_binds core) (cg_tycons core)
-#endif
-      stg <- coreToStg dflags mod' core_binds
+      let stg = coreToStg dflags mod' core_binds
       (stg', cCCs) <- stg2stg dflags mod' stg
       return $ variantRender gen2Variant settings dflags mod' stg' cCCs

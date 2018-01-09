@@ -1,6 +1,8 @@
 Name:           ghcjs
-Version:        0.2.1
-Description:    Haskell to JavaScript compiler
+Version:        8.2.0.1
+Synopsis:       Haskell to JavaScript compiler
+Description:    Haskell to JavaScript compiler based on GHC
+Category:       compiler, web
 License:        MIT
 License-file:   LICENSE
 Author:         Victor Nazarov, Hamish Mackenzie, Luite Stegeman
@@ -8,35 +10,12 @@ Copyright:      Victor Nazarov, Hamish Mackenzie, Luite Stegeman
 Maintainer:     Luite Stegeman <stegeman@gmail.com>
 Stability:      Experimental
 Build-Type:     Custom
-Cabal-Version:  >= 1.10
+Cabal-Version:  >= 2.0
 
-data-dir:       .
-data-files:     lib/include/ghcjs/*.h
-                lib/cache/boot.tar
-                lib/cache/shims.tar
-                lib/cache/test.tar
-                lib/etc/cabalBootConfig
-                lib/etc/*.yaml
-                lib/etc/*.html
-                lib/etc/*.js
-                lib/etc/*.c-tmpl
-                lib/etc/*.rc
-                lib/etc/*.manifest
-                lib/etc/manifest.webapp
-                lib/bin/*.sh
-                lib/bin/*.exe.options
-                lib/ghcjs-th/LICENSE
-                lib/ghcjs-th/Setup.hs
-                lib/ghcjs-th/ghcjs-th.cabal
-                lib/ghcjs-th/GHCJS/Prim/TH/*.hs
-                lib/ghcjs-prim/LICENSE
-                lib/ghcjs-prim/Setup.hs
-                lib/ghcjs-prim/cbits/*.c
-                lib/ghcjs-prim/GHCJS/*.hs
-                lib/ghcjs-prim/GHCJS/Prim/*.hs
-                lib/ghcjs-prim/GHCJS/Prim/Internal/*.hs
-                lib/ghcjs-prim/ghcjs-prim.cabal
-                doc/*.txt
+data-dir:       data
+data-files:     *.tar
+                bin/*.sh
+                bin/*.exe.options
 
 extra-source-files:
                 utils/*.hs
@@ -44,9 +23,8 @@ extra-source-files:
                 include/prim/*.hs-incl
                 include/prim/*.txt
                 include/*.h
-                src-bin/Pkg-708.hs
-                src-bin/Pkg-710.hs
                 src-bin/haddock/*.hs
+                HACKING.markdown
                 README.markdown
                 test/LICENSE
                 test/ghcjs-testsuite.cabal
@@ -61,10 +39,6 @@ flag compiler-only
   description: only build the library and ghcjs executable
   default:     False
   manual:      True
-
-flag network-uri
-  description: select the network/network-uri >= 2.6
-  default:     True
 
 -- Don't rename the executables to include the version number in the filename
 -- and install the wrapper scripts. This means that you need to supply your own
@@ -91,6 +65,7 @@ Library
                      Gen2.StgAst,
                      Gen2.Optimizer,
                      Gen2.Dataflow,
+                     Gen2.Deps,
                      Gen2.Printer,
                      Gen2.Linker,
                      Gen2.Shim,
@@ -124,16 +99,16 @@ Library
                      Compiler.JMacro.QQ,
                      Compiler.JMacro.ParseTH,
                      Compiler.JMacro.Util,
-                     GHCJS,
-                     -- shared code from the ghcjs-th package, found in lib/ghcjs-th
-                     GHCJS.Prim.TH.Types,
-                     GHCJS.Prim.TH.Serialized
+                     GHCJS
     other-modules: Paths_ghcjs
+    autogen-modules: Paths_ghcjs
+
     build-depends: base           >= 4        && < 5,
-                   Cabal          >= 1.23     && < 1.25,
-                   ghc            >= 7.11     && < 8.1,
+                   Cabal          >= 2,
+                   ghc-api-ghcjs  >= 8.1     && < 8.3,
+                   ghcjs-th,
                    ghc-boot,
-                   ghci,
+                   ghci-ghcjs,
                    directory,
                    filepath,
                    containers,
@@ -141,20 +116,20 @@ Library
                    mtl,
                    ghc-paths,
                    template-haskell,
-                   syb            >= 0.6      && < 0.7,
+                   template-haskell-ghcjs,
+                   syb            >= 0.6      && < 0.8,
                    bytestring     >= 0.10     && < 0.11,
                    attoparsec     >= 0.12     && < 0.14,
-                   aeson          >= 0.7      && < 0.12,
+                   aeson          >= 1.2      && < 1.3,
                    text           >= 1.2      && < 1.3,
                    wl-pprint-text >= 1.1      && < 1.2,
-                   lens           >= 4.0      && < 4.16,
+                   lens           >= 4.15     && < 4.16,
                    yaml           >= 0.8      && < 0.9,
                    time,
-                   system-filepath,
                    transformers,
                    split          >= 0.2      && < 0.3,
                    deepseq,
-                   vector         >= 0.10     && < 0.12,
+                   vector         >= 0.12     && < 0.13,
                    data-default   >= 0.7      && < 0.8,
                    array          >= 0.4      && < 0.6,
                    binary         >= 0.7      && < 0.9,
@@ -163,7 +138,7 @@ Library
                    cryptohash     >= 0.11     && < 0.12,
                    hashable,
                    unordered-containers,
-                   optparse-applicative       >= 0.11 && < 0.13,
+                   optparse-applicative       >= 0.14 && < 0.15,
                    stringsearch               >= 0.3 && < 0.4,
                    base16-bytestring          >= 0.1 && < 0.2,
                    cryptohash,
@@ -171,25 +146,27 @@ Library
                    regex-posix                >= 0.90 && < 0.100,
                    safe                       >= 0.3  && < 0.4,
                    parsec                     >= 3.1  && < 3.2,
+                   -- fixme haskell-src-exts, bump?
                    haskell-src-exts           >= 1.16 && < 1.19,
-                   haskell-src-meta           >= 0.6.0.3  && < 0.8
+                   haskell-src-meta           >= 0.6.0.3  && < 0.9
     exposed: True
     buildable: True
-    hs-source-dirs: src lib/ghcjs-th
+    hs-source-dirs: src
     include-dirs: include
-    GHC-Options: -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-unused-do-bind -auto-all -fprof-auto
-
+    GHC-Options: -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-unused-do-bind -fprof-auto-calls
 -- the compiler executable, Setup.hs installs a wrapper script that
 -- supplies the installation directory
 Executable ghcjs
+    scope: private
     Main-Is:        Main.hs
     Default-Language: Haskell2010
     hs-source-dirs: src-bin
     Build-Depends:  base                >= 4    &&  < 5,
                     ghcjs
-    GHC-Options:    -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded
+    GHC-Options:    -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded -fprof-auto-calls
 
 Executable haddock-ghcjs
+    scope: private
     if os(Windows)
       cpp-options: -DWINDOWS
     Main-Is:        Haddock.hs
@@ -197,17 +174,18 @@ Executable haddock-ghcjs
     hs-source-dirs: src-bin, src-bin/haddock
     Build-Depends:  base                >= 4    &&  < 5,
                     process,
-                    ghc,
+                    ghc-api-ghcjs,
                     transformers,
                     transformers-compat,
                     containers,
                     directory,
                     filepath,
                     ghcjs,
-                    haddock-api >= 2.15
+                    haddock-api-ghcjs >= 2.15
     GHC-Options:    -Wall
 
 Executable hsc2hs-ghcjs
+    scope: private
     if os(Windows)
       cpp-options: -DWINDOWS
     Main-Is:        Hsc2Hs.hs
@@ -221,30 +199,22 @@ Executable hsc2hs-ghcjs
 -- the package manager, like with the compiler, this executable is called
 -- through a wrapper script
 Executable ghcjs-pkg
+    scope: private
     if flag(compiler-only)
       Buildable:      False
-    -- cabal sdist is buggy when main-is is inside a conditional.
-    -- work around it by listing Pkg-708.hs in extra-source-files and
-    -- including that in Pkg.hs for older compilers
-    -- if impl(ghc >= 7.9)
-    --   Main-Is:          Pkg.hs
-    -- else
-    --  Main-Is:          Pkg-708.hs
     Main-Is: Pkg.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
     Build-Depends:    ghcjs,
                       base       >= 4   && < 5,
-                      directory,
-                      process    >= 1   && < 1.6,
+                      directory  >= 1,
+                      process    >= 1,
                       filepath,
                       containers,
                       Cabal,
                       binary,
---                      bin-package-db,
-                      bytestring
-    if impl(ghc >= 7.11)
-       Build-Depends: ghc-boot
+                      bytestring,
+                      ghc-boot
 
     if !os(windows)
         Build-Depends: unix,
@@ -255,11 +225,12 @@ Executable ghcjs-pkg
 -- the boot program, this prepares a ghcjs installation by populating the
 -- installation directory and building the boot libraries
 Executable ghcjs-boot
+    scope: private
     if flag(compiler-only)
       Buildable:      False
     if os(Windows)
       cpp-options: -DWINDOWS
-    ghc-options:      -threaded
+    ghc-options:      -threaded -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-unused-do-bind -fprof-auto
     Main-Is:          Boot.hs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
@@ -273,27 +244,21 @@ Executable ghcjs-boot
                       unordered-containers,
                       vector,
                       filepath,
-                      aeson,
                       text                 >= 0.11   && < 1.3,
                       bytestring           >= 0.10   && < 0.11,
                       system-filepath      >= 0.4    && < 0.5,
-                      shelly               >= 1.5    && < 1.7,
+                      shelly               >= 1.7    && < 1.8,
                       system-fileio        >= 0.3    && < 0.4,
-                      optparse-applicative >= 0.11   && < 0.13,
+                      optparse-applicative >= 0.11   && < 0.15,
                       tar                  >= 0.5    && < 0.6,
-                      HTTP                 >= 4000.2 && < 5000,
                       yaml                 >= 0.8    && < 0.9,
-                      process              >= 1.2    && < 1.5,
-                      time                 >= 1.4    && < 1.7,
-                      unix-compat          >= 0.4    && < 0.5,
+                      process              >= 1.2,
+                      time                 >= 1.4    && < 1.9,
+                      unix-compat          >= 0.5    && < 0.6,
                       executable-path      >= 0      && < 0.1
 
-    if flag(network-uri)
-      build-depends: network-uri >= 2.6, network >= 2.6
-    else
-       build-depends: network-uri < 2.6, network < 2.6
-
 Executable ghcjs-run
+    scope: private
     if flag(compiler-only)
       Buildable:      False
     if os(Windows)
@@ -306,6 +271,24 @@ Executable ghcjs-run
                       directory,
                       process,
                       filepath
+
+Executable ghcjs-dumparchive
+    scope: private
+    if flag(compiler-only)
+      Buildable:      False
+    if os(Windows)
+      cpp-options: -DWINDOWS
+    ghc-options:      -threaded
+    Main-Is:          dumpArchive.hs
+    Default-Language: Haskell2010
+    Hs-Source-Dirs:   utils
+    Build-Depends:    base                 >= 4      && < 5,
+                      text,
+                      ghc-api-ghcjs,
+                      ghcjs,
+                      bytestring,
+                      filepath
+
 
 -- our test suite, requires JavaScript environments to run the tests:
 --   - node.js              http://nodejs.org/
@@ -334,7 +317,7 @@ test-suite test
                       aeson,
                       test-framework       >= 0.8,
                       test-framework-hunit >= 0.3,
-                      HUnit                >= 1.2 && < 1.4,
+                      HUnit                >= 1.6 && < 1.7,
                       system-filepath      >= 0.4 && < 0.5,
                       system-fileio        >= 0.3 && < 0.4,
                       text,
@@ -345,17 +328,27 @@ test-suite test
                       bytestring,
                       deepseq,
                       unordered-containers,
-                      shelly               >= 1.5 &&  < 1.7,
+                      shelly               >= 1.5 &&  < 1.8,
                       data-default         >= 0.7 &&  < 0.8,
                       yaml                 >= 0.8 &&  < 0.9,
                       optparse-applicative,
                       directory,
-                      http-types           >= 0.8 &&  < 0.10,
-                      warp                 >= 3.0 &&  < 3.3,
-                      wai                  >= 3.0 &&  < 3.3,
-                      wai-extra            >= 3.0 &&  < 3.1,
-                      wai-app-static       >= 3.0 &&  < 3.2,
-                      wai-websockets       >= 3.0 &&  < 3.1,
-                      websockets           >= 0.9 &&  < 0.10,
-                      webdriver            >= 0.8 &&  < 0.9,
-                      lifted-base          >= 0.2 &&  < 0.3
+                      http-types           >= 0.11 &&  < 0.12,
+                      warp                 >= 3.0  &&  < 3.3,
+                      wai                  >= 3.0  &&  < 3.3,
+                      wai-extra            >= 3.0  &&  < 3.1,
+                      wai-app-static       >= 3.0  &&  < 3.2,
+                      wai-websockets       >= 3.0  &&  < 3.1,
+                      websockets           >= 0.12 &&  < 0.13,
+                      webdriver            >= 0.8  &&  < 0.9,
+                      lifted-base          >= 0.2  &&  < 0.3
+
+Custom-Setup
+  Setup-Depends:      base,
+                      Cabal >= 2 && < 2.1,
+                      containers,
+                      filepath,
+                      directory,
+                      process,
+                      template-haskell,
+                      transformers

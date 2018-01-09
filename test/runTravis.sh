@@ -10,15 +10,15 @@ TESTRUNNER="./dist/build/test/test"
 travis_boot() {
     case "$PART" in
         CORE1)
-            ghcjs_boot -j2 --build-stage1-unbooted --no-prof
+            ghcjs_boot -j2 --no-prof
             cabal_install random QuickCheck stm syb parsec parallel
         ;;
         CORE2)
-            ghcjs_boot -j2 --build-stage1-unbooted --no-prof
+            ghcjs_boot -j2 --no-prof
             cabal_install random QuickCheck stm syb
         ;;
         PROFILING)
-            ghcjs_boot -j2 --build-stage1-unbooted
+            ghcjs_boot -j2
         ;;
         GHCJS)
             ghcjs_boot -j1 --no-prof

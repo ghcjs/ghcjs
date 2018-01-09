@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# prepare the GHCJS tree for building
+#
+# after boot, use ./utils/makeSandbox if using a Cabal sandbox
+# stack should work
+
+SOURCE="${BASH_SOURCE[0]}"
+# resolve $SOURCE until the file is no longer a symlink
+while [ -h "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  # if $SOURCE was a relative symlink, we need to resolve it
+  # relative to the path where the symlink file was located
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SOURCEDIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+GHCJSROOT="$SOURCEDIR/.."
+
+(
+cd "$GHCJSROOT"
+
+# build enough of the GHC tree submodule to pull our data from it
+(
+cd "ghc"
+git submodule update --init --recursive
+./boot
+
+# we need the genprimopcode tool and the libraries need to be
+# configured such that `cabal sdist works`
+#
+# this takes far longer than it should. is there a better way?
+
+echo "BuildFlavour = quickest" > mk/build.mk
+cat mk/build.mk.sample >> mk/build.mk
+./configure
+make
+
+) # /ghc
+
+
+# link our packages and generate boot.tar
+./utils/makePackages.sh
+
+) # /

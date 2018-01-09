@@ -142,6 +142,7 @@ module GHCJS.Prim.Internal.Build
 
 import GHCJS.Prim
 import GHC.Prim
+import GHC.Exts
 import Unsafe.Coerce
 import System.IO.Unsafe
 

@@ -39,7 +39,9 @@ ghcjsPrimIface
         mi_fix_fn  = mkIfaceFixCache fixities
     }
   where
-#if __GLASGOW_HASKELL__ >= 711
+#if __GLASGOW_HASKELL__ >= 801
+    fixities = (getOccName seqId, Fixity NoSourceText 0 InfixR)
+#elif __GLASGOW_HASKELL__ >= 711
     fixities = (getOccName seqId, Fixity "0" 0 InfixR)  -- seq is infixr 0
 #else
     fixities = (getOccName seqId, Fixity 0 InfixR)  -- seq is infixr 0
@@ -58,8 +60,10 @@ ghcjsPrimExports
 -- include our own primop type list, this must match the host
 -- compiler version and be processed with WORD_SIZE_IN_BITS=32
 primOpInfo :: PrimOp -> PrimOpInfo
-#if __GLASGOW_HASKELL__ >= 801
+#if __GLASGOW_HASKELL__ >= 821
 #error "unsupported GHC version"
+#elif __GLASGOW_HASKELL__ >= 801
+#include "prim/primop-primop-info-820.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 711
 #include "prim/primop-primop-info-800.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 709
@@ -71,8 +75,10 @@ primOpInfo :: PrimOp -> PrimOpInfo
 #endif
 
 primOpStrictness :: PrimOp -> Arity -> StrictSig
-#if __GLASGOW_HASKELL__ >= 801
+#if __GLASGOW_HASKELL__ >= 821
 #error "unsupported GHC version"
+#elif __GLASGOW_HASKELL__ >= 801
+#include "prim/primop-strictness-820.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 711
 #include "prim/primop-strictness-800.hs-incl"
 #elif __GLASGOW_HASKELL__ >= 709
@@ -142,4 +148,3 @@ mkCompare str ty = Compare (mkVarOccFS str) ty
 
 mkGenPrimOp :: FastString -> [TyVar] -> [Type] -> Type -> PrimOpInfo
 mkGenPrimOp str tvs tys ty = GenPrimOp (mkVarOccFS str) tvs tys ty
-

@@ -37,6 +37,14 @@ import DriverMkDepend   ( doMkDependHS )
 import InteractiveUI    ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
 #endif
 
+-- Frontend plugins
+-- #ifdef GHCI
+import DynamicLoading   ( loadFrontendPlugin )
+import Plugins
+-- #else
+-- import DynamicLoading   ( pluginError )
+-- #endif
+import Module           ( ModuleName )
 
 -- Various other random stuff that we need
 import Config
@@ -49,7 +57,6 @@ import Packages         ( dumpPackages )
 #endif
 import DriverPhases
 import BasicTypes       ( failed )
-import StaticFlags
 import DynFlags
 import ErrUtils
 import FastString
@@ -63,12 +70,14 @@ import MonadUtils       ( liftIO )
 -- Imports for --abi-hash
 import LoadIface           ( loadUserInterface )
 import Module              ( mkModuleName )
-import Finder              ( findImportedModule, cannotFindInterface )
+import Finder              ( findImportedModule, cannotFindModule )
 import TcRnMonad           ( initIfaceCheck )
-import Binary              ( openBinMem, put_, fingerprintBinMem )
+import Binary              ( openBinMem, put_)
+import BinFingerprint      ( fingerprintBinMem )
 
 -- Standard Haskell libraries
 import System.IO
+import System.Environment
 import System.Exit
 import System.FilePath
 import Control.Monad
@@ -90,8 +99,22 @@ import Data.Maybe
 
 main :: IO ()
 main = do
+   initGCStatistics -- See Note [-Bsymbolic and hooks]
    hSetBuffering stdout LineBuffering
    hSetBuffering stderr LineBuffering
+
+   -- Handle GHC-specific character encoding flags, allowing us to control how
+   -- GHC produces output regardless of OS.
+   env <- getEnvironment
+   case lookup "GHC_CHARENC" env of
+    Just "UTF-8" -> do
+     hSetEncoding stdout utf8
+     hSetEncoding stderr utf8
+    _ -> do
+     -- Avoid GHC erroring out when trying to display unhandled characters
+     hSetTranslit stdout
+     hSetTranslit stderr
+
    Ghcjs.ghcjsErrorHandler defaultFatalMessager defaultFlushOut $ do
     -- 1. extract the -B flag from the args
     (argv0, booting, booting_stage1) <- Ghcjs.getWrappedArgs
@@ -101,18 +124,15 @@ main = do
                  | otherwise = Just (drop 2 (last minusB_args))
         argv1' = map (mkGeneralLocated "on the commandline") argv1
     when (any (== "--run") argv1) (Ghcjs.runJsProgram mbMinusB argv1)
-    (argv1'', ghcjsSettings) <- Ghcjs.getGhcjsSettings argv1'
+
+    (argv2, ghcjsSettings) <- Ghcjs.getGhcjsSettings argv1'
 
     -- fall back to native GHC if we're booting (we can't build Setup.hs with GHCJS yet)
     when (booting_stage1 && Ghcjs.gsBuildRunner ghcjsSettings)
       Ghcjs.bootstrapFallback
 
-    (argv2, staticFlagWarnings) <- parseStaticFlags argv1''
-
     -- 2. Parse the "mode" flags (--make, --interactive etc.)
-    (mode, argv3, modeFlagWarnings) <- parseModeFlags argv2
-
-    let flagWarnings = staticFlagWarnings ++ modeFlagWarnings
+    (mode, argv3, flagWarnings) <- parseModeFlags argv2
 
     -- If all we want to do is something like showing the version number
     -- then do it now, before we start a GHC session etc. This makes
@@ -263,13 +283,6 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
       | v >= 5 -> liftIO $ dumpPackages dflags6
       | otherwise -> return ()
 
-  when (verbosity dflags6 >= 3) $ do
-        liftIO $ hPutStrLn stderr ("Hsc static flags: " ++ unwords staticFlags)
-
-  when (dopt Opt_D_dump_mod_map dflags6) . liftIO $
-    printInfoForUser (dflags6 { pprCols = 200 })
-                     (pkgQual dflags6) (pprModuleMap dflags6)
-
   liftIO $ initUniqSupply (initialUnique dflags6) (uniqueIncrement dflags6)
         ---------------- Final sanity checking -----------
   liftIO $ checkOptions ghcjsSettings postLoadMode dflags6 srcs objs (js_objs ++ Ghcjs.gsJsLibSrcs ghcjsSettings)
@@ -289,7 +302,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
        StopBefore p           -> phaseMsg >> liftIO (Ghcjs.ghcjsOneShot jsEnv ghcjsSettings native hsc_env p srcs) >> return False
        DoInteractive          -> ghciUI srcs Nothing >> return True
        DoEval exprs           -> (ghciUI srcs $ Just $ reverse exprs) >> return True
-       DoAbiHash              -> abiHash srcs >> return True
+       DoAbiHash              -> abiHash (map fst srcs) >> return True
        ShowPackages           -> liftIO $ showPackages dflags6 >> return True
        DoGenerateLib          -> Ghcjs.generateLib ghcjsSettings >> return True
        DoPrintRts             -> liftIO (Ghcjs.printRts dflags6) >> return True
@@ -861,17 +874,9 @@ showOptions isInteractive = putStr (unlines availableOptions)
     where
       availableOptions = concat [
         flagsForCompletion isInteractive,
-        map ('-':) (concat [
-            getFlagNames mode_flags
-          , (filterUnwantedStatic . getFlagNames $ flagsStatic)
-          , flagsStaticNames
-          ])
+        map ('-':) (getFlagNames mode_flags)
         ]
-      getFlagNames opts = map flagName opts
-      -- this is a hack to get rid of two unwanted entries that get listed
-      -- as static flags. Hopefully this hack will disappear one day together
-      -- with static flags
-      filterUnwantedStatic      = filter (`notElem`["f", "fno-"])
+      getFlagNames opts         = map flagName opts
 
 showGhcUsage :: DynFlags -> IO ()
 showGhcUsage = showUsage False
@@ -930,6 +935,20 @@ dumpPackages       dflags = putMsg dflags (pprPackages dflags)
 dumpPackagesSimple dflags = putMsg dflags (pprPackagesSimple dflags)
 
 -- -----------------------------------------------------------------------------
+-- Frontend plugin support
+
+doFrontend :: ModuleName -> [(String, Maybe Phase)] -> Ghc ()
+-- #ifndef GHCI
+-- doFrontend modname _ = pluginError [modname]
+-- #else
+doFrontend modname srcs = do
+    hsc_env <- getSession
+    frontend_plugin <- liftIO $ loadFrontendPlugin hsc_env modname
+    frontend frontend_plugin
+      (reverse $ frontendPluginOpts (hsc_dflags hsc_env)) srcs
+-- #endif
+
+-- -----------------------------------------------------------------------------
 -- ABI hash support
 
 {-
@@ -945,7 +964,13 @@ the package chagnes, so during registration Cabal calls ghc --abi-hash
 to get a hash of the package's ABI.
 -}
 
-abiHash :: [(String, Maybe Phase)] -> Ghc ()
+-- | Print ABI hash of input modules.
+--
+-- The resulting hash is the MD5 of the GHC version used (Trac #5328,
+-- see 'hiVersion') and of the existing ABI hash from each module (see
+-- 'mi_mod_hash').
+abiHash :: [String] -- ^ List of module names
+        -> Ghc ()
 abiHash strs = do
   hsc_env <- getSession
   let dflags = hsc_dflags hsc_env
@@ -958,12 +983,12 @@ abiHash strs = do
          case r of
            Found _ m -> return m
            _error    -> throwGhcException $ CmdLineError $ showSDoc dflags $
-                          cannotFindInterface dflags modname r
+                          cannotFindModule dflags modname r
 
-  mods <- mapM find_it (map fst strs)
+  mods <- mapM find_it strs
 
   let get_iface modl = loadUserInterface False (text "abiHash") modl
-  ifaces <- initIfaceCheck hsc_env $ mapM get_iface mods
+  ifaces <- initIfaceCheck (text "abiHash") hsc_env $ mapM get_iface mods
 
   bh <- openBinMem (3*1024) -- just less than a block
   put_ bh hiVersion
@@ -982,6 +1007,39 @@ unknownFlagsErr fs = throwGhcException $ UsageError $ concatMap oneError fs
   where
     oneError f =
         "unrecognised flag: " ++ f ++ "\n" ++
-        (case fuzzyMatch f (nub allNonDeprecatedFlags) of
+        (case match f (nubSort allNonDeprecatedFlags) of
             [] -> ""
             suggs -> "did you mean one of:\n" ++ unlines (map ("  " ++) suggs))
+    -- fixes #11789
+    -- If the flag contains '=',
+    -- this uses both the whole and the left side of '=' for comparing.
+    match f allFlags
+        | elem '=' f =
+              let (flagsWithEq, flagsWithoutEq) = partition (elem '=') allFlags
+                  fName = takeWhile (/= '=') f
+              in (fuzzyMatch f flagsWithEq) ++ (fuzzyMatch fName flagsWithoutEq)
+        | otherwise = fuzzyMatch f allFlags
+
+{- Note [-Bsymbolic and hooks]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-Bsymbolic is a flag that prevents the binding of references to global
+symbols to symbols outside the shared library being compiled (see `man
+ld`). When dynamically linking, we don't use -Bsymbolic on the RTS
+package: that is because we want hooks to be overridden by the user,
+we don't want to constrain them to the RTS package.
+
+Unfortunately this seems to have broken somehow on OS X: as a result,
+defaultHooks (in hschooks.c) is not called, which does not initialize
+the GC stats. As a result, this breaks things like `:set +s` in GHCi
+(#8754). As a hacky workaround, we instead call 'defaultHooks'
+directly to initalize the flags in the RTS.
+
+A byproduct of this, I believe, is that hooks are likely broken on OS
+X when dynamically linking. But this probably doesn't affect most
+people since we're linking GHC dynamically, but most things themselves
+link statically.
+-}
+
+-- foreign import ccall safe "initGCStatistics"
+--  initGCStatistics :: IO ()
+initGCStatistics = pure ()

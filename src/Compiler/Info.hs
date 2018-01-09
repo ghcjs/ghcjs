@@ -1,7 +1,6 @@
-{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings, LambdaCase #-}
+{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings #-}
 module Compiler.Info where
 
-import           Control.Applicative
 import qualified Control.Exception as E
 
 import           Data.Function      (on)
@@ -39,7 +38,8 @@ compilerInfo :: Bool
 compilerInfo nativeToo dflags = do
       let topDir = getTopDir dflags
       nubBy ((==) `on` fst) $
-           [ ("Project name"     , "The Glorious Glasgow Haskell Compilation System for JavaScript")
+           [ ("Project name"
+           , "The Glorious Glasgow Haskell Compilation System for JavaScript")
            , ("Global Package DB", getGlobalPackageDB topDir)
            , ("Project version"  , getCompilerVersion)
            , ("LibDir"           , topDir)
@@ -72,7 +72,7 @@ getTopDir = sTopDir . settings
 
 -- | get the library directory (ghcjs --print-libdir).
 getLibDir :: DynFlags -> FilePath
-getLibDir = {- (</>"lib") . -} sTopDir . settings
+getLibDir = sTopDir . settings
 
 {- | get the library directory from the unsafe global DynFlags
      throws an exception if called before a Ghc session has been started
@@ -86,10 +86,10 @@ getGlobalPackageDB :: FilePath
 getGlobalPackageDB libDir = libDir </> "package.conf.d"
 
 getUserTopDir :: IO (Maybe FilePath)
-getUserTopDir = fmap Just getUserTopDir' `E.catch` 
+getUserTopDir = fmap Just getUserTopDir' `E.catch`
                    \(E.SomeException _) -> return Nothing
 
-getUserTopDir' :: IO FilePath -- (Maybe FilePath)
+getUserTopDir' :: IO FilePath
 getUserTopDir' =  (</> subdir) <$> getAppUserDataDirectory "ghcjs"
   where
     targetARCH = arch
@@ -112,7 +112,9 @@ getGhcCompilerVersion = cProjectVersion
 
 -- | GHCJS-GHC
 getFullCompilerVersion :: [Char]
-getFullCompilerVersion = Version.showVersion Paths_ghcjs.version ++ "-" ++ getGhcCompilerVersion
+getFullCompilerVersion = Version.showVersion Paths_ghcjs.version ++
+                         "-" ++
+                         getGhcCompilerVersion
 
 -- | Just the GHCJS version
 getCompilerVersion :: String
@@ -166,7 +168,8 @@ getFullArguments = do
           True  -> getOptionArgs o
           False -> addArgs os
   exists <- doesFileExist (exe)
-  when (not exists) (error $ "could not determine executable location: " ++ exe)
+  when (not exists)
+       (panic $ "could not determine executable location: " ++ exe)
   (++) <$> addArgs opts <*> getArgs
 
 getOptionArgs :: FilePath -> IO [String]
@@ -176,7 +179,8 @@ getOptionArgs file = do
   where f env line
           | "#" == (take 1 . dropWhile isSpace $ line) = Nothing
           | all isSpace line                           = Nothing
-          | otherwise                                  = Just (T.unpack $ substPatterns [] env (T.pack line))
+          | otherwise                                  =
+              Just (T.unpack $ substPatterns [] env (T.pack line))
 #else
 getFullArguments = getArgs
 #endif

@@ -1,12 +1,13 @@
-t7861.hs:15:13: error:
-    • Cannot instantiate unification variable ‘t0’
-      with a type involving foralls:
-        (forall (b :: GHC.Prim.Any). a1) -> a1
-        GHC doesn't yet support impredicative polymorphism
-    • In the first argument of ‘seq’, namely ‘f’
-      In a stmt of a 'do' block: f `seq` print "Hello 2"
-      In the expression:
-        do { print "Hello 1";
-             f `seq` print "Hello 2";
-             f (error "urk") `seq` print "Bad" }
+t7861.hs:10:5: error:
+    • Couldn't match type ‘a’ with ‘[a]’
+      ‘a’ is a rigid type variable bound by
+        the type signature for:
+          f :: forall a. (forall b. a) -> a
+        at t7861.hs:9:1-23
+      Expected type: (forall b. a) -> a
+        Actual type: (forall b. a) -> [a]
+    • In the expression: doA
+      In an equation for ‘f’: f = doA
+    • Relevant bindings include
+        f :: (forall b. a) -> a (bound at t7861.hs:10:1)
 (deferred type error)

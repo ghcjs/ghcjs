@@ -3,7 +3,8 @@
              ScopedTypeVariables,
              TemplateHaskell,
              TupleSections,
-             OverloadedStrings #-}
+             OverloadedStrings
+  #-}
 
 {-
   The compactor does link-time optimization. It is much simpler
@@ -18,16 +19,21 @@
 module Gen2.Compactor where
 
 import           DynFlags
+import           Util
+import           Panic
+
 
 import           Control.Applicative
 import           Control.Arrow
 import           Control.Lens
 import           Control.Monad.State.Strict
 
+import           Data.Array
 import qualified Data.Binary.Get as DB
 import qualified Data.Binary.Put as DB
 import           Data.Bits
 import qualified Data.ByteString.Lazy as BL
+import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Builder as BB
@@ -51,6 +57,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Encoding.Error as TE
 
 import           Compiler.JMacro
 import           Compiler.Settings
@@ -59,7 +66,7 @@ import           Gen2.Base
 import           Gen2.ClosureInfo
 import           Gen2.Utils (buildingProf, buildingDebug)
 import           Gen2.Printer             (pretty)
-import qualified Panic
+import qualified Gen2.Utils as U
 import           Text.PrettyPrint.Leijen.Text (renderPretty, displayT)
 import qualified Crypto.Hash.SHA256 as SHA256
 import           Data.Aeson (ToJSON(..), Value)
@@ -68,6 +75,7 @@ import qualified Data.ByteString.Base16 as B16
 
 import System.IO.Unsafe (unsafePerformIO)
 
+type LinkedUnit = (JStat, [ClosureInfo], [StaticInfo])
 
 -- | collect global objects (data / CAFs). rename them and add them to the table
 collectGlobals :: [StaticInfo]
@@ -75,13 +83,180 @@ collectGlobals :: [StaticInfo]
 collectGlobals = mapM_ (\(StaticInfo i _ _) -> renameObj i)
 
 debugShowStat :: (JStat, [ClosureInfo], [StaticInfo]) -> String
-debugShowStat (_s, cis, sis) = "closures:\n" ++ unlines (map show cis) ++ "\nstatics:" ++ unlines (map show sis) ++ "\n\n"
+debugShowStat (_s, cis, sis) =
+  "closures:\n" ++
+  unlines (map show cis) ++
+  "\nstatics:" ++
+  unlines (map show sis) ++
+  "\n\n"
 
-renameInternals :: GhcjsSettings
+{- create a single string initializer for all StaticUnboxedString references
+   in the code, and rewrite all references to point to it
+
+   if incremental linking is used, each increment gets its own packed string
+   blob. if a string value already exists in an earlier blob it is not added
+   again
+ -}
+packStrings :: HasDebugCallStack
+            => GhcjsSettings
+            -> DynFlags
+            -> CompactorState
+            -> [LinkedUnit]
+            -> (CompactorState, [LinkedUnit])
+packStrings settings dflags cstate code =
+  let allStatics :: [StaticInfo]
+      allStatics = concatMap (\(_,_,x) -> x) code
+
+      origStringTable :: StringTable
+      origStringTable = cstate ^. stringTable
+
+      allStrings :: Set ByteString
+      allStrings = S.fromList $
+                   filter (not . isExisting)
+                          (mapMaybe (staticString . siVal) allStatics)
+        where
+          isExisting bs = isJust (HM.lookup bs $ stOffsets origStringTable)
+
+      staticString :: StaticVal -> Maybe ByteString
+      staticString (StaticUnboxed (StaticUnboxedString bs)) = Just bs
+      staticString (StaticUnboxed (StaticUnboxedStringOffset bs)) = Just bs
+      staticString _ = Nothing
+
+      allStringsList :: [ByteString]
+      allStringsList = S.toList allStrings
+
+      -- we may see two kinds of null characters
+      --   - string separator, packed as \0
+      --   - within a string, packed as \cz\0
+      -- we transform the strings to
+      transformPackedLiteral :: Text -> Text
+      transformPackedLiteral = T.concatMap f
+        where
+          f :: Char -> Text
+          f '\0'  = "\^Z\0"
+          f '\^Z' = "\^Z\^Z"
+          f x     = T.singleton x
+
+      allStringsPacked :: Text
+      allStringsPacked = T.intercalate "\0" $
+        map ( transformPackedLiteral
+            . fromMaybe (panic "invalid string literal")
+            . U.decodeModifiedUTF8)
+            allStringsList
+
+      allStringsWithOffset :: [(ByteString, Int)]
+      allStringsWithOffset = snd $
+        mapAccumL (\o b -> let o' = o + fromIntegral (BS.length b) + 1
+                           in  o' `seq` (o', (b, o)))
+                  0
+                  allStringsList
+
+      -- the offset of each of the strings in the big blob
+      offsetIndex :: HashMap ByteString Int
+      offsetIndex = HM.fromList allStringsWithOffset
+
+      stringSymbol :: Ident
+      stringSymbol = head $ cstate ^. identSupply
+
+      stringSymbolT :: Text
+      stringSymbolT = let (TxtI t) = stringSymbol in t
+
+      stringSymbolIdx :: Int
+      stringSymbolIdx = snd (bounds $ stTableIdents origStringTable) + 1
+
+      -- append the new string symbol
+      newTableIdents :: Array Int Text
+      newTableIdents =
+        listArray (0, stringSymbolIdx)
+                  (elems (stTableIdents origStringTable) ++ [stringSymbolT])
+
+      newOffsetsMap :: HashMap ByteString (Int, Int)
+      newOffsetsMap = HM.union (stOffsets origStringTable)
+                               (fmap (stringSymbolIdx,) offsetIndex)
+
+      newIdentsMap :: HashMap Text (Either Int Int)
+      newIdentsMap =
+        let f (StaticInfo s (StaticUnboxed (StaticUnboxedString bs)) _)
+              = Just (s, Left . fst $ newOffsetsMap HM.! bs)
+            f (StaticInfo s (StaticUnboxed (StaticUnboxedStringOffset bs)) _)
+              = Just (s, Right . snd $ newOffsetsMap HM.! bs)
+            f _ = Nothing
+        in HM.union (stIdents origStringTable)
+                    (HM.fromList $ mapMaybe f allStatics)
+
+      newStringTable :: StringTable
+      newStringTable = StringTable newTableIdents newOffsetsMap newIdentsMap
+
+      replaceSymbol :: Text -> Maybe JVal
+      replaceSymbol t =
+        let f (Left i)  = JVar (TxtI $ newTableIdents ! i)
+            f (Right o) = JInt (fromIntegral o)
+        in  fmap f (HM.lookup t newIdentsMap)
+
+      cstate0 :: CompactorState
+      cstate0 = cstate & identSupply %~ tail
+                       & stringTable .~ newStringTable
+
+      initStr :: JStat
+      initStr =
+        DeclStat stringSymbol <>
+        AssignStat (ValExpr $ JVar stringSymbol)
+          (ApplExpr (ApplExpr (ValExpr $ JVar (TxtI "h$pstr"))
+                              [ValExpr (JStr allStringsPacked)])
+                    [])
+
+      rewriteValsE :: JExpr -> JExpr
+      rewriteValsE e = e & valsE %~ rewriteVals
+
+      rewriteVals :: JVal -> JVal
+      rewriteVals (JVar (TxtI t))
+        | Just v <- replaceSymbol t = v
+      rewriteVals (JList es) = JList (map rewriteValsE es)
+      rewriteVals (JHash m) = JHash (fmap rewriteValsE m)
+      rewriteVals (JFunc args body) = JFunc args (body & valsS %~ rewriteVals)
+      rewriteVals v = v
+
+      rewriteStat :: JStat -> JStat
+      rewriteStat st = st & valsS %~ rewriteVals
+
+      rewriteStatic :: StaticInfo -> Maybe StaticInfo
+      rewriteStatic (StaticInfo i
+                                (StaticUnboxed (StaticUnboxedString {}))
+                                cc) =
+        Nothing
+      rewriteStatic (StaticInfo i
+                                (StaticUnboxed (StaticUnboxedStringOffset {}))
+                                cc) =
+        Nothing
+      rewriteStatic si = Just (si & staticInfoArgs %~ rewriteStaticArg)
+
+      rewriteStaticArg :: StaticArg -> StaticArg
+      rewriteStaticArg a@(StaticObjArg t) =
+        case HM.lookup t newIdentsMap of
+          Just (Right v)       -> StaticLitArg (IntLit $ fromIntegral v)
+          Just (Left idx)      -> StaticObjArg (newTableIdents ! idx)
+          _                    -> a
+      rewriteStaticArg (StaticConArg v es)
+        = StaticConArg v (map rewriteStaticArg es)
+      rewriteStaticArg x = x
+
+      initStatic :: LinkedUnit
+      initStatic =
+        let (TxtI ss) = stringSymbol
+        in  (initStr, [], [StaticInfo ss (StaticThunk Nothing) Nothing])
+
+      rewriteBlock :: LinkedUnit -> LinkedUnit
+      rewriteBlock (stat, ci, si)
+        = (rewriteStat stat, ci, mapMaybe rewriteStatic si)
+
+    in (cstate0, initStatic : map rewriteBlock code)
+
+renameInternals :: HasDebugCallStack
+                => GhcjsSettings
                 -> DynFlags
                 -> CompactorState
                 -> [Text]
-                -> [(JStat, [ClosureInfo], [StaticInfo])]
+                -> [LinkedUnit]
                 -> (CompactorState, [JStat], JStat)
 renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
   where
@@ -93,9 +268,12 @@ renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
     renamed
       | buildingDebug dflags || buildingProf dflags = do
         cs <- get
-        let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs) stats0
-            statics      = map (renameStaticInfo cs)  $ concatMap (\(_,_,x) -> x) stats0
-            infos        = map (renameClosureInfo cs) $ concatMap (\(_,x,_) -> x) stats0
+        let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs)
+                               stats0
+            statics      = map (renameStaticInfo cs)  $
+                               concatMap (\(_,_,x) -> x) stats0
+            infos        = map (renameClosureInfo cs) $
+                               concatMap (\(_,x,_) -> x) stats0
             -- render metadata as individual statements
             meta = mconcat (map staticDeclStat statics) <>
                    (stbs & identsS %~ lookupRenamed cs) <>
@@ -117,20 +295,35 @@ renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
             safariCrashWorkaround xs =
               case chunksOf 10000 xs of
                 (y:ys) | not (null ys)
-                  -> ApplExpr (SelExpr (toJExpr y) (TxtI "concat")) (map toJExpr ys)
-                _      -> toJExpr xs
-        let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs) stats0
-            sortedInfo   = concatMap (\(_,xs,_) -> map (renameClosureInfo cs) xs) stats0
+                  -> ApplExpr (SelExpr (toJExpr y) (TxtI "concat"))
+                              (map toJExpr ys)
+                _ -> toJExpr xs
+        let renamedStats = map (\(s,_,_) -> s & identsS %~ lookupRenamed cs)
+                               stats0
+            sortedInfo   = concatMap (\(_,xs,_) -> map (renameClosureInfo cs)
+                                                       xs)
+                                     stats0
             entryArr     = safariCrashWorkaround $
-                           map (TxtI . fst) . sortBy (compare `on` snd) . HM.toList $ cs ^. entries
-            lblArr       = map (TxtI . fst) . sortBy (compare `on` snd) . HM.toList $ cs ^. labels
-            ss           = concatMap (\(_,_,xs) -> map (renameStaticInfo cs) xs) stats0
+                           map (TxtI . fst) .
+                           sortBy (compare `on` snd) .
+                           HM.toList $
+                           cs ^. entries
+            lblArr       = map (TxtI . fst) .
+                           sortBy (compare `on` snd) .
+                           HM.toList $
+                           cs ^. labels
+            ss           = concatMap (\(_,_,xs) -> map (renameStaticInfo cs) xs)
+                                     stats0
             infoBlock    = encodeStr (concatMap (encodeInfo cs) sortedInfo)
             staticBlock  = encodeStr (concatMap (encodeStatic cs) ss)
             stbs'        = stbs & identsS %~ lookupRenamed cs
             staticDecls  = mconcat (map staticDeclStat ss) <> stbs'
             meta = staticDecls <>
-                   [j| h$scheduleInit(`entryArr`, h$staticDelayed, `lblArr`, `infoBlock`, `staticBlock`);
+                   [j| h$scheduleInit( `entryArr`
+                                     , h$staticDelayed
+                                     , `lblArr`
+                                     , `infoBlock`
+                                     , `staticBlock`);
                        h$staticDelayed = [];
                      |]
         return (renamedStats, meta)
@@ -152,8 +345,13 @@ renameEntry i = do
   addItem entries entries numEntries numEntries parentEntries i''
   return i'
 
-addItem :: Getting (HashMap Text Int) CompactorState (HashMap Text Int)
-        -> Setting (->) CompactorState CompactorState (HashMap Text Int) (HashMap Text Int)
+addItem :: HasDebugCallStack
+        => Getting (HashMap Text Int) CompactorState (HashMap Text Int)
+        -> Setting (->)
+                   CompactorState
+                   CompactorState
+                   (HashMap Text Int)
+                   (HashMap Text Int)
         -> Getting Int CompactorState Int
         -> ASetter' CompactorState Int
         -> Getting (HashMap Text Int) CompactorState (HashMap Text Int)
@@ -173,7 +371,8 @@ addItem items items' numItems numItems' parentItems i = do
           numItems' += 1
 
 collectLabels :: StaticInfo -> State CompactorState ()
-collectLabels si = mapM_ (addItem labels labels numLabels numLabels parentLabels) (labelsV . siVal $ si)
+collectLabels si = mapM_ (addItem labels labels numLabels numLabels parentLabels)
+                         (labelsV . siVal $ si)
   where
     labelsV (StaticData _ args) = concatMap labelsA args
     labelsV (StaticList args _) = concatMap labelsA args
@@ -228,14 +427,20 @@ renameStaticInfo cs si = si & staticIdents %~ renameIdent
     renameIdent t = maybe t (\(TxtI t') -> t') (HM.lookup t $ cs ^. nameMap)
 
 staticIdents :: Traversal' StaticInfo Text
-staticIdents f (StaticInfo i v cc) = StaticInfo <$> f i <*> staticIdentsV f v <*> pure cc
+staticIdents f (StaticInfo i v cc) =
+  StaticInfo <$> f i <*> staticIdentsV f v <*> pure cc
 
 staticIdentsV :: Traversal' StaticVal Text
-staticIdentsV f (StaticFun i args)     = StaticFun <$> f i <*> traverse (staticIdentsA f) args
-staticIdentsV f (StaticThunk (Just (i, args))) = StaticThunk . Just <$> liftA2 (,) (f i) (traverse (staticIdentsA f) args)
-staticIdentsV f (StaticData con args)  = StaticData <$> f con <*> traverse (staticIdentsA f) args
-staticIdentsV f (StaticList xs t)      = StaticList <$> traverse (staticIdentsA f) xs <*> traverse f t
-staticIdentsV _ x                      = pure x
+staticIdentsV f (StaticFun i args) =
+  StaticFun <$> f i <*> traverse (staticIdentsA f) args
+staticIdentsV f (StaticThunk (Just (i, args))) =
+  StaticThunk . Just <$> liftA2 (,) (f i) (traverse (staticIdentsA f) args)
+staticIdentsV f (StaticData con args) =
+  StaticData <$> f con <*> traverse (staticIdentsA f) args
+staticIdentsV f (StaticList xs t) =
+  StaticList <$> traverse (staticIdentsA f) xs <*> traverse f t
+staticIdentsV _ x =
+  pure x
 
 staticIdentsA :: Traversal' StaticArg Text
 staticIdentsA f (StaticObjArg t) = StaticObjArg <$> f t
@@ -250,64 +455,76 @@ staticIdentsA _ x                = pure x
       2 byte: 124 a b            (90-8189)
       3 byte: 125 a b c          (8190-737189)
 -}
-encodeStr :: [Int] -> String
+encodeStr :: HasDebugCallStack => [Int] -> String
 encodeStr = concatMap encodeChr
   where
-    c :: Int -> Char
+    c :: HasDebugCallStack => Int -> Char
     c i | i > 90 || i < 0 = error ("encodeStr: c " ++ show i)
         | i >= 59   = chr (34+i)
         | i >= 2    = chr (33+i)
         | otherwise = chr (32+i)
+    encodeChr :: HasDebugCallStack => Int -> String
     encodeChr i
-      | i < 0       = error "encodeStr: negative"
+      | i < 0       = panic "encodeStr: negative"
       | i <= 89     = [c i]
       | i <= 8189   = let (c1, c2)  = (i - 90) `divMod` 90 in [chr 124, c c1, c c2]
       | i <= 737189 = let (c2a, c3) = (i - 8190) `divMod` 90
                           (c1, c2)  = c2a `divMod` 90
                       in [chr 125, c c1, c c2, c c3]
-      | otherwise = error "encodeStr: overflow"
+      | otherwise = panic "encodeStr: overflow"
 
-entryIdx :: String
+entryIdx :: HasDebugCallStack
+         => String
          -> CompactorState
          -> Text
          -> Int
 entryIdx msg cs i = fromMaybe lookupParent (HM.lookup i' (cs ^. entries))
   where
     (TxtI i')    = lookupRenamed cs (TxtI i)
-    lookupParent = maybe err (+ cs ^. numEntries) (HM.lookup i' (cs ^. parentEntries))
-    err = error (msg ++ ": invalid entry: " ++ T.unpack i')
+    lookupParent = maybe err
+                         (+ cs ^. numEntries)
+                         (HM.lookup i' (cs ^. parentEntries))
+    err = panic (msg ++ ": invalid entry: " ++ T.unpack i')
 
-objectIdx :: String
+objectIdx :: HasDebugCallStack
+          => String
           -> CompactorState
           -> Text
           -> Int
 objectIdx msg cs i = fromMaybe lookupParent (HM.lookup i' (cs ^. statics))
   where
     (TxtI i')    = lookupRenamed cs (TxtI i)
-    lookupParent = maybe err (+ cs ^. numStatics) (HM.lookup i' (cs ^. parentStatics))
-    err          = error (msg ++ ": invalid static: " ++ T.unpack i')
+    lookupParent = maybe err
+                         (+ cs ^. numStatics)
+                         (HM.lookup i' (cs ^. parentStatics))
+    err          = panic (msg ++ ": invalid static: " ++ T.unpack i')
 
-labelIdx :: String
+labelIdx :: HasDebugCallStack
+         => String
          -> CompactorState
          -> Text
          -> Int
 labelIdx msg cs l = fromMaybe lookupParent (HM.lookup l (cs ^. labels))
   where
-    lookupParent = maybe err (+ cs ^. numLabels) (HM.lookup l (cs ^. parentLabels))
-    err          = error (msg ++ ": invalid label: " ++ T.unpack l)
+    lookupParent = maybe err
+                         (+ cs ^. numLabels)
+                         (HM.lookup l (cs ^. parentLabels))
+    err          = panic (msg ++ ": invalid label: " ++ T.unpack l)
 
-encodeInfo :: CompactorState
+encodeInfo :: HasDebugCallStack
+           => CompactorState
            -> ClosureInfo  -- ^ information to encode
            -> [Int]
 encodeInfo cs (ClosureInfo _var regs name layout typ static)
   | CIThunk              <- typ = [0] ++ ls
   | (CIFun _arity regs0) <- typ, regs0 /= argSize regs
-     = error ("encodeInfo: inconsistent register metadata for " ++ T.unpack name)
+     = panic ("encodeInfo: inconsistent register metadata for " ++ T.unpack name)
   | (CIFun arity _regs0) <- typ = [1, arity, encodeRegs regs] ++ ls
   | (CICon tag)          <- typ = [2, tag] ++ ls
   | CIStackFrame         <- typ = [3, encodeRegs regs] ++ ls
 -- (CIPap ar)         <- typ = [4, ar] ++ ls  -- these should only appear during runtime
-  | otherwise                  = error ("encodeInfo, unexpected closure type: " ++ show typ)
+  | otherwise                  = panic $
+      "encodeInfo, unexpected closure type: " ++ show typ
   where
     ls         = encodeLayout layout ++ encodeSrt static
     encodeLayout CILayoutVariable      = [0]
@@ -318,44 +535,78 @@ encodeInfo cs (ClosureInfo _var regs name layout typ static)
     encodeRegs (CIRegs skip regTypes) = let nregs = sum (map varSize regTypes)
                                         in  encodeRegsTag skip nregs
     encodeRegsTag skip nregs
-      | skip < 0 || skip > 1 = error "encodeRegsTag: unexpected skip"
+      | skip < 0 || skip > 1 = panic "encodeRegsTag: unexpected skip"
       | otherwise            = 1 + (nregs `shiftL` 1) + skip
     argSize (CIRegs skip regTypes) = sum (map varSize regTypes) - 1 + skip
     argSize _ = 0
 
-encodeStatic :: CompactorState
+encodeStatic :: HasDebugCallStack
+             => CompactorState
              -> StaticInfo
              -> [Int]
-encodeStatic cs (StaticInfo _to sv _)
-    | StaticFun f args <- sv                      = [1, entry f, length args] ++ concatMap encodeArg args
-    | StaticThunk (Just (t, args)) <- sv          = [2, entry t, length args] ++ concatMap encodeArg args
-    | StaticThunk Nothing <- sv                   = [0]
-    | StaticUnboxed (StaticUnboxedBool b) <- sv   = [3 + fromEnum b]
-    | StaticUnboxed (StaticUnboxedInt i) <- sv    = [5] -- ++ encodeInt i
-    | StaticUnboxed (StaticUnboxedDouble d) <- sv = [6] -- ++ encodeDouble d
+encodeStatic cs si =
+  U.trace' ("encodeStatic: " ++ show si)
+           (encodeStatic0 cs si)
+
+encodeStatic0 :: HasDebugCallStack
+             => CompactorState
+             -> StaticInfo
+             -> [Int]
+encodeStatic0 cs (StaticInfo _to sv _)
+    | StaticFun f args <- sv =
+      [1, entry f, length args] ++ concatMap encodeArg args
+    | StaticThunk (Just (t, args)) <- sv =
+      [2, entry t, length args] ++ concatMap encodeArg args
+    | StaticThunk Nothing <- sv =
+      [0]
+    | StaticUnboxed (StaticUnboxedBool b) <- sv =
+      [3 + fromEnum b]
+    | StaticUnboxed (StaticUnboxedInt i) <- sv =
+      [5] -- ++ encodeInt i
+    | StaticUnboxed (StaticUnboxedDouble d) <- sv =
+      [6] -- ++ encodeDouble d
 --    | StaticString t <- sv         = [7, T.length t] ++ map encodeChar (T.unpack t)
 --    | StaticBin bs <- sv           = [8, BS.length bs] ++ map fromIntegral (BS.unpack bs)
-    | StaticList [] Nothing <- sv                 = [8]
-    | StaticList args t <- sv                     = [9, length args] ++ maybe [0] (\t' -> [1, obj t']) t ++ concatMap encodeArg (reverse args)
+    | StaticList [] Nothing <- sv =
+      [8]
+    | StaticList args t <- sv =
+      [9, length args] ++
+      maybe [0] (\t' -> [1, obj t']) t ++
+      concatMap encodeArg (reverse args)
     | StaticData con args <- sv =
-      (if length args <= 6 then [11+length args] else [10,length args]) ++ [entry con] ++ concatMap encodeArg args
+      (if length args <= 6
+        then [11+length args]
+        else [10,length args]) ++
+      [entry con] ++
+      concatMap encodeArg args
   where
     obj   = objectIdx "encodeStatic" cs
     entry = entryIdx  "encodeStatic" cs
     lbl   = labelIdx  "encodeStatic" cs
     -- | an argument is either a reference to a heap object or a primitive value
-    encodeArg (StaticLitArg (BoolLit b))    = [0 + fromEnum b]
-    encodeArg (StaticLitArg (IntLit 0))     = [2]
-    encodeArg (StaticLitArg (IntLit 1))     = [3]
-    encodeArg (StaticLitArg (IntLit i))     = [4] ++ encodeInt i
-    encodeArg (StaticLitArg NullLit)        = [5]
-    encodeArg (StaticLitArg (DoubleLit d))  = [6] ++ encodeDouble d
-    encodeArg (StaticLitArg (StringLit s))  = [7] ++ encodeString s
-    encodeArg (StaticLitArg (BinLit b))     = [8] ++ encodeBinary b
-    encodeArg (StaticLitArg (LabelLit b l)) = [9, fromEnum b, lbl l]
-    encodeArg (StaticConArg con args)       = [10, entry con, length args] ++ concatMap encodeArg args
-    encodeArg (StaticObjArg t)              = [11 + obj t]
-    -- encodeArg x                             = error ("encodeArg: unexpected: " ++ show x)
+    encodeArg (StaticLitArg (BoolLit b)) =
+      [0 + fromEnum b]
+    encodeArg (StaticLitArg (IntLit 0)) =
+      [2]
+    encodeArg (StaticLitArg (IntLit 1)) =
+      [3]
+    encodeArg (StaticLitArg (IntLit i)) =
+      [4] ++ encodeInt i
+    encodeArg (StaticLitArg NullLit) =
+      [5]
+    encodeArg (StaticLitArg (DoubleLit d)) =
+      [6] ++ encodeDouble d
+    encodeArg (StaticLitArg (StringLit s)) =
+      [7] ++ encodeString s
+    encodeArg (StaticLitArg (BinLit b)) =
+      [8] ++ encodeBinary b
+    encodeArg (StaticLitArg (LabelLit b l)) =
+      [9, fromEnum b, lbl l]
+    encodeArg (StaticConArg con args) =
+      [10, entry con, length args] ++ concatMap encodeArg args
+    encodeArg (StaticObjArg t) =
+      [11 + obj t]
+    -- encodeArg x                             = panic ("encodeArg: unexpected: " ++ show x)
     encodeChar = ord -- fixme make characters more readable
 
 encodeString :: Text -> [Int]
@@ -387,18 +638,24 @@ encodeBinary bs = BS.length bs : go bs
 encodeInt :: Integer -> [Int]
 encodeInt i
   | i >= -10 && i < encodeMax - 11 = [fromIntegral i + 12]
-  | i > 2^(31::Int)-1 || i < -2^(31::Int) = error "encodeInt: integer outside 32 bit range"
+  | i > 2^(31::Int)-1 || i < -2^(31::Int)
+    = panic "encodeInt: integer outside 32 bit range"
   | otherwise = let i' :: Int32 = fromIntegral i
-                in [0, fromIntegral ((i' `shiftR` 16) .&. 0xffff), fromIntegral (i' .&. 0xffff)]
+                in [ 0
+                   , fromIntegral ((i' `shiftR` 16) .&. 0xffff)
+                   , fromIntegral (i' .&. 0xffff)
+                   ]
 
 -- encode a possibly 53 bit int
 encodeSignificand :: Integer -> [Int]
 encodeSignificand i
   | i >= -10 && i < encodeMax - 11      = [fromIntegral i + 12]
-  | i > 2^(53::Int) || i < -2^(53::Int) = error ("encodeInt: integer outside 53 bit range: " ++ show i)
+  | i > 2^(53::Int) || i < -2^(53::Int)
+    = panic ("encodeInt: integer outside 53 bit range: " ++ show i)
   | otherwise = let i' = abs i
                 in  [if i < 0 then 0 else 1] ++
-                    map (\r -> fromIntegral ((i' `shiftR` r) .&. 0xffff)) [48,32,16,0]
+                    map (\r -> fromIntegral ((i' `shiftR` r) .&. 0xffff))
+                        [48,32,16,0]
 
 encodeDouble :: SaneDouble -> [Int]
 encodeDouble (SaneDouble d)
@@ -407,8 +664,10 @@ encodeDouble (SaneDouble d)
   | isInfinite d && d > 0 = [2]
   | isInfinite d          = [3]
   | isNaN d               = [4]
-  | abs exponent <= 30    = [6 + fromIntegral exponent + 30] ++ encodeSignificand significand
-  | otherwise             = [5] ++ encodeInt (fromIntegral exponent) ++ encodeSignificand significand
+  | abs exponent <= 30
+    = [6 + fromIntegral exponent + 30] ++ encodeSignificand significand
+  | otherwise
+    = [5] ++ encodeInt (fromIntegral exponent) ++ encodeSignificand significand
     where
       (significand, exponent) = decodeFloat d
 
@@ -481,17 +740,70 @@ identsV f (JHash m)      = JHash <$> (traverse . identsE) f m
 identsV f (JFunc args s) = JFunc <$> traverse f args <*> identsS f s
 identsV _ (UnsatVal{})   = error "identsV: UnsatVal"
 
+----------------------------
+
+{-# INLINE valsS #-}
+valsS :: Traversal' JStat JVal
+valsS _ d@(DeclStat _i)      = pure d -- DeclStat       <$> f i
+valsS f (ReturnStat e)       = ReturnStat     <$> valsE f e
+valsS f (IfStat e s1 s2)     = IfStat         <$> valsE f e <*> valsS f s1 <*> valsS f s2
+valsS f (WhileStat b e s)    = WhileStat b    <$> valsE f e <*> valsS f s
+valsS f (ForInStat b i e s)  = ForInStat b    <$> pure i <*> valsE f e <*> valsS f s
+valsS f (SwitchStat e xs s)  = SwitchStat     <$> valsE f e <*> (traverse . traverseCase) f xs <*> valsS f s
+  where traverseCase g (e,s) = (,) <$> valsE g e <*> valsS g s
+valsS f (TryStat s1 i s2 s3) = TryStat        <$> valsS f s1 <*> pure i <*> valsS f s2 <*> valsS f s3
+valsS f (BlockStat xs)       = BlockStat   <$> (traverse . valsS) f xs
+valsS f (ApplStat e es)      = ApplStat    <$> valsE f e <*> (traverse . valsE) f es
+valsS f (UOpStat op e)       = UOpStat op  <$> valsE f e
+valsS f (AssignStat e1 e2)   = AssignStat  <$> valsE f e1 <*> valsE f e2
+valsS _ (UnsatBlock{})       = panic "valsS: UnsatBlock"
+valsS _ (AntiStat{})         = panic "valsS: AntiStat"
+valsS f (LabelStat l s)      = LabelStat l <$> valsS f s
+valsS _ b@(BreakStat{})      = pure b
+valsS _ c@(ContinueStat{})   = pure c
+
+{-# INLINE valsE #-}
+valsE :: Traversal' JExpr JVal
+valsE f (ValExpr v)         = ValExpr     <$> f v
+valsE f (SelExpr e i)       = SelExpr     <$> valsE f e <*> pure i
+valsE f (IdxExpr e1 e2)     = IdxExpr     <$> valsE f e1 <*> valsE f e2
+valsE f (InfixExpr s e1 e2) = InfixExpr s <$> valsE f e1 <*> valsE f e2
+valsE f (UOpExpr o e)       = UOpExpr o   <$> valsE f e
+valsE f (IfExpr e1 e2 e3)   = IfExpr      <$> valsE f e1 <*> valsE f e2 <*> valsE f e3
+valsE f (ApplExpr e es)     = ApplExpr    <$> valsE f e <*> (traverse . valsE) f es
+valsE _ (UnsatExpr{})       = panic "valsE: UnsatExpr"
+valsE _ (AntiExpr{})        = panic "valsE: AntiExpr"
+
+
+staticInfoArgs :: Traversal' StaticInfo StaticArg
+staticInfoArgs f (StaticInfo si sv sa) =
+  StaticInfo <$> pure si <*> staticValArgs f sv <*> pure sa
+
+staticValArgs :: Traversal' StaticVal StaticArg
+staticValArgs f (StaticFun fn as)
+  = StaticFun fn <$> traverse f as
+staticValArgs f (StaticThunk (Just (t, as)))
+  = StaticThunk . Just . (t,) <$> traverse f as
+staticValArgs f (StaticData c as) = StaticData c <$> traverse f as
+staticValArgs f (StaticList as mt) = StaticList <$> traverse f as <*> pure mt
+staticValArgs _ x = pure x
+
 compact :: GhcjsSettings
         -> DynFlags
         -> CompactorState
         -> [Text]
-        -> [(JStat, [ClosureInfo], [StaticInfo])]
-        -> (CompactorState, [JStat], JStat) -- ^ renamer state, statements for each unit, metadata
-compact settings dflags rs rtsDeps input
+        -> [LinkedUnit]
+        -> (CompactorState, [JStat], JStat)
+compact settings dflags cs0 rtsDeps0 input0
 --  | dumpHashes' input
   =
-  let rtsDeps' = rtsDeps ++ map (<> "_e") rtsDeps ++ map (<> "_con_e") rtsDeps
-  in  renameInternals settings dflags rs rtsDeps' input
+  let rtsDeps1 = rtsDeps0 ++
+                 map (<> "_e") rtsDeps0 ++
+                 map (<> "_con_e") rtsDeps0
+      (cs1, input1) = packStrings settings dflags cs0 input0
+  in  renameInternals settings dflags cs1 rtsDeps1 input1
+
+  -- renameInternals settings dflags cs1 rtsDeps' input
 
 
 -- hash compactification
@@ -506,9 +818,13 @@ dedupeBodies rtsDeps input = (renderBuildFunctions bfN bfCB, input')
                              (map (\(k, s, bs) -> (bs, (s, [k]))) hdefs0)
     hdefsR  = M.fromList $ map (\(k, _, bs) -> (k, bs)) hdefs0
     hdefs0 :: [(Text, Int, BS.ByteString)]
-    hdefs0  = concatMap (\(b,_,_) -> (map (\(k,h) ->
-                                        let (s,fh, _deps) = finalizeHash' h
-                                        in (k, s, fh)) . hashDefinitions globals) b) input
+    hdefs0  = concatMap (\(b,_,_) ->
+                          (map (\(k,h) ->
+                            let (s,fh, _deps) = finalizeHash' h
+                            in (k, s, fh))
+                        . hashDefinitions globals) b
+                        )
+                        input
     globals = foldl' (flip S.delete) (findAllGlobals input) rtsDeps
 
 renderBuildFunctions :: [BuildFunction] -> [BuildFunction] -> JStat
@@ -551,14 +867,16 @@ sortBuildFunctions bfs = (map snd normBFs, map snd cbBFs)
     fromSCC (G.AcyclicSCC x) = [(False, bfm M.! x)]
     fromSCC (G.CyclicSCC xs) = breakCycles xs
     sccs :: [BuildFunction] -> [G.SCC Text]
-    sccs b = G.stronglyConnComp $ map (\bf -> let n = bfName bf in (n, n, bfDeps bf)) b
+    sccs b = G.stronglyConnComp $
+      map (\bf -> let n = bfName bf in (n, n, bfDeps bf)) b
     {-
        finding the maximum acyclic subgraph is the Minimum Feedback Arc Set problem,
        which is NP-complete. We use an approximation here.
      -}
     breakCycles :: [Text] -> [(Bool, BuildFunction)]
-    breakCycles nodes = (True, bfm M.! selected)
-                      : concatMap fromSCC (sccs $ (map (bfm M.!) $ filter (/=selected) nodes))
+    breakCycles nodes =
+      (True, bfm M.! selected)
+      : concatMap fromSCC (sccs $ (map (bfm M.!) $ filter (/=selected) nodes))
       where
         outDeg, inDeg :: Map Text Int
         outDeg = M.fromList $ map (\n -> (n, length (bfDeps (bfm M.! n)))) nodes
@@ -570,8 +888,8 @@ sortBuildFunctions bfs = (map snd normBFs, map snd cbBFs)
 rewriteBodies :: Set Text
               -> Map Text BS.ByteString
               -> Map BS.ByteString (Int, [Text])
-              -> [(JStat, [ClosureInfo], [StaticInfo])]
-              -> ([BuildFunction], [BuildFunction], [(JStat, [ClosureInfo], [StaticInfo])])
+              -> [LinkedUnit]
+              -> ([BuildFunction], [BuildFunction], [LinkedUnit])
 rewriteBodies globals idx1 idx2 input = (bfsNormal, bfsCycleBreaker, input')
   where
     (bfs1, input')               = unzip (map rewriteBlock input)
@@ -582,7 +900,7 @@ rewriteBodies globals idx1 idx2 input = (bfsNormal, bfsCycleBreaker, input')
     idx2' = M.filter (\(s, xs) -> dedupeBody (length xs) s) idx2
 
     rewriteBlock :: (JStat, [ClosureInfo], [StaticInfo])
-                 -> ([BuildFunction], (JStat, [ClosureInfo], [StaticInfo]))
+                 -> ([BuildFunction], LinkedUnit)
     rewriteBlock (st, cis, sis) =
       let (bfs, st') = rewriteFunctions st
       -- remove the declarations for things that we just deduped
@@ -596,15 +914,22 @@ rewriteBodies globals idx1 idx2 input = (bfsNormal, bfsCycleBreaker, input')
     removeDecls _ s = s
 
     rewriteFunctions :: JStat -> ([BuildFunction], JStat)
-    rewriteFunctions (BlockStat ss) = let (bfs, ss') = unzip (map rewriteFunctions ss)
-                                      in  (concat bfs, BlockStat ss')
-    rewriteFunctions (AssignStat (ValExpr (JVar (TxtI i))) (ValExpr (JFunc args st)))
+    rewriteFunctions (BlockStat ss) =
+      let (bfs, ss') = unzip (map rewriteFunctions ss)
+      in  (concat bfs, BlockStat ss')
+    rewriteFunctions (AssignStat (ValExpr (JVar (TxtI i)))
+                                 (ValExpr (JFunc args st)))
       | Just h         <- M.lookup i idx1
       , Just (_s, his) <- M.lookup h idx2' =
           let (bf, st') = rewriteFunction i h his args st in ([bf], st')
     rewriteFunctions x = ([], x)
 
-    rewriteFunction :: Text -> BS.ByteString -> [Text] -> [Ident] -> JStat -> (BuildFunction, JStat)
+    rewriteFunction :: Text
+                    -> BS.ByteString
+                    -> [Text]
+                    -> [Ident]
+                    -> JStat
+                    -> (BuildFunction, JStat)
     rewriteFunction i h his args body
       | i == iFirst = (bf, createFunction i idx g args body)
       | otherwise   = (bf, mempty)
@@ -616,7 +941,12 @@ rewriteBodies globals idx1 idx2 input = (bfsNormal, bfsCycleBreaker, input')
           iFirst   = head his
           Just idx = M.lookupIndex h idx2'
 
-    createFunction :: Text -> Int -> [Text] -> [Ident] -> JStat -> JStat
+    createFunction :: Text
+                   -> Int
+                   -> [Text]
+                   -> [Ident]
+                   -> JStat
+                   -> JStat
     createFunction i idx g args body =
       DeclStat bi <>
       AssignStat (ValExpr (JVar bi))
@@ -689,9 +1019,16 @@ dedupe rtsDeps input
     pickShortest :: [Text] -> Text
     pickShortest = head . sortBy (compare `on` T.length)
 
-dedupeBlock :: HashIdx -> JStat -> [ClosureInfo] -> [StaticInfo] -> (JStat, [ClosureInfo], [StaticInfo])
+dedupeBlock :: HashIdx
+            -> JStat
+            -> [ClosureInfo]
+            -> [StaticInfo]
+            -> LinkedUnit
 dedupeBlock hi st ci si =
-  (dedupeStat hi st, mapMaybe (dedupeClosureInfo hi) ci, mapMaybe (dedupeStaticInfo hi) si)
+  ( dedupeStat hi st
+  , mapMaybe (dedupeClosureInfo hi) ci
+  , mapMaybe (dedupeStaticInfo hi) si
+  )
 
 dedupeStat :: HashIdx -> JStat -> JStat
 dedupeStat hi st = go st
@@ -731,8 +1068,11 @@ dedupeStaticVal hi (StaticList args lt) =
 dedupeStaticVal _ v = v -- unboxed value or thunk with alt init, no rewrite needed
 
 dedupeStaticArg :: HashIdx -> StaticArg -> StaticArg
-dedupeStaticArg hi (StaticObjArg o)      = StaticObjArg (toCanon hi o)
-dedupeStaticArg hi (StaticConArg c args) = StaticConArg (toCanon hi c) (map (dedupeStaticArg hi) args)
+dedupeStaticArg hi (StaticObjArg o)
+  = StaticObjArg (toCanon hi o)
+dedupeStaticArg hi (StaticConArg c args)
+  = StaticConArg (toCanon hi c)
+                 (map (dedupeStaticArg hi) args)
 dedupeStaticArg hi a@(StaticLitArg{})    = a
 
 isCanon :: HashIdx -> Text -> Bool
@@ -786,7 +1126,7 @@ dumpHashes' input =
         BL.writeFile "hashes.json" (Aeson.encode $ dumpHashes hashes)
   in unsafePerformIO writeHashes `seq` True
 -}
-buildHashes :: [Text] -> [(JStat, [ClosureInfo], [StaticInfo])] -> Map Text Hash
+buildHashes :: [Text] -> [LinkedUnit] -> Map Text Hash
 buildHashes rtsDeps xss
   -- - | dumpHashes0 hashes0
   = fixHashes (fmap finalizeHash hashes0)
@@ -799,7 +1139,7 @@ buildHashes rtsDeps xss
           hsis  = map hashStaticInfo (filter (not . ignoreStatic) sis)
       in  M.fromList (combineHashes hdefs hcis ++ hsis)
 
-findAllGlobals :: [(JStat, [ClosureInfo], [StaticInfo])] -> Set Text
+findAllGlobals :: [LinkedUnit] -> Set Text
 findAllGlobals xss = S.fromList $ concatMap f xss
   where
     f (_, cis, sis) =
@@ -869,17 +1209,24 @@ fixHashesIter n invDeps allKeys checkKeys sccs hashes finalHashes
                          luds           = map lookupDep deps
                      in (k, makeFinalHash bs luds)
         lookupDep :: Text -> BS.ByteString
-        lookupDep d | Just b <- M.lookup d finalHashes = b
-                    | Just i <- M.lookup d toHashIdx = grpHash <> (TE.encodeUtf8 . T.pack . show $ i)
-                    | otherwise = Panic.panic ("Gen2.Compactor.hashRootSCC: unknown key: " ++ T.unpack d)
+        lookupDep d
+          | Just b <- M.lookup d finalHashes = b
+          | Just i <- M.lookup d toHashIdx
+              = grpHash <> (TE.encodeUtf8 . T.pack . show $ i)
+          | otherwise
+              = Panic.panic $ "Gen2.Compactor.hashRootSCC: unknown key: " ++
+                              T.unpack d
         toHashIdx :: M.Map Text Integer
         toHashIdx = M.fromList $ zip toHash [1..]
         grpHash :: BS.ByteString
-        grpHash = BL.toStrict . BB.toLazyByteString $ mconcat (map (mkGrpHash . (hashes M.!)) toHash)
-        mkGrpHash (h, deps) = let deps' = mapMaybe (`M.lookup` finalHashes) deps
-                              in  BB.byteString h <>
-                                  BB.int64LE (fromIntegral $ length deps') <>
-                                  mconcat (map BB.byteString deps')
+        grpHash = BL.toStrict
+                . BB.toLazyByteString
+                $ mconcat (map (mkGrpHash . (hashes M.!)) toHash)
+        mkGrpHash (h, deps) =
+          let deps' = mapMaybe (`M.lookup` finalHashes) deps
+          in  BB.byteString h <>
+              BB.int64LE (fromIntegral $ length deps') <>
+              mconcat (map BB.byteString deps')
         toHash :: [Text]
         toHash = sortBy (compare `on` (fst . (hashes M.!))) scc
 
@@ -892,8 +1239,12 @@ ignoreStatic (StaticInfo _ (StaticThunk {}) _) = True
 ignoreStatic _                                 = False
 
 -- combine hashes from x and y, leaving only those which have an entry in both
-combineHashes :: [(Text, HashBuilder)] -> [(Text, HashBuilder)] -> [(Text, HashBuilder)]
-combineHashes x y = M.toList $ M.intersectionWith (<>) (M.fromList x) (M.fromList y)
+combineHashes :: [(Text, HashBuilder)]
+              -> [(Text, HashBuilder)]
+              -> [(Text, HashBuilder)]
+combineHashes x y = M.toList $ M.intersectionWith (<>)
+                                                  (M.fromList x)
+                                                  (M.fromList y)
 
 {-
 dumpHashes0 :: Map Text HashBuilder -> Bool
@@ -1015,9 +1366,11 @@ hashMaybe _ Nothing  = ht 1
 hashMaybe f (Just x) = ht 2 <> f x
 
 hashStaticUnboxed :: StaticUnboxed -> HashBuilder
-hashStaticUnboxed (StaticUnboxedBool b)    = ht 1 <> hi (fromEnum b)
-hashStaticUnboxed (StaticUnboxedInt iv)    = ht 2 <> hi' iv
-hashStaticUnboxed (StaticUnboxedDouble sd) = ht 3 <> hashSaneDouble sd
+hashStaticUnboxed (StaticUnboxedBool b)           = ht 1 <> hi (fromEnum b)
+hashStaticUnboxed (StaticUnboxedInt iv)           = ht 2 <> hi' iv
+hashStaticUnboxed (StaticUnboxedDouble sd)        = ht 3 <> hashSaneDouble sd
+hashStaticUnboxed (StaticUnboxedString str)       = ht 4 <> hb str
+hashStaticUnboxed (StaticUnboxedStringOffset str) = ht 5 <> hb str
 
 
 hashStaticArg :: StaticArg -> HashBuilder

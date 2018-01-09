@@ -25,6 +25,21 @@ import           Outputable (defaultUserStyle, text)
 import           ErrUtils (Severity(..))
 import           FastString
 
+import qualified Debug.Trace
+import qualified GHC.Stack
+import           Util
+
+trace' :: HasDebugCallStack => String -> a -> a
+trace' xs a
+  | otherwise = a
+  | otherwise = Debug.Trace.trace (xs ++ "\n" ++ GHC.Stack.prettyCallStack GHC.Stack.callStack) a
+
+trace'' :: HasDebugCallStack => String -> a -> a
+trace'' xs a
+    | otherwise = a
+    | otherwise = Debug.Trace.trace (xs ++ "\n" ++ GHC.Stack.prettyCallStack GHC.Stack.callStack) a
+
+
 insertAt :: Int -> a -> [a] -> [a]
 insertAt 0 y xs             = y:xs
 insertAt n y (x:xs) | n > 0 = x : insertAt (n-1) y xs
@@ -156,7 +171,7 @@ buildingProf dflags = WayProf `elem` ways dflags
 -- use instead of ErrUtils variant to prevent being suppressed
 compilationProgressMsg :: DynFlags -> String -> IO ()
 compilationProgressMsg dflags msg
-  = ifVerbose dflags 1 (log_action dflags dflags NoReason SevOutput ghcjsSrcSpan defaultUserStyle (text msg))
+  = ifVerbose dflags 1 (log_action dflags dflags NoReason SevOutput ghcjsSrcSpan (defaultUserStyle dflags) (text msg))
 
 ifVerbose :: DynFlags -> Int -> IO () -> IO ()
 ifVerbose dflags val act

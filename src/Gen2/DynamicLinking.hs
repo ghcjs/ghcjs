@@ -40,7 +40,7 @@ import Platform
 import ErrUtils
 import DriverPhases
 import DriverPipeline hiding ( linkingNeeded )
-import UniqFM
+import UniqDFM
 import Maybes hiding ( Succeeded )
 
 import           Control.Applicative
@@ -119,7 +119,7 @@ ghcjsLinkJsLib settings jsFiles dflags hpt
           meta    = Meta (opt_P dflags)
       jsEntries <- forM jsFiles' $ \file ->
         (JsSource file,) . B.fromStrict <$> BS.readFile file
-      objEntries <- forM (eltsUFM hpt) $ \hmi -> do
+      objEntries <- forM (eltsUDFM hpt) $ \hmi -> do
         let mt    = T.pack . moduleNameString . moduleName . mi_module . hm_iface $ hmi
             files = maybe [] (\l -> [ o | DotO o <- linkableUnlinked l]) (hm_linkable hmi)
         -- fixme archive does not handle multiple files for a module yet
@@ -142,13 +142,13 @@ dumpHpt :: DynFlags -> HomePackageTable -> String
 dumpHpt dflags pt = "hpt:\n" ++ unlines
   (map (\hmi -> (moduleNameString . moduleName . mi_module . hm_iface $ hmi) ++
                 " -> " ++ maybe "<no linkable>" (showPpr dflags) (hm_linkable hmi))
-       (eltsUFM pt))
+       (eltsUDFM pt))
 ghcjsLinkJsBinary :: GhcjsEnv
                   -> GhcjsSettings
                   -> [FilePath]
                   -> DynFlags
                   -> [FilePath]
-                  -> [PackageKey]
+                  -> [InstalledUnitId]
                   -> IO ()
 ghcjsLinkJsBinary env settings jsFiles dflags objs dep_pkgs =
   void $ variantLink gen2Variant dflags env settings exe [] dep_pkgs objs' jsFiles isRoot S.empty
@@ -156,21 +156,16 @@ ghcjsLinkJsBinary env settings jsFiles dflags objs dep_pkgs =
       objs'    = map ObjFile objs
       isRoot _ = True
       exe      = Utils.exeFileName dflags
-      packageLibPaths :: PackageKey -> [FilePath]
-#if __GLASGOW_HASKELL__ >= 709
-      packageLibPaths = maybe [] libraryDirs . lookupPackage dflags
-#else
-      packageLibPaths pkg = maybe [] libraryDirs (lookupPackage pidMap pkg)
-      pidMap   = pkgIdMap (pkgState dflags)
-#endif
+      packageLibPaths :: InstalledUnitId -> [FilePath]
+      packageLibPaths = maybe [] libraryDirs . lookupInstalledPackage dflags
 
-isGhcjsPrimPackage :: DynFlags -> PackageKey -> Bool
+isGhcjsPrimPackage :: DynFlags -> InstalledUnitId -> Bool
 isGhcjsPrimPackage dflags pkgKey
-  =  getPackageName dflags pkgKey == "ghcjs-prim" ||
-     (pkgKey == thisPackage dflags && 
+  =  getInstalledPackageName dflags pkgKey == "ghcjs-prim" ||
+     (pkgKey == thisInstalledUnitId dflags &&
       any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
 
-ghcjsPrimPackage :: DynFlags -> IO PackageKey
+ghcjsPrimPackage :: DynFlags -> IO InstalledUnitId
 ghcjsPrimPackage dflags = do
   keys <- BS.readFile filename
   case Yaml.decodeEither keys of
@@ -198,7 +193,7 @@ link' env settings extraJs buildJs dflags batch_attempt_linking hpt
                           LinkStaticLib -> True
                           _ -> platformBinariesAreStaticLibs (targetPlatform dflags)
 
-            home_mod_infos = eltsUFM hpt
+            home_mod_infos = eltsUDFM hpt
 
             -- the packages we depend on
             pkg_deps  = concatMap (map fst . dep_pkgs . mi_deps . hm_iface) home_mod_infos
@@ -254,7 +249,7 @@ link' env settings extraJs buildJs dflags batch_attempt_linking hpt
         return Succeeded
 
 
-linkingNeeded :: DynFlags -> Bool -> [Linkable] -> [PackageKey] -> IO Bool
+linkingNeeded :: DynFlags -> Bool -> [Linkable] -> [InstalledUnitId] -> IO Bool
 linkingNeeded dflags staticLink linkables pkg_deps = do
         -- if the modification time on the executable is later than the
         -- modification times on all of the objects and libraries, then omit
@@ -275,9 +270,8 @@ linkingNeeded dflags staticLink linkables pkg_deps = do
 
         -- next, check libraries. XXX this only checks Haskell libraries,
         -- not extra_libraries or -l things from the command line.
-#if __GLASGOW_HASKELL__ >= 709
         let pkg_hslibs  = [ (libraryDirs c, lib)
-                          | Just c <- map (lookupPackage dflags) pkg_deps,
+                          | Just c <- map (lookupInstalledPackage dflags) pkg_deps,
                             lib <- packageHsLibs dflags c ]
 
         pkg_libfiles <- mapM (uncurry (findHSLib dflags)) pkg_hslibs
@@ -288,36 +282,22 @@ linkingNeeded dflags staticLink linkables pkg_deps = do
         if not (null lib_errs) || any (t <) lib_times
            then return True
            else checkLinkInfo dflags pkg_deps exe_file
-#else
-        let pkg_map = pkgIdMap (pkgState dflags)
-            pkg_hslibs  = [ (libraryDirs c, lib)
-                          | Just c <- map (lookupPackage pkg_map) pkg_deps,
-                            lib <- ghcjsPackageHsLibs dflags c ]
-        pkg_libfiles <- mapM (uncurry (findHSLib dflags)) pkg_hslibs
-        if any isNothing pkg_libfiles then return True else do
-        e_lib_times <- mapM (tryIO . getModificationUTCTime)
-                          (catMaybes pkg_libfiles)
-        let (lib_errs,lib_times) = splitEithers e_lib_times
-        if not (null lib_errs) || any (t <) lib_times
-           then return True
-           else checkLinkInfo dflags pkg_deps exe_file
-#endif
 
 panicBadLink :: GhcLink -> a
 panicBadLink other = panic ("link: GHC not built to link this way: " ++
                             show other)
 
-linkDynLibCheck :: DynFlags -> [String] -> [PackageKey] -> IO ()
+linkDynLibCheck :: DynFlags -> [String] -> [InstalledUnitId] -> IO ()
 linkDynLibCheck dflags o_files dep_packages
  = do
     when (haveRtsOptsFlags dflags) $ do
-      log_action dflags dflags NoReason SevInfo noSrcSpan defaultUserStyle
+      log_action dflags dflags NoReason SevInfo noSrcSpan (defaultUserStyle dflags)
           (text "Warning: -rtsopts and -with-rtsopts have no effect with -shared." $$
            text "    Call hs_init_ghc() from your main() function to set these options.")
 
     linkDynLib dflags o_files dep_packages
 
-linkStaticLibCheck :: DynFlags -> [String] -> [PackageKey] -> IO ()
+linkStaticLibCheck :: DynFlags -> [String] -> [InstalledUnitId] -> IO ()
 linkStaticLibCheck dflags o_files dep_packages
  = do
     when (platformOS (targetPlatform dflags) `notElem` [OSiOS, OSDarwin]) $
@@ -537,7 +517,7 @@ linkBinary' staticLink dflags o_files dep_packages = do
 -- linkBinary :: DynFlags -> [FilePath] -> [UnitId] -> IO ()
 -- linkBinary = linkBinary' False
 
-linkBinary' :: Bool -> DynFlags -> [FilePath] -> [UnitId] -> IO ()
+linkBinary' :: Bool -> DynFlags -> [FilePath] -> [InstalledUnitId] -> IO ()
 linkBinary' staticLink dflags o_files dep_packages = do
     let platform = targetPlatform dflags
         mySettings = settings dflags
@@ -562,8 +542,9 @@ linkBinary' staticLink dflags o_files dep_packages = do
                             then "$ORIGIN" </>
                                  (l `makeRelativeTo` full_output_fn)
                             else l
+                  -- See Note [-Xlinker -rpath vs -Wl,-rpath]
                   rpath = if gopt Opt_RPath dflags
-                          then ["-Wl,-rpath",      "-Wl," ++ libpath]
+                          then ["-Xlinker", "-rpath", "-Xlinker", libpath]
                           else []
                   -- Solaris 11's linker does not support -rpath-link option. It silently
                   -- ignores it and then complains about next option which is -l<some
@@ -577,20 +558,36 @@ linkBinary' staticLink dflags o_files dep_packages = do
               in ["-L" ++ l] ++ rpathlink ++ rpath
          | osMachOTarget (platformOS platform) &&
            dynLibLoader dflags == SystemDependent &&
-           ghcLink dflags /= LinkStaticLib && -- not (gopt Opt_Static dflags) &&
+           WayDyn `elem` ways dflags &&
            gopt Opt_RPath dflags
             = let libpath = if gopt Opt_RelativeDynlibPaths dflags
                             then "@loader_path" </>
                                  (l `makeRelativeTo` full_output_fn)
                             else l
-              in ["-L" ++ l] ++ ["-Wl,-rpath", "-Wl," ++ libpath]
+              in ["-L" ++ l] ++ ["-Xlinker", "-rpath", "-Xlinker", libpath]
          | otherwise = ["-L" ++ l]
 
+    let
+      dead_strip
+        | gopt Opt_WholeArchiveHsLibs dflags = []
+        | otherwise = if osSubsectionsViaSymbols (platformOS platform)
+                      then ["-Wl,-dead_strip"]
+                      else []
     let lib_paths = libraryPaths dflags
     let lib_path_opts = map ("-L"++) lib_paths
 
     extraLinkObj <- mkExtraObjToLinkIntoBinary dflags
     noteLinkObjs <- mkNoteObjsToLinkIntoBinary dflags dep_packages
+
+    let
+      (pre_hs_libs, post_hs_libs)
+        | gopt Opt_WholeArchiveHsLibs dflags
+        = if platformOS platform == OSDarwin
+            then (["-Wl,-all_load"], [])
+              -- OS X does not have a flag to turn off -all_load
+            else (["-Wl,--whole-archive"], ["-Wl,--no-whole-archive"])
+        | otherwise
+        = ([],[])
 
     pkg_link_opts <- do
         (package_hs_libs, extra_libs, other_flags) <- getPackageLinkOpts dflags dep_packages
@@ -600,16 +597,19 @@ linkBinary' staticLink dflags o_files dep_packages = do
                                  -- HS packages, because libtool doesn't accept other options.
                                  -- In the case of iOS these need to be added by hand to the
                                  -- final link in Xcode.
-            else other_flags ++ package_hs_libs ++ extra_libs -- -Wl,-u,<sym> contained in other_flags
-                                                              -- needs to be put before -l<package>,
-                                                              -- otherwise Solaris linker fails linking
-                                                              -- a binary with unresolved symbols in RTS
-                                                              -- which are defined in base package
-                                                              -- the reason for this is a note in ld(1) about
-                                                              -- '-u' option: "The placement of this option
-                                                              -- on the command line is significant.
-                                                              -- This option must be placed before the library
-                                                              -- that defines the symbol."
+            else other_flags ++ dead_strip
+                  ++ pre_hs_libs ++ package_hs_libs ++ post_hs_libs
+                  ++ extra_libs
+                 -- -Wl,-u,<sym> contained in other_flags
+                 -- needs to be put before -l<package>,
+                 -- otherwise Solaris linker fails linking
+                 -- a binary with unresolved symbols in RTS
+                 -- which are defined in base package
+                 -- the reason for this is a note in ld(1) about
+                 -- '-u' option: "The placement of this option
+                 -- on the command line is significant.
+                 -- This option must be placed before the library
+                 -- that defines the symbol."
 
     -- frameworks
     pkg_framework_opts <- getPkgFrameworkOpts dflags platform dep_packages
@@ -632,9 +632,8 @@ linkBinary' staticLink dflags o_files dep_packages = do
     let thread_opts
          | WayThreaded `elem` ways dflags =
             let os = platformOS (targetPlatform dflags)
-            in if os == OSOsf3 then ["-lpthread", "-lexc"]
-               else if os `elem` [OSMinGW32, OSFreeBSD, OSOpenBSD,
-                                  OSNetBSD, OSHaiku, OSQNXNTO, OSiOS, OSDarwin]
+            in if os `elem` [OSMinGW32, OSFreeBSD, OSOpenBSD, OSAndroid,
+                             OSNetBSD, OSHaiku, OSQNXNTO, OSiOS, OSDarwin]
                then []
                else ["-lpthread"]
          | otherwise               = []
@@ -651,6 +650,11 @@ linkBinary' staticLink dflags o_files dep_packages = do
                          ]
                       ++ map SysTools.Option (
                          []
+
+                      -- See Note [No PIE eating when linking]
+                      ++ (if sGccSupportsNoPie mySettings
+                             then ["-no-pie"]
+                             else [])
 
                       -- Permit the linker to auto link _symbol to _imp_symbol.
                       -- This lets us link against DLLs without needing an "import library".
@@ -697,7 +701,8 @@ linkBinary' staticLink dflags o_files dep_packages = do
                           then ["-Wl,-read_only_relocs,suppress"]
                           else [])
 
-                      ++ (if sLdIsGnuLd mySettings
+                      ++ (if sLdIsGnuLd mySettings &&
+                             not (gopt Opt_WholeArchiveHsLibs dflags)
                           then ["-Wl,--gc-sections"]
                           else [])
 
@@ -753,7 +758,7 @@ ghcjsCompileCoreExpr hsc_env srcspan ds_expr = error "ghcjsCompileCoreExpr"
            {- Prepare for codegen -}
          ; prepd_expr <- corePrepExpr dflags hsc_env tidy_expr
            {- Lint if necessary -}
-         ; lintInteractiveExpr "hscCompileExpr" hsc_env prepd_expr 
+         ; lintInteractiveExpr "hscCompileExpr" hsc_env prepd_expr
            {- Convert to BCOs -}
          ; bcos <- coreExprToBCOs dflags (icInteractiveModule (hsc_IC hsc_env)) prepd_expr
            {- link it -}
@@ -803,4 +808,3 @@ throwCmdLineErrorS dflags = throwCmdLineError . showSDoc dflags
 
 throwCmdLineError :: String -> IO a
 throwCmdLineError = throwGhcExceptionIO . CmdLineError
-

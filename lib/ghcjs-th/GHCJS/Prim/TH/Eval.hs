@@ -21,7 +21,7 @@ import           GHCJS.Prim.TH.Types
 import           Control.Applicative
 import qualified Control.Exception        as E
 import           Control.Monad
-import qualified Control.Monad.Fail       as Fail
+import           Control.Monad.Fail
 
 import           Data.Binary
 import           Data.Binary.Get
@@ -40,14 +40,15 @@ import qualified Data.Map                 as M
 import           Data.Maybe
 import           Data.Monoid              ((<>))
 import           Data.Typeable
-import           Data.Typeable.Internal
 import           Data.Word
 
 import           Foreign.C
 import           Foreign.Ptr
 
 import           GHC.Prim
+import           GHC.Exts
 import           GHC.Desugar
+import           GHC.Fingerprint.Type
 
 import qualified Language.Haskell.TH        as TH
 import qualified Language.Haskell.TH.Syntax as TH
@@ -95,9 +96,8 @@ instance Monad GHCJSQ where
        (a,  s'') <- runGHCJSQ (f m') s'
        return (a, s'')
   return    = pure
-  fail      = Fail.fail
 
-instance Fail.MonadFail GHCJSQ where
+instance MonadFail GHCJSQ where
   fail err = GHCJSQ $ \s -> E.throw (GHCJSQException s Nothing err)
 
 getState :: GHCJSQ QState
@@ -141,11 +141,21 @@ instance TH.Quasi GHCJSQ where
   qReifyModule m = do
     ReifyModule' mi <- sendRequestQ (ReifyModule m)
     return mi
-#if MIN_VERSION_template_haskell(2,11,0)
   qReifyFixity m = do
     ReifyFixity' mi <- sendRequestQ (ReifyFixity m)
     return mi
-#endif
+  qReifyConStrictness name = do
+    ReifyConStrictness' ss <- sendRequestQ (ReifyConStrictness name)
+    return ss
+  qAddForeignFile lang contents = do
+    AddForeignFile' <- sendRequestQ (AddForeignFile lang contents)
+    return ()
+  qIsExtEnabled ext = do
+    IsExtEnabled' b <- sendRequestQ (IsExtEnabled ext)
+    return b
+  qExtsEnabled = do
+    ExtsEnabled' exts <- sendRequestQ ExtsEnabled
+    return exts
   qLocation = fromMaybe noLoc . qsLocation <$> getState
   qRunIO m = GHCJSQ $ \s -> fmap (,s) m
   qAddDependentFile file = do
@@ -165,14 +175,26 @@ instance TH.Quasi GHCJSQ where
 
 makeAnnPayload :: forall a. Data a => a -> ByteString
 makeAnnPayload x =
+#if __GLASGOW_HASKELL__ >= 711
+  let Fingerprint w1 w2 = typeRepFingerprint (typeOf (undefined :: a))
+#elif __GLASGOW_HASKELL__ >= 709
   let TypeRep (Fingerprint w1 w2) _ _ _ = typeOf (undefined :: a)
+#else
+  let TypeRep (Fingerprint w1 w2) _ _ = typeOf (undefined :: a)
+#endif
       fp = runPut (putWord64be w1 >> putWord64be w2)
   in  BL.toStrict $ fp <> BL.pack (serializeWithData x)
 
 convertAnnPayloads :: forall a. Data a => [ByteString] -> [a]
 convertAnnPayloads bs = catMaybes (map convert bs)
   where
+#if __GLASGOW_HASKELL__ >= 711
+    Fingerprint w1 w2 = typeRepFingerprint (typeOf (undefined :: a))
+#elif __GLASGOW_HASKELL__ >= 709
     TypeRep (Fingerprint w1 w2) _ _ _ = typeOf (undefined :: a)
+#else
+    TypeRep (Fingerprint w1 w2) _ _ = typeOf (undefined :: a)
+#endif
     getFp b = runGet ((,) <$> getWord64be <*> getWord64be) $ BL.fromStrict (B.take 16 b)
     convert b | (bw1,bw2) <- getFp b, bw1 == w1, bw2 == w2 =
                   Just (deserializeWithData . B.unpack . B.drop 16 $ b)
@@ -194,11 +216,9 @@ runTHServer = do
         a <- TH.qRunIO (loadCode code)
         runTH t a loc
         server
-      FinishTH endProcess -> do
+      FinishTH -> do
         runModFinalizers
-        mu <- TH.qRunIO $ js_getMemoryUsage
-        TH.qRunIO $ sendResult (FinishTH' mu)
-        when (not endProcess) server
+        TH.qRunIO $ sendResult FinishTH'
       _ -> error "runTHServer: unexpected message type"
 
 {-# NOINLINE runTH #-}
@@ -268,9 +288,6 @@ foreign import javascript unsafe "h$TH.bufSize($1_1, $1_2)"
 -- | actually returns the heap object to be evaluated
 foreign import javascript unsafe "h$TH.loadCode($1_1,$1_2,$2)"
   js_loadCode :: Ptr Word8 -> Int -> IO Double
-
-foreign import javascript unsafe "$r = h$TH.getMemoryUsage();"
-  js_getMemoryUsage :: IO Int
 
 -- | only safe in JS
 fromBs :: ByteString -> IO (Ptr Word8)

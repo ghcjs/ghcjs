@@ -16,6 +16,7 @@ import Control.Applicative
 import Control.Lens
 
 import Data.Char
+import Data.Either
 import Data.List (partition)
 import Data.Maybe
 import Data.Traversable
@@ -31,13 +32,23 @@ import Gen2.ClosureInfo
   - literals (small literals may also be sunk if they are used more than once)
  -}
 
-sinkPgm :: Module                         -- ^ the module, since we treat definitions from the
-                                          --   current module differently
-        -> [StgBinding]                   -- ^ the bindings
-        -> (UniqFM StgExpr, [StgBinding]) -- ^ a map with sunken replacements for nodes, for where
-                                          --   the replacement does not fit in the 'StgBinding' AST
-                                          --   and the new bindings
-sinkPgm m pgm =
+sinkPgm :: Module
+        -> [StgTopBinding]
+        -> (UniqFM StgExpr, [StgTopBinding])
+sinkPgm m pgm = (sunk, map StgTopLifted pgm'' ++ stringLits)
+  where
+    selectLifted (StgTopLifted b) = Left b
+    selectLifted x                = Right x
+    (pgm', stringLits) = partitionEithers (map selectLifted pgm)
+    (sunk, pgm'')      = sinkPgm' m pgm'
+
+sinkPgm' :: Module                         -- ^ the module, since we treat definitions from the
+                                           --   current module differently
+         -> [StgBinding]                   -- ^ the bindings
+         -> (UniqFM StgExpr, [StgBinding]) -- ^ a map with sunken replacements for nodes, for where
+                                           --   the replacement does not fit in the 'StgBinding' AST
+                                           --   and the new bindings
+sinkPgm' m pgm =
   let usedOnce = collectUsedOnce pgm
       sinkables = listToUFM $
           concatMap alwaysSinkable pgm ++
@@ -53,10 +64,10 @@ sinkPgm m pgm =
 -}
 alwaysSinkable :: StgBinding -> [(Id, StgExpr)]
 alwaysSinkable (StgNonRec b rhs)
-  | (StgRhsClosure _ccs _bi _ _upd _srt _ e@(StgLit l)) <- rhs,
+  | (StgRhsClosure _ccs _bi _ _upd _srt e@(StgLit l)) <- rhs,
      isSmallSinkableLit l && isLocal b = [(b,e)]
   | (StgRhsCon _ccs dc as@[StgLitArg l]) <- rhs,
-     isSmallSinkableLit l && isLocal b && isUnboxableCon dc = [(b,StgConApp dc as)]
+     isSmallSinkableLit l && isLocal b && isUnboxableCon dc = [(b,StgConApp dc as [])]
 alwaysSinkable _ = []
 
 isSmallSinkableLit :: Literal -> Bool
@@ -74,8 +85,8 @@ onceSinkable _m (StgNonRec b rhs)
   | Just e <- getSinkable rhs, isLocal b = [(b,e)]
   where
     getSinkable (StgRhsCon _ccs dc args)
-      = Just (StgConApp dc args)
-    getSinkable (StgRhsClosure _ccs _bi _ _upd _srt _ e@(StgLit{}))
+      = Just (StgConApp dc args [])
+    getSinkable (StgRhsClosure _ccs _bi _ _upd _ e@(StgLit{}))
       = Just e
     getSinkable _ = Nothing
 onceSinkable _ _ = []
@@ -94,7 +105,7 @@ collectUsedOnce binds = intersectUniqSets (usedOnce foldArgs) (usedOnce foldArgs
 
 -- | fold over all id in StgArg used at the top level in an StgRhsCon
 foldArgsTop :: Fold StgBinding Id
-foldArgsTop f e@(StgNonRec b r) 
+foldArgsTop f e@(StgNonRec b r)
   | (StgRhsCon ccs dc args) <- r =
      StgNonRec b . StgRhsCon ccs dc <$> (traverse . foldArgsA) f args
   | otherwise                    = pure e
@@ -112,22 +123,22 @@ foldArgs f (StgRec bs)     =
   StgRec <$> sequenceA (map (\(b,r) -> (,) b <$> foldArgsR f r) bs)
 
 foldArgsR :: Fold StgRhs Id
-foldArgsR f (StgRhsClosure x0 x1 x2 x3 x4 x5 e) =
-  StgRhsClosure x0 x1 x2 x3 x4 x5 <$> foldArgsE f e
+foldArgsR f (StgRhsClosure x0 x1 x2 x3 x4 e) =
+  StgRhsClosure x0 x1 x2 x3 x4 <$> foldArgsE f e
 foldArgsR f (StgRhsCon x y args)                =
   StgRhsCon x y <$> (traverse . foldArgsA) f args
 
 foldArgsE :: Fold StgExpr Id
 foldArgsE f (StgApp x args)            = StgApp <$> f x <*> (traverse . foldArgsA) f args
-foldArgsE f (StgConApp c args)         = StgConApp c <$> (traverse . foldArgsA) f args
+foldArgsE f (StgConApp c args ts)      = StgConApp c <$> (traverse . foldArgsA) f args <*> pure ts
 foldArgsE f (StgOpApp x args t)        = StgOpApp x  <$> (traverse . foldArgsA) f args <*> pure t
 foldArgsE f (StgLam b e)               = StgLam b    <$> foldArgsE f e
-foldArgsE f (StgCase e l1 l2 b s a alts) =
-  StgCase <$> foldArgsE f e <*> pure l1 <*> pure l2
-          <*> pure b <*> pure s <*> pure a
-          <*> sequenceA (map (\(ac,bs,us,e) -> (,,,) ac bs us <$> foldArgsE f e) alts)
+foldArgsE f (StgCase e b a alts) =
+  StgCase <$> foldArgsE f e
+          <*> pure b <*> pure a
+          <*> sequenceA (map (\(ac,bs,e) -> (,,) ac bs <$> foldArgsE f e) alts)
 foldArgsE f (StgLet b e)               = StgLet <$> foldArgs f b <*> foldArgsE f e
-foldArgsE f (StgLetNoEscape l1 l2 b e) = StgLetNoEscape l1 l2 <$> foldArgs f b <*> foldArgsE f e
+foldArgsE f (StgLetNoEscape b e)       = StgLetNoEscape <$> foldArgs f b <*> foldArgsE f e
 #if __GLASGOW_HASKELL__ < 709
 foldArgsE f (StgSCC cc b1 b2 e)        = StgSCC cc b1 b2 <$> foldArgsE f e
 foldArgsE f (StgTick m i e)            = StgTick m i <$> foldArgsE f e
@@ -163,4 +174,3 @@ topSortDecls _m binds = rest ++ nr'
     nr' | (not . null) [()| CyclicSCC _ <- stronglyConnCompG g]
             = error "topSortDecls: unexpected cycle"
         | otherwise = map fst (topologicalSortG g)
-

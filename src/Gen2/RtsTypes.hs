@@ -697,15 +697,15 @@ showModule :: DynFlags -> Module -> String
 showModule dflags m = pkg ++ ":" ++ modName
   where
     modName     = moduleNameString (moduleName m)
-    pkg         = encodePackageKey dflags (modulePackageKey m)
+    pkg         = encodeInstalledUnitId dflags (toInstalledUnitId $ moduleUnitId m)
 
-encodePackageKey :: DynFlags -> PackageKey -> String
-encodePackageKey dflags k
+encodeInstalledUnitId :: DynFlags -> InstalledUnitId -> String
+encodeInstalledUnitId dflags k
   | isGhcjsPrimPackage dflags k = "ghcjs-prim"
   | isGhcjsThPackage dflags k   = "ghcjs-th"
-  | otherwise                   = packageKeyString k
+  | otherwise                   = installedUnitIdString k
   where
-    n = getPackageName dflags k
+    n = getInstalledPackageName dflags k
 
 {-
    some packages are wired into GHCJS, but not GHC
@@ -713,35 +713,35 @@ encodePackageKey dflags k
    since the RTS uses thins from them
 -}
 
-isGhcjsPrimPackage :: DynFlags -> PackageKey -> Bool
+isGhcjsPrimPackage :: DynFlags -> InstalledUnitId -> Bool
 isGhcjsPrimPackage dflags pkgKey
   =  pn == "ghcjs-prim" ||
-     (null pn && pkgKey == thisPackage dflags &&
+     (null pn && pkgKey == thisInstalledUnitId dflags &&
       any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
   where
-    pn = getPackageName dflags pkgKey
+    pn = getInstalledPackageName dflags pkgKey
 
-isGhcjsThPackage :: DynFlags -> PackageKey -> Bool
+isGhcjsThPackage :: DynFlags -> InstalledUnitId -> Bool
 isGhcjsThPackage dflags pkgKey
   =  pn == "ghcjs-th" ||
-     (null pn && pkgKey == thisPackage dflags &&
+     (null pn && pkgKey == thisInstalledUnitId dflags &&
       any (=="-DBOOTING_PACKAGE=ghcjs-th") (opt_P dflags))
   where
-    pn = getPackageName dflags pkgKey
+    pn = getInstalledPackageName dflags pkgKey
 
-ghcjsPrimPackage :: DynFlags -> PackageKey
+ghcjsPrimPackage :: DynFlags -> InstalledUnitId
 ghcjsPrimPackage dflags =
   case prims of
-    ((_,k):_) -> k
+    ((_,k):_) -> toInstalledUnitId k
     _         -> error "Package `ghcjs-prim' is required to link executables"
   where
     prims = filter ((=="ghcjs-prim").fst)
                    (searchModule dflags (mkModuleName "GHCJS.Prim"))
 
-ghcjsThPackage :: DynFlags -> PackageKey
+ghcjsThPackage :: DynFlags -> InstalledUnitId
 ghcjsThPackage dflags =
   case prims of
-    ((_,k):_) -> k
+    ((_,k):_) -> toInstalledUnitId k
     _         -> error "Package `ghcjs-th' is required to link executables"
   where
     prims = filter ((=="ghcjs-th").fst)
@@ -836,4 +836,3 @@ declIds  i
   | otherwise = mconcat <$> mapM (\n -> decl <$> jsIdIN i n) [1..s]
   where
     s  = typeSize (idType i)
-

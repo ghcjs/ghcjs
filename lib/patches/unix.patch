@@ -1,0 +1,76 @@
+diff -Nru upstream/pkg/unix/System/Posix/Files/Common.hsc boot/pkg/unix/System/Posix/Files/Common.hsc
+--- upstream/pkg/unix/System/Posix/Files/Common.hsc	2018-01-09 08:27:54.000000000 +0000
++++ boot/pkg/unix/System/Posix/Files/Common.hsc	2018-01-09 08:27:55.082366723 +0000
+@@ -520,7 +520,7 @@
+ -- Note: calls @ftruncate@.
+ setFdSize :: Fd -> FileOffset -> IO ()
+ setFdSize (Fd fd) off =
+-  throwErrnoIfMinus1_ "setFdSize" (c_ftruncate fd off)
++  throwErrnoIfMinus1_ "setFdSize" (c_ftruncate fd (fromIntegral off))
+ 
+ -- -----------------------------------------------------------------------------
+ -- pathconf()/fpathconf() support
+diff -Nru upstream/pkg/unix/System/Posix/IO/Common.hsc boot/pkg/unix/System/Posix/IO/Common.hsc
+--- upstream/pkg/unix/System/Posix/IO/Common.hsc	2018-01-09 08:27:54.000000000 +0000
++++ boot/pkg/unix/System/Posix/IO/Common.hsc	2018-01-09 08:27:55.082366723 +0000
+@@ -281,7 +281,7 @@
+ -- | May throw an exception if this is an invalid descriptor.
+ fdSeek :: Fd -> SeekMode -> FileOffset -> IO FileOffset
+ fdSeek (Fd fd) mode off =
+-  throwErrnoIfMinus1 "fdSeek" (Base.c_lseek fd off (mode2Int mode))
++  throwErrnoIfMinus1 "fdSeek" (fmap fromIntegral $ Base.c_lseek fd (fromIntegral off) (mode2Int mode))
+ 
+ -- -----------------------------------------------------------------------------
+ -- Locking
+diff -Nru upstream/pkg/unix/System/Posix/Process/Internals.hs boot/pkg/unix/System/Posix/Process/Internals.hs
+--- upstream/pkg/unix/System/Posix/Process/Internals.hs	2018-01-09 08:27:54.000000000 +0000
++++ boot/pkg/unix/System/Posix/Process/Internals.hs	2018-01-09 08:27:55.082366723 +0000
+@@ -1,5 +1,6 @@
+ {-# LANGUAGE CApiFFI #-}
+ {-# LANGUAGE Trustworthy #-}
++{-# LANGUAGE CPP #-}
+ 
+ module System.Posix.Process.Internals (
+        pPrPr_disableITimers, c_execvpe,
+@@ -9,7 +10,12 @@
+ import Foreign.C
+ import System.Exit
+ import System.IO.Error
++
++#ifdef ghcjs_HOST_OS
++type Signal = CInt
++#else
+ import GHC.Conc (Signal)
++#endif
+ 
+ -- | The exit status of a process
+ data ProcessStatus
+diff -Nru upstream/pkg/unix/System/Posix/Signals.hsc boot/pkg/unix/System/Posix/Signals.hsc
+--- upstream/pkg/unix/System/Posix/Signals.hsc	2018-01-09 08:27:54.000000000 +0000
++++ boot/pkg/unix/System/Posix/Signals.hsc	2018-01-09 08:27:55.082366723 +0000
+@@ -349,11 +349,13 @@
+                -> Maybe SignalSet       -- ^ other signals to block
+                -> IO Handler            -- ^ old handler
+ 
+-#ifdef __PARALLEL_HASKELL__
++##if defined(__PARALLEL_HASKELL__)
+ installHandler =
+   error "installHandler: not available for Parallel Haskell"
+-#else
+-
++##elif defined(ghcjs_HOST_OS)
++installHandler =
++  error "installHandler: not available for GHCJS"
++##else
+ installHandler sig handler _maybe_mask = do
+   ensureIOManagerIsRunning  -- for the threaded RTS
+ 
+@@ -441,7 +443,7 @@
+         siginfoError  = Errno errno,
+         siginfoSpecific = extra }
+ 
+-#endif /* !__PARALLEL_HASKELL__ */
++##endif /* !__PARALLEL_HASKELL__ */
+ 
+ -- -----------------------------------------------------------------------------
+ -- Alarms

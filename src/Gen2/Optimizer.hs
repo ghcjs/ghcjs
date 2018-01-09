@@ -5,7 +5,8 @@
              QuasiQuotes,
              NoMonomorphismRestriction,
              TupleSections,
-             OverloadedStrings #-}
+             OverloadedStrings
+  #-}
 {- |
 
   Optimizer:
@@ -56,6 +57,8 @@ optimize :: JStat -> JStat
 #ifdef DISABLE_OPTIMIZER
 optimize = id
 #else
+-- optimize = id
+-- fixme
 optimize = renameLocalVars . removeDeadVars . dataflow
 #endif
 
@@ -732,7 +735,7 @@ normalizeReg cache g = rewriteOf template assoc . rewriteOf template comm . fold
     associates2b op1 op2 = (op1,op2) `elem` [(AddOp, SubOp)] -- , ("*", "/")] -- (a - b) + c  = a + (c - b)
     cf = rewriteOf template comm . foldExpr cache
     f  = Just . foldExpr cache
-    allowed e 
+    allowed e
         | IdxE (ValE (Var st)) e' <- e, Just st == stack = allowed' e'
         | otherwise                                      = allowed' e
        where
@@ -1093,4 +1096,3 @@ showCons g (CReached imf) = "\n" ++ (L.unlines $ map (\x -> "   " ++ f x) (IM.to
   where
     f (i,v) = showId g i ++ ":" ++ show v
 -}
-

@@ -1,4 +1,9 @@
-{-# LANGUAGE CPP, FlexibleContexts, QuasiQuotes, DeriveDataTypeable, DeriveGeneric, OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Gen2.ClosureInfo where
 
@@ -26,8 +31,12 @@ import           DynFlags
 import           StgSyn
 import           DataCon
 import           TyCon
+import           RepType
 import           Type
 import           Id
+import           Util
+import           Outputable hiding ((<>))
+import           TyCoRep
 
 -- closure types
 data CType = Thunk | Fun | Pap | Con | Blackhole | StackFrame
@@ -106,49 +115,87 @@ isMatchable [DoubleV] = True
 isMatchable [IntV]    = True
 isMatchable _         = False
 
-tyConVt :: TyCon -> [VarType]
+tyConVt :: HasDebugCallStack => TyCon -> [VarType]
 tyConVt = typeVt . mkTyConTy
 
-idVt :: Id -> [VarType]
+idVt :: HasDebugCallStack => Id -> [VarType]
 idVt = typeVt . idType
 
-typeVt :: Type -> [VarType]
-typeVt t | isRuntimeRepKindedTy t || isRuntimeRepTy t = []
-typeVt t = case repType t of
-             UbxTupleRep uts   -> concatMap typeVt (dropRuntimeRepArgs uts)
-             UnaryRep ut       -> [uTypeVt ut]
+typeVt :: HasDebugCallStack => Type -> [VarType]
+typeVt t | isRuntimeRepKindedTy t {- || isRuntimeRepTy t -} = []
+typeVt t = map primRepVt (typePrimRep t)-- map uTypeVt (repTypeArgs t)
+
+uTypeVt :: HasDebugCallStack => UnaryType -> VarType
+uTypeVt ut = trace' ("uTypeVt: " ++ show ut ++ "\n" ++ (show $ isRuntimeRepKindedTy ut)
+                                            ++ "\n" ++ (show $ isRuntimeRepTy ut)
+                                            ++ "\n" ++ (show $ showDbgTy ut))
+                               (uTypeVt0 ut)
+  where
+                               showDbgTy ty = "isPrimitiveType: " ++
+                                 case splitTyConApp_maybe ty of
+                                   Just (tc, ty_args) -> show (tc, tyConArity tc, ty_args)
+                                   Nothing            -> "<not tyconapp>"
+
+  {-
+case repType t of
+             MultiRep uts   -> concatMap typeVt (dropRuntimeRepArgs uts)
+             UnaryRep ut       -> [uTypeVt ut] -}
 
 -- only use if you know it's not an unboxed tuple
-uTypeVt :: UnaryType -> VarType
-uTypeVt ut
+uTypeVt0 :: HasDebugCallStack => UnaryType -> VarType
+uTypeVt0 ut
   | isRuntimeRepKindedTy ut = VoidV
-  | isRuntimeRepTy ut = VoidV
-  | isPrimitiveType ut = primTypeVt ut
-  | otherwise          = primRepVt . typePrimRep' $ ut
-  where
-    primRepVt VoidRep    = VoidV
-    primRepVt PtrRep     = PtrV -- fixme does ByteArray# ever map to this?
-    primRepVt IntRep     = IntV
-    primRepVt WordRep    = IntV
-    primRepVt Int64Rep   = LongV
-    primRepVt Word64Rep  = LongV
-    primRepVt AddrRep    = AddrV
-    primRepVt FloatRep   = DoubleV
-    primRepVt DoubleRep  = DoubleV
-    primRepVt (VecRep{}) = error "uTypeVt: vector types are unsupported"
+--  | isRuntimeRepTy ut = VoidV
+  -- GHC panics on this otherwise
+  | Just (tc, ty_args) <- splitTyConApp_maybe ut
+  , length ty_args /= tyConArity tc = PtrV
+  | isPrimitiveType ut = (primTypeVt ut)
+  | otherwise          =
+    case typePrimRep' ut of
+      []   -> VoidV
+      [pt] -> primRepVt pt
+      _    -> panic ("uTypeVt: not unary" ++ show ut)
+    -- primRepVt . typePrimRep' $ ut
+--   where
 
-typePrimRep' :: UnaryType -> PrimRep
-typePrimRep' ty = kindPrimRep' (typeKind ty)
+primRepVt :: HasDebugCallStack => PrimRep -> VarType
+primRepVt VoidRep     = VoidV
+primRepVt LiftedRep   = PtrV -- fixme does ByteArray# ever map to this?
+primRepVt UnliftedRep = PtrV
+primRepVt IntRep      = IntV
+primRepVt WordRep     = IntV
+primRepVt Int64Rep    = LongV
+primRepVt Word64Rep   = LongV
+primRepVt AddrRep     = AddrV
+primRepVt FloatRep    = DoubleV
+primRepVt DoubleRep   = DoubleV
+primRepVt (VecRep{})  = error "uTypeVt: vector types are unsupported"
+
+typePrimRep' :: HasDebugCallStack => UnaryType -> [PrimRep]
+typePrimRep' ty = kindPrimRep' empty (typeKind ty)
 
 -- | Find the primitive representation of a 'TyCon'. Defined here to
 -- avoid module loops. Call this only on unlifted tycons.
-tyConPrimRep' :: TyCon -> PrimRep
-tyConPrimRep' tc = kindPrimRep' res_kind
+tyConPrimRep' :: HasDebugCallStack => TyCon -> [PrimRep]
+tyConPrimRep' tc = kindPrimRep' empty res_kind
   where
     res_kind = tyConResKind tc
 
 -- | Take a kind (of shape @TYPE rr@) and produce the 'PrimRep' of values
 -- of types of this kind.
+-- | Take a kind (of shape @TYPE rr@) and produce the 'PrimRep's
+-- of values of types of this kind.
+kindPrimRep' :: HasDebugCallStack => SDoc -> Kind -> [PrimRep]
+kindPrimRep' doc ki
+  | Just ki' <- coreView ki
+  = kindPrimRep' doc ki'
+kindPrimRep' doc (TyConApp typ [runtime_rep])
+  = -- ASSERT( typ `hasKey` tYPETyConKey )
+    runtimeRepPrimRep doc runtime_rep
+kindPrimRep' doc ki
+  = pprPanic "kindPrimRep'" (ppr ki $$ doc)
+
+{-
 kindPrimRep' :: Kind -> PrimRep
 kindPrimRep' ki | Just ki' <- coreViewOneStarKind ki = kindPrimRep' ki'
 kindPrimRep' ki -- (TyConApp typ [runtime_rep])
@@ -166,13 +213,12 @@ kindPrimRep' ki -- (TyConApp typ [runtime_rep])
 kindPrimRep' ki = -- WARN( True
                     -- , text "kindPrimRep defaulting to PtrRep on" <+> ppr ki )
                  PtrRep  -- this can happen legitimately for, e.g., Any
+-}
 
-primTypeVt :: Type -> VarType
-primTypeVt t = case repType t of
-                 UnaryRep ut -> case tyConAppTyCon_maybe ut of
+primTypeVt :: HasDebugCallStack => Type -> VarType
+primTypeVt t = case tyConAppTyCon_maybe (unwrapType t) of
                                    Nothing -> error "primTypeVt: not a TyCon"
                                    Just tc -> go (show tc)
-                 _ -> error "primTypeVt: non-unary type found"
   where
    pr xs = "ghc-prim:GHC.Prim." ++ xs
    go st
@@ -206,18 +252,15 @@ primTypeVt t = case repType t of
     | st == pr "~#"                  = VoidV -- coercion token?
     | st == pr "~R#"                 = VoidV -- role
     | st == pr "Any"                 = PtrV
-#if __GLASGOW_HASKELL__ >= 709
     | st == pr "SmallMutableArray#"  = ArrV
     | st == pr "SmallArray#"         = ArrV
-#endif
-#if __GLASGOW_HASKELL__ >= 801
-    | st == pr "TYPE"                = PtrV -- ?
-#endif
+    | st == pr "Compact#"            = ObjV -- unsupported?
     | st == "Data.Dynamic.Obj"       = PtrV -- ?
     | otherwise = error ("primTypeVt: unrecognized primitive type: " ++ st)
 
-argVt :: StgArg -> VarType
-argVt = uTypeVt . stgArgType
+argVt :: HasDebugCallStack => StgArg -> VarType
+argVt a = trace' ("argVt: " ++ show a)
+                            (uTypeVt . stgArgType $ a)
 
 instance ToJExpr VarType where
   toJExpr = toJExpr . fromEnum
@@ -393,9 +436,11 @@ data StaticVal = StaticFun     !Text   [StaticArg]       -- ^ heap object for fu
 
 instance NFData StaticVal
 
-data StaticUnboxed = StaticUnboxedBool   !Bool
-                   | StaticUnboxedInt    !Integer
-                   | StaticUnboxedDouble !SaneDouble
+data StaticUnboxed = StaticUnboxedBool         !Bool
+                   | StaticUnboxedInt          !Integer
+                   | StaticUnboxedDouble       !SaneDouble
+                   | StaticUnboxedString       !ByteString
+                   | StaticUnboxedStringOffset !ByteString
   deriving (Eq, Ord, Show, Typeable, Generic)
 
 instance NFData StaticUnboxed
@@ -445,6 +490,10 @@ staticDeclStat (StaticInfo si sv _) =
       ssu (StaticUnboxedBool b)   = [je| h$p(`b`) |]
       ssu (StaticUnboxedInt i)    = [je| h$p(`i`) |]
       ssu (StaticUnboxedDouble d) = [je| h$p(`unSaneDouble d`) |]
+      ssu (StaticUnboxedString str) = ApplExpr (initStr str) [] --[je| h$p(`unSaneDouble d`) |]
+      ssu (StaticUnboxedStringOffset str) = jint 0 -- AssignStat (jvar i) (initStr str)
+      ssu (StaticUnboxedDouble d) = [je| h$p(`unSaneDouble d`) |]
+
   -- fixme, we shouldn't do h$di, we need to record the statement to init the thunks
   in maybe [j| h$di(`si'`); |] (\v -> DeclStat si' <> [j| `si'` = `v`; |]) (ssv sv)
 
@@ -460,15 +509,41 @@ staticInitStat _prof (StaticInfo i sv cc) =
     StaticList args mt   ->
       ApplStat (jvar "h$stl") $ [jvar i, toJExpr args, toJExpr $ maybe jnull (toJExpr . TxtI) mt] ++ ccArg
     StaticThunk (Just (f,args)) -> ApplStat (jvar "h$stc") $ [jvar i, jvar f, toJExpr args] ++ ccArg
+    --StaticUnboxed (StaticUnboxedString str) -> AssignStat (jvar i) (initStr str)
+
+
+      --  -> withNewIdent $ \ident -> do
+        -- this should do modified UTF8
+    --    emitToplevel [j| `decl ident`;
+    --                     `ident` = h$str(`T.unpack t`);
+  --                     |]
+    --    return [ [je| `ident`() |], [je| 0 |] ]
+    --  Nothing -> withNewIdent $ \ident -> do
+    --    emitToplevel [j| `decl ident`;
+      --                   `ident` = h$rstr(`map toInteger (B.unpack str)`);
+        --               |]
+    -- ApplStat (jvar "h$str")
+    --StaticUnboxed (StaticUnboxedStringOffset str) -> AssignStat (jvar i) (jint 0)
     _                    -> mempty
   where
     ccArg = maybeToList (fmap toJExpr cc)
 
+
+initStr :: ByteString -> JExpr
+initStr str =
+  case decodeModifiedUTF8 str of
+    Just t  -> ApplExpr (jvar "h$str") [ValExpr (JStr t)]
+    Nothing -> [je| h$rstr(`map toInteger (B.unpack str)`) |]
+
 allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> Maybe JExpr -> JExpr
 allocDynamicE s entry free cc
   | csInlineAlloc s || length free > 24 =
-      ValExpr . jhFromList $ [("f", entry), ("d1", fillObj1), ("d2", fillObj2), ("m", ji 0)]
-                             ++ maybe [] (\cid -> [("cc", cid)]) cc
+      ValExpr . jhFromList $ [ ("f", entry)
+                             , ("d1", fillObj1)
+                             , ("d2", fillObj2)
+                             , ("m", ji 0)
+                             ] ++
+                             maybe [] (\cid -> [("cc", cid)]) cc
   | otherwise = ApplExpr allocFun (toJExpr entry : free ++ maybeToList cc)
   where
     allocFun = allocClsA ! length free

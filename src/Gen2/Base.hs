@@ -1,4 +1,7 @@
-{-# LANGUAGE TemplateHaskell, OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell,
+             OverloadedStrings,
+             TupleSections
+  #-}
 {-
   A base bundle is used for incremental linking. it contains information about
   the symbols that have already been linked. These symbols are not included
@@ -14,6 +17,7 @@ import qualified Gen2.Object          as Object
 import           Compiler.JMacro
 
 import           Control.Applicative
+import           Control.Arrow
 import           Control.Lens
 import           Control.Monad
 
@@ -21,6 +25,7 @@ import           Data.Array
 import qualified Data.Binary          as DB
 import qualified Data.Binary.Get      as DB
 import qualified Data.Binary.Put      as DB
+import           Data.Hashable
 import           Data.HashMap.Strict  (HashMap)
 import qualified Data.HashMap.Strict  as HM
 import qualified Data.HashSet         as HS
@@ -30,9 +35,14 @@ import           Data.Set             (Set)
 import qualified Data.Set             as S
 import           Data.Text            (Text)
 import qualified Data.Text            as T
+import           Data.ByteString      (ByteString)
+
+import           Panic
 
 newLocals :: [Ident]
-newLocals = filter (not . isKeyword) $ map (TxtI . T.pack) $ (map (:[]) chars0) ++ concatMap mkIdents [1..]
+newLocals = filter (not . isKeyword) $
+            map (TxtI . T.pack) $
+            (map (:[]) chars0) ++ concatMap mkIdents [1..]
   where
     mkIdents n = [c0:cs | c0 <- chars0, cs <- replicateM n chars]
     chars0 = ['a'..'z']++['A'..'Z']
@@ -44,8 +54,10 @@ newLocals = filter (not . isKeyword) $ map (TxtI . T.pack) $ (map (:[]) chars0) 
                , "function", "if", "in", "instanceof", "new", "return"
                , "switch", "this", "throw", "try", "typeof", "var", "void"
                , "while", "with"
-               , "class", "enum", "export", "extends", "import", "super", "const"
-               , "implements", "interface", "let", "package", "private", "protected"
+               , "class", "enum", "export", "extends", "import", "super"
+               , "const"
+               , "implements", "interface", "let", "package", "private"
+               , "protected"
                , "public", "static", "yield"
                , "null", "true", "false"
                ]
@@ -53,24 +65,56 @@ newLocals = filter (not . isKeyword) $ map (TxtI . T.pack) $ (map (:[]) chars0) 
 renamedVars :: [Ident]
 renamedVars = map (\(TxtI xs) -> TxtI ("h$$"<>xs)) newLocals
 
-data CompactorState =
-  CompactorState { _identSupply   :: [Ident]               -- ^ ident supply for new names
-                 , _nameMap       :: !(HashMap Text Ident) -- ^ renaming mapping for internal names
-                 , _entries       :: !(HashMap Text Int)   -- ^ entry functions (these get listed in the metadata init array)
-                 , _numEntries    :: !Int
-                 , _statics       :: !(HashMap Text Int)   -- ^ mapping of global closure -> index in current block, for static initialisation
-                 , _numStatics    :: !Int                  -- ^ number of static entries
-                 , _labels        :: !(HashMap Text Int)   -- ^ non-Haskell JS labels
-                 , _numLabels     :: !Int                  -- ^ number of labels
-                 , _parentEntries :: !(HashMap Text Int)   -- ^ entry functions we're not linking, offset where parent gets [0..n], grantparent [n+1..k] etc
-                 , _parentStatics :: !(HashMap Text Int)   -- ^ objects we're not linking in base bundle
-                 , _parentLabels  :: !(HashMap Text Int)   -- ^ non-Haskell JS labels in parent
-                 } deriving (Show)
+data CompactorState = CompactorState
+  { _identSupply   :: [Ident]               -- ^ ident supply for new names
+  , _nameMap       :: !(HashMap Text Ident) -- ^ renaming mapping for internal names
+  , _entries       :: !(HashMap Text Int)   -- ^ entry functions (these get listed in the metadata init array)
+  , _numEntries    :: !Int
+  , _statics       :: !(HashMap Text Int)   -- ^ mapping of global closure -> index in current block, for static initialisation
+  , _numStatics    :: !Int                  -- ^ number of static entries
+  , _labels        :: !(HashMap Text Int)   -- ^ non-Haskell JS labels
+  , _numLabels     :: !Int                  -- ^ number of labels
+  , _parentEntries :: !(HashMap Text Int)   -- ^ entry functions we're not linking, offset where parent gets [0..n], grandparent [n+1..k] etc
+  , _parentStatics :: !(HashMap Text Int)   -- ^ objects we're not linking in base bundle
+  , _parentLabels  :: !(HashMap Text Int)   -- ^ non-Haskell JS labels in parent
+  , _stringTable   :: !StringTable
+  } deriving (Show)
+
+data StringTable = StringTable
+  { stTableIdents :: !(Array Int Text)
+  , stOffsets     :: !(HashMap ByteString (Int, Int))  -- ^ content of the table
+  , stIdents      :: !(HashMap Text       (Either Int Int))  -- ^ identifiers in the table
+  } deriving (Show)
+
+instance DB.Binary StringTable where
+  put (StringTable tids offs idents) = do
+    DB.put tids
+    DB.put (HM.toList offs)
+    DB.put (HM.toList idents)
+  get = StringTable <$> DB.get
+                    <*> fmap HM.fromList DB.get
+                    <*> fmap HM.fromList DB.get
+
+emptyStringTable :: StringTable
+emptyStringTable = StringTable (listArray (0,-1) [])
+                               HM.empty
+                               HM.empty
 
 makeLenses ''CompactorState
 
 emptyCompactorState :: CompactorState
-emptyCompactorState = CompactorState renamedVars HM.empty HM.empty 0 HM.empty 0 HM.empty 0 HM.empty HM.empty HM.empty
+emptyCompactorState = CompactorState renamedVars
+                                     HM.empty
+                                     HM.empty
+                                     0
+                                     HM.empty
+                                     0
+                                     HM.empty
+                                     0
+                                     HM.empty
+                                     HM.empty
+                                     HM.empty
+                                     emptyStringTable
 
 showBase :: Base -> String
 showBase b = unlines
@@ -109,8 +153,9 @@ putBase (Base cs packages funs) = do
     modsM = M.fromList (zip mods [(0::Int)..])
     putList f xs = pi (length xs) >> mapM_ f xs
     -- serialise the compactor state
-    putCs (CompactorState [] _ _ _ _ _ _ _ _ _ _) = error "putBase: putCs exhausted renamer symbol names"
-    putCs (CompactorState (ns:_) nm es _ ss _ ls _ pes pss pls) = do
+    putCs (CompactorState [] _ _ _ _ _ _ _ _ _ _ _) =
+      panic "putBase: putCs exhausted renamer symbol names"
+    putCs (CompactorState (ns:_) nm es _ ss _ ls _ pes pss pls sts) = do
       DB.put ns
       DB.put (HM.toList nm)
       DB.put (HM.toList es)
@@ -119,6 +164,7 @@ putBase (Base cs packages funs) = do
       DB.put (HM.toList pes)
       DB.put (HM.toList pss)
       DB.put (HM.toList pls)
+      DB.put sts
     putPkg (Object.Package k) = DB.put k
     -- fixme group things first
     putFun (p,m,s) = pi (pkgsM M.! p) >> pi (modsM M.! m) >> DB.put s
@@ -141,12 +187,26 @@ getBase file = getBase'
       pes <- HM.fromList <$> DB.get
       pss <- HM.fromList <$> DB.get
       pls <- HM.fromList <$> DB.get
-      return (CompactorState (dropWhile (/=n) renamedVars) nm es (HM.size es) ss (HM.size ss) ls (HM.size ls) pes pss pls)
+      sts <- DB.get
+      return (CompactorState (dropWhile (/=n) renamedVars)
+                             nm
+                             es
+                             (HM.size es)
+                             ss
+                             (HM.size ss)
+                             ls
+                             (HM.size ls)
+                             pes
+                             pss
+                             pls
+                             sts)
     getBase' = do
       hdr <- DB.getByteString 9
-      when (hdr /= "GHCJSBASE") (error $ "getBase: invalid base file: " <> file)
+      when (hdr /= "GHCJSBASE")
+           (panic $ "getBase: invalid base file: " <> file)
       vt  <- DB.getLazyByteString (fromIntegral Object.versionTagLength)
-      when (vt /= Object.versionTag) (error $ "getBase: incorrect version: " <> file)
+      when (vt /= Object.versionTag)
+           (panic $ "getBase: incorrect version: " <> file)
       cs <- makeCompactorParent <$> getCs
       linkedPackages <- getList DB.get
       pkgs <- la <$> getList getPkg
@@ -154,14 +214,19 @@ getBase file = getBase'
       funs <- getList (getFun pkgs mods)
       return (Base cs linkedPackages $ S.fromList funs)
 
--- | make a base state from a CompactorState: empty the current symbols sets, move everything to
---   the parent
+-- | make a base state from a CompactorState: empty the current symbols sets,
+--   move everything to the parent
 makeCompactorParent :: CompactorState -> CompactorState
-makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls) =
-  CompactorState is nm HM.empty 0 HM.empty 0 HM.empty 0
-     (HM.union (fmap (+nes) pes) es)
-     (HM.union (fmap (+nss) pss) ss)
-     (HM.union (fmap (+nls) pls) ls)
+makeCompactorParent (CompactorState is nm es nes ss nss ls nls pes pss pls sts)
+  = CompactorState is
+                   nm
+                   HM.empty 0
+                   HM.empty 0
+                   HM.empty 0
+                   (HM.union (fmap (+nes) pes) es)
+                   (HM.union (fmap (+nss) pss) ss)
+                   (HM.union (fmap (+nls) pls) ls)
+                   sts
 
 instance DB.Binary Base where
   get = getBase "<unknown file>"

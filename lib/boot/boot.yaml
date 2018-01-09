@@ -1,0 +1,81 @@
+###############################################################################
+# the packages that ghcjs-boot builds
+#
+# package names are relative to the directory containing this boot.yaml file
+
+packages:
+
+  # special packages installed between stages:
+
+  ghc-prim:   ./pkg/ghc-prim
+
+  ghcjs-prim: ./pkg/ghcjs-prim
+  ghcjs-th:   ./pkg/ghcjs-th
+
+  cabal:      ./pkg/Cabal
+
+
+  # pretend to have these packages installed during stage 1,
+  # GHCJS calls GHC for anything that depends on them
+  # (these must be installed in the GHC installation used for booting)
+
+  stage1PretendToHave:
+    - Cabal
+
+  # in stage 1a, we cannot do linking yet, ghc-prim is installed
+  # before this
+
+  stage1a:
+    - ./pkg/base
+    - ./pkg/integer-gmp
+    - ./pkg/transformers
+
+  # after stage 1a, ghcjs-boot installs ghcjs-prim and
+  # continues with stage 1b
+
+  stage1b:
+    - ./pkg/array
+    - ./pkg/binary
+    - ./pkg/bytestring
+    - ./pkg/containers
+    - ./pkg/deepseq
+    - ./pkg/directory
+    - ./pkg/filepath
+    - ./pkg/ghc
+    - ./pkg/ghc-boot
+    - ./pkg/ghc-boot-th
+    - ./pkg/ghci
+    - ./pkg/pretty
+    - ./pkg/template-haskell
+    - ./pkg/process
+    - ./pkg/time
+    - IfUnix:    ./pkg/unix
+    - IfWindows: ./pkg/Win32
+
+programs:
+
+  # GHCJS programs
+  #
+  # customize their wrapper scripts to change the installation destination
+
+  ghcjs:         ghcjs
+  ghcjs-pkg:     ghcjs-pkg
+  haddock-ghcjs: haddock-ghcjs
+
+  # non-wrapped GHCJS programs
+
+  ghcjs-run:     ghcjs-run
+
+  # third party programs
+
+  cabal:      cabal
+  ghc:        ghc
+  ghc-pkg:    ghc-pkg
+  node:       node
+  bash:       bash
+  make:       make
+  cpp:        cpp
+  alex:       alex
+  happy:      happy
+  git:        git
+  autoreconf: autoreconf

@@ -1,3 +1,4 @@
+{-# LANGUAGE PackageImports #-}
 {- |
 Module      :  Language.Javascript.JMacro
 Copyright   :  (c) Gershom Bazerman, 2010
@@ -60,7 +61,7 @@ Meanwhile, the above lambda is in Javascript, and brings the variable into scope
 
 Other than that, the language is essentially Javascript (1.5). Note however that one must use semicolons in a principled fashion -- i.e. to end statements consistently. Otherwise, the parser will mistake the whitespace for a whitespace application, and odd things will occur. A further gotcha exists in regex literals, whicch cannot begin with a space. @x / 5 / 4@ parses as ((x / 5) / 4). However, @x /5 / 4@ will parse as x(/5 /, 4). Such are the perils of operators used as delimeters in the presence of whitespace application.
 
-Additional features in jmacro (documented on the wiki) include an infix application operator, and an enhanced destructuring bind.  
+Additional features in jmacro (documented on the wiki) include an infix application operator, and an enhanced destructuring bind.
 
 Additional datatypes can be marshalled to Javascript by proper instance declarations for the ToJExpr class.
 
@@ -76,7 +77,7 @@ module Compiler.JMacro (
   j, je
  ) where
 
-import Language.Haskell.TH.Quote (QuasiQuoter)
+import "template-haskell" Language.Haskell.TH.Quote (QuasiQuoter)
 
 import Compiler.JMacro.Base hiding (expr2stat)
 import Compiler.JMacro.QQ
@@ -88,4 +89,3 @@ j  = jmacro
 
 je :: QuasiQuoter
 je = jmacroE
-

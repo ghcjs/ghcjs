@@ -1,0 +1,46 @@
+#ifndef ghcjs_HOST_OS
+#include "../include_native/ghcautoconf.h"
+#else
+
+#ifndef __GHCAUTOCONF_H__
+#define __GHCAUTOCONF_H__
+
+/* static config for GHCJS */
+#define ALIGNMENT_CHAR 1
+#define ALIGNMENT_DOUBLE 8
+#define ALIGNMENT_FLOAT 4
+#define ALIGNMENT_INT 4
+#define ALIGNMENT_LONG 4
+#define ALIGNMENT_LONG_LONG 8
+#define ALIGNMENT_SHORT 2
+#define ALIGNMENT_UNSIGNED_CHAR 1
+#define ALIGNMENT_UNSIGNED_INT 4
+#define ALIGNMENT_UNSIGNED_LONG 4 
+#define ALIGNMENT_UNSIGNED_LONG_LONG 8
+#define ALIGNMENT_UNSIGNED_SHORT 2
+#define ALIGNMENT_VOID_P 4 
+#define CC_SUPPORTS_TLS 0 
+#define HAS_VISIBILITY_HIDDEN 1
+#define HAVE_BIN_SH 1
+#define HAVE_GETTIMEOFDAY 1
+#define HAVE_LONG_LONG 1
+#define LEADING_UNDERSCORE 1
+#define RETSIGTYPE void
+#define SIZEOF_CHAR 1
+#define SIZEOF_DOUBLE 8
+#define SIZEOF_FLOAT 4
+#define SIZEOF_INT 4
+#define SIZEOF_LONG 4 
+#define SIZEOF_LONG_LONG 8
+#define SIZEOF_SHORT 2
+#define SIZEOF_UNSIGNED_CHAR 1
+#define SIZEOF_UNSIGNED_INT 4
+#define SIZEOF_UNSIGNED_LONG 4 
+#define SIZEOF_UNSIGNED_LONG_LONG 8
+#define SIZEOF_UNSIGNED_SHORT 2
+#define SIZEOF_VOID_P 4
+#define TABLES_NEXT_TO_CODE 1
+#endif /* __GHCAUTOCONF_H__ */
+
+#endif
+

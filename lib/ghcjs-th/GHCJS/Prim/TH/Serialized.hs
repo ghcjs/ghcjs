@@ -17,7 +17,7 @@ import Data.Binary
 import Data.Bits
 import Data.Data
 import Data.Typeable
-import Data.Typeable.Internal
+-- import Data.Typeable.Internal
 import Data.Word
 
 -- | Represents a serialized value of a particular type. Attempts can be made to deserialize it at certain types
@@ -27,16 +27,6 @@ instance Binary Serialized where
     put (Serialized the_type bytes) =
         put the_type >> put bytes
     get = Serialized <$> get <*> get
-
-instance Binary TyCon where
-    put tc = put (tyConPackage tc) >> put (tyConModule tc) >> put (tyConName tc)
-    get = mkTyCon3 <$> get <*> get <*> get
-
-instance Binary TypeRep where
-    put type_rep =
-      let (ty_con, child_type_reps) = splitTyConApp type_rep
-      in  put ty_con >> put child_type_reps
-    get = mkTyConApp <$> get <*> get
 
 -- | Put a Typeable value that we are able to actually turn into bytes into a 'Serialized' value ready for deserialization later
 toSerialized :: Typeable a => (a -> [Word8]) -> a -> Serialized

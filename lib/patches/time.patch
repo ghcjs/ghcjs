@@ -1,0 +1,90 @@
+diff -Nru upstream/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc boot/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc
+--- upstream/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc	2018-01-09 08:27:54.000000000 +0000
++++ boot/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc	2018-01-09 08:27:54.718402618 +0000
+@@ -1,5 +1,80 @@
+ module Data.Time.Clock.Internal.CTimespec where
+ 
++#ifdef __GHCJS__
++
++import Foreign
++import Foreign.C
++import System.IO.Unsafe
++
++type ClockID = CInt
++
++data CTimespec = MkCTimespec CTime CLong
++
++instance Storable CTimespec where
++  sizeOf _ = 8
++  alignment _ = 4
++  peek p = do
++    s  <- peekByteOff p 0
++    ns <- peekByteOff p 4
++    return (MkCTimespec s ns)
++  poke p (MkCTimespec s ns) = do
++    pokeByteOff p 0 s
++    pokeByteOff p 4 ns
++
++-- | Get the current POSIX time from the system clock.
++getCTimespec :: IO CTimespec
++getCTimespec = alloca (\ptspec -> do
++    throwErrnoIfMinus1_ "clock_gettime" $
++        clock_gettime 0 ptspec
++    peek ptspec
++    )
++
++foreign import ccall unsafe "time.h clock_gettime"
++    clock_gettime :: ClockID -> Ptr CTimespec -> IO CInt
++foreign import ccall unsafe "time.h clock_getres"
++    clock_getres :: ClockID -> Ptr CTimespec -> IO CInt
++
++-- | Get the resolution of the given clock.
++clockGetRes :: ClockID -> IO (Either Errno CTimespec)
++clockGetRes clockid = alloca $ \ptspec -> do
++    rc <- clock_getres clockid ptspec
++    case rc of
++        0 -> do
++            res <- peek ptspec
++            return $ Right res
++        _ -> do
++            errno <- getErrno
++            return $ Left errno
++
++-- | Get the current time from the given clock.
++clockGetTime :: ClockID -> IO CTimespec
++clockGetTime clockid = alloca (\ptspec -> do
++    throwErrnoIfMinus1_ "clock_gettime" $ clock_gettime clockid ptspec
++    peek ptspec
++    )
++
++clock_REALTIME :: ClockID
++clock_REALTIME = 0
++
++clock_TAI :: ClockID
++clock_TAI = 11
++
++realtimeRes :: CTimespec
++realtimeRes = unsafePerformIO $ do
++    mres <- clockGetRes clock_REALTIME
++    case mres of
++        Left errno -> ioError (errnoToIOError "clock_getres" errno Nothing Nothing)
++        Right res -> return res
++
++clockResolution :: ClockID -> Maybe CTimespec
++clockResolution clockid = unsafePerformIO $ do
++    mres <- clockGetRes clockid
++    case mres of
++        Left _ -> return Nothing
++        Right res -> return $ Just res
++
++#else
++
+ #include "HsTimeConfig.h"
+ 
+ #if !defined(mingw32_HOST_OS) && HAVE_CLOCK_GETTIME
+@@ -74,3 +149,5 @@
+         Right res -> return $ Just res
+ 
+ #endif
++
++#endif

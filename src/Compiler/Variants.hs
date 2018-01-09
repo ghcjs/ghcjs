@@ -16,14 +16,14 @@ import qualified Gen2.Object           as Gen2
 
 import           CostCentre            (CollectedCCs)
 import           DynFlags              (DynFlags)
-import           Module                (Module (..))
-import           StgSyn                (StgBinding)
+import           Module                (Module (..), InstalledUnitId)
+import           StgSyn                (StgBinding, StgTopBinding)
 
 data Variant = Variant
     { variantRender            :: GhcjsSettings
                                -> DynFlags
                                -> Module
-                               -> StgPgm
+                               -> [StgTopBinding]
                                -> CollectedCCs
                                -> ByteString
     , variantLink              :: DynFlags
@@ -31,7 +31,7 @@ data Variant = Variant
                                -> GhcjsSettings
                                -> FilePath                     -- output directory
                                -> [FilePath]                   -- include paths for home package
-                               -> [PackageKey]                 -- dependencies
+                               -> [InstalledUnitId]            -- dependencies
                                -> [LinkedObj]                  -- object files
                                -> [FilePath]                   -- extra JavaScript files
                                -> (Gen2.Fun -> Bool)           -- function to use as roots

@@ -13,7 +13,7 @@ import           System.Exit
 
 import           GHC
 import           DynFlags
-import           StaticFlags
+-- import           StaticFlags
 
 import           Documentation.Haddock
 import           ResponseFile (expandResponse)
@@ -74,10 +74,10 @@ withGhcjs' libDir flags ghcActs = runGhc (Just libDir) $ do
       --
       -- This is a bit of a hack until we get rid of the rest of the remaining
       -- StaticFlags. See GHC issue #8276.
-      let flags' = discardStaticFlags flags
-      (dynflags', rest, _) <- parseDynamicFlags dynflags (map noLoc $ flags')
+      -- let flags' = discardStaticFlags flags
+      (dynflags', rest, _) <- parseDynamicFlags dynflags (map noLoc $ flags)
       if not (null rest)
-        then throw (HaddockException $ "Couldn't parse GHC options: " ++ unwords flags')
+        then throw (HaddockException $ "Couldn't parse GHC options: " ++ unwords flags)
         else return dynflags'
 
 getGhcjsDirs :: [Flag] -> IO (String, String)
@@ -85,4 +85,3 @@ getGhcjsDirs flags =
   case [ dir | Flag_GhcLibDir dir <- flags ] of
     [] -> error "haddock-ghcjs: missing -B option, cannot find library dir"
     xs -> return ("not available", last xs)
-

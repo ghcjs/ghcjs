@@ -26,10 +26,12 @@ import           Unique
 import           StgSyn
 import           PrimOp
 import           Module
+import           VarSet
 import           Panic
 import           TyCon
 import           Util
 import           Type hiding (typeSize)
+import           RepType
 import           Name
 import           GHC
 import           Id
@@ -40,7 +42,8 @@ import           Control.Lens hiding ((||=))
 import           Control.Monad.State.Strict
 
 import           Data.Array
-import           Data.Bits ((.|.), shiftL, shiftR, (.&.), testBit, xor, complement)
+import           Data.Bits
+  ((.|.), shiftL, shiftR, (.&.), testBit, xor, complement)
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
@@ -54,7 +57,8 @@ import           Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet        as IS
 import           Data.Monoid
-import           Data.Maybe (isJust, isNothing, catMaybes, fromMaybe, maybeToList, listToMaybe)
+import           Data.Maybe
+  (isJust, isNothing, catMaybes, fromMaybe, maybeToList, listToMaybe)
 import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Set (Set)
@@ -72,6 +76,7 @@ import           Compiler.Compat
 import           Compiler.Settings
 
 import           Gen2.Base
+import           Gen2.Deps
 import           Gen2.Utils
 import           Gen2.Prim
 import           Gen2.Rts
@@ -87,11 +92,19 @@ import           Gen2.Sinker
 import           Gen2.Profiling
 import qualified Gen2.Compactor as Compactor
 
-import qualified Debug.Trace
+import qualified Control.Exception
+
+-- debug
+import           Gen2.Printer             (pretty)
+
+import qualified Data.Text.Lazy           as TL
+import qualified Data.Text.Lazy.Encoding  as TLE
+import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
+
 
 data DependencyDataCache = DDC
-         { _ddcModule   :: !(IntMap        Object.Package)  -- Unique Module -> Object.Package
-         , _ddcId       :: !(IntMap        Object.Fun)      -- Unique Id     -> Object.Fun (only to other modules)
+         { _ddcModule   :: !(IntMap        Object.Package)  -- ^ Unique Module -> Object.Package
+         , _ddcId       :: !(IntMap        Object.Fun)      -- ^ Unique Id     -> Object.Fun (only to other modules)
          , _ddcOther    :: !(Map OtherSymb Object.Fun)
          }
 
@@ -103,12 +116,18 @@ data ExprCtx = ExprCtx
        { _ctxTop        :: Id
        , _ctxTarget     :: [JExpr]
        , _ctxEval       :: UniqSet Id
-       , _ctxLne        :: UniqSet Id -- all lne-bound things
-       , _ctxLneFrameBs :: UniqFM Int -- binds in current lne frame (defined at size)
-       , _ctxLneFrame   :: [(Id,Int)] -- contents of current lne frame
+       , _ctxLne        :: UniqSet Id -- ^ all lne-bound things
+       , _ctxLneFrameBs :: UniqFM Int -- ^ binds in current lne frame (defined at size)
+       , _ctxLneFrame   :: [(Id,Int)] -- ^ contents of current lne frame
        }
 
 makeLenses ''ExprCtx
+
+instance Show ExprCtx where
+  show (ExprCtx top tgt eval lne _lnefbs lnef) =
+    "ExprCtx\n" ++ unlines [show top, show tgt, sus eval, sus lne, show lnef]
+    where
+      sus = show . nonDetEltsUniqSet
 
 clearCtxStack :: ExprCtx -> ExprCtx
 clearCtxStack ctx = ctx & ctxLneFrameBs .~ emptyUFM
@@ -128,22 +147,25 @@ addEval i = over ctxEval (flip addOneToUniqSet i)
 generate :: GhcjsSettings
          -> DynFlags
          -> Module
-         -> StgPgm
+         -> [StgTopBinding] -- StgPgm
          -> CollectedCCs
          -> ByteString -- ^ binary data for the .js_o object file
 generate settings df m s cccs =
   let (uf, s') = sinkPgm m s
-  in  flip evalState (initState df m uf) $ do
+  in trace' ("generate\n" ++ intercalate "\n\n" (map showIndent s)) $
+
+     flip evalState (initState df m uf) $ do
         ifProfiling' $ initCostCentres cccs
         (st, lus) <- genUnits df m s'
         -- (exported symbol names, javascript statements) for each linkable unit
-        p <- forM lus $ \u -> mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
-                                \ts -> return (ts ++ luOtherExports u, luStat u)
+        p <- forM lus $ \u ->
+           mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
+            \ts -> return (ts ++ luOtherExports u, luStat u)
         let (st', dbg) = dumpAst st settings df s'
         deps <- genDependencyData df m lus
-        return . BL.toStrict $
-          Object.object' st' deps (p ++ dbg) -- p first, so numbering of linkable units lines up
-
+        -- p first, so numbering of linkable units lines up
+        pure . BL.toStrict $
+          Object.object' st' deps (p ++ dbg)
 {- |
   Generate an extra linkable unit for the object file if -debug is active.
   this unit is never actually linked, but it contains the optimized STG AST
@@ -153,7 +175,7 @@ generate settings df m s cccs =
 dumpAst :: Object.SymbolTable
         -> GhcjsSettings
         -> DynFlags
-        -> StgPgm
+        -> [StgTopBinding]
         -> (Object.SymbolTable, [([Text], BL.ByteString)])
 dumpAst st _settings dflags s
   | buildingDebug dflags = (st', [(["h$debug", "h$dumpAst"], bs)])
@@ -179,43 +201,71 @@ data LinkableUnit = LinkableUnit
   } deriving (Eq, Ord, Show)
 
 -- | Generate the ingredients for the linkable units for this module
-genUnits :: DynFlags
+genUnits :: HasDebugCallStack
+         => DynFlags
          -> Module
-         -> StgPgm
+         -> [StgTopBinding] -- StgPgm
          -> G (Object.SymbolTable, [LinkableUnit]) -- ^ the final symbol table and the linkable units
 genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
     where
-      go :: Int                 -- ^ the block we're generating (block 0 is the global unit for the module)
+      -- ss' = [l | StgTopLifted l <- ss]
+
+      go :: HasDebugCallStack
+         => Int                 -- ^ the block we're generating (block 0 is the global unit for the module)
          -> Object.SymbolTable  -- ^ the shared symbol table
-         -> StgPgm
+         -> [StgTopBinding]
          -> G (Object.SymbolTable, [LinkableUnit])
       go n st (x:xs) = do
-        (st', lu) <- generateBlock st x n
+        (st', mlu) <- generateBlock st x n
         (st'', lus)  <- go (n+1) st' xs
-        return (st'', lu:lus)
+        return (st'', maybe lus (:lus) mlu)
       go _ st []     = return (st, [])
 
       -- | Generate the global unit that all other blocks in the module depend on
       --   used for cost centres and static initializers
       --   the global unit has no dependencies, exports the moduleGlobalSymbol
-      generateGlobalBlock :: (Object.SymbolTable, [LinkableUnit])
+      generateGlobalBlock :: HasDebugCallStack
+                          => (Object.SymbolTable, [LinkableUnit])
                           -> G (Object.SymbolTable, [LinkableUnit])
       generateGlobalBlock (st, lus) = do
         glbl <- use gsGlobal
-        staticInit <- initStaticPtrs (collectStaticInfo ss)
+        staticInit <-
+          initStaticPtrs (collectStaticInfo [l | StgTopLifted l <- ss])
         (st', [], bs) <- serializeLinkableUnit m st [] [] []
                          . O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
                          $ mconcat (reverse glbl) <> staticInit
-        return (st', LinkableUnit bs [] [moduleGlobalSymbol dflags m] [] [] False : lus)
+        return ( st'
+               , LinkableUnit bs
+                              []
+                              [moduleGlobalSymbol dflags m]
+                              []
+                              []
+                              False
+                 : lus
+               )
 
       -- | Generate the linkable unit for one binding or group of
       --   mutually recursive bindings
-      generateBlock :: Object.SymbolTable
-                    -> StgBinding
+      generateBlock :: HasDebugCallStack
+                    => Object.SymbolTable
+                    -> StgTopBinding
                     -> Int
-                    -> G (Object.SymbolTable, LinkableUnit)
-      generateBlock st decl n = do
+                    -> G (Object.SymbolTable, Maybe LinkableUnit)
+      generateBlock st (StgTopStringLit bnd str) n = do
+        [b1@(TxtI b1t),b2@(TxtI b2t)] <- genIdsI bnd
+        -- [e1,e2] <- genLit (MachStr str)
+        emitStatic b1t (StaticUnboxed (StaticUnboxedString str)) Nothing
+        emitStatic b2t (StaticUnboxed (StaticUnboxedStringOffset str)) Nothing
+        extraTl   <- use (gsGroup . ggsToplevelStats)
+        si        <- use (gsGroup . ggsStatic)
+        let stat = mempty -- mconcat (reverse extraTl) <> b1 ||= e1 <> b2 ||= e2
+        (st', _ss, bs) <- serializeLinkableUnit m st [bnd] [] si $
+                          jsSaturate (Just $ modulePrefix m n) stat
+        pure (st', Just $ LinkableUnit bs [bnd] [] [] [] False)
+      generateBlock st (StgTopLifted decl) n =
+        trace' ("generateBlock:\n" ++ showIndent decl) $
+       do
         tl        <- genToplevel decl
         extraTl   <- use (gsGroup . ggsToplevelStats)
         ci        <- use (gsGroup . ggsClosureInfo)
@@ -231,7 +281,7 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
                            . jsSaturate (Just $ modulePrefix m n)
                            $ mconcat (reverse extraTl) <> tl
         return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq`
-          (st', LinkableUnit bs topDeps [] allDeps (S.toList extraDeps) required)
+          (st', Just $ LinkableUnit bs topDeps [] allDeps (S.toList extraDeps) required)
 
 data SomeStaticPtr = SomeStaticPtr
   { sspId          :: Id
@@ -247,62 +297,53 @@ initStaticPtrs ptrs = mconcat <$> mapM initStatic ptrs
       i <- jsId (sspId p)
       let Fingerprint w1 w2 = sspFingerprint p
       fpa <- concat <$> mapM (genLit . MachWord64 . fromIntegral) [w1,w2]
-      let sptInsert = ApplExpr (ValExpr (JVar (TxtI "h$hs_spt_insert"))) (fpa ++ [i])
+      let sptInsert = ApplExpr (ValExpr (JVar (TxtI "h$hs_spt_insert")))
+                               (fpa ++ [i])
       return [j| h$initStatic.push(function() {
                    `sptInsert`;
                  })
                |]
 
-collectStaticInfo :: StgPgm -> [SomeStaticPtr]
-#if __GLASGOW_HASKELL__ >= 709
+collectStaticInfo :: HasDebugCallStack => StgPgm -> [SomeStaticPtr]
 collectStaticInfo pgm = eltsUFM (collect collectStaticPtr emptyUFM pgm)
   where
-    fingerprints :: UniqFM Fingerprint
-    fingerprints = collect collectFingerprint emptyUFM pgm
-
     collect :: (UniqFM a -> Id -> StgRhs -> UniqFM a)
             -> UniqFM a -> StgPgm -> UniqFM a
     collect f !m [] = m
     collect f !m (d:ds) = collect f (collectDecl f m d) ds
+
     collectDecl :: (UniqFM a -> Id -> StgRhs -> UniqFM a)
                 -> UniqFM a -> StgBinding -> UniqFM a
     collectDecl f !m (StgNonRec b e) = f m b e
     collectDecl f !m (StgRec bs)     = foldl' (\m (b,e) -> f m b e) m bs
 
-    collectFingerprint !m b
-      (StgRhsCon _cc con [StgLitArg (MachWord64 w1), StgLitArg (MachWord64 w2)])
-      | getUnique con == fingerprintDataConKey
-      = addToUFM m b $ Fingerprint (fromIntegral w1) (fromIntegral w2)
-    collectFingerprint !m _ _ = m
-
     collectStaticPtr !m b
-      (StgRhsCon _cc con [StgVarArg fpId, StgVarArg info, StgVarArg tgt])
+      (StgRhsCon _cc con [ StgLitArg (MachWord64 w1)
+                         , StgLitArg (MachWord64 w2)
+                         , StgVarArg info
+                         , StgVarArg tgt
+                         ] )
       | getUnique con == staticPtrDataConKey
-      = let Just fp = lookupUFM fingerprints fpId
+      = let fp = Fingerprint (fromIntegral w1) (fromIntegral w2)
         in  addToUFM m b (SomeStaticPtr b info tgt fp)
     collectStaticPtr !m _ _ = m
-#else
-collectStaticInfo _pgm = []
-#endif
 
 hasExport :: StgBinding -> Bool
-#if __GLASGOW_HASKELL__ >= 709
 hasExport bnd =
   case bnd of
     StgNonRec b e -> isExportedBind b e
     StgRec bs     -> any (uncurry isExportedBind) bs
   where
-    isExportedBind _i (StgRhsCon _cc con _) = getUnique con == staticPtrDataConKey
+    isExportedBind _i (StgRhsCon _cc con _) =
+      getUnique con == staticPtrDataConKey
     isExportedBind _ _ = False
-#else
-hasExport _bnd = False
-#endif
 
 {- |
    serialize the payload of a linkable unit in the object file, adding
    strings to the SymbolTable where necessary
 -}
-serializeLinkableUnit :: Module
+serializeLinkableUnit :: HasDebugCallStack
+                      => Module
                       -> Object.SymbolTable  -- symbol table to start with
                       -> [Id]                -- id's exported by unit
                       -> [ClosureInfo]
@@ -323,7 +364,8 @@ collectTopIds (StgRec bs) = let xs = map (zapFragileIdInfo . fst) bs
 
 collectIds :: UniqFM StgExpr -> StgBinding -> [Id]
 collectIds unfloated b =
-  let xs = map zapFragileIdInfo . filter acceptId $ S.toList (bindingRefs unfloated b)
+  let xs = map zapFragileIdInfo .
+           filter acceptId $ S.toList (bindingRefs unfloated b)
   in  seqList xs `seq` xs
   where
     acceptId i = all ($ i) [not . isForbidden] -- fixme test this: [isExported[isGlobalId, not.isForbidden]
@@ -338,13 +380,17 @@ collectIds unfloated b =
      generate the object's dependy data, taking care that package and module names
      are only stored once
  -}
-genDependencyData :: DynFlags -> Module -> [LinkableUnit]
+genDependencyData :: HasDebugCallStack
+                  => DynFlags
+                  -> Module
+                  -> [LinkableUnit]
                   -> G Object.Deps
 genDependencyData dflags mod units = do
     -- [(blockindex, blockdeps, required, exported)]
     ds <- evalStateT (sequence (map (uncurry oneDep) blocks))
                      (DDC IM.empty IM.empty M.empty)
-    return $ Object.Deps (Linker.mkPackage $ modulePackageKey mod)
+    return $ Object.Deps (Linker.mkPackage $
+                           toInstalledUnitId (moduleUnitId mod))
                          (moduleNameText mod)
                          (IS.fromList [ n | (n, _, True, _) <- ds ])
                          (M.fromList $ (\(n,_,_,es) -> map (,n) es) =<< ds)
@@ -433,7 +479,7 @@ genDependencyData dflags mod units = do
                         -> OtherSymb -> StateT DependencyDataCache G Object.Fun
       lookupExternalFun mbIdKey od@(OtherSymb m idTxt) = do
         let mk        = getKey . getUnique $ m
-            mpk       = Linker.mkPackage (modulePackageKey m)
+            mpk       = Linker.mkPackage (toInstalledUnitId (moduleUnitId m))
             inCache p = Object.Fun p (moduleNameText m) idTxt
             addCache  = do
               let cache' = IM.insert mk mpk
@@ -477,36 +523,57 @@ genToplevelDecl i rhs = do
   return (s1 <> s2)
 
 genToplevelConEntry :: Id -> StgRhs -> C
-genToplevelConEntry i (StgRhsCon _cc con _args)
-    | i `elem` [ i' | AnId i' <- dataConImplicitTyThings con ] = genSetConInfo i con NoSRT
-genToplevelConEntry i (StgRhsClosure _cc _bi [] _upd_flag srt _args (removeTick -> StgConApp dc _cargs))
-    | i `elem` [ i' | AnId i' <- dataConImplicitTyThings dc ] = genSetConInfo i dc srt
+genToplevelConEntry i rhs@(StgRhsCon _cc con _args)
+    | i `elem` [ i' | AnId i' <- dataConImplicitTyThings con ]
+    = genSetConInfo i con (stgRhsLive rhs) -- NoSRT
+genToplevelConEntry i rhs@(StgRhsClosure _cc _bi [] _upd_flag
+                    _args (removeTick -> StgConApp dc _cargs _))
+    | i `elem` [ i' | AnId i' <- dataConImplicitTyThings dc ]
+    = genSetConInfo i dc (stgRhsLive rhs) -- srt
 genToplevelConEntry _ _ = mempty
 
 removeTick :: StgExpr -> StgExpr
 removeTick (StgTick _ e) = e
 removeTick e             = e
 
-genStaticRefs :: SRT -> G CIStatic
-genStaticRefs NoSRT = return noStatic
+genStaticRefsRhs :: StgRhs -> G CIStatic
+genStaticRefsRhs lv = genStaticRefs (stgRhsLive lv)
+
+-- fixme, update to new way to compute static refs dynamically
+genStaticRefs :: LiveVars -> G CIStatic
+genStaticRefs lv
+  | isEmptyDVarSet sv = return noStatic
+  | otherwise         = do
+      unfloated <- use gsUnfloated
+      let xs = filter (\x -> not (elemUFM x unfloated ||
+                                  isLiftedType_maybe (idType x) == Just False))
+                      (dVarSetElems sv)
+      CIStaticRefs . catMaybes <$> mapM getStaticRef xs
+  where
+    sv = liveStatic lv
+
+{-
+genStaticRefs {- NoSRT -} = return noStatic
+-}
+{-
 genStaticRefs (SRTEntries s) = do
   unfloated <- use gsUnfloated
   let xs = filter (\x -> not $ elemUFM x unfloated) (uniqSetToList s)
   CIStaticRefs <$> mapM getStaticRef xs
-#if __GLASGOW_HASKELL__ < 711
-genStaticRefs (SRT{}) =
-  panic "genStaticRefs: unexpected SRT"
-#endif
+-}
 
-getStaticRef :: Id -> G Text
-getStaticRef = fmap (itxt.head) . genIdsI
+getStaticRef :: Id -> G (Maybe Text)
+getStaticRef = fmap (fmap itxt . listToMaybe) . genIdsI
+
+headYikes (x:_) = x
+headYikes []    = panic "headYikes"
 
 genToplevelRhs :: Id
                -> StgRhs
                -> C
--- genTopLevelRhs _ _ | Debug.Trace.trace "genToplevelRhs" False = error "genTopLevelRhs"
+-- genTopLevelRhs _ _ | trace' "genToplevelRhs" False = error "genTopLevelRhs"
 -- special cases
-genToplevelRhs i (StgRhsClosure cc _bi _ upd _ args body)
+genToplevelRhs i rhs@(StgRhsClosure cc _bi _ upd args body)
   -- foreign exports
   | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _)) _)
      [StgLitArg (MachInt _is_js_conv), StgLitArg (MachStr _js_name), StgVarArg _tgt] _) <- body,
@@ -521,7 +588,7 @@ genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
   allocConStatic ii cc con args
   return mempty
-genToplevelRhs i (StgRhsClosure cc _bi [] _upd_flag srt args body) = do
+genToplevelRhs i rhs@(StgRhsClosure cc _bi [] _upd_flag {- srt -} args body) = do
   eid@(TxtI eidt) <- jsEnIdI i
   (TxtI idt)   <- jsIdI i
 --  pushGlobalRefs
@@ -530,7 +597,7 @@ genToplevelRhs i (StgRhsClosure cc _bi [] _upd_flag srt args body) = do
   let lidents' = map (\(TxtI t) -> t) lidents
 --  li
 --  refs <- popGlobalRefs
-  CIStaticRefs sr0 <- genStaticRefs srt
+  CIStaticRefs sr0 <- genStaticRefsRhs rhs
   let sri = filter (`notElem` lidents') sr0
       sr   = CIStaticRefs sri
 
@@ -622,39 +689,71 @@ loadLiveFun l = do
 dataFields :: Array Int Ident
 dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..1024])
 
+genBody :: HasDebugCallStack => ExprCtx -> Id -> StgReg -> [Id] -> StgExpr -> C
 genBody ctx i startReg args e =
-  {- Debug.Trace.trace ("genBody: " ++ show args) -} (genBody0 ctx i startReg args e)
+  -- trace' ("genBody: " ++ show args)
+  (genBody0 ctx i startReg args e)
 
-genBody0 :: ExprCtx -> Id -> StgReg -> [Id] -> StgExpr -> C
+genBody0 :: HasDebugCallStack
+         => ExprCtx
+         -> Id
+         -> StgReg
+         -> [Id]
+         -> StgExpr
+         -> C
 genBody0 ctx i startReg args e = do
   la <- loadArgs startReg args
   let ids = take (resultSize args $ idType i) (map toJExpr $ enumFrom R1)
-  (e, _r) <- genExpr (ctx & ctxTarget .~ ids) e
+  (e, _r) <-  trace' ("genBody0 ids:\n" ++ show ids) (genExpr (ctx & ctxTarget .~ ids) e)
   return $ la <> e <> returnStack -- [j| return `Stack`[`Sp`]; |]
 
 -- find the result type after applying the function to the arguments
-resultSize xs t = {- Debug.Trace.trace "resultSize" -} (resultSize0 xs t)
+resultSize :: HasDebugCallStack => [Id] -> Type -> Int
+resultSize xs t = trace' ("resultSize\n" ++ show xs ++ "\n" ++ show t)
+                    (let r = resultSize0 xs t
+                     in trace' ("resultSize -> " ++ show r) r
+                    )
 
-resultSize0 :: [Id] -> Type -> Int
-resultSize0 (x:xs) t
-  | UbxTupleRep _ <- {- Debug.Trace.trace "resultSize0 ubx" -} (repType (idType x)) = panic "genBody: unboxed tuple argument"
-  | otherwise = {- Debug.Trace.trace "resultSize0 not" $ -}
-      case repType t of
-       (UnaryRep t') | isFunTy t' ->
-                         let (fa,fr) = splitFunTy t'
-                             t''     = mkFunTys (flattenRepType $ repType fa) fr
-                         in  {- Debug.Trace.trace ("resultSize0 fun: " ++ show (fa, fr)) $ -}
-                             resultSize0 xs (snd . splitFunTy $ t'')
-       _                          -> 1 -- possibly newtype family, must be boxed
+resultSize0 :: HasDebugCallStack
+            => [Id]
+            -> Type
+            -> Int
+resultSize0 xxs@(x:xs) t
+  -- | isUnboxedTupleType
+  -- | t' <- piResultTys t (map idType xxs) = resultSize0 [] t'
+  -- | MultiRep _ <- {- trace' "resultSize0 ubx" -} (repType (idType x)) = panic "genBody: unboxed tuple argument"
+  -- | otherwise = {- trace' "resultSize0 not" $ -}
+  | t' <- unwrapType t
+  , Just (fa, fr) <- splitFunTy_maybe t' -- isFunTy t' =
+  , Just (tc, ys) <- splitTyConApp_maybe fa
+  , isUnboxedTupleTyCon tc =
+      resultSize0 xxs (mkFunTys (dropRuntimeRepArgs ys) fr)
+  | t' <- unwrapType t
+  , Just (fa, fr) <- splitFunTy_maybe t' = -- isFunTy t' =
+      resultSize0 xs fr
+        -- let (fa, fr) = splitFunTy t'
+        -- let    t''     = mkFunTys (map primRepToType . typePrimRep $ unwrapType fa) fr
+        -- in  resultSize0 xs (maybe fr snd . splitFunTy_maybe $ t'')
+  | otherwise = 1 -- possibly newtype family, must be boxed
+--      case typePrimRep (unwrapType t) of -- repType t of
+       -- (UnaryRep t' | isFunTy t' ->
+      --                   let (fa,fr) = splitFunTy t'
+        --                     t''     = mkFunTys (map slotTyToType . repTypeSlots $ repType fa) fr
+--                         in  {- trace' ("resultSize0 fun: " ++ show (fa, fr)) $ -}
+  --                           resultSize0 xs (snd . splitFunTy $ t'')
+--       _                          -> 1 -- possibly newtype family, must be boxed
 resultSize0 [] t
-  | isRuntimeRepKindedTy t = 0
-  | isRuntimeRepTy t = 0
-  | otherwise = {- Debug.Trace.trace "resultSize0 eol" $ -}
-  case repType t of
-    UnaryRep t'     -> {- Debug.Trace.trace ("resultSize0 eol2: " ++ show t') $ -} typeSize t'
-    UbxTupleRep tys -> {- Debug.Trace.trace ("resultSize0 eol3: " ++ show tys) $ -} sum (map typeSize tys)
+  -- | isRuntimeRepKindedTy t = 0
+  -- | isRuntimeRepTy t = 0
+  | Nothing <- isLiftedType_maybe t = 1
+  | otherwise = sum . map (varSize . primRepVt) $ typePrimRep (unwrapType t)
 
-loadArgs :: StgReg -> [Id] -> C
+    {- trace' "resultSize0 eol" $ -}
+  -- case repType t of
+    -- UnaryRep t'     -> {- trace' ("resultSize0 eol2: " ++ show t') $ -} typeSize t'
+    -- MultiRep tys -> {- trace' ("resultSize0 eol3: " ++ show tys) $ -} sum (map (typeSize . slotTyToType) tys)
+
+loadArgs :: HasDebugCallStack => StgReg -> [Id] -> C
 loadArgs start args = do
   args' <- concatMapM genIdArgI args
   return (mconcat $ zipWith (||=) args' [start..])
@@ -667,7 +766,7 @@ data ExprValData = ExprValData [JExpr]
   deriving (Eq, Ord, Show)
 
 -- not a Monoid
-branchResult :: [ExprResult] -> ExprResult
+branchResult :: HasDebugCallStack => [ExprResult] -> ExprResult
 branchResult []           = panic "branchResult: empty list"
 branchResult [e]          = e
 branchResult (ExprCont:_) = ExprCont
@@ -675,56 +774,61 @@ branchResult (_:es)
   | any (==ExprCont) es   = ExprCont
   | otherwise             = ExprInline Nothing
 
-genExpr :: ExprCtx -> StgExpr -> G (JStat, ExprResult)
-genExpr top (StgApp f args) = {- Debug.Trace.trace "genExpr -> genApp" -} (genApp top f args)
-genExpr top (StgLit l) = (,ExprInline Nothing)
-                             . assignAllCh ("genExpr StgLit " ++ show (top ^. ctxTarget))
-                                           (top ^. ctxTarget)
+genExpr :: HasDebugCallStack => ExprCtx -> StgExpr -> G (JStat, ExprResult)
+genExpr top e = trace' ("genExpr\n" ++ showIndent e)
+                       (genExpr0 top e)
+
+genExpr0 :: HasDebugCallStack
+         => ExprCtx
+         -> StgExpr
+         -> G (JStat, ExprResult)
+genExpr0 top (StgApp f args) = genApp top f args
+genExpr0 top (StgLit l) =
+  (,ExprInline Nothing) .
+  assignAllCh ("genExpr StgLit " ++ show (top ^. ctxTarget))
+                                         (top ^. ctxTarget)
                          <$> genLit l
-genExpr top (StgConApp con args) = do
+genExpr0 top (StgConApp con args _) = do
   as <- concatMapM genArg args
   c <- genCon top con as
   return (c, ExprInline (Just as))
-genExpr top (StgOpApp (StgFCallOp f _) args t) =
+genExpr0 top (StgOpApp (StgFCallOp f _) args t) =
    genForeignCall f t (top ^. ctxTarget) args
-genExpr top (StgOpApp (StgPrimOp op) args t)    = genPrimOp top op args t
-genExpr top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall top c args t
-genExpr _   (StgLam{}) = panic "genExpr: StgLam"
-genExpr top (StgCase e _ liveRhs b srt at alts) = genCase top b e at alts liveRhs srt
-genExpr top (StgLet b e) = do
+genExpr0 top (StgOpApp (StgPrimOp op) args t)    = genPrimOp top op args t
+genExpr0 top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall top c args t
+genExpr0 _   (StgLam{}) = panic "genExpr: StgLam"
+genExpr0 top stg@(StgCase e b at alts) =
+  genCase top b e at alts (liveVars $ stgExprLive False stg)
+genExpr0 top (StgLet b e) = do
   (b',top') <- genBind top b
   (s,r)     <- genExpr top' e
   return (b' <> s, r)
-genExpr top (StgLetNoEscape _ live b e) = do
-  (b', top') <- genBindLne top live b
+genExpr0 top (StgLetNoEscape b e) = do
+  (b', top') <- genBindLne top b
   (s, r)     <- genExpr top' e
   return (b' <> s, r)
-#if __GLASGOW_HASKELL__ < 709
-genExpr top (StgSCC cc tick push e) = do
-  setSCCstats <- ifProfilingM $ setCC cc tick push
-  (stats, result) <- genExpr top e
-  return (setSCCstats <> stats, result)
-genExpr top (StgTick _m _n e) = genExpr top e
-#else
-genExpr top (StgTick (ProfNote cc count scope) e) = do
+genExpr0 top (StgTick (ProfNote cc count scope) e) = do
   setSCCstats <- ifProfilingM $ setCC cc count scope
   (stats, result) <- genExpr top e
   return (setSCCstats <> stats, result)
-genExpr top (StgTick _m e) = genExpr top e
-#endif
+genExpr0 top (StgTick _m e) = genExpr top e
 
-might_be_a_function :: Type -> Bool
+might_be_a_function :: HasDebugCallStack => Type -> Bool
 -- Return False only if we are *sure* it's a data type
 -- Look through newtypes etc as much as poss
 might_be_a_function ty
-  | UnaryRep rep <- repType ty
-  , Just tc <- tyConAppTyCon_maybe rep
+  | [LiftedRep] <- typePrimRep ty
+  , Just tc <- tyConAppTyCon_maybe (unwrapType ty)
   , isDataTyCon tc
   = False
   | otherwise
   = True
 
-genApp :: ExprCtx -> Id -> [StgArg] -> G (JStat, ExprResult)
+genApp :: HasDebugCallStack
+       => ExprCtx
+       -> Id
+       -> [StgArg]
+       -> G (JStat, ExprResult)
 -- special cases for unpacking C Strings, avoid going through a typed array when possible
 genApp ctx i [StgLitArg (MachStr bs)]
     | [top] <- (ctx ^. ctxTarget), getUnique i == unpackCStringIdKey =
@@ -774,7 +878,7 @@ genApp top i a
                 return ([j| `c` = (typeof `i'` === 'object') ? `i'`.d1 : `i'`; |]
                        ,ExprInline Nothing)
     | n == 0 && (i `elementOfUniqSet` (top ^. ctxEval) || isStrictId i) = do
-                a <- assignAllCh ("genApp:" ++ show i ++ " " ++ show (idRepArity i, idVt i))
+                a <- assignAllCh ("genApp:" ++ show i ++ " " ++ show (idFunRepArity i, idVt i))
                                  (top ^. ctxTarget)
                                  <$> genIds i
                 settings <- use gsSettings
@@ -792,15 +896,15 @@ genApp top i a
                 if isStrictId a' || a' `elementOfUniqSet` (top ^. ctxEval)
                   then return ([j| `t` = `ai`; |], ExprInline Nothing)
                   else return ([j| return h$e(`ai`); |], ExprCont)
-    | idRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) = do
+    | idFunRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) = do
              ii <- enterId
              return ([j| return h$e(`ii`) |], ExprCont)
-    | idRepArity i == n && not (isLocalId i) && isStrictId i && n /= 0 = do
+    | idFunRepArity i == n && not (isLocalId i) && isStrictId i && n /= 0 = do
         as' <- concatMapM genArg a
         jmp <- jumpToII i as' =<< r1
         return (jmp, ExprCont)
-    | idRepArity i < n && isStrictId i && idRepArity i > 0 =
-         let (reg,over) = splitAt (idRepArity i) a
+    | idFunRepArity i < n && isStrictId i && idFunRepArity i > 0 =
+         let (reg,over) = splitAt (idFunRepArity i) a
          in  do
            reg' <- concatMapM genArg reg
            pc   <- pushCont over
@@ -814,7 +918,7 @@ genApp top i a
     enterId = genArg (StgVarArg i) >>=
                 \case
                    [x] -> return x
-                   _   -> panic "genApp: unexpected multi-var argument"
+                   xs  -> panic $ "genApp: unexpected multi-var argument (" ++ show (length xs) ++ ")\n" ++ showIndent i
 
     r1 :: C
     r1 = do
@@ -822,7 +926,9 @@ genApp top i a
       return $ mconcat $ zipWith (\r u -> [j| `r`=`u`; |]) (enumFrom R1) ids
     n = length a
 
-pushCont :: [StgArg] -> C
+pushCont :: HasDebugCallStack
+         => [StgArg]
+         -> C
 pushCont as = do
   as' <- concatMapM genArg as
   (app, spec) <- selectApply False (as,as')
@@ -833,7 +939,10 @@ pushCont as = do
     mkTag rs ns = toJExpr ((length rs `shiftL` 8) .|. length ns)
 
 -- regular let binding: allocate heap object
-genBind :: ExprCtx -> StgBinding -> G (JStat, ExprCtx)
+genBind :: HasDebugCallStack
+        => ExprCtx
+        -> StgBinding
+        -> G (JStat, ExprCtx)
 genBind ctx bndr =
   case bndr of
     StgNonRec b r -> do
@@ -850,7 +959,7 @@ genBind ctx bndr =
      ctx' = clearCtxStack ctx
 
      assign :: Id -> StgRhs -> G (Maybe JStat)
-     assign b (StgRhsClosure _ccs _bi _free _upd _str [] expr)
+     assign b (StgRhsClosure _ccs _bi _free _upd [] expr)
        | snd (isInlineExpr (ctx ^. ctxEval) expr) = do
            d   <- declIds b
            tgt <- genIds b
@@ -861,12 +970,23 @@ genBind ctx bndr =
 
      addEvalRhs c [] = c
      addEvalRhs c ((b,r):xs)
-       | (StgRhsCon{}) <- r                         = addEvalRhs (addEval b c) xs
-       | (StgRhsClosure _ _ _ ReEntrant _ _ _) <- r = addEvalRhs (addEval b c) xs
-       | otherwise                                  = addEvalRhs c xs
+       | (StgRhsCon{}) <- r                       = addEvalRhs (addEval b c) xs
+       | (StgRhsClosure _ _ _ ReEntrant _ _) <- r = addEvalRhs (addEval b c) xs
+       | otherwise                                = addEvalRhs c xs
 
-genBindLne :: ExprCtx -> StgLiveVars -> StgBinding -> G (JStat, ExprCtx)
-genBindLne ctx live bndr = do
+genBindLne :: HasDebugCallStack
+           => ExprCtx
+           -> StgBinding
+           -> G (JStat, ExprCtx)
+genBindLne ctx bndr =
+  trace' ("genBindLne\n" ++ showIndent bndr)
+         (genBindLne0 ctx bndr)
+
+genBindLne0 :: HasDebugCallStack
+            => ExprCtx
+            -> StgBinding
+            -> G (JStat, ExprCtx)
+genBindLne0 ctx bndr = do
   vis  <- map (\(x,y,_) -> (x,y)) <$>
             optimizeFree oldFrameSize (newLvs++map fst updBinds)
   declUpds <- mconcat <$> mapM (fmap (||= jnull) . jsIdI . fst) updBinds
@@ -879,17 +999,30 @@ genBindLne ctx live bndr = do
   where
     oldFrame     = ctx ^. ctxLneFrame
     oldFrameSize = length oldFrame
-    isOldLv i    = i `elementOfUniqSet` (ctx ^. ctxLne) || i `elem` (map fst oldFrame)
-    newLvs       = filter (not . isOldLv) (uniqSetToList live)
+    isOldLv i    = i `elementOfUniqSet` (ctx ^. ctxLne) ||
+                   i `elem` (map fst oldFrame)
+    live         = liveVars $ mkDVarSet $ stgLneLive' bndr
+    newLvs       = filter (not . isOldLv) (dVarSetElems live)
     binds = case bndr of
               StgNonRec b e -> [(b,e)]
               StgRec    bs  -> bs
     bound = map fst binds
     (updBinds, _nonUpdBinds) = partition (isUpdatableRhs . snd) binds
 
+stgLneLive' :: StgBinding -> [Id]
+stgLneLive' b = filter (`notElem` bindees b) (stgLneLive b)
+
+stgLneLive :: StgBinding -> [Id]
+stgLneLive (StgNonRec _b e) = stgLneLiveExpr e
+stgLneLive (StgRec bs)      = L.nub $ concatMap (stgLneLiveExpr . snd) bs
+
+stgLneLiveExpr :: StgRhs -> [Id]
+stgLneLiveExpr (StgRhsClosure _ _ l _ _ _) = l
+stgLneLiveExpr (StgRhsCon {})                = []
+
 isUpdatableRhs :: StgRhs -> Bool
-isUpdatableRhs (StgRhsClosure _ _ _ u _ _ _) = isUpdatable u
-isUpdatableRhs _                             = False
+isUpdatableRhs (StgRhsClosure _ _ _ u _ _) = isUpdatable u
+isUpdatableRhs _                           = False
 
 {-
   Let-no-escape entries live on the stack. There is no heap object associated with them.
@@ -902,8 +1035,9 @@ isUpdatableRhs _                             = False
   is initially set to null, changed to h$blackhole when the thunk is being evaluated.
  -}
 
-genEntryLne :: ExprCtx -> Id -> StgRhs -> G ()
-genEntryLne ctx i (StgRhsClosure _cc _bi _live2 update srt args body) = resetSlots $ do
+genEntryLne :: HasDebugCallStack => ExprCtx -> Id -> StgRhs -> G ()
+genEntryLne ctx i rhs@(StgRhsClosure _cc _bi _live2 update args body) =
+  resetSlots $ do
   let payloadSize = length frame
       frame       = ctx ^. ctxLneFrame
       myOffset    =
@@ -918,7 +1052,7 @@ genEntryLne ctx i (StgRhsClosure _cc _bi _live2 update srt args body) = resetSlo
   lvs  <- popLneFrame True payloadSize ctx
   body <- genBody ctx i R1 args body
   ei   <- jsEntryIdI i
-  sr   <- genStaticRefs srt
+  sr   <- genStaticRefsRhs rhs
   let f = JFunc [] (bh <> lvs <> body)
   emitClosureInfo $
     ClosureInfo (itxt ei)
@@ -938,13 +1072,13 @@ genEntryLne ctx i (StgRhsCon cc con args) = resetSlots $ do
   args' <- concatMapM genArg args
   ac    <- allocCon ii con cc args'
   emitToplevel $ ei ||= JFunc []
-    (decl ii <> p <> ac <> [j| `R1` = `ii`; |] <> returnStack) -- return `Stack`[`Sp`]; |])
+    (decl ii <> p <> ac <> [j| `R1` = `ii`; |] <> returnStack)
 
 -- generate the entry function for a local closure
-genEntry :: ExprCtx -> Id -> StgRhs -> G ()
+genEntry :: HasDebugCallStack => ExprCtx -> Id -> StgRhs -> G ()
 genEntry _ _i (StgRhsCon _cc _con _args) = return () -- mempty -- error "local data entry"
 
-genEntry ctx i (StgRhsClosure cc _bi live upd_flag srt args body) = resetSlots $ do
+genEntry ctx i rhs@(StgRhsClosure cc _bi live upd_flag args body) = resetSlots $ do
   ll    <- loadLiveFun live
   upd   <- genUpdFrame upd_flag i
   body  <- genBody entryCtx i R2 args body
@@ -954,7 +1088,7 @@ genEntry ctx i (StgRhsClosure cc _bi live upd_flag srt args body) = resetSlots $
              if et == CIThunk
                then enterCostCentreThunk
                else enterCostCentreFun cc
-  sr <- genStaticRefs srt
+  sr <- genStaticRefsRhs rhs
   emitClosureInfo $ ClosureInfo (itxt ei)
                                 (CIRegs 0 $ PtrV : concatMap idVt args)
                                 (itxt ei <> ", " <> T.pack (show i))
@@ -965,18 +1099,18 @@ genEntry ctx i (StgRhsClosure cc _bi live upd_flag srt args body) = resetSlots $
   where
     entryCtx = ExprCtx i [] (ctx ^. ctxEval) (ctx ^. ctxLne) emptyUFM []
 
-genEntryType :: [Id] -> G CIType
+genEntryType :: HasDebugCallStack => [Id] -> G CIType
 genEntryType []   = return CIThunk
-genEntryType args0 = {- Debug.Trace.trace "genEntryType" $ -} do
+genEntryType args0 = {- trace' "genEntryType" $ -} do
   args' <- mapM genIdArg args
   return $ CIFun (length args) (length $ concat args')
   where
     args = filter (not . isRuntimeRepKindedTy . idType) args0
 
-genSetConInfo :: Id -> DataCon -> SRT -> C
-genSetConInfo i d srt = do
+genSetConInfo :: HasDebugCallStack => Id -> DataCon -> LiveVars -> C
+genSetConInfo i d l {- srt -} = do
   ei <- jsDcEntryIdI i
-  sr <- genStaticRefs srt
+  sr <- genStaticRefs l
   emitClosureInfo $ ClosureInfo (itxt ei)
                                 (CIRegs 0 [PtrV])
                                 (T.pack $ show d)
@@ -986,7 +1120,9 @@ genSetConInfo i d srt = do
   return (ei ||= mkDataEntry)
     where
       -- dataConRepArgTys sometimes returns unboxed tuples. is that a bug?
-      fields = concatMap (flattenRepType . repType) (dataConRepArgTys d)
+      fields = concatMap (map primRepToType . typePrimRep . unwrapType)
+                         (dataConRepArgTys d)
+        -- concatMap (map slotTyToType . repTypeSlots . repType) (dataConRepArgTys d)
 
 mkDataEntry :: JExpr
 mkDataEntry = ValExpr $ JFunc [] returnStack
@@ -1025,28 +1161,66 @@ allocCls dynMiddle xs = do
     -- dynamics
     toCl (i, StgRhsCon cc con ar) =
       -- fixme do we need to handle unboxed?
-      Right <$> ((,,,) <$> jsIdI i <*> enterDataCon con <*> concatMapM genArg ar <*> pure cc)
-    toCl (i, StgRhsClosure cc _bi live _upd_flag _srt _args _body) =
-      Right <$> ((,,,) <$> jsIdI i <*> jsEntryId i <*> concatMapM genIds live <*> pure cc)
+      Right <$> ((,,,) <$> jsIdI i
+                       <*> enterDataCon con
+                       <*> concatMapM genArg ar
+                       <*> pure cc)
+    toCl (i, StgRhsClosure cc _bi live _upd_flag _args _body) =
+      Right <$> ((,,,) <$> jsIdI i
+                       <*> jsEntryId i
+                       <*> concatMapM genIds live
+                       <*> pure cc)
 
+
+genCase :: HasDebugCallStack
+        => ExprCtx
+        -> Id
+        -> StgExpr
+        -> AltType
+        -> [StgAlt]
+        -> LiveVars
+        -> G (JStat, ExprResult)
+genCase top bnd e at alts l =
+  trace' ("genCase\n" ++ showIndent e ++ "\n" ++ unlines (map showIndent alts))
+ (genCase0 top bnd e at alts l)
 -- fixme CgCase has a reps_compatible check here
-genCase :: ExprCtx -> Id -> StgExpr -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> G (JStat, ExprResult)
-genCase top bnd e at alts l srt
+genCase0 :: HasDebugCallStack
+        => ExprCtx
+        -> Id
+        -> StgExpr
+        -> AltType
+        -> [StgAlt]
+        -> LiveVars
+        -> G (JStat, ExprResult)
+genCase0 top bnd e at alts l
   | snd (isInlineExpr (top ^. ctxEval) e) = withNewIdent $ \ccsVar -> do
       bndi <- genIdsI bnd
-      (ej, r) <- genExpr (top & ctxTop .~ bnd & ctxTarget .~ map toJExpr bndi) e -- ExprCtx bnd (map toJExpr bndi) (top ^. ctxEval) (top ^. ctxLneV) (top ^. ctxLneB) (top ^. ctxLne)) e
+      (ej, r) <- genExpr (top & ctxTop .~ bnd & ctxTarget .~ map toJExpr bndi) e
+      -- ExprCtx bnd (map toJExpr bndi) (top ^. ctxEval) (top ^. ctxLneV) (top ^. ctxLneB) (top ^. ctxLne)) e
       let d = case r of
                 ExprInline d0 -> d0
-                ExprCont -> panic $ "genCase: expression was not inline:\n" ++ show e
+                ExprCont -> panic $ "genCase: expression was not inline:\n" ++
+                                    showIndent e ++ "\n" ++
+                                    (TL.unpack . (<>"\n") . displayT . renderPretty 0.8 150 . pretty . jsSaturate (Just "debug") $ ej)
+
           ww = mempty -- if snd (isInlineExpr emptyUniqSet e) then mempty else [j| h$log('danger will robinson'); |]
       (aj, ar) <- genAlts (addEval bnd top) bnd at d alts
       saveCCS <- ifProfiling $ ccsVar |= jCurrentCCS
       restoreCCS <- ifProfiling $ [j| `jCurrentCCS` = `ccsVar`; |]
-      return (decl ccsVar <> mconcat (map decl bndi) <> saveCCS <> ww <> ej <> restoreCCS <> aj, ar)
+      return ( decl ccsVar <>
+               mconcat (map decl bndi) <>
+               saveCCS <>
+               ww <>
+               ej <>
+               restoreCCS <>
+               aj
+             , ar
+             )
   | otherwise = do
       n        <- length <$> genIdsI bnd
-      rj       <- genRet (addEval bnd top) bnd at alts l srt
-      (ej, _r) <- genExpr (top & ctxTop .~ bnd & ctxTarget .~ take n (map toJExpr [R1 ..])) e
+      rj       <- genRet (addEval bnd top) bnd at alts l
+      (ej, _r) <- genExpr (top & ctxTop .~ bnd
+                               & ctxTarget .~ take n (map toJExpr [R1 ..])) e
       return (rj <> ej, ExprCont)
 
 assignAll :: (ToJExpr a, ToJExpr b) => [a] -> [b] -> JStat
@@ -1055,19 +1229,40 @@ assignAll xs ys = mconcat (zipWith assignj xs ys)
 assignAllCh :: (ToJExpr a, ToJExpr b) => String -> [a] -> [b] -> JStat
 assignAllCh msg xs ys
   | length xs == length ys = mconcat (zipWith assignj xs ys)
-  | otherwise              = panic $ "assignAllCh: lengths do not match: " ++ show (length xs, length ys) ++ "\n    " ++ msg
+  | otherwise =
+     panic $ "assignAllCh: lengths do not match: " ++
+             show (length xs, length ys) ++
+             "\n    " ++
+             msg
 
-genRet :: ExprCtx -> Id -> AltType -> [StgAlt] -> StgLiveVars -> SRT -> C
-genRet ctx e at as l srt = withNewIdent f
+genRet :: HasDebugCallStack
+       => ExprCtx
+       -> Id
+       -> AltType
+       -> [StgAlt]
+       -> LiveVars
+       -> C
+genRet ctx e at as l = -- withNewIdent f
+  trace' ("genRet" ++ unlines (map showIndent as))
+         (genRet0 ctx e at as l)
+
+genRet0 :: HasDebugCallStack
+       => ExprCtx
+       -> Id
+       -> AltType
+       -> [StgAlt]
+       -> LiveVars
+       -> C
+genRet0 ctx e at as l = withNewIdent f
   where
     allRefs :: [Id]
-    allRefs =  S.toList . S.unions $ as ^.. traverse . _4 . to (exprRefs emptyUFM)
+    allRefs =  S.toList . S.unions $ as ^.. traverse . _3 . to (exprRefs emptyUFM)
     lneLive :: Int
     lneLive    = maximum $ 0 : map (fromMaybe 0 . lookupUFM (ctx ^. ctxLneFrameBs)) allRefs
     ctx'       = adjustCtxStack lneLive ctx
     lneVars    = map fst $ take lneLive (ctx ^. ctxLneFrame)
     isLne i    = i `elem` lneVars || i `elementOfUniqSet` (ctx ^. ctxLne)
-    nonLne     = filter (not . isLne) (uniqSetToList l)
+    nonLne     = filter (not . isLne) (dVarSetElems l) -- [] -- fixme filter (not . isLne) (uniqSetToList l)
 
     f :: Ident -> C
     f r    =  do
@@ -1076,7 +1271,7 @@ genRet ctx e at as l srt = withNewIdent f
       free     <- optimizeFree 0 nonLne
       pushRet  <- pushRetArgs free (iex r)
       fun'     <- fun free
-      sr       <- genStaticRefs srt
+      sr       <- genStaticRefs l -- srt
       prof     <- profiling
       emitClosureInfo $
         ClosureInfo (itxt r)
@@ -1092,10 +1287,11 @@ genRet ctx e at as l srt = withNewIdent f
       return (pushLne <> saveCCS <> pushRet)
     fst3 ~(x,_,_)  = x
 
+    altRegs :: HasDebugCallStack => [VarType]
     altRegs = case at of
-      PrimAlt ptc  -> tyConVt ptc
-      UbxTupAlt _n -> idVt e
-      _            -> [PtrV]
+      PrimAlt ptc    -> [primRepVt ptc]
+      MultiValAlt _n -> idVt e
+      _              -> [PtrV]
 
     fun free = resetSlots $ do
       decs          <- declIds e
@@ -1127,7 +1323,7 @@ popLneFrame inEntry size ctx
     skip = if inEntry then 1 else 0 -- pop the frame header
     l    = ctx ^. ctxLneFrame . to length
 
-pushLneFrame :: Int -> ExprCtx -> C
+pushLneFrame :: HasDebugCallStack => Int -> ExprCtx -> C
 pushLneFrame size ctx
   | l < size  = panic $ "pushLneFrame: let-no-escape frame too short " ++
                         show l ++ " < " ++ show size
@@ -1137,9 +1333,14 @@ pushLneFrame size ctx
 
 -- reorder the things we need to push to reuse existing stack values as much as possible
 -- True if already on the stack at that location
-optimizeFree :: Int -> [Id] -> G [(Id,Int,Bool)]
+optimizeFree :: HasDebugCallStack => Int -> [Id] -> G [(Id,Int,Bool)]
 optimizeFree offset ids = do
-  let ids' = concat $ map (\i -> map (i,) [1..varSize . uTypeVt . idType $ i]) ids
+  -- this line goes wrong                               vvvvvvv
+  let -- ids' = concat $ map (\i -> map (i,) [1..varSize . uTypeVt . idType $ i]) ids
+      idSize :: Id -> Int
+      idSize i = sum $ map varSize (typeVt . idType $ i)
+      ids' = concat $ map (\i -> map (i,) [1..idSize i]) ids
+      -- 1..varSize] . uTypeVt . idType $ i]) (typeVt ids)
       l    = length ids'
   slots <- drop offset . take l . (++repeat SlotUnknown) <$> getSlots
   let slm                = M.fromList (zip slots [0..])
@@ -1153,7 +1354,7 @@ optimizeFree offset ids = do
   return $ map (\(i,n,_,b) -> (i,n,b)) allSlots
 
 
-pushRetArgs :: [(Id,Int,Bool)] -> JExpr -> C
+pushRetArgs :: HasDebugCallStack => [(Id,Int,Bool)] -> JExpr -> C
 pushRetArgs free fun = do
   p <- pushOptimized . (++[(fun,False)]) =<< mapM (\(i,n,b) -> (\es->(es!!(n-1),b)) <$> genIdArg i) free
 --  p <- push . (++[fun]) =<< mapM (\(i,n,b) -> (\es->es!!(n-1)) <$> genIdArg i) free
@@ -1170,67 +1371,99 @@ loadRetArgs free = popSkipI 1 =<< ids
     where
        ids = mapM (\(i,n,_b) -> (!!(n-1)) <$> genIdStackArgI i) free
 
-genAlts :: ExprCtx        -- ^ lhs to assign expression result to
+genAlts :: HasDebugCallStack
+        => ExprCtx        -- ^ lhs to assign expression result to
         -> Id             -- ^ id being matched
         -> AltType        -- ^ type
         -> Maybe [JExpr]  -- ^ if known, fields in datacon from earlier expression
         -> [StgAlt]       -- ^ the alternatives
         -> G (JStat, ExprResult)
-genAlts top e PolyAlt _ [alt] = (\(_,s,r) -> (s,r)) <$> mkAlgBranch top e alt
-genAlts _   _ PolyAlt _ _ = panic "genAlts: multiple polyalt"
-genAlts top e (PrimAlt _tc) _ [(_, bs, _use, expr)] = do
+genAlts top e at me as =
+  trace''
+  ("genAlts0\n" ++ unlines ([{- show top, -} show e, show at] ++ map show as))
+  (genAlts0 top e at me as)
+  --(\(_,s,r) -> (s,r)) <$> mkAlgBranch top e alt
+
+
+genAlts0 :: HasDebugCallStack
+         => ExprCtx        -- ^ lhs to assign expression result to
+         -> Id             -- ^ id being matched
+         -> AltType        -- ^ type
+         -> Maybe [JExpr]  -- ^ if known, fields in datacon from earlier expression
+         -> [StgAlt]       -- ^ the alternatives
+         -> G (JStat, ExprResult)
+genAlts0 top e PolyAlt _ [alt] = (\(_,s,r) -> (s,r)) <$> mkAlgBranch top e alt
+genAlts0 _   _ PolyAlt _ _ = panic "genAlts: multiple polyalt"
+genAlts0 top e (PrimAlt _tc) _ [(_, bs, expr)] = do
   ie       <- genIds e
   dids     <- mconcat (map declIds bs)
   bss      <- concatMapM genIds bs
   (ej, er) <- genExpr top expr
-  return (dids <> assignAll {- Ch ("genAlts PrimAlt: " ++ show (idType e)) -} bss ie <> ej, er)
-genAlts top e (PrimAlt tc) _ alts = do
+  return (dids <> assignAll bss ie <> ej, er)
+genAlts0 top e (PrimAlt tc) _ alts = do
   ie <- genIds e
-  (r, bss) <- normalizeBranches top <$> mapM (isolateSlots . mkPrimIfBranch top (tyConVt tc)) alts
+  (r, bss) <- normalizeBranches top <$>
+     mapM (isolateSlots . mkPrimIfBranch top [primRepVt tc]) alts
   setSlots []
   return (mkSw ie bss, r)
-genAlts top e (UbxTupAlt n) _ [(_, bs, _use, expr)] = do
+genAlts0 top e (MultiValAlt n) _ [(_, bs, expr)] = do
   eids     <- genIds e
   l        <- loadUbxTup eids bs n
   (ej, er) <- genExpr top expr
   return (l <> ej, er)
-genAlts _   _ (AlgAlt tc) _ [_alt] | isUnboxedTupleTyCon tc = panic "genAlts: unexpected unboxed tuple"
-genAlts top _ (AlgAlt _tc) (Just es) [(DataAlt dc, bs, use, expr)] | not (isUnboxableCon dc) = do
-  bsi <- mapM genIdsI bs
-  let bus  = concat $ zipWith (\bss u -> zip bss (repeat u)) bsi use
-      args = zipWith (\(i,u) de -> if u then i ||= de else mempty) bus es
-  (ej, er) <- genExpr top expr
-  return (mconcat args <> ej, er)
-genAlts top e (AlgAlt _tc) _ [alt] = do
+genAlts0 _   _ (AlgAlt tc) _ [_alt] | isUnboxedTupleTyCon tc =
+  panic "genAlts: unexpected unboxed tuple"
+genAlts0 top _ (AlgAlt _tc) (Just es) [(DataAlt dc, bs, expr)]
+  | not (isUnboxableCon dc) = do
+      bsi <- mapM genIdsI bs
+      let args = zipWith (\i de -> i ||= de) (concat bsi) es
+      (ej, er) <- genExpr top expr
+      return (mconcat args <> ej, er)
+genAlts0 top e (AlgAlt _tc) _ [alt] = do
   (_,s,r) <- mkAlgBranch top e alt
   return (s, r)
-genAlts top e (AlgAlt _tc) _ alts@[(DataAlt dc,_,_,_),_]
+genAlts0 top e (AlgAlt _tc) _ alts@[(DataAlt dc,_,_),_]
   | isBoolTy (dataConType dc) = do
       i <- jsId e
-      (r, [(_,s1,_), (_,s2,_)]) <- normalizeBranches top <$> mapM (isolateSlots . mkAlgBranch top e) alts
-      let s = if dataConTag dc == 2 then [j| if(`i`) { `s1` } else { `s2` } |]
-                                    else [j| if(`i`) { `s2` } else { `s1` } |]
+      (r, [(_,s1,_), (_,s2,_)]) <- normalizeBranches top <$>
+          mapM (isolateSlots . mkAlgBranch top e) alts
+      let s = if   dataConTag dc == 2
+              then [j| if(`i`) { `s1` } else { `s2` } |]
+              else [j| if(`i`) { `s2` } else { `s1` } |]
       setSlots []
       return (s, r)
 -- fixme, add all alts
-genAlts top e (AlgAlt _tc) _ alts = do
+genAlts0 top e (AlgAlt _tc) _ alts = do
       ei <- jsId e
-      (r, brs) <- normalizeBranches top <$> mapM (isolateSlots . mkAlgBranch top e) alts
+      (r, brs) <- normalizeBranches top <$>
+          mapM (isolateSlots . mkAlgBranch top e) alts
       setSlots []
       return (mkSwitch [je| `ei`.f.a |] brs, r)
-genAlts _  _ a _ l = do
+genAlts0 _  _ a _ l = do
   ap <- showPpr' a
-  panic $ "genAlts: unhandled case variant: " ++ ap ++ " (" ++ show (length l) ++ ")"
+  panic $ "genAlts: unhandled case variant: " ++
+          ap ++
+          " (" ++
+          show (length l) ++
+          ")"
 
--- if one branch ends in a continuation but another is inline, we need to adjust the inline branch
--- to use the continuation convention
-normalizeBranches :: ExprCtx -> [(a, JStat, ExprResult)] -> (ExprResult, [(a, JStat, ExprResult)])
+-- if one branch ends in a continuation but another is inline,
+-- we need to adjust the inline branch to use the continuation convention
+normalizeBranches :: ExprCtx
+                  -> [(a, JStat, ExprResult)]
+                  -> (ExprResult, [(a, JStat, ExprResult)])
 normalizeBranches e brs
-    | all (==ExprCont) (brs ^.. traverse . _3)         = (ExprCont, brs)
-    | branchResult (brs ^.. traverse  ._3) == ExprCont = (ExprCont, map mkCont brs)
-    | otherwise                                        = (ExprInline Nothing, brs)
+    | all (==ExprCont) (brs ^.. traverse . _3) =
+        (ExprCont, brs)
+    | branchResult (brs ^.. traverse  ._3) == ExprCont =
+        (ExprCont, map mkCont brs)
+    | otherwise =
+        (ExprInline Nothing, brs)
   where
-    mkCont (me, s, ExprInline{}) = (me, s <> assignAll (enumFrom R1) (e ^. ctxTarget), ExprCont)
+    mkCont (me, s, ExprInline{}) = ( me
+                                   , s <> assignAll (enumFrom R1)
+                                                    (e ^. ctxTarget)
+                                   , ExprCont)
     mkCont x                     = x
 
 loadUbxTup :: [JExpr] -> [Id] -> Int -> C
@@ -1245,11 +1478,15 @@ mkSw es cases  = mkIfElse es cases
 -- switch for pattern matching on constructors or prims
 mkSwitch :: JExpr -> [(Maybe JExpr, JStat, ExprResult)] -> JStat
 mkSwitch e cases
-    | [(Just c1,s1,_)] <- n, [(_,s2,_)] <- d = IfStat [je| `e` === `c1` |] s1 s2
-    | [(Just c1,s1,_),(_,s2,_)] <- n, null d = IfStat [je| `e` === `c1` |] s1 s2
-    | null d                                 = SwitchStat e (map addBreak (init n)) (last n ^. _2)
-    | [(_,d0,_)] <- d                        = SwitchStat e (map addBreak n) d0
-    | otherwise                              = panic "mkSwitch: multiple default cases"
+    | [(Just c1,s1,_)] <- n, [(_,s2,_)] <- d =
+        IfStat [je| `e` === `c1` |] s1 s2
+    | [(Just c1,s1,_),(_,s2,_)] <- n, null d =
+        IfStat [je| `e` === `c1` |] s1 s2
+    | null d =
+        SwitchStat e (map addBreak (init n)) (last n ^. _2)
+    | [(_,d0,_)] <- d =
+        SwitchStat e (map addBreak n) d0
+    | otherwise = panic "mkSwitch: multiple default cases"
     where
       addBreak (Just c, s, _) = (c, s <> [j| break; |])
       addBreak _              = panic "mkSwitch: addBreak"
@@ -1278,16 +1515,16 @@ mkAlgBranch :: ExprCtx  -- ^ toplevel id for the result
             -> Id      -- ^ datacon to match
             -> StgAlt  -- ^ match alternative with binders
             -> G (Maybe JExpr, JStat, ExprResult)
-mkAlgBranch top d (DataAlt dc,[b],_,expr)
+mkAlgBranch top d (DataAlt dc,[b],expr)
   | isUnboxableCon dc = do
       idd      <- jsId d
       [fld]    <- genIdsI b
       (ej, er) <- genExpr top expr
       return (Nothing, decl fld <> [j| `fld` = `idd` |] <> ej, er)
-mkAlgBranch top d (a,bs,use,expr) = do
+mkAlgBranch top d (a, bs, expr) = do
   cc       <- caseCond a
   idd      <- jsId d
-  b        <- loadParams idd bs use
+  b        <- loadParams idd bs
   (ej, er) <- genExpr top expr
   return (cc, b <> ej, er)
 
@@ -1298,8 +1535,11 @@ mkPrimBranch top _vt (cond, _bs, _us, e) =
   (\cc (ej,er) -> (cc,ej,er)) <$> caseCond cond <*> genExpr top e
 -}
 
-mkPrimIfBranch :: ExprCtx -> [VarType] -> StgAlt -> G (Maybe [JExpr], JStat, ExprResult)
-mkPrimIfBranch top _vt (cond, _bs, _us, e) =
+mkPrimIfBranch :: ExprCtx
+               -> [VarType]
+               -> StgAlt
+               -> G (Maybe [JExpr], JStat, ExprResult)
+mkPrimIfBranch top _vt (cond, _, e) =
   (\ic (ej,er) -> (ic,ej,er)) <$> ifCond cond <*> genExpr top e
 
 -- fixme are bool things always checked correctly here?
@@ -1315,8 +1555,8 @@ caseCond DEFAULT      = return Nothing
 
 -- load parameters from constructor
 -- fixme use single tmp var for all branches
-loadParams :: JExpr -> [Id] -> [Bool] -> C
-loadParams from args use = do
+loadParams :: JExpr -> [Id] -> C
+loadParams from args = do
   as <- concat <$> sequence (zipWith (\a u -> map (,u) <$> genIdsI a) args use)
   return $ case as of
     []                 -> mempty
@@ -1328,6 +1568,7 @@ loadParams from args use = do
                               `loadConVarsIfUsed d xs`;
                             |]
   where
+    use = repeat True -- fixme clean up
     loadIfUsed fr tgt True = decl' tgt fr
     loadIfUsed  _ _ _  = mempty
 
@@ -1349,8 +1590,14 @@ genStackArg a@(StgVarArg i) = zipWith f [1..] <$> genArg a
     f :: Int -> JExpr -> (JExpr, StackSlot)
     f n e = (e, SlotId i n)
 -}
+{-
+genArg :: HasDebugCallStack => StgArg -> G [JExpr]
+genArg arg = do
+  res <- genArg0 arg
+  trace' ("genArg:\n" ++ show arg ++ "\n" ++ show res) (pure res)
+-}
 
-genArg :: StgArg -> G [JExpr]
+genArg :: HasDebugCallStack => StgArg -> G [JExpr]
 genArg (StgLitArg l) = genLit l
 genArg a@(StgVarArg i) = do
   unFloat <- use gsUnfloated
@@ -1358,7 +1605,11 @@ genArg a@(StgVarArg i) = do
     Nothing -> reg
     Just expr -> unfloated expr
    where
-     r = uTypeVt . stgArgType $ a
+     -- if our argument is a joinid, it can be an unboxed tuple
+     r :: HasDebugCallStack => VarType
+     r = trace' ("r: " ++ showIndent a) r0
+     r0 :: HasDebugCallStack => VarType
+     r0 = uTypeVt . stgArgType $ a
      reg
        | isVoid r     = return []
        | i == trueDataConId  = return [ [je| true  |] ]
@@ -1366,9 +1617,9 @@ genArg a@(StgVarArg i) = do
        | isMultiVar r = mapM (jsIdN i) [1..varSize r]
        | otherwise    = (:[]) <$> jsId i
 
-     unfloated :: StgExpr -> G [JExpr]
+     unfloated :: HasDebugCallStack => StgExpr -> G [JExpr]
      unfloated (StgLit l) = genLit l
-     unfloated (StgConApp dc args)
+     unfloated (StgConApp dc args _)
        | isBoolTy (dataConType dc) || isUnboxableCon dc =
            (:[]) . allocUnboxedCon dc . concat <$> mapM genArg args
        | null args = (:[]) <$> jsId (dataConWorkId dc)
@@ -1377,9 +1628,10 @@ genArg a@(StgVarArg i) = do
            e  <- enterDataCon dc
            cs <- use gsSettings
            return [allocDynamicE cs e as Nothing] -- FIXME: ccs
-     unfloated x = panic ("genArg: unexpected unfloated expression: " ++ show x)
+     unfloated x = panic $ "genArg: unexpected unfloated expression: " ++
+                           show x
 
-genStaticArg :: StgArg -> G [StaticArg]
+genStaticArg :: HasDebugCallStack => StgArg -> G [StaticArg]
 genStaticArg (StgLitArg l) = map StaticLitArg <$> genStaticLit l
 genStaticArg a@(StgVarArg i) = do
   unFloat <- use gsUnfloated
@@ -1389,15 +1641,19 @@ genStaticArg a@(StgVarArg i) = do
    where
      r = uTypeVt . stgArgType $ a
      reg
-       | isVoid r            = return []
-       | i == trueDataConId  = return [StaticLitArg (BoolLit True)]
-       | i == falseDataConId = return [StaticLitArg (BoolLit False)]
-       | isMultiVar r        = map (\(TxtI t) -> StaticObjArg t) <$> mapM (jsIdIN i) [1..varSize r] -- this seems wrong, not an obj?
+       | isVoid r            =
+           return []
+       | i == trueDataConId  =
+           return [StaticLitArg (BoolLit True)]
+       | i == falseDataConId =
+           return [StaticLitArg (BoolLit False)]
+       | isMultiVar r        =
+           map (\(TxtI t) -> StaticObjArg t) <$> mapM (jsIdIN i) [1..varSize r] -- this seems wrong, not an obj?
        | otherwise           = (\(TxtI it) -> [StaticObjArg it]) <$> jsIdI i
 
      unfloated :: StgExpr -> G [StaticArg]
      unfloated (StgLit l) = map StaticLitArg <$> genStaticLit l
-     unfloated (StgConApp dc args)
+     unfloated (StgConApp dc args _)
        | isBoolTy (dataConType dc) || isUnboxableCon dc =
            (:[]) . allocUnboxedConStatic dc . concat <$> mapM genStaticArg args -- fixme what is allocunboxedcon?
        | null args = (\(TxtI t) -> [StaticObjArg t]) <$> jsIdI (dataConWorkId dc)
@@ -1413,7 +1669,7 @@ allocateStaticList xs a@(StgVarArg i)
   | otherwise = do
       unFloat <- use gsUnfloated
       case lookupUFM unFloat i of
-        Just (StgConApp dc [h,t])
+        Just (StgConApp dc [h,t] _)
           | dc == consDataCon -> allocateStaticList (h:xs) t
         _ -> listAlloc xs (Just a)
   where
@@ -1426,10 +1682,15 @@ allocateStaticList xs a@(StgVarArg i)
       r' <- genStaticArg r
       case r' of
         [StaticObjArg ri] -> return (StaticList as (Just ri))
-        _                 -> panic ("allocateStaticList: invalid argument (tail): " ++ show xs ++ " " ++ show r)
+        _                 ->
+          panic $ "allocateStaticList: invalid argument (tail): " ++
+                  show xs ++
+                  " " ++
+                  show r
 allocateStaticList _ _ = panic "allocateStaticList: unexpected literal in list"
 
--- generate arg to be passed to FFI call, with marshalling JStat to be run before the call
+-- generate arg to be passed to FFI call, with marshalling JStat to be run
+-- before the call
 -- currently marshalling:
 --   String literals passed as real JS string
 --   Ptr ghcjs-base.GHCJS.Types.JSChar -> JavaScript String
@@ -1447,11 +1708,14 @@ genFFIArg a@(StgVarArg i)
    where
      r = uTypeVt . stgArgType $ a
 
-genIdArg :: Id -> G [JExpr]
+genIdArg :: HasDebugCallStack => Id -> G [JExpr]
 genIdArg i = genArg (StgVarArg i)
 
-genIdArgI :: Id -> G [Ident]
-genIdArgI i
+genIdArgI :: HasDebugCallStack => Id -> G [Ident]
+genIdArgI i = trace' ("genIdArgI: " ++ show i) (genIdArgI0 i)
+
+genIdArgI0 :: HasDebugCallStack => Id -> G [Ident]
+genIdArgI0 i
     | isVoid r     = return []
     | isMultiVar r = mapM (jsIdIN i) [1..varSize r]
     | otherwise    = (:[]) <$> jsIdI i
@@ -1459,7 +1723,7 @@ genIdArgI i
       r = uTypeVt . idType $ i
 
 
-genIdStackArgI :: Id -> G [(Ident,StackSlot)]
+genIdStackArgI :: HasDebugCallStack => Id -> G [(Ident,StackSlot)]
 genIdStackArgI i = zipWith f [1..] <$> genIdArgI i
   where
     f :: Int -> Ident -> (Ident,StackSlot)
@@ -1468,7 +1732,12 @@ genIdStackArgI i = zipWith f [1..] <$> genIdArgI i
 r2d :: Rational -> Double
 r2d = realToFrac
 
-genStrThunk :: Id -> Bool -> B.ByteString -> CostCentreStack -> C
+genStrThunk :: HasDebugCallStack
+            => Id
+            -> Bool
+            -> B.ByteString
+            -> CostCentreStack
+            -> C
 genStrThunk i nonAscii str cc = do
   ii@(TxtI iit) <- jsIdI i
   let d = decl ii
@@ -1476,22 +1745,25 @@ genStrThunk i nonAscii str cc = do
   let ccsArg = map toJExpr $ maybeToList ccs
   emitStatic iit (StaticThunk Nothing) Nothing
   return $ case decodeModifiedUTF8 str of
-             Just t -> d <> if nonAscii
-                              then [j| `ii` =  `ApplExpr (jvar "h$strt") $
-                                                  [toJExpr $ T.unpack t] ++ ccsArg`; |]
-                              else [j| `ii` =  `ApplExpr (jvar "h$strta") $
-                                                  [toJExpr $ T.unpack t] ++ ccsArg`; |]
-             Nothing -> d <> if nonAscii
-                               then [j| `ii` = `ApplExpr (jvar "h$strtb") $
-                                                  [toJExpr $ map toInteger (B.unpack str)] ++ ccsArg`; |]
-                               else [j| `ii` = `ApplExpr (jvar "h$strta") $
-                                                  [toJExpr $ map (chr.fromIntegral) (B.unpack str)] ++ ccsArg`; |]
+    Just t -> d <>
+      if nonAscii
+      then [j| `ii` =  `ApplExpr (jvar "h$strt") $
+               [toJExpr $ T.unpack t] ++ ccsArg`; |]
+      else [j| `ii` =  `ApplExpr (jvar "h$strta") $
+               [toJExpr $ T.unpack t] ++ ccsArg`; |]
+    Nothing -> d <>
+      if nonAscii
+      then [j| `ii` = `ApplExpr (jvar "h$strtb") $
+               [toJExpr $ map toInteger (B.unpack str)] ++ ccsArg`; |]
+      else [j| `ii` = `ApplExpr (jvar "h$strta") $
+               [toJExpr $ map (chr.fromIntegral) (B.unpack str)] ++ ccsArg`; |]
 
-genLit :: Literal -> G [JExpr]
+genLit :: HasDebugCallStack => Literal -> G [JExpr]
 genLit (MachChar c)      = return [ [je| `ord c` |] ]
 genLit (MachStr  str)    =
   case decodeModifiedUTF8 str of
     Just t -> withNewIdent $ \ident -> do
+      -- this should do modified UTF8
       emitToplevel [j| `decl ident`;
                        `ident` = h$str(`T.unpack t`);
                      |]
@@ -1503,15 +1775,19 @@ genLit (MachStr  str)    =
       return [ [je| `ident`() |], [je| 0 |] ]
 genLit MachNullAddr      = return [ [je| null |], [je| 0 |] ]
 genLit (MachInt i)       = return [ [je| `intLit i` |] ]
-genLit (MachInt64 i)     = return [ [je| `intLit (shiftR i 32)` |] , [je| `toSigned i` |] ]
+genLit (MachInt64 i)     = return [ [je| `intLit (shiftR i 32)` |]
+                                  , [je| `toSigned i` |]
+                                  ]
 genLit (MachWord w)      = return [ [je| `toSigned w` |] ]
-genLit (MachWord64 w)    = return [ [je| `toSigned (shiftR w 32)` |] , [je| `toSigned w` |] ]
+genLit (MachWord64 w)    = return [ [je| `toSigned (shiftR w 32)` |]
+                                  , [je| `toSigned w` |]
+                                  ]
 genLit (MachFloat r)     = return [ [je| `r2d r` |] ]
 genLit (MachDouble r)    = return [ [je| `r2d r` |] ]
 genLit (MachLabel name _size fod)
   | fod == IsFunction = return [ [je| h$mkFunctionPtr(`TxtI . T.pack $ "h$" ++ unpackFS name`) |], [je| 0 |] ]
   | otherwise         = return [ iex (TxtI . T.pack $ "h$" ++ unpackFS name), [je| 0 |] ]
-genLit (LitInteger _i _id) =panic ("genLit: LitInteger") -- removed by CorePrep
+genLit (LitInteger _i _id) = panic "genLit: LitInteger" -- removed by CorePrep
 
 -- | generate a literal for the static init tables
 genStaticLit :: Literal -> G [StaticLit]
@@ -1522,14 +1798,21 @@ genStaticLit (MachStr  str)       =
                          Left _  -> return [ BinLit str, IntLit 0]
 genStaticLit MachNullAddr         = return [ NullLit, IntLit 0 ]
 genStaticLit (MachInt i)          = return [ IntLit (fromIntegral i) ]
-genStaticLit (MachInt64 i)        = return [ IntLit (i `shiftR` 32), IntLit (toSigned i) ]
+genStaticLit (MachInt64 i)        = return [ IntLit (i `shiftR` 32)
+                                           , IntLit (toSigned i)
+                                           ]
 genStaticLit (MachWord w)         = return [ IntLit (toSigned w) ]
-genStaticLit (MachWord64 w)       = return [ IntLit (toSigned (w `shiftR` 32)), IntLit (toSigned w) ]
+genStaticLit (MachWord64 w)       = return [ IntLit (toSigned (w `shiftR` 32))
+                                           , IntLit (toSigned w)
+                                           ]
 genStaticLit (MachFloat r)        = return [ DoubleLit . SaneDouble . r2d $ r ]
 genStaticLit (MachDouble r)       = return [ DoubleLit . SaneDouble . r2d $ r ]
 genStaticLit (MachLabel name _size fod) =
-  return [ LabelLit (fod == IsFunction) (T.pack $ "h$" ++ unpackFS name) , IntLit 0 ]
-genStaticLit l = panic ("genStaticLit: " ++ show l)
+  return [ LabelLit (fod == IsFunction) (T.pack $ "h$" ++ unpackFS name)
+         , IntLit 0
+         ]
+genStaticLit l = panic $ "genStaticLit: " ++
+                         show l
 
 -- make a signed 32 bit int from this unsigned one, lower 32 bits
 toSigned :: Integer -> Integer
@@ -1552,7 +1835,11 @@ genCon tgt con args
   | isUnboxedTupleCon con && length (tgt^.ctxTarget) == length args =
       return $ assignAll (tgt ^. ctxTarget) args
 genCon tgt con args | isUnboxedTupleCon con =
-  panic ("genCon: unhandled DataCon: " ++ show con ++ " " ++ show (tgt ^. ctxTop, length args))
+  panic ("genCon: unhandled DataCon:\n" ++
+         show con ++ "\n" ++
+         show (tgt ^. ctxTop) ++ "\n" ++
+         show (tgt ^. ctxTarget) ++ "\n" ++
+         show args)
 genCon tgt con args | [ValExpr (JVar tgti)] <- tgt ^. ctxTarget =
   allocCon tgti con currentCCS args
 genCon tgt con args =
@@ -1583,8 +1870,10 @@ allocUnboxedCon con xs = panic ("allocUnboxedCon: not an unboxed constructor: " 
 
 allocUnboxedConStatic :: DataCon -> [StaticArg] -> StaticArg
 allocUnboxedConStatic con []
-  | isBoolTy (dataConType con) && dataConTag con == 1      = StaticLitArg (BoolLit False)
-  | isBoolTy (dataConType con) && dataConTag con == 2      = StaticLitArg (BoolLit True)
+  | isBoolTy (dataConType con) && dataConTag con == 1 =
+      StaticLitArg (BoolLit False)
+  | isBoolTy (dataConType con) && dataConTag con == 2 =
+      StaticLitArg (BoolLit True)
 allocUnboxedConStatic _   [a@(StaticLitArg (IntLit _i))]    = a
 allocUnboxedConStatic _   [a@(StaticLitArg (DoubleLit _d))] = a
 allocUnboxedConStatic con _                                =
@@ -1592,7 +1881,7 @@ allocUnboxedConStatic con _                                =
 
 allocConStatic :: Ident -> CostCentreStack -> DataCon -> [GenStgArg Id] {- -> Bool -} -> G ()
 allocConStatic (TxtI to) cc con args -- isRecursive
-{-  | Debug.Trace.trace ("allocConStatic: " ++ show to ++ " " ++ show con ++ " " ++ show args) True -} = do
+{-  | trace' ("allocConStatic: " ++ show to ++ " " ++ show con ++ " " ++ show args) True -} = do
   as <- mapM genStaticArg args
   cc' <- costCentreStackLbl cc
   allocConStatic' cc' (concat as)
@@ -1609,10 +1898,14 @@ allocConStatic (TxtI to) cc con args -- isRecursive
     allocConStatic' cc' [x]
       | isUnboxableCon con =
         case x of
-          StaticLitArg (IntLit i)    -> emitStatic to (StaticUnboxed $ StaticUnboxedInt i) cc'
-          StaticLitArg (BoolLit b)   -> emitStatic to (StaticUnboxed $ StaticUnboxedBool b) cc'
-          StaticLitArg (DoubleLit d) -> emitStatic to (StaticUnboxed $ StaticUnboxedDouble d) cc'
-          _                          -> panic $ "allocConStatic: invalid unboxed literal: " ++ show x
+          StaticLitArg (IntLit i)    ->
+            emitStatic to (StaticUnboxed $ StaticUnboxedInt i) cc'
+          StaticLitArg (BoolLit b)   ->
+            emitStatic to (StaticUnboxed $ StaticUnboxedBool b) cc'
+          StaticLitArg (DoubleLit d) ->
+            emitStatic to (StaticUnboxed $ StaticUnboxedDouble d) cc'
+          _                          ->
+            panic $ "allocConStatic: invalid unboxed literal: " ++ show x
     allocConStatic' cc' xs =
            if con == consDataCon
               then flip (emitStatic to) cc' =<< allocateStaticList [args !! 0] (args !! 1)
@@ -1641,7 +1934,7 @@ jumpTo' fun args = ra <> [j| return `fun`(); |]
       ra = assignAll (enumFrom R2) args
 -}
 
-jumpToFast :: [StgArg] -> JStat -> C
+jumpToFast :: HasDebugCallStack => [StgArg] -> JStat -> C
 jumpToFast as afterLoad = do
   regs <- concatMapM genArg as
   (fun, spec) <- selectApply True (as,regs)
@@ -1676,18 +1969,31 @@ getObjectKeyValuePairs [] = Just []
 getObjectKeyValuePairs (k:v:xs)
   | Just t <- argJSStringLitUnfolding k =
       fmap ((t,v):) (getObjectKeyValuePairs xs)
-getObjectKeyValuePairs _ = Nothing                                     
+getObjectKeyValuePairs _ = Nothing
 
 argJSStringLitUnfolding :: StgArg -> Maybe Text
 argJSStringLitUnfolding (StgVarArg v)
   | False = Just "abc" -- fixme
 argJSStringLitUnfolding _ = Nothing
 
-genForeignCall :: ForeignCall -> Type -> [JExpr] -> [StgArg] -> G (JStat, ExprResult)
-genForeignCall (CCall (CCallSpec (StaticTarget _ tgt Nothing True) JavaScriptCallConv PlayRisky)) t [obj] args
-  | tgt == fsLit "h$buildObject", Just pairs <- getObjectKeyValuePairs args = do
+genForeignCall :: HasDebugCallStack
+               => ForeignCall
+               -> Type
+               -> [JExpr]
+               -> [StgArg]
+               -> G (JStat, ExprResult)
+genForeignCall (CCall (CCallSpec (StaticTarget _ tgt Nothing True)
+                                 JavaScriptCallConv
+                                 PlayRisky))
+               t
+               [obj]
+               args
+  | tgt == fsLit "h$buildObject"
+  , Just pairs <- getObjectKeyValuePairs args = do
       pairs' <- mapM (\(k,v) -> genArg v >>= \([v']) -> return (k,v')) pairs
-      return (assignj obj (ValExpr (JHash $ M.fromList pairs')), ExprInline Nothing)
+      return ( assignj obj (ValExpr (JHash $ M.fromList pairs'))
+             , ExprInline Nothing
+             )
 genForeignCall (CCall (CCallSpec ccTarget cconv safety)) t tgt args =
   (,exprResult) <$> parseFFIPattern catchExcep async isJsCc lbl t tgt' args
   where
@@ -1871,9 +2177,10 @@ saturateFFI u = jsSaturate (Just . T.pack $ "ghcjs_ffi_sat_" ++ show u)
 resultPlaceholders :: Bool -> Type -> [JExpr] -> [(Ident,JExpr)] -- ident, replacement
 resultPlaceholders True _ _ = [] -- async has no direct resuls, use callback
 resultPlaceholders False t rs =
-  case repType t of
-    UbxTupleRep uts ->
-      let sizes = filter (>0) (map typeSize uts)
+  case typeVt (unwrapType t) of
+    [t'] -> mkUnary (varSize t')
+    uts ->
+      let sizes = filter (>0) (map varSize uts)
           f _ 0 = []
           f n 1 = [["$r" ++ show n]]
           f n k = ["$r" ++ sn, "$r" ++ sn ++ "_1"] : map (\x -> ["$r" ++ sn ++ "_" ++ show x]) [2..k]
@@ -1882,7 +2189,6 @@ resultPlaceholders False t rs =
       in case sizes of
            [n] -> mkUnary n
            _   -> concat $ zipWith (\phs' r -> map (\i -> (TxtI (T.pack i), r)) phs') (concat phs) rs
-    UnaryRep t' -> mkUnary (typeSize t')
   where
     mkUnary 0 = []
     mkUnary 1 = [(TxtI "$r",head rs)] -- single
@@ -1931,34 +2237,45 @@ makeIdent = do
   gsId += 1
   i <- use gsId
   mod <- use gsModule
-  return (TxtI . T.pack $ "h$$" ++ zEncodeString (show mod) ++ "_" ++ encodeUnique i)
+  return (TxtI . T.pack $ "h$$" ++
+                          zEncodeString (show mod) ++
+                          "_" ++
+                          encodeUnique i
+         )
 
 freshUnique :: G Int
 freshUnique = gsId += 1 >> use gsId
 
 -- returns True if the expression is definitely inline
 isInlineExpr :: UniqSet Id -> StgExpr -> (UniqSet Id, Bool)
-isInlineExpr v (StgApp i args)                    = (emptyUniqSet, isInlineApp v i args)
-isInlineExpr _ (StgLit{})                         = (emptyUniqSet, True)
-isInlineExpr _ (StgConApp{})                      = (emptyUniqSet, True)
-isInlineExpr _ (StgOpApp (StgFCallOp f _) _ _)    = (emptyUniqSet, isInlineForeignCall f)
-isInlineExpr v (StgOpApp (StgPrimOp SeqOp) [StgVarArg e] t) = (emptyUniqSet, e `elementOfUniqSet` v || isStrictType t)
-isInlineExpr _ (StgOpApp (StgPrimOp op) _ _)      = (emptyUniqSet, isInlinePrimOp op)
-isInlineExpr _ (StgOpApp (StgPrimCallOp _c) _ _)  = (emptyUniqSet, True)
-isInlineExpr _ (StgLam{})                         = (emptyUniqSet, True)
-isInlineExpr v (StgCase e _ _ b _ _ alts)         = let (_ve, ie)   = isInlineExpr v e
-                                                        v'          = addOneToUniqSet v b
-                                                        (vas, ias)  = unzip $ map (isInlineExpr v') (alts ^.. traverse . _4)
-                                                        vr         = foldl1' intersectUniqSets vas
-                                                    in (vr, (ie || b `elementOfUniqSet` v) && and ias)
-isInlineExpr v (StgLet b e)                       = isInlineExpr (inspectInlineBinding v b) e
-isInlineExpr v (StgLetNoEscape _ _ b e)           = isInlineExpr v e
-#if __GLASGOW_HASKELL__ < 709
-isInlineExpr v (StgSCC _ _ _ e)                   = isInlineExpr v e
-isInlineExpr v (StgTick _ _ e)                    = isInlineExpr v e
-#else
-isInlineExpr v (StgTick  _ e)                     = isInlineExpr v e
-#endif
+isInlineExpr v (StgApp i args) =
+  (emptyUniqSet, isInlineApp v i args)
+isInlineExpr _ (StgLit{}) =
+  (emptyUniqSet, True)
+isInlineExpr _ (StgConApp{}) =
+  (emptyUniqSet, True)
+isInlineExpr _ (StgOpApp (StgFCallOp f _) _ _) =
+  (emptyUniqSet, isInlineForeignCall f)
+isInlineExpr v (StgOpApp (StgPrimOp SeqOp) [StgVarArg e] t) =
+  (emptyUniqSet, e `elementOfUniqSet` v || isStrictType t)
+isInlineExpr _ (StgOpApp (StgPrimOp op) _ _) =
+  (emptyUniqSet, isInlinePrimOp op)
+isInlineExpr _ (StgOpApp (StgPrimCallOp _c) _ _) =
+  (emptyUniqSet, True)
+isInlineExpr _ (StgLam{}) =
+  (emptyUniqSet, True)
+isInlineExpr v (StgCase e b _ alts) =
+  let (_ve, ie)   = isInlineExpr v e
+      v'          = addOneToUniqSet v b
+      (vas, ias)  = unzip $ map (isInlineExpr v') (alts ^.. traverse . _3)
+      vr          = foldl1' intersectUniqSets vas
+  in (vr, (ie || b `elementOfUniqSet` v) && and ias)
+isInlineExpr v (StgLet b e) =
+  isInlineExpr (inspectInlineBinding v b) e
+isInlineExpr v (StgLetNoEscape b e) =
+  isInlineExpr (inspectInlineBinding v b) e
+isInlineExpr v (StgTick  _ e) =
+  isInlineExpr v e
 
 inspectInlineBinding :: UniqSet Id -> StgBinding -> UniqSet Id
 inspectInlineBinding v (StgNonRec i r) = inspectInlineRhs v i r
@@ -1966,9 +2283,9 @@ inspectInlineBinding v (StgRec bs)       =
   foldl' (\v' (i,r) -> inspectInlineRhs v' i r) v bs
 
 inspectInlineRhs :: UniqSet Id -> Id -> StgRhs -> UniqSet Id
-inspectInlineRhs v i (StgRhsCon{})                         = addOneToUniqSet v i
-inspectInlineRhs v i (StgRhsClosure _ _ _ ReEntrant _ _ _) = addOneToUniqSet v i
-inspectInlineRhs v _ _                                     = v
+inspectInlineRhs v i (StgRhsCon{})                       = addOneToUniqSet v i
+inspectInlineRhs v i (StgRhsClosure _ _ _ ReEntrant _ _) = addOneToUniqSet v i
+inspectInlineRhs v _ _                                   = v
 
 isInlineForeignCall :: ForeignCall -> Bool
 isInlineForeignCall (CCall (CCallSpec _ cconv safety)) =
@@ -1976,9 +2293,19 @@ isInlineForeignCall (CCall (CCallSpec _ cconv safety)) =
   not (cconv /= JavaScriptCallConv && playSafe safety)
 
 isInlineApp :: UniqSet Id -> Id -> [StgArg] -> Bool
-isInlineApp v i [] = isUnboxedTupleType (idType i) || isStrictType (idType i) || i `elementOfUniqSet` v || isStrictId i
+isInlineApp _ i _
+  | isJoinId i = False
+isInlineApp v i [] = isUnboxedTupleType (idType i) ||
+                     isStrictType (idType i) ||
+                     i `elementOfUniqSet` v ||
+                     isStrictId i
 isInlineApp _ i [StgLitArg (MachStr _)]
-  | getUnique i `elem` [unpackCStringIdKey, unpackCStringUtf8IdKey, unpackCStringAppendIdKey] = True
+  | getUnique i `elem` [ unpackCStringIdKey
+                       , unpackCStringUtf8IdKey
+                       , unpackCStringAppendIdKey
+                       ] = True
 isInlineApp v i [StgVarArg a]
-  | DataConWrapId dc <- idDetails i, isNewTyCon (dataConTyCon dc), isStrictType (idType a) || a `elementOfUniqSet` v || isStrictId a = True
+  | DataConWrapId dc <- idDetails i
+  , isNewTyCon (dataConTyCon dc)
+  , isStrictType (idType a) || a `elementOfUniqSet` v || isStrictId a = True
 isInlineApp _ _ _ = False

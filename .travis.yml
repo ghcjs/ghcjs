@@ -1,8 +1,8 @@
 env:
-    - GHCVER=7.10.3 TEST_PART=CORE1
-    - GHCVER=7.10.3 TEST_PART=CORE2
-    - GHCVER=7.10.3 TEST_PART=PROFILING
-    - GHCVER=7.10.3 TEST_PART=GHCJS
+    - GHCVER=8.2.2 TEST_PART=CORE1
+    - GHCVER=8.2.2 TEST_PART=CORE2
+    - GHCVER=8.2.2 TEST_PART=PROFILING
+    - GHCVER=8.2.2 TEST_PART=GHCJS
 
 addons:
     apt:
@@ -11,16 +11,14 @@ addons:
         packages:
             - build-essential
             - nodejs
-            - cabal-install-1.22
-            - ghc-7.10.3
-            - alex-3.1.4
-            - happy-1.19.5
+            - cabal-install-2.0.0.1
+            - ghc-8.2.2
+            - alex-3.2.3
+            - happy-1.19.8
 
 before_install:
-    - export GHCJS_BOOTING=1
-    - export GHCJS_BOOTING_STAGE1=1
-    - nvm install 4
-    - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/1.22/bin:/opt/alex/3.1.4/bin:/opt/happy/1.19.5/bin:$PATH
+    - nvm install 8
+    - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/2.0/bin:/opt/alex/3.2.3/bin:/opt/happy/1.19.8/bin:$PATH
 
 install:
     - travis_retry cabal update

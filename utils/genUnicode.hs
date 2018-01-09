@@ -90,6 +90,5 @@ main = putStrLn . unlines $
          map (\(v,m) -> assignDat v (mkMapping m))
            [ ("toLowerMapping", (\c -> toAbs (ord (toLower c) - (ord c))))
            , ("toUpperMapping", (\c -> toAbs (ord (toUpper c) - (ord c))))
-           , ("toTitleMapping", (\c -> toAbs (ord (toTitle c) - (ord c))))
            , ("catMapping", catNum . generalCategory)
            ]

@@ -179,7 +179,7 @@ handleWebSocket pending = do
   let handleMessages = forever $ do
         d <- WS.receiveDataMessage conn
         case d of
-          WS.Text t    -> do
+          WS.Text t _mdt -> do
             putStrLn "received text message"
             case reads . TL.unpack . TLE.decodeUtf8 $ t of
              [(i, [])] -> case i of
@@ -187,7 +187,7 @@ handleWebSocket pending = do
                                  putStrLn "closing connection"
                                  WS.sendClose conn (""::T.Text)
                             _ | i < 0 -> replicateM_ (negate i) $
-                                 WS.sendDataMessage conn (WS.Text "TestTextMessage")
+                                 WS.sendDataMessage conn (WS.Text "TestTextMessage" Nothing)
                             _         -> replicateM_ i $
                                  WS.sendDataMessage conn (WS.Binary "TestBinaryMessage")
              _         -> putStrLn "received non-numeric message"
@@ -203,8 +203,11 @@ respondWith :: (W.Response -> IO W.ResponseReceived) -> HTTP.Status -> [(ByteStr
 respondWith respond status query contentLength content = do
   maybe (return ()) threadDelay (readMaybeB =<< lookup "delay" query)
   let ct = fromMaybe "text/plain" (lookup "content-type" query)
-      hdrs = [ ("Content-Type",   ct)
-             , ("Content-Length", BL.toStrict . B.toLazyByteString . B.int64Dec $ contentLength)
+      hdrs = [ ("Content-Type", ct)
+             , ("Content-Length", BL.toStrict .
+                                  B.toLazyByteString .
+                                  B.int64Dec $
+                                  contentLength)
              ]
   respond (W.responseLBS status hdrs content)
 
@@ -220,4 +223,3 @@ readMaybeT = readMaybe . T.unpack
 invalidMethod :: (W.Response -> IO W.ResponseReceived) -> IO W.ResponseReceived
 invalidMethod respond = respond $
   W.responseLBS HTTP.methodNotAllowed405 [] "Method not allowed"
-

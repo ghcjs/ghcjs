@@ -1,5 +1,14 @@
 {-# OPTIONS_GHC -O0 #-}
-{-# LANGUAGE CPP, DeriveGeneric, DeriveDataTypeable, LambdaCase, MagicHash, StandaloneDeriving #-}
+{-# LANGUAGE CPP,
+             DeriveGeneric,
+             DeriveDataTypeable,
+             LambdaCase,
+             MagicHash,
+             StandaloneDeriving
+  #-}
+#ifndef __GHCJS__
+{-# LANGUAGE PackageImports #-}
+#endif
 
 {- |
      Communication between the compiler (GHCJS) and runtime (on node.js) for
@@ -23,8 +32,13 @@ import           GHC.Exts
 import           GHCJS.Prim.TH.Serialized
 import           GHCi.TH.Binary
 
+#ifdef __GHCJS__
 import qualified Language.Haskell.TH        as TH
 import qualified Language.Haskell.TH.Syntax as TH
+#else
+import qualified "template-haskell-ghcjs" Language.Haskell.TH        as TH
+import qualified "template-haskell-ghcjs" Language.Haskell.TH.Syntax as TH
+#endif
 
 data THResultType = THExp | THPat | THType | THDec | THAnnWrapper
   deriving (Enum, Show, Data, Generic)
@@ -32,34 +46,42 @@ data THResultType = THExp | THPat | THType | THDec | THAnnWrapper
 data Message
   -- | compiler to node requests
   = RunTH THResultType ByteString (Maybe TH.Loc)
-  | FinishTH          Bool       -- ^ also stop runner (False to just clean up at end of module)
+  | FinishTH
   -- | node to compiler responses
   | RunTH'            ByteString -- ^ serialized result
-  | FinishTH'         Int        -- ^ memory consumption
+  | FinishTH'
   -- | node to compiler requests
-  | NewName           String
-  | Report            Bool String
-  | LookupName        Bool String
-  | Reify             TH.Name
-  | ReifyInstances    TH.Name [TH.Type]
-  | ReifyRoles        TH.Name
-  | ReifyAnnotations  TH.AnnLookup
-  | ReifyModule       TH.Module
-  | ReifyFixity       TH.Name
-  | AddDependentFile  FilePath
-  | AddTopDecls       [TH.Dec]
+  | NewName             String
+  | Report              Bool String
+  | LookupName          Bool String
+  | Reify               TH.Name
+  | ReifyInstances      TH.Name [TH.Type]
+  | ReifyRoles          TH.Name
+  | ReifyAnnotations    TH.AnnLookup
+  | ReifyModule         TH.Module
+  | ReifyFixity         TH.Name
+  | ReifyConStrictness  TH.Name
+  | AddForeignFile      TH.ForeignSrcLang String
+  | AddDependentFile    FilePath
+  | AddTopDecls         [TH.Dec]
+  | IsExtEnabled        TH.Extension
+  | ExtsEnabled
   -- | compiler to node responses
-  | NewName'          TH.Name
+  | NewName'            TH.Name
   | Report'
-  | LookupName'       (Maybe TH.Name)
-  | Reify'            TH.Info
-  | ReifyInstances'   [TH.Dec]
-  | ReifyRoles'       [TH.Role]
-  | ReifyAnnotations' [ByteString]
-  | ReifyModule'      TH.ModuleInfo
-  | ReifyFixity'      (Maybe TH.Fixity)
+  | LookupName'         (Maybe TH.Name)
+  | Reify'              TH.Info
+  | ReifyInstances'     [TH.Dec]
+  | ReifyRoles'         [TH.Role]
+  | ReifyAnnotations'   [ByteString]
+  | ReifyModule'        TH.ModuleInfo
+  | ReifyFixity'        (Maybe TH.Fixity)
+  | ReifyConStrictness' [TH.DecidedStrictness]
+  | AddForeignFile'
   | AddDependentFile'
   | AddTopDecls'
+  | IsExtEnabled'       Bool
+  | ExtsEnabled'        [TH.Extension]
   | QFail'
   | QCompilerException' Int String -- ^ exception id and result of showing the exception
   -- | error recovery
@@ -71,16 +93,23 @@ data Message
   | QFail              String  -- ^ monadic fail called
   | QUserException     String  -- ^ exception in user code
   | QCompilerException Int     -- ^ exception originated on compiler side
-  deriving (Data, Generic)
+  deriving (Generic)
+
+
+-- deriving instance Generic TH.ForeignSrcLang
+
+instance Binary TH.Extension
+instance Binary TH.ForeignSrcLang
 
 instance Binary THResultType
 instance Binary Message
 
-#if MIN_VERSION_template_haskell(2,12,0)
-#error "unsupported template-haskell version"
-#elif MIN_VERSION_template_haskell(2,9,0)
+-- #if MIN_VERSION_template_haskell(2,13,0)
+-- #error "unsupported template-haskell version"
+-- #elif MIN_VERSION_template_haskell(2,9,0)
 
-#if !MIN_VERSION_template_haskell(2,10,0)
+-- #if !MIN_VERSION_template_haskell(2,10,0)
+{-
 deriving instance Generic TH.Pred
 
 deriving instance Generic TH.Loc
@@ -123,19 +152,19 @@ deriving instance Generic TH.Con
 deriving instance Generic TH.AnnLookup
 deriving instance Generic TH.ModuleInfo
 deriving instance Generic TH.Clause
-#endif
+-- #endif
 
-#if !MIN_VERSION_template_haskell(2,10,0)
+-- #if !MIN_VERSION_template_haskell(2,10,0)
 instance Binary TH.Pred
-#endif
+-- #endif
 
-#if !MIN_VERSION_template_haskell(2,11,0)
+-- #if !MIN_VERSION_template_haskell(2,11,0)
 instance Binary TH.Loc
 instance Binary TH.Name
 instance Binary TH.ModName
-#if MIN_VERSION_template_haskell(2,10,0)
+-- #if MIN_VERSION_template_haskell(2,10,0)
 instance Binary TH.NameFlavour
-#else
+-- #else
 instance Binary TH.NameFlavour where
   put TH.NameS             = putWord8 1
   put (TH.NameQ mn)        = putWord8 2 >> put mn
@@ -149,7 +178,7 @@ instance Binary TH.NameFlavour where
                         4 -> (\(I# i) -> TH.NameL i) <$> get
                         5 -> TH.NameG <$> get <*> get <*> get
                         _ -> error "get Name: invalid tag"
-#endif
+-- #endif
 
 instance Binary TH.PkgName
 instance Binary TH.NameSpace
@@ -188,19 +217,19 @@ instance Binary TH.AnnLookup
 instance Binary TH.ModuleInfo
 instance Binary TH.Clause
 
-#if MIN_VERSION_template_haskell(2,11,0)
+-- #if MIN_VERSION_template_haskell(2,11,0)
 instance Binary TH.InjectivityAnn
 instance Binary TH.FamilyResultSig
 instance Binary TH.Bang
 instance Binary TH.SourceUnpackedness
 instance Binary TH.SourceStrictness
 instance Binary TH.TypeFamilyHead
-#else
+-- #else
 instance Binary TH.Strict
-#endif
+-- #endif
 
-#endif
-
-#else
-#error "unsupported template-haskell version"
-#endif
+-- #endif
+-}
+-- #else
+-- #error "unsupported template-haskell version"
+-- #endif

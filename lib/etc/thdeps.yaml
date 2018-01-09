@@ -1,7 +1,0 @@
-# symbols that we need for running Template Haskell
-
-ghcjs-th:
-  GHCJS.Prim.TH.Eval:
-    runTHServer
-
-

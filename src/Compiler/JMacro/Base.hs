@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverlappingInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, StandaloneDeriving, FlexibleContexts, TypeSynonymInstances, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, BangPatterns, DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, FlexibleContexts, TypeSynonymInstances, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, BangPatterns, DeriveGeneric #-}
 
 -----------------------------------------------------------------------------
 {- |
@@ -38,7 +38,7 @@ module Compiler.JMacro.Base (
   jsSaturate, SaneDouble(..)
   ) where
 import Prelude hiding (tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
-import Control.Applicative hiding (empty)
+-- import Control.Applicative hiding (empty)
 import Control.Arrow (second, (***))
 import Control.DeepSeq
 import Control.Monad.State.Strict
@@ -317,22 +317,18 @@ class JMacro a where
 instance JMacro Ident where
     jtoGADT = JMGId
     jfromGADT (JMGId x) = x
-    jfromGADT _ = error "impossible"
 
 instance JMacro JStat where
     jtoGADT = JMGStat
     jfromGADT (JMGStat x) = x
-    jfromGADT _ = error "impossible"
 
 instance JMacro JExpr where
     jtoGADT = JMGExpr
     jfromGADT (JMGExpr x) = x
-    jfromGADT _ = error "impossible"
 
 instance JMacro JVal where
     jtoGADT = JMGVal
     jfromGADT (JMGVal x) = x
-    jfromGADT _ = error "impossible"
 
 -- | Union type to allow regular traversal by compos.
 data JMGadt a where
@@ -503,7 +499,7 @@ withHygiene_ un f x = jfromGADT $ case jtoGADT x of
     JMGVal  _ -> jtoGADT $ UnsatVal (jsUnsat_ is' x'')
     JMGId _ -> jtoGADT $ f x
     where
-        (x', (TxtI l : _)) = runState (runIdentSupply $ jsSaturate_ x) is 
+        (x', (TxtI l : _)) = runState (runIdentSupply $ jsSaturate_ x) is
         is' = take lastVal is
         x'' = f x'
         lastVal = readNote ("inSat" ++ T.unpack un) (reverse . takeWhile (/= '_') . reverse $ T.unpack l) :: Int
@@ -888,5 +884,3 @@ encodeJsonChar c
     where hexxs prefix pad cp =
             let h = showHex cp ""
             in  T.pack (prefix ++ replicate (pad - length h) '0' ++ h)
-
-

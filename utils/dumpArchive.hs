@@ -34,7 +34,6 @@ extractIndexEntry archive (ieEntry -> JsSource file) = do
   let outFile = dropExtension archive ++ "_src_" ++ map replaceChr file
       replaceChr c | c `elem` "\\/" = '_'
                    | otherwise      = c
-  putStrLn $ "extracing js source: " ++ file ++ " ->\n  " ++ outFile
+  putStrLn $ "extracting js source: " ++ file ++ " ->\n  " ++ outFile
   bs <- readSource file archive
   B.writeFile outFile bs
-

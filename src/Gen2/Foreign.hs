@@ -28,11 +28,7 @@ import ErrUtils
 import HscTypes
 import HsBinds
 import HsDecls
-#if __GLASGOW_HASKELL__ >= 711
 import Gen2.GHC.DsForeign (dsForeigns, dsForeigns', dsPrimCall)
-#else
-import DsForeign
-#endif
 import DsMonad
 import Encoding
 import HsUtils
@@ -54,6 +50,7 @@ import DataCon
 import Outputable
 import Coercion
 import Type
+import RepType
 import TysWiredIn
 import TysPrim
 import CoreUtils
@@ -78,9 +75,7 @@ import Gen2.PrimIface
 
 import Gen2.StgAst -- fixme
 
-#if __GLASGOW_HASKELL__ >= 711
 import GHC.LanguageExtensions
-#endif
 
 import Data.Char
 import Data.List (stripPrefix)
@@ -393,7 +388,7 @@ dsJsFExportDynamic id co0 _cconv = do
     let fun_ty = head arg_tys
     arg_id <- newSysLocalDs fun_ty
     let mkExport = mkFCallId dflags u
-                      (CCall (CCallSpec (StaticTarget "h$mkExportDyn" (fsLit "h$mkExportDyn") Nothing True) JavaScriptCallConv PlayRisky))
+                      (CCall (CCallSpec (StaticTarget NoSourceText (fsLit "h$mkExportDyn") Nothing True) JavaScriptCallConv PlayRisky))
                       (mkFunTy addrPrimTy ty)
         mkExportTy = mkFunTy (mkFunTys arg_tys res_ty) unitTy
         (_fun_args0, _fun_r) = splitFunTys (dropForAlls fun_ty)
@@ -412,29 +407,43 @@ dsJsFExportDynamic id co0 _cconv = do
 dsJsCall :: Id -> Coercion -> ForeignCall -> Maybe Header
         -> DsM ([(Id, Expr TyVar)], SDoc, SDoc)
 
-#if __GLASGOW_HASKELL__ >= 711
-dsJsCall fn_id co fcall mDeclHeader = do
-    let
-        ty                     = pFst $ coercionKind co
-        (all_bndrs, io_res_ty) = tcSplitPiTys ty
-        (named_bndrs, arg_tys) = partitionBindersIntoBinders all_bndrs
-        tvs                    = map (binderVar "dsFCall") named_bndrs
-                -- Must use tcSplit* functions because we want to
-                -- see that (IO t) in the corner
+dsJsCall fn_id co fcall _mDeclHeader = do
+  let
+      ty                   = pFst $ coercionKind co
+      (tv_bndrs, rho)      = tcSplitForAllTyVarBndrs ty
+      (arg_tys, io_res_ty) = tcSplitFunTys rho
 
-    args <- newSysLocalsDs arg_tys
-    (val_args, arg_wrappers) <- mapAndUnzipM unboxJsArg (map Var args)
+  args <- newSysLocalsDs arg_tys
+  (val_args, arg_wrappers) <- mapAndUnzipM unboxJsArg (map Var args)
 
-    let
-        work_arg_ids  = [v | Var v <- val_args] -- All guaranteed to be vars
+  let
+      work_arg_ids  = [v | Var v <- val_args] -- All guaranteed to be vars
 
-    (ccall_result_ty, res_wrapper) <- boxJsResult io_res_ty
+  (ccall_result_ty, res_wrapper) <- boxJsResult io_res_ty
 
-    ccall_uniq <- newUnique
-    work_uniq  <- newUnique
+  ccall_uniq <- newUnique
+  work_uniq  <- newUnique
 
-    dflags <- getDynFlags
-    let
+  dflags <- getDynFlags
+
+  let
+    -- Build the worker
+    worker_ty     = mkForAllTys tv_bndrs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
+    tvs           = map binderVar tv_bndrs
+    the_ccall_app = mkFCall dflags ccall_uniq fcall val_args ccall_result_ty
+    work_rhs      = mkLams tvs (mkLams work_arg_ids the_ccall_app)
+    work_id       = mkSysLocal (fsLit "$wccall") work_uniq worker_ty
+
+    -- Build the wrapper
+    work_app     = mkApps (mkVarApps (Var work_id) tvs) val_args
+    wrapper_body = foldr ($) (res_wrapper work_app) arg_wrappers
+    wrap_rhs     = mkLams (tvs ++ args) wrapper_body
+    wrap_rhs'    = Cast wrap_rhs co
+    fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfoldingWithArity
+                                            (length args) wrap_rhs'
+
+  return ([(work_id, work_rhs), (fn_id_w_inl, wrap_rhs')], empty, empty)
+{-
         -- Build the worker
         worker_ty     = mkForAllTys named_bndrs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
         the_ccall_app = mkFCall dflags ccall_uniq fcall val_args ccall_result_ty
@@ -449,42 +458,7 @@ dsJsCall fn_id co fcall mDeclHeader = do
         fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfolding (Just (length args)) wrap_rhs'
 
     return ([(work_id, work_rhs), (fn_id_w_inl, wrap_rhs')], empty, empty)
-#else
-dsJsCall fn_id co fcall _mDeclHeader = do
-    let
-        ty                   = pFst $ coercionKind co
-        (tvs, fun_ty)        = tcSplitForAllTys ty
-        (arg_tys, io_res_ty) = tcSplitFunTys fun_ty
-                -- Must use tcSplit* functions because we want to
-                -- see that (IO t) in the corner
-
-    args <- newSysLocalsDs arg_tys
-    (val_args, arg_wrappers) <- mapAndUnzipM unboxJsArg (map Var args)
-
-    let work_arg_ids  = [v | Var v <- val_args] -- All guaranteed to be vars
-
-    (ccall_result_ty, res_wrapper) <- boxJsResult io_res_ty
-
-    ccall_uniq <- newUnique
-    work_uniq  <- newUnique
-
-    dflags <- getDynFlags
-    let
-        -- Build the worker
-        worker_ty     = mkForAllTys tvs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
-        the_ccall_app = mkFCall dflags ccall_uniq fcall val_args ccall_result_ty
-        work_rhs      = mkLams tvs (mkLams work_arg_ids the_ccall_app)
-        work_id       = mkSysLocal (fsLit "$wccall") work_uniq worker_ty
-
-        -- Build the wrapper
-        work_app     = mkApps (mkVarApps (Var work_id) tvs) val_args
-        wrapper_body = foldr ($) (res_wrapper work_app) arg_wrappers
-        wrap_rhs     = mkLams (tvs ++ args) wrapper_body
-        wrap_rhs'    = Cast wrap_rhs co
-        fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfolding (Just (length args)) wrap_rhs'
-
-    return ([(work_id, work_rhs), (fn_id_w_inl, wrap_rhs')], empty, empty)
-#endif
+-}
 
 mkHObj :: Type -> SDoc
 mkHObj t = text "rts_mk" <> text (showFFIType t)
@@ -500,8 +474,8 @@ showFFIType t = getOccString (getName (typeTyCon t))
 
 typeTyCon :: Type -> TyCon
 typeTyCon ty
-  | UnaryRep rep_ty <- repType ty
-  , Just (tc, _) <- tcSplitTyConApp_maybe rep_ty
+  -- | UnaryRep rep_ty <- repType ty
+  | Just (tc, _) <- tcSplitTyConApp_maybe (unwrapType ty) -- rep_ty
   = tc
   | otherwise
   = pprPanic "Gen2.Foreign.typeTyCon" (ppr ty)
@@ -593,7 +567,7 @@ boxJSResult result_ty
 
 boxJsResult result_ty
   | Just (io_tycon, io_res_ty) <- tcSplitIOType_maybe result_ty
-        -- isIOType_maybe handles the case where the type is a 
+        -- isIOType_maybe handles the case where the type is a
         -- simple wrapping of IO.  E.g.
         --      newtype Wrap a = W (IO a)
         -- No coercion necessary because its a non-recursive newtype
@@ -824,7 +798,7 @@ jsResultWrapper result_ty
 -- low-level primitive JavaScript call:
 mkJsCall :: DynFlags -> Unique -> String -> [CoreExpr] -> Type -> CoreExpr
 mkJsCall dflags u tgt args t =
-  mkFCall dflags u (CCall (CCallSpec (StaticTarget tgt (mkFastString tgt)
+  mkFCall dflags u (CCall (CCallSpec (StaticTarget NoSourceText (mkFastString tgt)
                                                        (Just primPackageKey)
                                                        True)
                                       JavaScriptCallConv PlayRisky)) args t
@@ -850,7 +824,7 @@ getPrimTyOf ty
         prim_ty
      _other -> pprPanic "DsForeign.getPrimTyOf" (ppr ty)
   where
-        UnaryRep rep_ty = repType ty
+    rep_ty = unwrapType ty
 
 -- When the result of a foreign call is smaller than the word size, we
 -- need to sign- or zero-extend the result up to the word size.  The C
@@ -860,11 +834,9 @@ getPrimTyOf ty
 -- narrow int32 and word32 since JS numbers can contain more
 maybeJsNarrow :: DynFlags -> TyCon -> (CoreExpr -> CoreExpr)
 maybeJsNarrow _dflags tycon
-  | tycon `hasKey` intTyConKey    = \e -> App (Var (mkGhcjsPrimOpId Narrow32IntOp)) e
   | tycon `hasKey` int8TyConKey   = \e -> App (Var (mkGhcjsPrimOpId Narrow8IntOp)) e
   | tycon `hasKey` int16TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow16IntOp)) e
   | tycon `hasKey` int32TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow32IntOp)) e
-  | tycon `hasKey` wordTyConKey   = \e -> App (Var (mkGhcjsPrimOpId Narrow32WordOp)) e
   | tycon `hasKey` word8TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow8WordOp)) e
   | tycon `hasKey` word16TyConKey = \e -> App (Var (mkGhcjsPrimOpId Narrow16WordOp)) e
   | tycon `hasKey` word32TyConKey = \e -> App (Var (mkGhcjsPrimOpId Narrow32WordOp)) e
@@ -902,7 +874,7 @@ ghcjsNativeDsForeigns fos = do
       convertForeignDecl _ x = x
 
       convertSpec :: DynFlags -> Located Id -> CImportSpec
-      convertSpec dflags i = CFunction (StaticTarget "" (stubName dflags (unLoc i)) Nothing True)
+      convertSpec dflags i = CFunction (StaticTarget NoSourceText (stubName dflags (unLoc i)) Nothing True)
 
       stubName :: DynFlags -> Id -> FastString
       stubName dflags i = mkFastString $
@@ -956,7 +928,7 @@ jsTySigLit dflags isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe
   where
            tcSig :: Bool -> TyCon -> (String, Char)
            tcSig isResult tc
-             | isUnliftedTyCon tc                                  = prim (tyConPrimRep tc)
+             | isUnliftedTyCon tc, [tt] <- tyConPrimRep tc = prim tt -- = prim (tyConPrimRep tc)
              | Just r <- lookup (getUnique tc) boxed               = r
              | isResult && getUnique tc == unitTyConKey            = ("void", 'v')
              | isJSValTyCon dflags tc = ("StgPtr", 'r')
@@ -965,7 +937,9 @@ jsTySigLit dflags isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe
               where
                  -- fixme is there already a list of these somewhere else?
                  prim VoidRep  = error "jsTySigLit: VoidRep"
-                 prim PtrRep   = hsPtr
+                 prim LiftedRep = hsPtr
+                 prim UnliftedRep = hsPtr -- fixme?
+                 -- prim PtrRep   = hsPtr
                  prim IntRep   = hsInt
                  prim WordRep  = hsWord
                  prim Int64Rep = hsInt64
@@ -1072,7 +1046,7 @@ isGhcjsFFIImportResultTy dflags ty
     where
       check ty | Just (tc, args) <- tcSplitTyConApp_maybe ty
                , getUnique tc == liftedTypeKindTyConKey
-                 || getUnique tc == unliftedTypeKindTyConKey = IsValid
+                {- || getUnique tc == unliftedTypeKindTyConKey -} = IsValid -- fixme
                | isValid (isGhcjsFFIImportResultTy' dflags ty) = IsValid
                | isGhcjsFFITy dflags ty = IsValid
                | otherwise = NotValid (text $ "")

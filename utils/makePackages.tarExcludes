@@ -1,0 +1,22 @@
+# add excludes for boot.tar here
+# to check if new excludes are needed, generate boot.tar on a clean source tree:
+#
+# $ ./utils/makePackages.sh
+# $ mv data/boot.tar data/boot-clean.tar
+#
+# then build the boot libraries and compare the new boot.tar to the clean one:
+#
+# $ ghcjs-boot -s lib/boot
+# $ ./utils/makePackages.sh
+# $ diff -u <(tar -tf data/boot-clean.tar | sort) <(tar -tf data/boot.tar | sort)
+#
+boot/pkg/*/dist
+boot/pkg/*/autom4te.cache
+boot/pkg/*/config.log
+boot/pkg/*/config.status
+boot/pkg/*/*.buildinfo
+boot/pkg/base/include/EventConfig.h
+boot/pkg/base/include/HsBaseConfig.h
+boot/pkg/integer-gmp/include/HsIntegerGmp.h
+boot/pkg/directory/HsDirectoryConfig.h
+boot/pkg/process/include/HsProcessConfig.h

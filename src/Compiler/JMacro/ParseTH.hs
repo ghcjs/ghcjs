@@ -1,7 +1,8 @@
+{-# LANGUAGE PackageImports #-}
 module Compiler.JMacro.ParseTH (parseHSExp) where
 
 import Language.Haskell.Meta.Parse
-import qualified Language.Haskell.TH as TH
+import qualified "template-haskell" Language.Haskell.TH as TH
 -- import Language.Haskell.Exts.Translate
 -- import Language.Haskell.Exts.Parser
 -- import Language.Haskell.Exts.Extension

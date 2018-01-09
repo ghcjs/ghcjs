@@ -7,7 +7,8 @@
              ScopedTypeVariables,
              DeriveGeneric,
              Rank2Types,
-             GeneralizedNewtypeDeriving#-}
+             GeneralizedNewtypeDeriving
+  #-}
 
 {- |
   Serialization/deserialization for the binary .js_o files
@@ -23,6 +24,7 @@
   file layout:
 
    - header ["GHCJSOBJ", length of symbol table, length of dependencies, length of index]
+   - compiler version tag
    - symbol table
    - dependency info
    - closureinfo index
@@ -169,7 +171,7 @@ instance NFData Fun where rnf x = x `seq` ()
 data Package = Package { packageName    :: !Text
                        , packageVersion :: !Text
                        }
--} 
+-}
 newtype Package = Package { unPackage :: Text }
   deriving (Eq, Ord, Show, Generic, NFData)
 instance DB.Binary Package
@@ -794,13 +796,17 @@ instance Objectable StaticVal where
                       n -> unexpected ("Objectable get StaticVal: invalid tag " ++ show n)
 
 instance Objectable StaticUnboxed where
-   put (StaticUnboxedBool b)   = tag 1 >> put b
-   put (StaticUnboxedInt i)    = tag 2 >> put i
-   put (StaticUnboxedDouble d) = tag 3 >> put d
+   put (StaticUnboxedBool b)           = tag 1 >> put b
+   put (StaticUnboxedInt i)            = tag 2 >> put i
+   put (StaticUnboxedDouble d)         = tag 3 >> put d
+   put (StaticUnboxedString str)       = tag 4 >> put str
+   put (StaticUnboxedStringOffset str) = tag 5 >> put str
    get = getTag >>= \case
-                       1 -> StaticUnboxedBool   <$> get
-                       2 -> StaticUnboxedInt    <$> get
-                       3 -> StaticUnboxedDouble <$> get
+                       1 -> StaticUnboxedBool         <$> get
+                       2 -> StaticUnboxedInt          <$> get
+                       3 -> StaticUnboxedDouble       <$> get
+                       4 -> StaticUnboxedString       <$> get
+                       5 -> StaticUnboxedStringOffset <$> get
                        n -> unexpected ("Objectable get StaticUnboxed: invalid tag " ++ show n)
 
 instance Objectable StaticArg where
@@ -834,4 +840,3 @@ instance Objectable StaticLit where
 instance Objectable BS.ByteString where
   put = lift . DB.put
   get = lift DB.get
-

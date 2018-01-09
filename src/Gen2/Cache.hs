@@ -67,7 +67,7 @@ getCached :: DynFlags
           -> IO (Maybe ByteString)
 getCached dflags prefix name =
   let getCacheEntry =
-        cacheFileName dflags prefix name >>= \case
+       cacheFileName dflags prefix name >>= \case
           Nothing   -> return Nothing
           Just file -> getCacheFile file `E.onException` removeCacheFile file
       getCacheFile file = do
@@ -76,7 +76,7 @@ getCached dflags prefix name =
         valid <- checkCacheMeta meta
         if valid then content `seq` return (Just content)
                  else removeCacheFile file >> return Nothing
-  in getCacheEntry `E.catch` \(_::E.SomeException) -> return Nothing
+  in  getCacheEntry `E.catch` \(_::E.SomeException) -> return Nothing
 
 {-
   put a file in the cache, returns False if the cache file could not be created
@@ -96,4 +96,3 @@ putCached dflags prefix key deps content =
         Just meta ->
           (BL.writeFile file (DB.runPut $ DB.put (meta, content)) >> return True) `catchIOError`
             \_ -> return False
-  

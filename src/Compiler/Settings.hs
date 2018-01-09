@@ -1,6 +1,4 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveGeneric #-}
 
 module Compiler.Settings where
 
@@ -12,36 +10,21 @@ import qualified Control.Exception as E
 import           Control.Concurrent.MVar
 import           Control.Monad
 
-import           Data.Aeson
 import           Data.ByteString        (ByteString)
-import qualified Data.ByteString.Lazy   as BL
 import           Data.IntMap            (IntMap)
-import qualified Data.List              as L
 import           Data.Map               (Map)
 import qualified Data.Map               as M
-import           Data.Maybe
-import           Data.Monoid
 import           Data.Set               (Set)
-import           Data.Text              (Text)
-import qualified Data.Text as T
-import           Data.Typeable
+import           Data.Monoid
+import           Data.Text (Text)
 
-import           GHC.Generics
-
-import           System.Environment     (getEnvironment)
 import           System.IO
 import           System.Process
-import           System.FilePath        ((</>), searchPathSeparator
-                                        ,splitSearchPath)
 
-import           DynFlags
 import           Module
 import           TcRnTypes
 import           ErrUtils
 import           HscTypes
-import           Panic
-
-import qualified Compiler.Info as Info
 
 {- | We can link incrementally against a base bundle, where we assume
      that the symbols from the bundle and their dependencies have already
@@ -119,8 +102,8 @@ instance Monoid GhcjsSettings where
                         (jslsrc1 <> jslsrc2)
                         (dd1 || dd2)
 
-data THRunner =
-  THRunner { thrProcess        :: ProcessHandle
+data ThRunner =
+  ThRunner { thrProcess        :: ProcessHandle
            , thrHandleIn       :: Handle
            , thrHandleErr      :: Handle
            , thrBase           :: MVar Base
@@ -133,33 +116,9 @@ data DepsLocation = ObjectFile  FilePath
                   | InMemory    String ByteString
                   deriving (Eq, Show)
 
-data THRunnerState = THRunnerState
-  { activeRunners :: Map String THRunner
-  , idleRunners   :: [THRunner]
-  }
-
-consIdleRunner :: THRunner -> THRunnerState -> THRunnerState
-consIdleRunner r s = s { idleRunners = r : idleRunners s }
-
-unconsIdleRunner :: THRunnerState -> Maybe (THRunner, THRunnerState)
-unconsIdleRunner s
-  | (r:xs) <- idleRunners s = Just (r, s { idleRunners = xs })
-  | otherwise               = Nothing
-
-deleteActiveRunner :: String -> THRunnerState -> THRunnerState
-deleteActiveRunner m s =
-  s { activeRunners = M.delete m (activeRunners s) }
-
-insertActiveRunner :: String -> THRunner -> THRunnerState -> THRunnerState
-insertActiveRunner m runner s =
-  s { activeRunners = M.insert m runner (activeRunners s) }
-
-emptyTHRunnerState :: THRunnerState
-emptyTHRunnerState = THRunnerState mempty mempty
-
 data GhcjsEnv = GhcjsEnv
   { compiledModules   :: MVar (Map Module ByteString) -- ^ keep track of already compiled modules so we don't compile twice for dynamic-too
-  , thRunners         :: MVar THRunnerState -- (Map String ThRunner)   -- ^ template haskell runners
+  , thRunners         :: MVar (Map String ThRunner)   -- ^ template haskell runners
   , thSplice          :: MVar Int
   , linkerArchiveDeps :: MVar (Map (Set FilePath)
                                    (Map (Object.Package, Text)
@@ -171,7 +130,7 @@ data GhcjsEnv = GhcjsEnv
 
 newGhcjsEnv :: IO GhcjsEnv
 newGhcjsEnv = GhcjsEnv <$> newMVar M.empty
-                       <*> newMVar emptyTHRunnerState
+                       <*> newMVar M.empty
                        <*> newMVar 0
                        <*> newMVar M.empty
                        <*> newMVar Nothing
@@ -180,40 +139,3 @@ newGhcjsEnv = GhcjsEnv <$> newMVar M.empty
 data LinkedObj = ObjFile   FilePath          -- load from this file
                | ObjLoaded String ByteString -- already loaded, description
                deriving (Eq, Ord, Show)
-
-data NodeSettings = NodeSettings
-  { nodeProgram         :: FilePath    -- ^ location of node.js program
-  , nodePath            :: Maybe Text  -- ^ value of NODE_PATH environment variable
-  , nodeExtraArgs       :: [Text]      -- ^ extra arguments to pass to node.js
-  , nodeKeepAliveMaxMem :: Integer     -- ^ keep node.js (TH, GHCJSi) processes alive if they don't use more than this
-  } deriving (Eq, Ord, Show, Typeable, Generic)
-
-instance FromJSON NodeSettings
-instance ToJSON NodeSettings
-
-readNodeSettings :: DynFlags -> IO NodeSettings
-readNodeSettings dflags = do
-  contents <- BL.readFile (Info.getLibDir dflags </> "nodeSettings.json")
-  either panic pure (eitherDecode' contents)
-
-runNodeInteractive :: DynFlags
-                   -> Maybe FilePath
-                   -> FilePath
-                   -> IO (Handle, Handle, Handle, ProcessHandle)
-runNodeInteractive dflags mbWorkingDir src = do
-  putStrLn "runNodeInteractive"
-  nodeSettings <- readNodeSettings dflags
-  env0 <- getEnvironment
-  let ghcjsNodePath = topDir dflags </> "ghcjs-node" </> "node_modules"
-      addGhcjsNodePath origNodePath =
-        L.intercalate (searchPathSeparator:[])
-                      (ghcjsNodePath:splitSearchPath origNodePath)
-      nodePath = maybe ghcjsNodePath
-                       addGhcjsNodePath
-                       (L.lookup "NODE_PATH" env0)
-      env1 = [("NODE_PATH", nodePath)] ++ filter ((/="NODE_PATH") . fst) env0
-  runInteractiveProcess
-    (nodeProgram nodeSettings)
-    (map T.unpack (nodeExtraArgs nodeSettings) ++ [src])
-    mbWorkingDir
-    (Just env1)

@@ -10,9 +10,13 @@ module Compiler.Compat ( PackageKey
                        , mainPackageKey
                        , modulePackageName
                        , getPackageName
+                       , getInstalledPackageName
                        , getPackageVersion
+                       , getInstalledPackageVersion
                        , getPackageLibDirs
+                       , getInstalledPackageLibDirs
                        , getPackageHsLibs
+                       , getInstalledPackageHsLibs
                        , searchModule
                        , Version(..)
                        , showVersion
@@ -23,12 +27,7 @@ import Module
 import DynFlags
 import FastString
 
-#if !(__GLASGOW_HASKELL__ >= 709)
-import Distribution.Package hiding ( PackageId )
 import Packages hiding ( Version )
-#else
-import Packages hiding ( Version )
-#endif
 
 import           Data.Binary
 import           Data.Text    (Text)
@@ -50,136 +49,66 @@ isEmptyVersion = null . unVersion
 convertVersion :: DV.Version -> Version
 convertVersion v = Version (map fromIntegral $ versionBranch v)
 
-#if !(__GLASGOW_HASKELL__ >= 709)
-
-type PackageKey = PackageId
-
-packageKeyString :: PackageKey -> String
-packageKeyString = packageIdString
-
-modulePackageKey :: Module -> PackageKey
-modulePackageKey = modulePackageId
-
-stringToPackageKey :: String -> PackageKey
-stringToPackageKey = stringToPackageId
-
-primPackageKey :: PackageKey
-primPackageKey = primPackageId
-
-mainPackageKey :: PackageKey
-mainPackageKey = mainPackageId
-
-modulePackageName :: DynFlags -> Module -> String
-modulePackageName dflags
-  = getPackageName dflags . modulePackageId
-
-getPackageName :: DynFlags -> PackageKey -> String
-getPackageName dflags
-  = maybe "" ((\(PackageName n) -> n) . pkgName . sourcePackageId)
-  . lookupPackage (pkgIdMap . pkgState $ dflags)
-
-getPackageVersion :: DynFlags -> PackageKey -> Maybe Version
-getPackageVersion dflags
-  = fmap (convertVersion . pkgVersion . sourcePackageId)
-  . lookupPackage (pkgIdMap . pkgState $ dflags)
-
-getPackageLibDirs :: DynFlags -> PackageKey -> [FilePath]
-getPackageLibDirs dflags
-  = maybe [] libraryDirs . lookupPackage (pkgIdMap . pkgState $ dflags)
-
-getPackageHsLibs :: DynFlags -> PackageKey -> [String]
-getPackageHsLibs dflags
-  = maybe [] hsLibraries . lookupPackage (pkgIdMap . pkgState $ dflags)
-
-searchModule :: DynFlags -> ModuleName -> [(String, PackageKey)]
-searchModule dflags
-  = map ((\k -> (getPackageName dflags k, k)) . packageConfigId . fst)
-  . lookupModuleInAllPackages dflags
-
-#elif !(__GLASGOW_HASKELL__ >= 711)
-
-getPackageName :: DynFlags -> PackageKey -> String
-getPackageName dflags
-  = maybe "" ((\(PackageName n) -> unpackFS n) . packageName)
-  . lookupPackage dflags
-
-modulePackageName :: DynFlags -> Module -> String
-modulePackageName dflags
-  = getPackageName dflags . modulePackageKey
-
-getPackageVersion :: DynFlags -> PackageKey -> Maybe Version
-getPackageVersion dflags
-  = fmap (convertVersion . packageVersion)
-  . lookupPackage dflags
-
-getPackageLibDirs :: DynFlags -> PackageKey -> [FilePath]
-getPackageLibDirs dflags
-  = maybe [] libraryDirs . lookupPackage dflags
-
-getPackageHsLibs :: DynFlags -> PackageKey -> [String]
-getPackageHsLibs dflags
-  = maybe [] hsLibraries . lookupPackage dflags
-
-searchModule :: DynFlags -> ModuleName -> [(String, PackageKey)]
-searchModule dflags
-  = map ((\k -> (getPackageName dflags k, k)) . packageKey . snd)
---  $ fromLookupResult
---  $ lookupModuleWithSuggestions dflags mn Nothing
-  . lookupModuleInAllPackages dflags
-{-
-fromLookupResult :: LookupResult -> [(Module, PackageConfig)]
-fromLookupResult (LookupFound m c)      = [(m,c)]
-fromLookupResult (LookupMultiple ms)    = concatMap fromModuleOrigin ms
-fromLookupResult (LookupHidden phs mhs) = concatMap fromModuleOrigin (phs ++ mhs)
-
-fromModuleOrigin :: (Module, ModuleOrigin) -> [(Module, PackageConfig)]
-fromModuleOrigin (m, mo) = case mo of
-  -}
-#else
 type PackageKey = UnitId
 
-packageKeyString :: PackageKey -> String
+packageKeyString :: UnitId -> String
 packageKeyString = unitIdString
 
-modulePackageKey :: Module -> PackageKey
+modulePackageKey :: Module -> UnitId
 modulePackageKey = moduleUnitId
 
-stringToPackageKey :: String -> PackageKey
-stringToPackageKey = stringToUnitId
+stringToPackageKey :: String -> InstalledUnitId
+stringToPackageKey = stringToInstalledUnitId
 
-primPackageKey :: PackageKey
+primPackageKey :: UnitId
 primPackageKey = primUnitId
 
-mainPackageKey :: PackageKey
+mainPackageKey :: UnitId
 mainPackageKey = mainUnitId
 
-getPackageName :: DynFlags -> PackageKey -> String
+getPackageName :: DynFlags -> UnitId -> String
 getPackageName dflags
   = maybe "" ((\(PackageName n) -> unpackFS n) . packageName)
   . lookupPackage dflags
+
+getInstalledPackageName :: DynFlags -> InstalledUnitId -> String
+getInstalledPackageName dflags
+  = maybe "" ((\(PackageName n) -> unpackFS n) . packageName)
+  . lookupInstalledPackage dflags
 
 modulePackageName :: DynFlags -> Module -> String
 modulePackageName dflags
   = getPackageName dflags . moduleUnitId
 
-getPackageVersion :: DynFlags -> PackageKey -> Maybe Version
+getPackageVersion :: DynFlags -> UnitId -> Maybe Version
 getPackageVersion dflags
   = fmap (convertVersion . packageVersion)
   . lookupPackage dflags
 
-getPackageLibDirs :: DynFlags -> PackageKey -> [FilePath]
+getInstalledPackageVersion :: DynFlags -> InstalledUnitId -> Maybe Version
+getInstalledPackageVersion dflags
+  = fmap (convertVersion . packageVersion)
+  . lookupInstalledPackage dflags
+
+getPackageLibDirs :: DynFlags -> UnitId -> [FilePath]
 getPackageLibDirs dflags
   = maybe [] libraryDirs . lookupPackage dflags
 
-getPackageHsLibs :: DynFlags -> PackageKey -> [String]
+getInstalledPackageLibDirs :: DynFlags -> InstalledUnitId -> [FilePath]
+getInstalledPackageLibDirs dflags
+  = maybe [] libraryDirs . lookupInstalledPackage dflags
+
+getPackageHsLibs :: DynFlags -> UnitId -> [String]
 getPackageHsLibs dflags
   = maybe [] hsLibraries . lookupPackage dflags
 
-searchModule :: DynFlags -> ModuleName -> [(String, PackageKey)]
+getInstalledPackageHsLibs :: DynFlags -> InstalledUnitId -> [String]
+getInstalledPackageHsLibs dflags
+  = maybe [] hsLibraries . lookupInstalledPackage dflags
+
+searchModule :: DynFlags -> ModuleName -> [(String, UnitId)]
 searchModule dflags
-  = map ((\k -> (getPackageName dflags k, k)) . unitId . snd)
+  = map ((\k -> (getPackageName dflags k, k)) . moduleUnitId . fst)
 --  $ fromLookupResult
 --  $ lookupModuleWithSuggestions dflags mn Nothing
   . lookupModuleInAllPackages dflags
-
-#endif

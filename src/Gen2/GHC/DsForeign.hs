@@ -26,6 +26,7 @@ import Literal
 import Module
 import Name
 import Type
+import RepType
 import TyCon
 import Coercion
 import TcEnv
@@ -194,15 +195,9 @@ dsFCall :: Id -> Coercion -> ForeignCall -> Maybe Header
         -> DsM ([(Id, Expr TyVar)], SDoc, SDoc)
 dsFCall fn_id co fcall mDeclHeader = do
     let
-        ty                     = pFst $ coercionKind co
-        (all_bndrs, io_res_ty) = tcSplitPiTys ty
-        (named_bndrs, arg_tys) = partitionBindersIntoBinders all_bndrs
-        tvs                    = -- ASSERT( fst (span isNamedBinder all_bndrs)
-                                 --        `equalLength` named_bndrs )
-                                   -- ensure that the named binders all come first
-                                 map (binderVar "dsFCall") named_bndrs
-                -- Must use tcSplit* functions because we want to
-                -- see that (IO t) in the corner
+        ty                   = pFst $ coercionKind co
+        (tv_bndrs, rho)      = tcSplitForAllTyVarBndrs ty
+        (arg_tys, io_res_ty) = tcSplitFunTys rho
 
     args <- newSysLocalsDs arg_tys
     (val_args, arg_wrappers) <- mapAndUnzipM unboxArg (map Var args)
@@ -222,7 +217,7 @@ dsFCall fn_id co fcall mDeclHeader = do
                                CApiConv safety) ->
                do wrapperName <- mkWrapperName "ghc_wrapper" (unpackFS cName)
                   let fcall' = CCall (CCallSpec
-                                      (StaticTarget (unpackFS wrapperName)
+                                      (StaticTarget NoSourceText
                                                     wrapperName mUnitId
                                                     True)
                                       CApiConv safety)
@@ -265,7 +260,22 @@ dsFCall fn_id co fcall mDeclHeader = do
                   return (fcall, empty)
     let
         -- Build the worker
-        worker_ty     = mkForAllTys named_bndrs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
+        worker_ty     = mkForAllTys tv_bndrs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
+        tvs           = map binderVar tv_bndrs
+        the_ccall_app = mkFCall dflags ccall_uniq fcall' val_args ccall_result_ty
+        work_rhs      = mkLams tvs (mkLams work_arg_ids the_ccall_app)
+        work_id       = mkSysLocal (fsLit "$wccall") work_uniq worker_ty
+
+        -- Build the wrapper
+        work_app     = mkApps (mkVarApps (Var work_id) tvs) val_args
+        wrapper_body = foldr ($) (res_wrapper work_app) arg_wrappers
+        wrap_rhs     = mkLams (tvs ++ args) wrapper_body
+        wrap_rhs'    = Cast wrap_rhs co
+        fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfoldingWithArity
+                                                (length args) wrap_rhs'
+{-
+        -- Build the worker
+        worker_ty     = mkForAllTys tv_bndrs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
         the_ccall_app = mkFCall dflags ccall_uniq fcall' val_args ccall_result_ty
         work_rhs      = mkLams tvs (mkLams work_arg_ids the_ccall_app)
         work_id       = mkSysLocal (fsLit "$wccall") work_uniq worker_ty
@@ -276,7 +286,7 @@ dsFCall fn_id co fcall mDeclHeader = do
         wrap_rhs     = mkLams (tvs ++ args) wrapper_body
         wrap_rhs'    = Cast wrap_rhs co
         fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfolding (Just (length args)) wrap_rhs'
-
+-}
     return ([(work_id, work_rhs), (fn_id_w_inl, wrap_rhs')], empty, cDoc)
 
 {-
@@ -299,11 +309,8 @@ dsPrimCall :: Id -> Coercion -> ForeignCall
 dsPrimCall fn_id co fcall = do
     let
         ty                   = pFst $ coercionKind co
-        (bndrs, io_res_ty)   = tcSplitPiTys ty
-        (tvs, arg_tys)       = partitionBinders bndrs
-                -- Must use tcSplit* functions because we want to
-                -- see that (IO t) in the corner
-
+        (tvs, fun_ty)        = tcSplitForAllTys ty
+        (arg_tys, io_res_ty) = tcSplitFunTys fun_ty
     -- MASSERT( fst (span isNamedBinder bndrs) `equalLength` tvs )
     args <- newSysLocalsDs arg_tys
 
@@ -479,10 +486,10 @@ dsFExportDynamic id co0 cconv = do
     return ([fed], h_code, c_code)
 
  where
-  ty                       = pFst (coercionKind co0)
-  (bndrs, fn_res_ty)       = tcSplitPiTys ty
-  (tvs, [arg_ty])          = partitionBinders bndrs
-  Just (io_tc, res_ty)     = tcSplitIOType_maybe fn_res_ty
+   ty                       = pFst (coercionKind co0)
+   (tvs,sans_foralls)       = tcSplitForAllTys ty
+   ([arg_ty], fn_res_ty)    = tcSplitFunTys sans_foralls
+   Just (io_tc, res_ty)     = tcSplitIOType_maybe fn_res_ty
         -- Must have an IO type; hence Just
 
 
@@ -547,10 +554,10 @@ mkFExportCBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
 
   type_string
       -- libffi needs to know the result type too:
-      | libffi    = primTyDescChar dflags res_hty : arg_type_string
+      | libffi    = primTyDescChar dflags res_hty ++ arg_type_string
       | otherwise = arg_type_string
 
-  arg_type_string = [primTyDescChar dflags ty | (_,_,ty,_) <- arg_info]
+  arg_type_string = concat [primTyDescChar dflags ty | (_,_,ty,_) <- arg_info]
                 -- just the real args
 
   -- add some auxiliary args; the stable ptr in the wrapper case, and
@@ -731,8 +738,7 @@ toCType = f False
 
 typeTyCon :: Type -> TyCon
 typeTyCon ty
-  | UnaryRep rep_ty <- repType ty
-  , Just (tc, _) <- tcSplitTyConApp_maybe rep_ty
+  | Just (tc, _) <- tcSplitTyConApp_maybe (unwrapType ty)
   = tc
   | otherwise
   = pprPanic "DsForeign.typeTyCon" (ppr ty)
@@ -791,25 +797,26 @@ getPrimTyOf ty
         prim_ty
      _other -> pprPanic "DsForeign.getPrimTyOf" (ppr ty)
   where
-        UnaryRep rep_ty = repType ty
+    rep_ty = unwrapType ty
 
 -- represent a primitive type as a Char, for building a string that
 -- described the foreign function type.  The types are size-dependent,
 -- e.g. 'W' is a signed 32-bit integer.
-primTyDescChar :: DynFlags -> Type -> Char
+primTyDescChar :: DynFlags -> Type -> String
 primTyDescChar dflags ty
- | ty `eqType` unitTy = 'v'
+ | ty `eqType` unitTy = "v"
  | otherwise
- = case typePrimRep (getPrimTyOf ty) of
-     IntRep      -> signed_word
-     WordRep     -> unsigned_word
-     Int64Rep    -> 'L'
-     Word64Rep   -> 'l'
-     AddrRep     -> 'p'
-     FloatRep    -> 'f'
-     DoubleRep   -> 'd'
-     _           -> pprPanic "primTyDescChar" (ppr ty)
+ = map repChar (typePrimRep (getPrimTyOf ty))
   where
+    repChar r = case r of
+      IntRep      -> signed_word
+      WordRep     -> unsigned_word
+      Int64Rep    -> 'L'
+      Word64Rep   -> 'l'
+      AddrRep     -> 'p'
+      FloatRep    -> 'f'
+      DoubleRep   -> 'd'
+      _           -> pprPanic "primTyDescChar" (ppr ty)
     (signed_word, unsigned_word)
        | wORD_SIZE dflags == 4  = ('W','w')
        | wORD_SIZE dflags == 8  = ('L','l')

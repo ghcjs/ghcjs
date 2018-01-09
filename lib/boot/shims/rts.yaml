@@ -1,0 +1,21 @@
+js:
+  - src/platform.js
+  - src/goog.js
+  - lib/typedarray/typedarray.js
+  - lib/setImmediate/setImmediate.js
+  - lib/closure-library/closure/goog/math/long.js
+  - src/structs.js
+  - src/mem.js
+  - src/gc.js
+  - src/errno.js
+  - src/md5.js
+  - src/arith.js
+  - src/unicode.js
+  - src/string.js
+  - src/environment.js
+  - src/enum.js
+  - src/weak.js
+  - src/thread.js
+  - src/stm.js
+  - src/staticpointer.js
+  - src/hscore.js

@@ -1,7 +1,10 @@
+{-# LANGUAGE CPP #-}
+
 -- !!! Testing Typeable instances
 module Main(main) where
 
 import Data.Dynamic
+import Data.Typeable (TyCon, TypeRep, typeOf)
 import Data.Array
 import Data.Array.MArray
 import Data.Array.ST

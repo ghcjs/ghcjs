@@ -90,6 +90,8 @@ import RdrName
 import SrcLoc
 import TcRnMonad
 
+import Unsafe.Coerce
+
 getValueSafely :: DynFlags -> GhcjsEnv
                -> HscEnv -> Name -> Type -> IO (Maybe a)
 getValueSafely orig_dflags js_env hsc_env val_name expected_type = do
@@ -98,6 +100,7 @@ getValueSafely orig_dflags js_env hsc_env val_name expected_type = do
     Nothing   -> return Nothing
     Just hval -> do
       value <- lessUnsafeCoerce dflags "getValueSafely" hval
+      -- let value = unsafeCoerce hval
       return (Just value)
   where
     dflags = hsc_dflags hsc_env
@@ -162,18 +165,25 @@ remapName src_env tgt_env val_name
     sdf = hsc_dflags src_env
     tdf = hsc_dflags tgt_env
 
-remapUnit :: DynFlags -> DynFlags -> ModuleName -> UnitId -> Maybe UnitId
+remapUnit :: DynFlags
+          -> DynFlags
+          -> ModuleName
+          -> UnitId
+          -> Maybe UnitId
 remapUnit src_dflags tgt_dflags module_name unit
   -- first try package with same unit id if possible
   | Just _ <- lookupPackage tgt_dflags unit = Just unit
   -- if we're building the package, then we don't have a PackageConfig for it
   | unit == thisPackage tgt_dflags
-  , tgt_config:_    <- searchPackageId tgt_dflags (SourcePackageId . mkFastString . unitToPkg . unitIdString $ unit) =
-    Just (unitId tgt_config)
+  , tgt_config:_    <- searchPackageId tgt_dflags (SourcePackageId . mkFastString . unitToPkg . unitIdString $ unit)
+  , Just m <- lookup module_name (instantiatedWith tgt_config) =
+    Just (moduleUnitId m)
   -- otherwise look up package with same package id (e.g. foo-0.1)
   | Just src_config <- lookupPackage src_dflags unit
-  , tgt_config:_    <- searchPackageId tgt_dflags (sourcePackageId src_config) =
-    Just (unitId tgt_config)
+  , tgt_config:_    <- searchPackageId tgt_dflags (sourcePackageId src_config)
+  , Just m <- lookup module_name (instantiatedWith tgt_config)
+  = Just (moduleUnitId m)
+    -- Just (unitId tgt_config)
   | otherwise = Nothing
 
 initPluginsEnv :: DynFlags -> Maybe HscEnv -> IO (Maybe HscEnv, HscEnv)
@@ -187,7 +197,8 @@ initPluginsEnv orig_dflags _ = do
       dflags1 = gopt_unset dflags0 Opt_HideAllPackages
       dflags2 = updateWays $
          dflags1 { packageFlags  = [] -- filterPackageFlags (packageFlags dflags1)
-                 , extraPkgConfs = filterPackageConfs . extraPkgConfs dflags1
+                 -- , extraPkgConfs = filterPackageConfs . extraPkgConfs dflags1
+                 , packageDBFlags = filterPackageDBFlags . packageDBFlags $ dflags1
                  , ways          = filter (/= WayCustom "js") (ways dflags1)
                  , hiSuf         = removeJsPrefix (hiSuf dflags1)
                  , dynHiSuf      = removeJsPrefix (dynHiSuf dflags1)
@@ -216,8 +227,15 @@ unitToPkg xs
   | ('-':ys) <- dropWhile (/='-') (reverse xs) = reverse ys
   | otherwise                                  = xs
 
-filterPackageConfs :: [PkgConfRef] -> [PkgConfRef]
-filterPackageConfs = mapMaybe fixPkgConf
+filterPackageDBFlags :: [PackageDBFlag] -> [PackageDBFlag]
+filterPackageDBFlags = mapMaybe f
+  where
+    f (PackageDB pcr) = PackageDB <$> filterPackageConfs pcr
+    f x               = Just x
+
+
+filterPackageConfs :: PkgConfRef -> Maybe PkgConfRef -- [PkgConfRef] -> [PkgConfRef]
+filterPackageConfs = fixPkgConf -- mapMaybe fixPkgConf
   where
     dtu '.' = '_'
     dtu x   = x
