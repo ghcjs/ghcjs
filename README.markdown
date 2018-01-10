@@ -17,6 +17,7 @@ $ git clone https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init
 $ ./utils/boot
+```
 
 if you want to build with a Cabal sandbox, use the `makeSandbox.sh` script
 to add the local packages.
