@@ -278,10 +278,13 @@ sed "s/@GhcVersion@/${UPSTREAMGHC}/g" "$TARGET/ghc/ghc.cabal.in" > "$TARGET/boot
 
 ) # boot/pkg
 
-echo "creating boot archive"
-tar --dereference --exclude-backups --exclude-vcs-ignores -X "$SOURCEDIR/makePackages.tarExcludes" -cvf boot.tar boot
-rm -f "$TARGET/../data/boot.tar"
-mv boot.tar "$TARGET/../data/boot.tar"
+# we need to preserve symlinks for our cached npm packages
+# store them in a separate tar file
+(
+tar -cvf "$TARGET/boot/ghcjs-node.tar" ghcjs-node/package.json ghcjs-node/LICENSE ghcjs-node/README.markdown ghcjs-node/node_modules
+) # ghcjs-node
+
+$SOURCEDIR/updateBootArchive.sh
 
 ###############################################################################
 # GHCJS dependencies

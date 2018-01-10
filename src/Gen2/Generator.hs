@@ -2273,7 +2273,7 @@ isInlineExpr v (StgCase e b _ alts) =
 isInlineExpr v (StgLet b e) =
   isInlineExpr (inspectInlineBinding v b) e
 isInlineExpr v (StgLetNoEscape b e) =
-  isInlineExpr (inspectInlineBinding v b) e
+  isInlineExpr v e
 isInlineExpr v (StgTick  _ e) =
   isInlineExpr v e
 

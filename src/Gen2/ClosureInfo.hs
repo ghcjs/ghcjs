@@ -255,6 +255,7 @@ primTypeVt t = case tyConAppTyCon_maybe (unwrapType t) of
     | st == pr "SmallMutableArray#"  = ArrV
     | st == pr "SmallArray#"         = ArrV
     | st == pr "Compact#"            = ObjV -- unsupported?
+    | st == pr "TYPE"                = PtrV -- ?
     | st == "Data.Dynamic.Obj"       = PtrV -- ?
     | otherwise = error ("primTypeVt: unrecognized primitive type: " ++ st)
 

@@ -16,7 +16,7 @@ cd "$1" || exit 1;
 echo "cleaning: $PWD"
 
 rm -rf dist dist-install autom4te.cache
-rm -f  config.guess config.status config.log
+rm -f  config.status config.log
 rm -f  *.buildinfo
 rm -f ghc.mk
 rm -f gmp/config.mk gmp/ghc.mk gmp/gmpsrc.patch gmp/GNUmakefile

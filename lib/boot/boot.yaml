@@ -74,6 +74,7 @@ programs:
   node:       node
   bash:       bash
   make:       make
+  npm:        npm
   cpp:        cpp
   alex:       alex
   happy:      happy

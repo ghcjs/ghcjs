@@ -28,9 +28,11 @@ rm -f template-haskell-ghcjs
 
 # boot packages
 rm -f boot/pkg
+rm -f boot/ghcjs-node.tar
 
 # generated from primops.txt for boot/pkg/ghc-prim
 rm -f boot/data/primops.txt
+rm -f boot/data/primops.txt.pp
 rm -f boot/data/Prim.hs
 rm -f boot/data/PrimopWrappers.hs
 

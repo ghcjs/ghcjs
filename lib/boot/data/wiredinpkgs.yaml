@@ -12,3 +12,4 @@
 # Only stage1 packages can be wired-in.
 
 - ghcjs-prim
+- ghcjs-th

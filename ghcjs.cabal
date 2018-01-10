@@ -244,6 +244,7 @@ Executable ghcjs-boot
                       unordered-containers,
                       vector,
                       filepath,
+                      aeson,
                       text                 >= 0.11   && < 1.3,
                       bytestring           >= 0.10   && < 0.11,
                       system-filepath      >= 0.4    && < 0.5,

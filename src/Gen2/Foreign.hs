@@ -837,6 +837,7 @@ maybeJsNarrow _dflags tycon
   | tycon `hasKey` int8TyConKey   = \e -> App (Var (mkGhcjsPrimOpId Narrow8IntOp)) e
   | tycon `hasKey` int16TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow16IntOp)) e
   | tycon `hasKey` int32TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow32IntOp)) e
+  | tycon `hasKey` wordTyConKey   = \e -> App (Var (mkGhcjsPrimOpId Narrow32WordOp)) e
   | tycon `hasKey` word8TyConKey  = \e -> App (Var (mkGhcjsPrimOpId Narrow8WordOp)) e
   | tycon `hasKey` word16TyConKey = \e -> App (Var (mkGhcjsPrimOpId Narrow16WordOp)) e
   | tycon `hasKey` word32TyConKey = \e -> App (Var (mkGhcjsPrimOpId Narrow32WordOp)) e

@@ -54,6 +54,7 @@ import           Control.Monad
 import           Control.Monad.Reader
   (MonadReader, ReaderT(..), MonadIO, ask, local, lift, liftIO)
 
+import qualified Data.Aeson                      as Aeson
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
 import           Data.Char
@@ -96,7 +97,8 @@ import qualified System.FilePath                 as FP
 
 import           System.IO
   (hPutStrLn, hSetBuffering, stderr, stdout, BufferMode(..))
-import           System.PosixCompat.Files        (setFileMode)
+import           System.PosixCompat.Files
+  (setFileMode, createSymbolicLink)
 import           System.Process                  (readProcessWithExitCode)
 
 import           Shelly                          ((<.>), fromText)
@@ -107,7 +109,8 @@ import           Text.Read                       (readEither, readMaybe)
 --
 import           Compiler.GhcjsProgram           (printVersion)
 import qualified Compiler.Info                   as Info
-import           Compiler.Utils                  as Utils
+import qualified Compiler.Utils                  as Utils
+import           Compiler.Settings               (NodeSettings(..))
 
 default (Text)
 
@@ -145,8 +148,10 @@ data BootSettings = BootSettings
                                       from this compiler) -}
   , _bsWithGhcPkg   :: Maybe Text -- ^location of ghc-pkg program
   , _bsWithNode     :: Maybe Text -- ^location of the node.js program
+  , _bsWithNodePath :: Maybe Text -- ^ NODE_PATH to use when running node.js Template Haskell or REPL
+                                  --      (if unspecified, GHCJS uses bundled packages)
+  , _bsNodeExtraArgs :: Maybe Text -- ^ extra node arguments
   , _bsSourceDir    :: Maybe Text -- ^source directory (can be a tar file)
-  -- , _bsBuildDir     :: Maybe Text -- ^build directory
   } deriving (Ord, Eq, Data, Typeable)
 
 
@@ -220,6 +225,7 @@ data BootPrograms = BootPrograms { _bpGhcjs      :: Program Required
                                  , _bpCabal      :: Program Required
                                  , _bpNode       :: Program Required
                                  , _bpHaddock    :: Program Required
+                                 , _bpNpm        :: Program Optional
                                  , _bpGit        :: Program Optional
                                  , _bpAlex       :: Program Optional
                                  , _bpHappy      :: Program Optional
@@ -301,7 +307,7 @@ instance Yaml.FromJSON BootPrograms where
     <$> v ..: "ghcjs" <*> v ..: "ghcjs-pkg" <*> v ..: "ghcjs-run"
     <*> v ..: "ghc"   <*> v ..: "ghc-pkg"
     <*> v ..: "cabal" <*> v ..: "node"      <*> v ..: "haddock-ghcjs"
-    <*> v ..: "git"   <*> v ..: "alex"
+    <*> v ..: "npm"   <*> v ..: "git"       <*> v ..: "alex"
     <*> v ..: "happy"
     <*> v ..: "cpp"   <*> v ..: "bash"      <*> v ..: "autoreconf"
     <*> v ..: "make"
@@ -427,6 +433,12 @@ optParser =
            metavar "PROGRAM" <>
            help "node.js program to use")
     <*> (optional . fmap T.pack . strOption)
+          (long "with-node-path" <> metavar "PATH" <>
+           help "value of NODE_PATH environment variable when running Template Haskell or GHCJSi")
+    <*> (optional . fmap T.pack . strOption)
+          (long "extra-node-args" <> metavar "ARGS" <>
+           help "extra arguments to pass to node.js")
+    <*> (optional . fmap T.pack . strOption)
           (long "source-dir" <>
            short 's' <>
            metavar "DIR" <>
@@ -483,10 +495,7 @@ prepareLibDir = subBuild $ do
   cp ghcjsRunSrc ghcjsRunDest
   mapM_ (liftIO . Cabal.setFileExecutable . toStringI)
         [unlitDest, ghcjsRunDest]
-  writefile (ghcjsLib </> "node") <^> bePrograms
-                                    . bpNode
-                                    . pgmLoc
-                                    . to (maybe "-" toTextI)
+  prepareNodeJs
   when (not isWindows) $ do
     let runSh = ghcjsLib </> "run" <.> "sh"
     writefile runSh "#!/bin/sh\nCOMMAND=$1\nshift\n\"$COMMAND\" \"$@\"\n"
@@ -500,6 +509,34 @@ prepareLibDir = subBuild $ do
        (ghcjsLib </> "bin" </> exe "touchy")
   writefile (ghcjsLib </> "ghc_libdir") (toTextI ghcLib)
   msg info "RTS prepared"
+
+prepareNodeJs :: B ()
+prepareNodeJs = do
+  ghcjsLib <- view (beLocations . blGhcjsLibDir)
+  buildDir <- view (beLocations . blBuildDir)
+  nodeProgram <- view (bePrograms . bpNode . pgmLoc . to (maybe "-" toTextI))
+  mbNodePath  <- view (beSettings . bsWithNodePath)
+  extraArgs   <- view (beSettings . bsNodeExtraArgs)
+  -- If no setting for NODE_PATH is specified, we use the libraries bundled
+  -- with the ghcjs-boot submodule. We must run "npm rebuild" to build
+  -- any sytem-specific components.
+  when (isNothing mbNodePath) $ do
+    npmProgram <- view (bePrograms . bpNpm)
+    subTop (mkdir_p "ghcjs-node")
+    liftIO $ unpackTar False
+                       True
+                       (toStringI $ ghcjsLib)
+                       (toStringI $ buildDir </> "ghcjs-node.tar")
+    subTop' "ghcjs-node" $ npm_ ["rebuild"]
+  -- write nodeSettings.json file
+  let nodeSettings = NodeSettings
+       { nodeProgram         = T.unpack nodeProgram
+       , nodePath            = mbNodePath
+       , nodeExtraArgs       = maybeToList extraArgs
+       , nodeKeepAliveMaxMem = 536870912
+       }
+  liftIO $ BL.writeFile (T.unpack . toTextI $ ghcjsLib </> "nodeSettings.json")
+                        (Aeson.encode $ Aeson.toJSON nodeSettings)
 
 installPlatformIncludes :: FilePath -> FilePath -> B ()
 installPlatformIncludes inc incNative = do
@@ -733,10 +770,11 @@ writeBinary file bs = do
 {- |unpack a tar file (does not support compression)
     only supports files, does not try to emulate symlinks -}
 unpackTar :: Bool             -- ^strip the first directory component?
+          -> Bool             -- ^preserve symbolic links?
           -> Prelude.FilePath -- ^destination to unpack to
           -> Prelude.FilePath -- ^the tar file
           -> IO ()
-unpackTar stripFirst dest tarFile = do
+unpackTar stripFirst preserveSymlinks dest tarFile = do
   createDirectoryIfMissing True dest
   entries <- Tar.read . BL.fromStrict <$> B.readFile tarFile
   void $ Tar.foldEntries (\e -> (>>=checkExtract e))
@@ -786,6 +824,14 @@ unpackTar stripFirst dest tarFile = do
         | Tar.Directory <- Tar.entryContent e = do
             createDirectoryIfMissing True tgt
             setPermissions (Tar.entryPermissions e) tgt
+        | Tar.SymbolicLink linkTgt <- Tar.entryContent e
+        , preserveSymlinks = do
+            createDirectoryIfMissing True (FP.dropFileName tgt)
+            fileExists <- doesFileExist tgt
+            dirExists  <- doesDirectoryExist tgt
+            when fileExists (removeFile tgt)
+            when dirExists  (removeDirectoryRecursive tgt)
+            createSymbolicLink (Tar.fromLinkTarget linkTgt) tgt
         | otherwise = hPutStrLn stderr $
             "ignoring unexpected entry type in tar. " <>
             "only normal files and directories (no links) " <>
@@ -817,6 +863,7 @@ git_         = runE_ bpGit
 cpp          = runE  bpCpp
 cabal        = runE  bpCabal
 cabal_       = runE_ bpCabal
+npm_         = runE_ bpNpm
 
 runE  g a = view (bePrograms . g) >>= flip run  a
 runE_ g a = view (bePrograms . g) >>= flip run_ a
@@ -1030,8 +1077,11 @@ prepareBuildDir :: Prelude.FilePath
                 -> IO Prelude.FilePath
 prepareBuildDir srcDir ghcjsLibDir = do
   e <- doesFileExist srcDir
-  if e then do unpackTar False ghcjsLibDir srcDir
-               pure (ghcjsLibDir FP.</> "boot")
+  if e then do let bootDir = ghcjsLibDir FP.</> "boot"
+               bootExists <- doesDirectoryExist  bootDir
+               when bootExists (removeDirectoryRecursive bootDir)
+               unpackTar False False ghcjsLibDir srcDir
+               pure bootDir
        else do
          d <- doesDirectoryExist srcDir
          if d then do
@@ -1165,7 +1215,6 @@ checkProgramVersions bs pgms = do
       return $
         if update then s (pgmVersion .~ Just res $ g ps) ps
                   else ps
---          (l . pgmVersion .~ Just res)
     verifyNodeVersion pgms = do
       let verTxt = fromMaybe "-" (pgms ^. bpNode . pgmVersion)
           v      = mapM (readMaybe . T.unpack . T.dropWhile (== 'v')) . T.splitOn "." . T.takeWhile (/='-') $ verTxt :: Maybe [Integer]

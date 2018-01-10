@@ -1,6 +1,14 @@
 /dist
-/lib/*/dist
+/dist-newstyle
+/.ghc.environment.*
+/cabal.project.local
 /lib/boot/pkg/
+/lib/boot/data/Prim.hs
+/lib/boot/data/PrimopWrappers.hs
+/lib/boot/data/primops.txt
+/lib/boot/data/primops.txt.pp
+/lib/boot/ghcjs-node.tar
+/lib/*/dist
 /lib/ghc-api-ghcjs/
 /lib/ghci-ghcjs/
 /lib/template-haskell-ghcjs/
@@ -25,7 +33,3 @@ cabal.sandbox.config
 /lib/cache/build
 .stack-work/
 .cabal-sandbox/
-/lib/boot/data/Prim.hs
-/lib/boot/data/PrimopWrappers.hs
-/lib/boot/data/primops.txt
-/lib/boot/data/primops.txt.pp

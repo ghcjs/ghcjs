@@ -427,12 +427,18 @@ genPrim _ _ AddrSubOp  [i] [_a1,o1,_a2,o2] = PrimInline [j| `i` = `o1` - `o2` |]
 genPrim _ _ AddrRemOp  [r] [_a,o,i]        = PrimInline [j| `r` = `o` % `i` |]
 genPrim _ _ Addr2IntOp [i]     [_a,o]      = PrimInline [j| `i` = `o`; |] -- only usable for comparisons within one range
 genPrim _ _ Int2AddrOp [a,o]   [i]         = PrimInline [j| `a` = []; `o` = `i`; |] -- unsupported
-genPrim _ _ AddrGtOp   [r] [_a1,o1,_a2,o2] = PrimInline [j| `r` = (`o1` >  `o2`) ? 1 : 0; |]
-genPrim _ _ AddrGeOp   [r] [_a1,o1,_a2,o2] = PrimInline [j| `r` = (`o1` >= `o2`) ? 1 : 0; |]
-genPrim _ _ AddrEqOp   [r] [a1,o1,a2,o2]   = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 1 : 0; |]
-genPrim _ _ AddrNeOp   [r] [a1,o1,a2,o2]   = PrimInline [j| `r` = (`a1` === `a2` && `o1` === `o2`) ? 1 : 0; |]
-genPrim _ _ AddrLtOp   [r] [_a1,o1,_a2,o2] = PrimInline [j| `r` = (`o1` <  `o2`) ? 1 : 0; |]
-genPrim _ _ AddrLeOp   [r] [_a1,o1,_a2,o2] = PrimInline [j| `r` = (`o1` <= `o2`) ? 1 : 0; |]
+genPrim _ _ AddrGtOp   [r] [a1,o1,a2,o2] =
+  PrimInline [j| `r` = h$comparePointer(`a1`,`o1`,`a2`,`o2`) > 0 ? 1 : 0; |]
+genPrim _ _ AddrGeOp   [r] [a1,o1,a2,o2] =
+  PrimInline [j| `r` = h$comparePointer(`a1`,`o1`,`a2`,`o2`) >= 0 ? 1 : 0; |]
+genPrim _ _ AddrEqOp   [r] [a1,o1,a2,o2]   =
+  PrimInline [j| `r` = h$comparePointer(`a1`,`o1`,`a2`,`o2`) === 0 ? 1 : 0; |]
+genPrim _ _ AddrNeOp   [r] [a1,o1,a2,o2]   =
+  PrimInline [j| `r` = h$comparePointer(`a1`,`o1`,`a2`,`o2`) !== 0 ? 1 : 0; |]
+genPrim _ _ AddrLtOp   [r] [a1,o1,a2,o2] =
+  PrimInline [j| `r` = h$comparePointer(`a1`,`o1`,`a2`,`o2`) < 0 ? 1 : 0; |]
+genPrim _ _ AddrLeOp   [r] [a1,o1,a2,o2] =
+  PrimInline [j| `r` = h$comparePointer(`a1`,`o1`,`a2`,`o2`) <= 0 ? 1 : 0; |]
 
 -- addr indexing: unboxed arrays
 genPrim _ _ IndexOffAddrOp_Char [c] [a,o,i] = PrimInline [j| `c` = `a`.u8[`o`+`i`]; |]

@@ -1,3 +1,6 @@
 [submodule "ghc"]
 	path = ghc
 	url = https://github.com/ghcjs/ghc.git
+[submodule "lib/ghcjs-node"]
+	path = lib/ghcjs-node
+	url = https://github.com/ghcjs/ghcjs-node.git

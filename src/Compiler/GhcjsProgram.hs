@@ -21,7 +21,6 @@ import           ErrUtils (fatalErrorMsg'')
 import           Panic (handleGhcException)
 import           Exception
 import           Packages (initPackages)
-#if __GLASGOW_HASKELL__ >= 711
 import           PrelNames
 import           THNames
 import           TyCon
@@ -34,7 +33,6 @@ import           TcTypeNats
 import           TysWiredIn
 import           TysPrim
 import           NameCache
-#endif
 
 import           Control.Applicative
 import           Control.Concurrent.MVar (readMVar)
@@ -445,18 +443,7 @@ ghcjsCleanupHandler :: (ExceptionMonad m, MonadIO m)
                     => DynFlags -> GhcjsEnv -> m a -> m a
 ghcjsCleanupHandler dflags env inner =
       defaultCleanupHandler dflags inner `gfinally`
-          (liftIO $ do
-              runners <- readMVar (thRunners env)
-              forM_ (M.assocs runners) $ \(m,r) ->
-                getProcessExitCode (thrProcess r) >>= \case
-                  Just _ -> return ()
-                  Nothing ->
-                    (timeout 2000000 (Gen2.finishTh env m r) >>=
-                      maybe (terminate r) return)
-                      `catch` \(_::SomeException) -> terminate r
-          )
-  where
-    terminate r = terminateProcess (thrProcess r) `catch` \(_::SomeException) -> return ()
+          (liftIO $ Gen2.finishTHAll env)
 
 runGhcjsSession :: Maybe FilePath  -- ^ Directory with library files,
                    -- like GHC's -B argument
