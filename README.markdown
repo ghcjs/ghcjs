@@ -16,8 +16,38 @@ installed under the name `ghc-api-ghcjs`
 $ git clone https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init
-$ ./utils/boot
+$ ./utils/makePackages.sh
 ```
+
+#### building the compiler
+
+GHCJS depends on a few "local" packages in the source tree. You can use
+`cabal-install` and `stack` to set up a build environment that contains
+these packages.
+
+##### Cabal new-build
+
+```
+$ cabal new-configure
+$ cabal new-build
+```
+
+Since `cabal new-build` does not install executables or wrapper scripts,
+we need to make them accessible by hand. You can do this by creating symlinks
+to the `/utils/dist-newstyle-wrapper.sh` script.
+
+For example if the `.bin` directory is in your PATH:
+
+```
+$ cd .bin
+$ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs
+$ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-pkg
+$ ln -s ../utils/dist-newstyle-wrapper.sh haddock-ghcjs
+$ ln -s ../utils/dist-newstyle-wrapper.sh hsc2hs-ghcjs
+$ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-boot
+```
+
+##### Cabal sandbox
 
 if you want to build with a Cabal sandbox, use the `makeSandbox.sh` script
 to add the local packages.
@@ -26,6 +56,8 @@ to add the local packages.
 $ ./utils/makeSandbox.sh
 $ cabal install
 ```
+
+##### stack
 
 or you can use stack:
 

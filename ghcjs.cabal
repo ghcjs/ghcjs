@@ -172,6 +172,7 @@ Executable haddock-ghcjs
     Main-Is:        Haddock.hs
     Default-Language: Haskell2010
     hs-source-dirs: src-bin, src-bin/haddock
+    other-modules: ResponseFile
     Build-Depends:  base                >= 4    &&  < 5,
                     process,
                     ghc-api-ghcjs,
