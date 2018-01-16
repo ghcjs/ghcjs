@@ -275,7 +275,6 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   hsc_env <- GHC.getSession
 
   liftIO (writeIORef (canGenerateDynamicToo dflags6) True) -- fixme is this still necessary for GHCJS?
-  when (not native) Ghcjs.fixNameCache
 
         ---------------- Display configuration -----------
   case verbosity dflags6 of

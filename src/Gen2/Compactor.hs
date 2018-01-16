@@ -36,6 +36,7 @@ import qualified Data.ByteString.Lazy as BL
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
+import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Builder as BB
 import           Data.ByteString.Builder (Builder)
 import           Data.Char (chr, ord)
@@ -139,10 +140,21 @@ packStrings settings dflags cstate code =
 
       allStringsPacked :: Text
       allStringsPacked = T.intercalate "\0" $
-        map ( transformPackedLiteral
-            . fromMaybe (panic "invalid string literal")
-            . U.decodeModifiedUTF8)
+        map (\str -> maybe (packBase64 str)
+                     transformPackedLiteral
+                     (U.decodeModifiedUTF8 str))
             allStringsList
+
+      packBase64 :: ByteString -> Text
+      packBase64 bs
+        | BS.null bs = mempty
+        | otherwise =
+          let (h,t) = BS.splitAt 128 bs
+              esc   = T.singleton '\^Z' <>
+                      T.singleton (chr . fromIntegral $ BS.length h + 0x1f)
+              b64   = esc <> fromJust (U.decodeModifiedUTF8 (B64.encode h))
+          in  maybe b64 transformPackedLiteral (U.decodeModifiedUTF8 h) <>
+              packBase64 t
 
       allStringsWithOffset :: [(ByteString, Int)]
       allStringsWithOffset = snd $

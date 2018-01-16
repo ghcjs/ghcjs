@@ -1,5 +1,5 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE GADTs,
+{-# LANGUAGE CPP,
+             GADTs,
              ScopedTypeVariables,
              ImpredicativeTypes,
              OverloadedStrings,
@@ -8,7 +8,6 @@
 module Compiler.GhcjsHooks where
 
 import           CorePrep             (corePrepPgm)
--- import           Gen2.GHC.CorePrep    (corePrepPgm) -- customized to not float new toplevel binds
 import           CoreToStg            (coreToStg)
 import           DriverPipeline
 import           DriverPhases
@@ -40,14 +39,11 @@ import qualified Compiler.Plugins     as Plugins
 import qualified Gen2.DynamicLinking  as Gen2
 import qualified Gen2.Foreign         as Gen2
 
-import qualified Gen2.PrimIface       as Gen2
 import qualified Gen2.TH              as Gen2TH
 
 import           System.IO.Error
 
-#if __GLASGOW_HASKELL__ >= 711
 import qualified GHC.LanguageExtensions as Ext
-#endif
 
 installGhcjsHooks :: GhcjsEnv
                   -> GhcjsSettings
@@ -57,27 +53,29 @@ installGhcjsHooks env settings js_objs dflags =
   Gen2.installForeignHooks True $ dflags { hooks = addHooks (hooks dflags) }
     where
       addHooks h = h
-        { linkHook               = Just (Gen2.ghcjsLink env settings js_objs True)
-        , getValueSafelyHook     = Just (Plugins.getValueSafely dflags env)
-        , runMetaHook            = Just (Gen2TH.ghcjsRunMeta env settings)
+        { linkHook           = Just (Gen2.ghcjsLink env settings js_objs True)
+        , getValueSafelyHook = Just (Plugins.getValueSafely dflags env)
+        , runMetaHook        = Just (Gen2TH.ghcjsRunMeta env settings)
         }
 
 installNativeHooks :: GhcjsEnv -> GhcjsSettings -> DynFlags -> DynFlags
 installNativeHooks env settings dflags =
   Gen2.installForeignHooks False $ dflags { hooks = addHooks (hooks dflags) }
     where
-      addHooks h = h { linkHook               = Just (Gen2.ghcjsLink env settings [] False)
-#if !(__GLASGOW_HASKELL__ >= 709)
-                     , getValueSafelyHook     = Just Gen2.ghcjsGetValueSafely
-                     , hscCompileCoreExprHook = Just Gen2.ghcjsCompileCoreExpr
-#endif
+      addHooks h = h { linkHook = Just (Gen2.ghcjsLink env settings [] False)
                      }
 
 --------------------------------------------------
 -- One shot replacement (the oneShot in DriverPipeline
 -- always uses the unhooked linker)
 
-ghcjsOneShot :: GhcjsEnv -> GhcjsSettings -> Bool -> HscEnv -> Phase -> [(String, Maybe Phase)] -> IO ()
+ghcjsOneShot :: GhcjsEnv
+             -> GhcjsSettings
+             -> Bool
+             -> HscEnv
+             -> Phase
+             -> [(String, Maybe Phase)]
+             -> IO ()
 ghcjsOneShot env settings native hsc_env stop_phase srcs = do
   o_files <- mapM (compileFile hsc_env stop_phase) srcs
   Gen2.ghcjsDoLink env settings native (hsc_dflags hsc_env) stop_phase o_files
@@ -88,15 +86,10 @@ ghcjsOneShot env settings native hsc_env stop_phase srcs = do
 installDriverHooks :: GhcjsSettings -> GhcjsEnv -> DynFlags -> DynFlags
 installDriverHooks settings env df = df { hooks = hooks' }
   where hooks' = (hooks df) { runPhaseHook     = Just (runGhcjsPhase settings env)
-                            , ghcPrimIfaceHook = Just Gen2.ghcjsPrimIface
                             }
 
 haveCpp :: DynFlags -> Bool
-#if __GLASGOW_HASKELL__ >= 711
 haveCpp dflags = xopt Ext.Cpp dflags
-#else
-haveCpp dflags = xopt Opt_Cpp dflags
-#endif
 
 runGhcjsPhase :: GhcjsSettings
               -> GhcjsEnv
@@ -161,7 +154,6 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
                    -- stamp file for the benefit of Make
                    liftIO $ touchObjectFile dflags o_file
                    return (RealPhase next_phase, o_file)
-#if __GLASGOW_HASKELL__ >= 709
             HscUpdateSig ->
                 do -- We need to create a REAL but empty .o file
                    -- because we are going to attempt to put it in a library
@@ -171,7 +163,6 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
 		   -- fixme do we need to create a js_o file here?
                    -- liftIO $ compileEmptyStub dflags hsc_env' basename location
                    return (RealPhase next_phase, o_file)
-#endif
             HscRecomp cgguts mod_summary
               -> do output_fn <- phaseOutputFilename next_phase
 
@@ -243,7 +234,11 @@ ghcjsCompileModule settings jsEnv env core mod = do
     cms    = compiledModules jsEnv
     dflags = hsc_dflags env
     compile = do
-      core_binds <- corePrepPgm env mod' (ms_location mod) (cg_binds core) (cg_tycons core)
+      core_binds <- corePrepPgm env
+                                mod'
+                                (ms_location mod)
+                                (cg_binds core)
+                                (cg_tycons core)
       let stg = coreToStg dflags mod' core_binds
       (stg', cCCs) <- stg2stg dflags mod' stg
       return $ variantRender gen2Variant settings dflags mod' stg' cCCs

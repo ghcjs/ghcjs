@@ -25,8 +25,7 @@ where
 -- #include "HsVersions.h"
 -- #include "../includes/MachDeps.h"
 
-import MkId ( {- mkPrimOpId, -} magicDictId )
-import {-# SOURCE #-} Gen2.PrimIface
+import MkId ( mkPrimOpId, magicDictId )
 
 import CoreSyn
 import MkCore
@@ -597,7 +596,7 @@ subsumesPrimOp :: PrimOp -> PrimOp -> RuleM CoreExpr
 this `subsumesPrimOp` that = do
   [Var primop_id `App` e] <- getArgs
   matchPrimOpId that primop_id
-  return (Var (mkGhcjsPrimOpId this) `App` e)
+  return (Var (mkPrimOpId this) `App` e)
 
 subsumedByPrimOp :: PrimOp -> RuleM CoreExpr
 subsumedByPrimOp primop = do
@@ -841,7 +840,7 @@ strengthReduction two_lit add_op = do -- Note [Strength reduction]
               , do [Lit mult_lit, arg] <- getArgs
                    guard (mult_lit == two_lit)
                    return arg ]
-  return $ Var (mkGhcjsPrimOpId add_op) `App` arg `App` arg
+  return $ Var (mkPrimOpId add_op) `App` arg `App` arg
 
 -- Note [Strength reduction]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1030,7 +1029,7 @@ builtinRules
           [arg, Lit (MachInt d)] <- getArgs
           Just n <- return $ exactLog2 d
           dflags <- getDynFlags
-          return $ Var (mkGhcjsPrimOpId ISraOp) `App` arg `App` mkIntVal dflags n
+          return $ Var (mkPrimOpId ISraOp) `App` arg `App` mkIntVal dflags n
         ],
      mkBasicRule modIntName 2 $ msum
         [ nonZeroLit 1 >> binaryLit (intOp2 mod)
@@ -1039,7 +1038,7 @@ builtinRules
           [arg, Lit (MachInt d)] <- getArgs
           Just _ <- return $ exactLog2 d
           dflags <- getDynFlags
-          return $ Var (mkGhcjsPrimOpId AndIOp)
+          return $ Var (mkPrimOpId AndIOp)
             `App` arg `App` mkIntVal dflags (d - 1)
         ]
      ]
@@ -1432,7 +1431,7 @@ match_XToIntegerToX _ _ _ _ _ = Nothing
 match_smallIntegerTo :: PrimOp -> RuleFun
 match_smallIntegerTo primOp _ _ _ [App (Var x) y]
   | idName x == smallIntegerName
-  = Just $ App (Var (mkGhcjsPrimOpId primOp)) y
+  = Just $ App (Var (mkPrimOpId primOp)) y
 match_smallIntegerTo _ _ _ _ _ = Nothing
 
 

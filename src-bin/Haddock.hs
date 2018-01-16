@@ -59,7 +59,6 @@ withGhcjs' libDir flags ghcActs = runGhc (Just libDir) $ do
       -- that may need to be re-linked: Haddock doesn't do any
       -- dynamic or static linking at all!
       _ <- setSessionDynFlags dynflags''
-      Ghcjs.fixNameCache
       ghcActs dynflags''
   where
     parseGhcFlags :: MonadIO m => DynFlags -> m DynFlags
