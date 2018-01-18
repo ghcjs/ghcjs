@@ -832,6 +832,7 @@ getPrimTyOf ty
 -- narrow int32 and word32 since JS numbers can contain more
 maybeJsNarrow :: DynFlags -> TyCon -> (CoreExpr -> CoreExpr)
 maybeJsNarrow _dflags tycon
+  | tycon `hasKey` intTyConKey    = \e -> App (Var (mkPrimOpId Narrow32IntOp)) e
   | tycon `hasKey` int8TyConKey   = \e -> App (Var (mkPrimOpId Narrow8IntOp)) e
   | tycon `hasKey` int16TyConKey  = \e -> App (Var (mkPrimOpId Narrow16IntOp)) e
   | tycon `hasKey` int32TyConKey  = \e -> App (Var (mkPrimOpId Narrow32IntOp)) e
