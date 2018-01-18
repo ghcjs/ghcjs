@@ -201,7 +201,6 @@ runNodeInteractive :: DynFlags
                    -> FilePath
                    -> IO (Handle, Handle, Handle, ProcessHandle)
 runNodeInteractive dflags mbWorkingDir src = do
-  putStrLn "runNodeInteractive"
   nodeSettings <- readNodeSettings dflags
   env0 <- getEnvironment
   let ghcjsNodePath = topDir dflags </> "ghcjs-node" </> "node_modules"
