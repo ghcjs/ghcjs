@@ -23,5 +23,9 @@ rm -f gmp/config.mk gmp/ghc.mk gmp/gmpsrc.patch gmp/GNUmakefile
 rm -f include/HsUnixConfig.h
 rm -f include/HsIntegerGmp.h
 rm -f include/HsBaseConfig.h
+rm -f include/EventConfig.h
+rm -f include/HsProcessConfig.h
 rm -f HsDirectoryConfig.h
+rm -f GHC/PrimopWrappers.hs
+rm -f GHC/Prim.hs
 )
