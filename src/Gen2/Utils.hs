@@ -158,9 +158,12 @@ encodeUnique = reverse . go  -- reversed is more compressible
 -- GHC produces modified UTF8 that the Text package doesn't particularly like
 -- unmodify it before decoding
 decodeModifiedUTF8 :: B.ByteString -> Maybe Text
-decodeModifiedUTF8 = either (const Nothing) Just . TE.decodeUtf8' . unmodify
-  where
-    unmodify = BL.toStrict . S.replace (B.pack [192,128]) (B.singleton 0)
+decodeModifiedUTF8 bs
+  | B.any (==0) bs = Nothing
+  | otherwise      =
+    either (const Nothing) Just . TE.decodeUtf8' . unmodify $ bs
+    where
+      unmodify = BL.toStrict . S.replace (B.pack [192,128]) (B.singleton 0)
 
 buildingDebug :: DynFlags -> Bool
 buildingDebug dflags = WayDebug `elem` ways dflags
