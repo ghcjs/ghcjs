@@ -10,6 +10,7 @@ import GHC.Fingerprint
 import System.Mem
 import System.Mem.Weak
 import Unsafe.Coerce (unsafeCoerce)
+import Control.Exception (evaluate)
 
 nats :: [Integer]
 nats = [0 .. ]
@@ -19,7 +20,7 @@ nats_fp :: StaticKey
 nats_fp = staticKey (static nats :: StaticPtr [Integer])
 
 main = do
-  let z = nats !! 400
+  z <- evaluate (nats !! 400)
   print z
   performGC
   addFinalizer z (putStrLn "finalizer z")
