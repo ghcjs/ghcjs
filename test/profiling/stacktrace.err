@@ -1,5 +1,5 @@
 --- a
-Stack trace:
+CallStack (from -prof):
   Main.errorM.\ (stacktrace.hs:24:22-54)
   Main.errorM (stacktrace.hs:24:1-54)
   Main.foo.\.\ (stacktrace.hs:39:23-30)
@@ -10,4 +10,3 @@ Stack trace:
   Main.runM (stacktrace.hs:27:1-36)
   Main.main (stacktrace.hs:(42,1)-(50,36))
   Main.CAF (<entire-module>)
-

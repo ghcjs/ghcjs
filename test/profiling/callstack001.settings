@@ -1,2 +1,3 @@
 compArguments: ["-prof", "-fprof-auto-calls", "-fno-full-laziness", "-fno-state-hack"]
 prof: True
+disableOpt: True

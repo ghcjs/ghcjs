@@ -1,6 +1,6 @@
-["Main.CAF (<entire-module>)","Main.main (pap.hs:(15,1)-(20,16))"]
-["Main.CAF (<entire-module>)","Main.main (pap.hs:(15,1)-(20,16))"]
+["Main.CAF (<entire-module>)","Main.main (pap.hs:16:5-26)","Main.main (pap.hs:16:15-26)"]
+["Main.CAF (<entire-module>)","Main.main.f' (pap.hs:17:14-18)"]
 6
-["Main.CAF (<entire-module>)","Main.main (pap.hs:(15,1)-(20,16))","Main.main.r (pap.hs:19:9-16)","Main.main.f' (pap.hs:17:9-18)","Main.f (pap.hs:4:1-25)"]
-["Main.CAF (<entire-module>)","Main.main (pap.hs:(15,1)-(20,16))","Main.forceIt (pap.hs:(6,1)-(13,31))"]
-["Main.CAF (<entire-module>)","Main.main (pap.hs:(15,1)-(20,16))","Main.forceIt (pap.hs:(6,1)-(13,31))"]
+["Main.CAF (<entire-module>)","Main.main.f' (pap.hs:17:14-18)","Main.main.r (pap.hs:19:13-16)","Main.f (pap.hs:4:14-25)"]
+["Main.CAF (<entire-module>)","Main.main.f' (pap.hs:17:14-18)","Main.main (pap.hs:20:5-16)","Main.forceIt (pap.hs:11:5-34)","Main.forceIt (pap.hs:11:15-34)"]
+["Main.CAF (<entire-module>)","Main.main.f' (pap.hs:17:14-18)","Main.main (pap.hs:20:5-16)","Main.forceIt (pap.hs:13:5-31)","Main.forceIt (pap.hs:13:15-31)"]

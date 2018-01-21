@@ -1,10 +1,10 @@
 err
-Stack trace:
+CallStack (from -prof):
   Main.inner (cls.hs:4:53-77)
   Main.mkCls.\ (cls.hs:4:35-77)
   Main.outer (cls.hs:4:29-77)
+  Main.main.b (cls.hs:10:7-14)
   Main.mkCls (cls.hs:4:1-77)
   Main.main.a (cls.hs:8:7-18)
-  Main.main.b (cls.hs:10:7-14)
   Main.main (cls.hs:(6,1)-(12,9))
   Main.CAF (<entire-module>)
