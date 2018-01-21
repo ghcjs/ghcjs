@@ -284,8 +284,6 @@ sed "s/@GhcVersion@/${UPSTREAMGHC}/g" "$TARGET/ghc/ghc.cabal.in" > "$TARGET/boot
 tar -cvf "$TARGET/boot/ghcjs-node.tar" ghcjs-node/package.json ghcjs-node/LICENSE ghcjs-node/README.markdown ghcjs-node/node_modules
 ) # ghcjs-node
 
-$SOURCEDIR/updateBootArchive.sh
-
 ###############################################################################
 # GHCJS dependencies
 
@@ -461,5 +459,7 @@ cp "$WORKDIR/primops.txt" "$TARGET/boot/data/primops.txt"
 
 ) # ghc-api-ghcjs/includes
 ) # ghc-api-ghcjs
+
+$SOURCEDIR/updateBootArchive.sh
 
 )
