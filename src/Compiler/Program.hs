@@ -156,16 +156,7 @@ main = do
 
           let runPostStartup native = GHC.runGhc mbMinusB $ do
 
-               dflags0 <- GHC.getSessionDynFlags
-               dflags1 <- return dflags0 -- Ghcjs.addPkgConf dflags0 -- Use the GHCJS user package DB
-
-               let dataDir = Ghcjs.getLibDir dflags1
-                   settings0 = (settings dflags1)
-                     { sGhcUsagePath  = dataDir </> "doc" </> "ghcjs-usage.txt"
-                     , sGhciUsagePath = dataDir </> "doc" </> "ghci-usage.txt"
-                     }
-                   dflags = dflags1 { settings = settings0 }
-
+               dflags <- GHC.getSessionDynFlags
                GHC.setSessionDynFlags dflags
 
                case postStartupMode of
