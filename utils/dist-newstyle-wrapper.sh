@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # wrapper utility script for developming in a new-build style environment
 #

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # update the patches for the boot packages
 # (only existing patches are updated, do the first update by hand)

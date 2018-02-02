@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
 # pull the code for GHCJS dependencies from the GHC tree in
 #   lib/ghc
@@ -35,7 +36,7 @@ then
   # exit 1
 fi
 
-if [ "$1" = "copy" ]; then
+if [ "${1:-link}" = "copy" ]; then
   echo "populating source tree by copying upstream files"
   LINK=0
 else
@@ -60,7 +61,7 @@ TARGET="$GHCJSROOT/lib"
 
 GHCSRC="$GHCJSROOT/ghc"
 
-WORKDIR=$(mktemp -d "${TMPDIR:-/tmp/}$(basename $0).XXXXXXXXXXXX")
+WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/$(basename $0).XXXXXXXXXXXX")
 
 # apply overrides
 apply_overrides() {
@@ -76,7 +77,7 @@ apply_overrides() {
       rm -f "$TARGET/$1/$i"
 
       # copy or link override file
-      if [ $LINK ]; then
+      if [ $LINK -ne 0 ]; then
         ln -s "$PKGINPUT/$1/$i" "$TARGET/$1/$i"
       else
         cp "$PKGINPUT/$1/$i" "$TARGET/$1/$i"
@@ -93,7 +94,7 @@ copy_file() {
   # echo "  $PWD"
   # echo "  $SRCPATH"
   # echo "  $FILE"
-  if [ $LINK ]; then
+  if [ $LINK -ne 0 ]; then
     rm -f "$FILE"
     ln -s "$SRCPATH/$FILE" "$FILE"
   else
@@ -108,7 +109,7 @@ copy_dir() {
   # echo "  $PWD"
   # echo "  $SRCPATH"
   # echo "  $DIR"
-  if [ $LINK ]; then
+  if [ $LINK -ne 0 ]; then
     rm -f "$DIR"
     ln -s "$SRCPATH/$DIR" "$DIR"
   else
