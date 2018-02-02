@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 if [ $# -ne 2 ];
 then
     echo "usage: updatePrimops version ghc-path"

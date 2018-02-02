@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # clean all the files linked/copied from upstream GHC or elsewhere
 # in the GHCJS tree

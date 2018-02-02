@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # make a sandbox for GHCJS development
 #   (after running utils/boot)
