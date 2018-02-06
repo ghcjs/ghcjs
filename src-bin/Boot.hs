@@ -1140,8 +1140,14 @@ cabalStage1 pkgs = sub $ do
                 ]
   globalFlags <- cabalGlobalFlags
   flags <- cabalInstallFlags (length pkgs == 1)
-  let args = globalFlags ++ ("install" : pkgs) ++
-             [ "--allow-boot-library-installs"
+  let args = globalFlags ++ ("install" : pkgs) ++ [
+-- If Cabal-2 is not available we must be using cabal-install-1.24,
+-- so avoid cabal-install-2 features.
+#if MIN_VERSION_Cabal(2,0,0)
+               "--allow-boot-library-installs"
+#else
+               "--solver=topdown" -- the modular solver refuses to install stage1 packages
+#endif
              ] ++ map ("--configure-option="<>) configureOpts ++ flags
   checkInstallPlan pkgs args
   cabal_ args
@@ -1162,7 +1168,11 @@ cabalInstall pkgs = do
 -- uses somewhat fragile parsing of --dry-run output, find a better way
 checkInstallPlan :: [Package] -> [Text] -> B ()
 checkInstallPlan pkgs opts = do
+#if MIN_VERSION_Cabal(2,0,0)
   plan <- cabal (opts ++ ["-vverbose+nowrap", "--dry-run"])
+#else
+  plan <- cabal (opts ++ ["-v2", "--dry-run"])
+#endif
   when (hasReinstalls plan || hasUnexpectedInstalls plan || hasNewVersion plan) (err plan)
   where
     hasReinstalls = T.isInfixOf "(reinstall)"   -- reject reinstalls
@@ -1504,8 +1514,10 @@ checkCabalSupport bs pgms = do
   cbl <- run' bs (pgms ^. bpCabal) ["install", "--help"]
   when (not $ "--ghcjs" `T.isInfixOf` cbl) $
     failWith ("cabal-install program " <> pgms ^. bpCabal . pgmLocText <> " does not support GHCJS")
+#if MIN_VERSION_Cabal(2,0,0)
   when (not $ "--allow-boot-library-installs" `T.isInfixOf` cbl) $
     failWith ("cabal-install program " <> pgms ^. bpCabal . pgmLocText <> " does not support --allow-boot-library-installs (requires version 2.0.0.0 or newer)")
+#endif
   void (run' bs (pgms ^. bpGhc) ["-e", "either error id (Text.Read.readEither \"GHCJS\" :: Either String Distribution.Simple.CompilerFlavor)"]) `Ex.catch`
     \(Ex.SomeException _) -> failWith
        ("GHC program " <> pgms ^. bpGhc . pgmLocText <> " does not have a Cabal library that supports GHCJS\n" <>

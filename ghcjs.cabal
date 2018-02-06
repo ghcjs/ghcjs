@@ -130,7 +130,7 @@ Library
                      GHCJS.Prim.TH.Serialized
     other-modules: Paths_ghcjs
     build-depends: base           >= 4        && < 5,
-                   Cabal          >= 1.23     && < 1.25,
+                   Cabal          >= 1.23,
                    ghc            >= 7.11     && < 8.1,
                    ghc-boot,
                    ghci,
