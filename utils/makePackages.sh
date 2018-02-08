@@ -182,7 +182,7 @@ copy_patch_boot_package_list() {
     for FILE in $LIST; do
       # echo "copying file: $PKGSRC/$FILE"
       # echo "   $PWD"
-      cp -ar "$PKGSRC/$FILE" "."
+      cp -a "$PKGSRC/$FILE" "."
     done
   )
 
@@ -194,7 +194,7 @@ copy_patch_boot_package_list() {
       mkdir -p "$PKGORIG"
       cd "$PKGORIG"
       for FILE in $LIST; do
-        cp -ar "$PKGSRC/$FILE" "."
+        cp -a "$PKGSRC/$FILE" "."
       done
     )
     apply_patch "$PKGDST" "$PKGPATCH"
