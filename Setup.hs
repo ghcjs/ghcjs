@@ -25,7 +25,7 @@ import           Distribution.Simple.Register
 
 import           System.Exit           (ExitCode(..))
 import           System.Directory
-  (doesFileExist, removeFile, renameFile, exeExtension)
+  (createDirectoryIfMissing, doesFileExist, removeFile, renameFile, exeExtension)
 import           System.FilePath
   ((</>), (<.>), splitExtensions, dropExtensions)
 import           System.IO
@@ -154,6 +154,7 @@ copyWrapperW v env descr installDirs exe
     optionsExists <- doesFileExist destOptions
     when (not optionsExists) $ do
       options <- replacePlaceholders env <$> readFile srcOptions
+      createDirectoryIfMissing False b
       withTempFile b "ghcjs-options-XXXXXX.tmp" $ \tmp h -> do
         hPutStr h options
         hClose h
@@ -203,6 +204,7 @@ copyWrapperU v env descr installDirs exe
       wrapperExists <- doesFileExist (b </> destWrapperVer)
       when (not wrapperExists) $ do
         wrapperScript <- replacePlaceholders env <$> readFile srcWrapper
+        createDirectoryIfMissing False b
         withTempFile b "ghcjs-wrapper-XXXXXX.tmp" $
           \tmp h -> do hPutStr h wrapperScript
                        hClose h
