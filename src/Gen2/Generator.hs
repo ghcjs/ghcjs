@@ -93,6 +93,7 @@ import           Gen2.Profiling
 import qualified Gen2.Compactor as Compactor
 
 import qualified Control.Exception
+import           GHC.Float
 
 -- debug
 import           Gen2.Printer             (pretty)
@@ -1732,6 +1733,9 @@ genIdStackArgI i = zipWith f [1..] <$> genIdArgI i
 r2d :: Rational -> Double
 r2d = realToFrac
 
+r2f :: Rational -> Double
+r2f = float2Double . realToFrac
+
 genStrThunk :: HasDebugCallStack
             => Id
             -> Bool
@@ -1782,7 +1786,7 @@ genLit (MachWord w)      = return [ [je| `toSigned w` |] ]
 genLit (MachWord64 w)    = return [ [je| `toSigned (shiftR w 32)` |]
                                   , [je| `toSigned w` |]
                                   ]
-genLit (MachFloat r)     = return [ [je| `r2d r` |] ]
+genLit (MachFloat r)     = return [ [je| `r2f r` |] ]
 genLit (MachDouble r)    = return [ [je| `r2d r` |] ]
 genLit (MachLabel name _size fod)
   | fod == IsFunction = return [ [je| h$mkFunctionPtr(`TxtI . T.pack $ "h$" ++ unpackFS name`) |], [je| 0 |] ]
@@ -1805,7 +1809,7 @@ genStaticLit (MachWord w)         = return [ IntLit (toSigned w) ]
 genStaticLit (MachWord64 w)       = return [ IntLit (toSigned (w `shiftR` 32))
                                            , IntLit (toSigned w)
                                            ]
-genStaticLit (MachFloat r)        = return [ DoubleLit . SaneDouble . r2d $ r ]
+genStaticLit (MachFloat r)        = return [ DoubleLit . SaneDouble . r2f $ r ]
 genStaticLit (MachDouble r)       = return [ DoubleLit . SaneDouble . r2d $ r ]
 genStaticLit (MachLabel name _size fod) =
   return [ LabelLit (fod == IsFunction) (T.pack $ "h$" ++ unpackFS name)

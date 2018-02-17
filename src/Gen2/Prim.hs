@@ -196,7 +196,7 @@ genPrim _ _ DoubleDivOp       [r] [x,y] = PrimInline [j| `r` = `x` / `y` |]
 genPrim _ _ DoubleNegOp       [r] [x]   = PrimInline [j| `r` = `jneg x` |] -- fixme negate
 genPrim _ _ DoubleFabsOp      [r] [x]   = PrimInline [j| `r` = Math.abs(`x`) |]
 genPrim _ _ Double2IntOp      [r] [x]   = PrimInline [j| `r` = `x`|0; |]
-genPrim _ _ Double2FloatOp    [r] [x]   = PrimInline [j| `r` = `x` |]
+genPrim _ _ Double2FloatOp    [r] [x]   = PrimInline [j| `r` = h$fround(`x`) |]
 genPrim _ _ DoubleExpOp       [r] [x]   = PrimInline [j| `r` = Math.exp(`x`) |]
 genPrim _ _ DoubleLogOp       [r] [x]   = PrimInline [j| `r` = Math.log(`x`) |]
 genPrim _ _ DoubleSqrtOp      [r] [x]   = PrimInline [j| `r` = Math.sqrt(`x`) |]
