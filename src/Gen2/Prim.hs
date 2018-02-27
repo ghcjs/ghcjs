@@ -426,7 +426,7 @@ genPrim _ _ AddrAddOp  [a',o'] [a,o,i]     = PrimInline [j| `a'` = `a`; `o'` = `
 genPrim _ _ AddrSubOp  [i] [_a1,o1,_a2,o2] = PrimInline [j| `i` = `o1` - `o2` |]
 genPrim _ _ AddrRemOp  [r] [_a,o,i]        = PrimInline [j| `r` = `o` % `i` |]
 genPrim _ _ Addr2IntOp [i]     [_a,o]      = PrimInline [j| `i` = `o`; |] -- only usable for comparisons within one range
-genPrim _ _ Int2AddrOp [a,o]   [i]         = PrimInline [j| `a` = []; `o` = `i`; |] -- unsupported
+genPrim _ _ Int2AddrOp [a,o]   [i]         = PrimInline [j| `a` = null; `o` = `i`; |] -- unsupported
 genPrim _ _ AddrGtOp   [r] [a1,o1,a2,o2] =
   PrimInline [j| `r` = h$comparePointer(`a1`,`o1`,`a2`,`o2`) > 0 ? 1 : 0; |]
 genPrim _ _ AddrGeOp   [r] [a1,o1,a2,o2] =
