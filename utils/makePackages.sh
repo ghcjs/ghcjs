@@ -63,6 +63,17 @@ GHCSRC="$GHCJSROOT/ghc"
 
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/$(basename $0).XXXXXXXXXXXX")
 
+# we need ln to support the -r option.
+# the BSD ln program on macOS doesn't support it
+# try the `gln` program first
+gnuln() {
+    if hash gln 2>/dev/null; then
+        gln "$@"
+    else
+        ln "$@"
+    fi
+}
+
 # apply overrides
 apply_overrides() {
   echo "apply_overrides: $1"
@@ -78,7 +89,7 @@ apply_overrides() {
 
       # copy or link override file
       if [ $LINK -ne 0 ]; then
-        ln -s "$PKGINPUT/$1/$i" "$TARGET/$1/$i"
+        gnuln -rs "$PKGINPUT/$1/$i" "$TARGET/$1/$i"
       else
         cp "$PKGINPUT/$1/$i" "$TARGET/$1/$i"
       fi
@@ -96,7 +107,7 @@ copy_file() {
   # echo "  $FILE"
   if [ $LINK -ne 0 ]; then
     rm -f "$FILE"
-    ln -s "$SRCPATH/$FILE" "$FILE"
+    gnuln -rs "$SRCPATH/$FILE" "$FILE"
   else
     cp "$SRCPATH/$FILE" "."
   fi
@@ -111,7 +122,7 @@ copy_dir() {
   # echo "  $DIR"
   if [ $LINK -ne 0 ]; then
     rm -f "$DIR"
-    ln -s "$SRCPATH/$DIR" "$DIR"
+    gnuln -rs "$SRCPATH/$DIR" "$DIR"
   else
     cp -r "$SRCPATH/$DIR" "."
   fi
