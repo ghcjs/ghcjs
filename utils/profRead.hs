@@ -21,7 +21,6 @@ profRead file m = do
 
 isEnough :: Double -> T.Text -> Bool
 isEnough m line
-  | [fun,mod,no,entries,itime,ialloc,htime,halloc] <- words (T.unpack line)
+  | [fun,mod,src,no,entries,itime,ialloc,htime,halloc] <- words (T.unpack line)
       , Just ht <- readMaybe htime, Just ha <- readMaybe halloc = ht >= m || ha >= m
   | otherwise = True
-
