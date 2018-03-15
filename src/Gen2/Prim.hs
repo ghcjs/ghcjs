@@ -117,15 +117,16 @@ genPrim _ _ Int2FloatOp       [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim _ _ Int2DoubleOp      [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim _ _ ISllOp            [r] [x,y] = PrimInline [j| `r` = `x` << `y` |]
 genPrim _ _ ISraOp            [r] [x,y] = PrimInline [j| `r` = `x` >> `y` |]
-genPrim _ _ ISrlOp            [r] [x,y] = PrimInline [j| `r` = `x` >>> `y` |]
+genPrim _ _ ISrlOp            [r] [x,y] = PrimInline [j| `r` = (`x` >>> `y`)|0; |]
 genPrim _ _ WordAddOp         [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0; |]
 genPrim _ _ WordAdd2Op      [h,l] [x,y] = PrimInline [j| `h` = h$wordAdd2(`x`,`y`);
                                                          `l` = `Ret1`;
                                                        |]
 genPrim _ _ WordSubOp         [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
-#if __GLASGOW_HASKELL__ >= 711
--- genPrim _ _ WordSubCOp        [r,c] [x,y] = error "Gen2.Prim.WordSubCOp"
-#endif
+genPrim _ _ WordSubCOp        [r,c] [x,y] =
+  PrimInline [j| `r` = (`x` - `y`)|0;
+                 `c` = ((`y` >>> 0) < (`x` >>> 0)) ? 1 : 0;
+               |]
 genPrim _ _ WordMulOp         [r] [x,y] =
   PrimInline [j| `r` = h$mulWord32(`x`,`y`); |]
 genPrim _ _ WordMul2Op      [h,l] [x,y] =
@@ -145,7 +146,7 @@ genPrim _ _ OrOp              [r] [x,y] = PrimInline [j| `r` = `x` | `y` |]
 genPrim _ _ XorOp             [r] [x,y] = PrimInline [j| `r` = `x` ^ `y` |]
 genPrim _ _ NotOp             [r] [x]   = PrimInline [j| `r` = ~`x` |]
 genPrim _ _ SllOp             [r] [x,y] = PrimInline [j| `r` = `x` << `y` |]
-genPrim _ _ SrlOp             [r] [x,y] = PrimInline [j| `r` = `x` >>> `y` |]
+genPrim _ _ SrlOp             [r] [x,y] = PrimInline [j| `r` = (`x` >>> `y`)|0; |]
 genPrim _ _ Word2IntOp        [r] [x]   = PrimInline [j| `r` = `x` |]
 genPrim _ _ WordGtOp          [r] [x,y] =
   PrimInline [j| `r` = ((`x`>>>1) > (`y`>>>1) || ((`x`>>>1) == (`y`>>>1) && (`x`&1) > (`y`&1))) ? 1 : 0 |]
@@ -703,7 +704,6 @@ genPrim d _ GetCCSOfOp [a, o] [obj]
 genPrim _ _ TraceEventOp [] [ed,eo] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
 genPrim _ _ TraceMarkerOp [] [ed,eo] = PrimInline [j| h$traceMarker(`ed`, `eo`); |]
 
-#if __GLASGOW_HASKELL__ >= 709
 genPrim _ _ CasArrayOp                 [s,o] [a,i,old,new] = PrimInline [j| var x = `a`[`i`]; if(x === `old`) { `o` = `new`; `a`[`i`] = `new`; `s` = 0; } else { `s` = 1; `o` = x; } |]
 genPrim _ _ NewSmallArrayOp            [a]   [n,e]         = PrimInline [j| `a` = new Array(`n`); for(var i=0;i<`n`;i++) { `a`[i] = `e`; `a`.m = 0; `a`.__ghcjsArray = true; } |]
 genPrim _ _ SameSmallMutableArrayOp    [r]   [x,y]         = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0; |]
@@ -743,8 +743,6 @@ genPrim _ _ Ctz8Op                     [r]   [x]           = PrimInline [j| `r` 
 genPrim _ _ Ctz16Op                    [r]   [x]           = PrimInline [j| `r` = h$ctz16(`x`);       |]
 genPrim _ _ Ctz32Op                    [r]   [x]           = PrimInline [j| `r` = h$ctz32(`x`);       |]
 genPrim _ _ Ctz64Op                    [r]   [x1,x2]       = PrimInline [j| `r` = h$ctz64(`x1`,`x2`); |]
-
-#endif
 
 -- genPrim _ _ op rs as = PrimInline [j| throw `"unhandled primop: " ++ show op ++ " " ++ show (length rs, length as)`; |]
 
