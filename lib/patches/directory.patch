@@ -1,6 +1,6 @@
 diff -Nru upstream/pkg/directory/directory.cabal boot/pkg/directory/directory.cabal
---- upstream/pkg/directory/directory.cabal	2018-01-09 08:27:52.000000000 +0000
-+++ boot/pkg/directory/directory.cabal	2018-01-09 08:27:52.198658973 +0000
+--- upstream/pkg/directory/directory.cabal	2018-02-15 22:31:55.000000000 +0000
++++ boot/pkg/directory/directory.cabal	2018-02-15 22:31:55.853451570 +0000
 @@ -57,6 +57,8 @@
          base     >= 4.5 && < 4.11,
          time     >= 1.4 && < 1.9,
@@ -11,12 +11,12 @@ diff -Nru upstream/pkg/directory/directory.cabal boot/pkg/directory/directory.ca
          build-depends: Win32 >= 2.2.2 && < 2.6
      else
 diff -Nru upstream/pkg/directory/System/Directory/Internal/Config.hs boot/pkg/directory/System/Directory/Internal/Config.hs
---- upstream/pkg/directory/System/Directory/Internal/Config.hs	2018-01-09 08:27:52.000000000 +0000
-+++ boot/pkg/directory/System/Directory/Internal/Config.hs	2018-01-09 08:27:52.198658973 +0000
+--- upstream/pkg/directory/System/Directory/Internal/Config.hs	2018-02-15 22:31:55.000000000 +0000
++++ boot/pkg/directory/System/Directory/Internal/Config.hs	2018-03-11 14:45:47.915527151 +0000
 @@ -1,13 +1,27 @@
  {-# LANGUAGE CPP #-}
 +#if defined(ghcjs_HOST_OS)
-+{-# LANGUAGE JavaScriptFFI, GHCForeignImportPrim #-}
++{-# LANGUAGE JavaScriptFFI, GHCForeignImportPrim, Trustworthy #-}
 +#else
  #include <HsDirectoryConfig.h>
 +#endif
@@ -42,8 +42,8 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/Config.hs boot/pkg/di
  -- builds, so we use this ugly workaround where we simply paste the C string
  -- literal directly in here.  This will probably break if the EXE_EXTENSION
 diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/Directory.hs
---- upstream/pkg/directory/System/Directory.hs	2018-01-09 08:27:52.000000000 +0000
-+++ boot/pkg/directory/System/Directory.hs	2018-01-09 08:27:52.198658973 +0000
+--- upstream/pkg/directory/System/Directory.hs	2018-02-15 22:31:55.000000000 +0000
++++ boot/pkg/directory/System/Directory.hs	2018-03-11 14:48:42.759720101 +0000
 @@ -1,9 +1,17 @@
  {-# LANGUAGE CPP #-}
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
@@ -57,12 +57,12 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  {-# LANGUAGE Trustworthy #-}
  #endif
 +#ifdef __GHCJS__
-+{-# LANGUAGE ForeignFunctionInterface, JavaScriptFFI, UnliftedFFITypes, MagicHash #-}
++{-# LANGUAGE ForeignFunctionInterface, JavaScriptFFI, Trustworthy #-}
 +#endif
  
  -----------------------------------------------------------------------------
  -- |
-@@ -122,6 +130,54 @@
+@@ -122,6 +130,53 @@
  import qualified System.Posix as Posix
  #endif
  
@@ -103,7 +103,6 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
 +foreign import javascript unsafe "h$directory_getAppUserDataDirectory($1)"       js_getAppUserDataDirectory       :: JSString -> IO JSString
 +foreign import javascript unsafe "h$directory_getUserDocumentsDirectory()"       js_getUserDocumentsDirectory     :: IO JSString
 +foreign import javascript unsafe "h$directory_getTemporaryDirectory()"           js_getTemporaryDirectory         :: IO JSString
-+foreign import javascript unsafe "h$directory_exeExtension()"                    js_exeExtension                  :: JSString
 +foreign import javascript interruptible "h$directory_getFileStatus($1,$c);"                 js_getFileStatus                 :: JSString -> IO JSObject
 +foreign import javascript interruptible "h$directory_getFileOrSymlinkStatus($1,$c);"        js_getFileOrSymlinkStatus        :: JSString -> IO JSObject
 +foreign import javascript unsafe "h$directory_getFileStatusModificationTime($1)" js_getFileStatusModificationTime :: JSObject -> IO Double
@@ -117,7 +116,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  {- $intro
  A directory contains a series of entries, each of which is a named
  reference to a file system object (file, directory etc.).  Some
-@@ -200,7 +256,15 @@
+@@ -200,7 +255,15 @@
  
  getPermissions :: FilePath -> IO Permissions
  getPermissions name =
@@ -134,7 +133,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
    -- issue #9: Windows doesn't like trailing path separators
    withFilePath (dropTrailingPathSeparator name) $ \s ->
    -- stat() does a better job of guessing the permissions on Windows
-@@ -255,7 +319,12 @@
+@@ -255,7 +318,12 @@
  
  setPermissions :: FilePath -> Permissions -> IO ()
  setPermissions name (Permissions r w e s) =
@@ -148,7 +147,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
    allocaBytes sizeof_stat $ \ p_stat ->
    withFilePath name $ \p_name -> do
      throwErrnoIfMinus1_ "setPermissions" $
-@@ -287,7 +356,10 @@
+@@ -287,7 +355,10 @@
  
  copyPermissions :: FilePath -> FilePath -> IO ()
  copyPermissions source dest =
@@ -160,7 +159,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
    allocaBytes sizeof_stat $ \ p_stat ->
    withFilePath source $ \p_source ->
    withFilePath dest $ \p_dest -> do
-@@ -300,7 +372,7 @@
+@@ -300,7 +371,7 @@
    copyPermissionsFromStatus stat dest
  #endif
  
@@ -169,7 +168,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  copyPermissionsFromStatus :: Posix.FileStatus -> FilePath -> IO ()
  copyPermissionsFromStatus st dst = do
    Posix.setFileMode dst (Posix.fileMode st)
-@@ -348,7 +420,10 @@
+@@ -348,7 +419,10 @@
  
  createDirectory :: FilePath -> IO ()
  createDirectory path = do
@@ -181,7 +180,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
    Win32.createDirectory path Nothing
  #else
    Posix.createDirectory path 0o777
-@@ -399,7 +474,11 @@
+@@ -399,7 +473,11 @@
                unless canIgnore (ioError e)
            | otherwise              -> ioError e
        where
@@ -194,7 +193,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
          isDir = withFileStatus "createDirectoryIfMissing" dir isDirectory
  #else
          isDir = (Posix.isDirectory <$> Posix.getFileStatus dir)
-@@ -417,7 +496,13 @@
+@@ -417,7 +495,13 @@
  getDirectoryType :: FilePath -> IO DirectoryType
  getDirectoryType path =
    (`ioeAddLocation` "getDirectoryType") `modifyIOError` do
@@ -209,7 +208,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      isDir <- withFileStatus "getDirectoryType" path isDirectory
      if isDir
        then do
-@@ -477,7 +562,9 @@
+@@ -477,7 +561,9 @@
  
  removeDirectory :: FilePath -> IO ()
  removeDirectory path =
@@ -220,7 +219,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
    Win32.removeDirectory path
  #else
    Posix.removeDirectory path
-@@ -622,7 +709,9 @@
+@@ -622,7 +708,9 @@
  
  removeFile :: FilePath -> IO ()
  removeFile path =
@@ -231,7 +230,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
    Win32.deleteFile path
  #else
    Posix.removeLink path
-@@ -679,6 +768,10 @@
+@@ -679,6 +767,10 @@
  
  renameDirectory :: FilePath -> FilePath -> IO ()
  renameDirectory opath npath =
@@ -242,7 +241,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
     -- XXX this test isn't performed atomically with the following rename
  #ifdef mingw32_HOST_OS
     -- ToDo: use Win32 API
-@@ -693,6 +786,7 @@
+@@ -693,6 +785,7 @@
       ioError . (`ioeSetErrorString` "not a directory") $
         (mkIOError InappropriateType "renameDirectory" Nothing (Just opath))
     renamePath opath npath
@@ -250,7 +249,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  
  {- |@'renameFile' old new@ changes the name of an existing file system
  object from /old/ to /new/.  If the /new/ object already
-@@ -742,6 +836,10 @@
+@@ -742,6 +835,10 @@
  renameFile opath npath = (`ioeAddLocation` "renameFile") `modifyIOError` do
     -- XXX the tests are not performed atomically with the rename
     checkNotDir opath
@@ -261,7 +260,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
     renamePath opath npath
       -- The underlying rename implementation can throw odd exceptions when the
       -- destination is a directory.  For example, Windows typically throws a
-@@ -752,6 +850,7 @@
+@@ -752,6 +849,7 @@
       `catchIOError` \ err -> do
         checkNotDir npath
         ioError err
@@ -269,7 +268,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
     where checkNotDir path = do
             dirType <- getDirectoryType path
                        `catchIOError` \ _ -> return NotDirectory
-@@ -928,7 +1027,9 @@
+@@ -928,7 +1026,9 @@
  copyFileWithMetadata src dst =
    (`ioeAddLocation` "copyFileWithMetadata") `modifyIOError` doCopy
    where
@@ -280,7 +279,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      doCopy = Win32.copyFile src dst False
  #else
      doCopy = do
-@@ -937,7 +1038,7 @@
+@@ -937,7 +1037,7 @@
        copyMetadataFromStatus st dst
  #endif
  
@@ -289,7 +288,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  copyMetadataFromStatus :: Posix.FileStatus -> FilePath -> IO ()
  copyMetadataFromStatus st dst = do
    tryCopyOwnerAndGroupFromStatus st dst
-@@ -945,26 +1046,26 @@
+@@ -945,26 +1045,26 @@
    copyFileTimesFromStatus st dst
  #endif
  
@@ -320,7 +319,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  copyFileTimesFromStatus :: Posix.FileStatus -> FilePath -> IO ()
  copyFileTimesFromStatus st dst = do
    let (atime, mtime) = fileTimesFromStatus st
-@@ -1032,6 +1133,10 @@
+@@ -1032,6 +1132,10 @@
  --
  canonicalizePath :: FilePath -> IO FilePath
  canonicalizePath = \ path ->
@@ -331,7 +330,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
    modifyIOError ((`ioeAddLocation` "canonicalizePath") .
                   (`ioeSetFileName` path)) $
    -- normalise does more stuff, like upper-casing the drive letter
-@@ -1066,6 +1171,7 @@
+@@ -1066,6 +1170,7 @@
               `catchIOError` \ _ -> realpathPrefix realpath rest path
          else realpathPrefix realpath rest path
      realpathPrefix _ _ path = return path
@@ -339,7 +338,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  
  -- | Convert a path into an absolute path.  If the given path is relative, the
  -- current directory is prepended and then the combined result is
-@@ -1139,7 +1245,9 @@
+@@ -1139,7 +1244,9 @@
  --
  findExecutable :: String -> IO (Maybe FilePath)
  findExecutable binary = do
@@ -350,7 +349,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      Win32.searchPath Nothing binary exeExtension
  #else
      path <- getPath
-@@ -1156,7 +1264,9 @@
+@@ -1156,7 +1263,9 @@
  -- @since 1.2.2.0
  findExecutables :: String -> IO [FilePath]
  findExecutables binary = do
@@ -361,7 +360,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      file <- findExecutable binary
      return $ maybeToList file
  #else
-@@ -1164,7 +1274,7 @@
+@@ -1164,7 +1273,7 @@
      findExecutablesInDirectories path binary
  #endif
  
@@ -370,7 +369,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  -- | Get the contents of the @PATH@ environment variable.
  getPath :: IO [FilePath]
  getPath = do
-@@ -1248,7 +1358,10 @@
+@@ -1248,7 +1357,10 @@
  getDirectoryContents path =
    modifyIOError ((`ioeSetFileName` path) .
                   (`ioeAddLocation` "getDirectoryContents")) $ do
@@ -382,7 +381,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      bracket
        (Posix.openDirStream path)
        Posix.closeDirStream
-@@ -1279,6 +1392,7 @@
+@@ -1279,6 +1391,7 @@
            else return (filename:acc)
                   -- no need to reverse, ordering is undefined
  #endif /* mingw32 */
@@ -390,7 +389,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  
  -- | @'listDirectory' dir@ returns a list of /all/ entries in /dir/ without
  -- the special entries (@.@ and @..@).
-@@ -1351,7 +1465,9 @@
+@@ -1351,7 +1464,9 @@
      isDoesNotExistError
      getCwd
    where
@@ -401,7 +400,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      getCwd = Win32.getCurrentDirectory
  #else
      getCwd = Posix.getWorkingDirectory
-@@ -1392,7 +1508,9 @@
+@@ -1392,7 +1507,9 @@
  --
  setCurrentDirectory :: FilePath -> IO ()
  setCurrentDirectory =
@@ -412,7 +411,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
    Win32.setCurrentDirectory
  #else
    Posix.changeWorkingDirectory
-@@ -1448,7 +1566,10 @@
+@@ -1448,7 +1565,10 @@
  
  doesDirectoryExist :: FilePath -> IO Bool
  doesDirectoryExist name =
@@ -424,7 +423,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
     (withFileStatus "doesDirectoryExist" name $ \st -> isDirectory st)
  #else
     (do stat <- Posix.getFileStatus name
-@@ -1462,7 +1583,10 @@
+@@ -1462,7 +1582,10 @@
  
  doesFileExist :: FilePath -> IO Bool
  doesFileExist name =
@@ -436,7 +435,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
     (withFileStatus "doesFileExist" name $ \st -> do b <- isDirectory st; return (not b))
  #else
     (do stat <- Posix.getFileStatus name
-@@ -1477,7 +1601,9 @@
+@@ -1477,7 +1600,9 @@
  pathIsSymbolicLink :: FilePath -> IO Bool
  pathIsSymbolicLink path =
    (`ioeAddLocation` "getDirectoryType") `modifyIOError` do
@@ -447,7 +446,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      isReparsePoint <$> Win32.getFileAttributes path
    where
      isReparsePoint attr = attr .&. win32_fILE_ATTRIBUTE_REPARSE_POINT /= 0
-@@ -1544,7 +1670,13 @@
+@@ -1544,7 +1669,13 @@
      getTimes
    where
      path' = normalise path              -- handle empty paths
@@ -462,7 +461,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      getTimes =
        bracket (openFileHandle path' Win32.gENERIC_READ)
                Win32.closeHandle $ \ handle ->
-@@ -1559,7 +1691,7 @@
+@@ -1559,7 +1690,7 @@
      getTimes = fileTimesFromStatus <$> Posix.getFileStatus path'
  #endif
  
@@ -471,7 +470,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
  fileTimesFromStatus :: Posix.FileStatus -> (UTCTime, UTCTime)
  fileTimesFromStatus st =
  # if MIN_VERSION_unix(2, 6, 0)
-@@ -1637,7 +1769,10 @@
+@@ -1637,7 +1768,10 @@
      path' = normalise path              -- handle empty paths
  
      setTimes :: (Maybe POSIXTime, Maybe POSIXTime) -> IO ()
@@ -483,7 +482,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      setTimes (atime', mtime') =
        bracket (openFileHandle path' Win32.gENERIC_WRITE)
                Win32.closeHandle $ \ handle ->
-@@ -1730,7 +1865,9 @@
+@@ -1730,7 +1864,9 @@
  getHomeDirectory :: IO FilePath
  getHomeDirectory = modifyIOError (`ioeAddLocation` "getHomeDirectory") get
    where
@@ -494,7 +493,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      get = getFolderPath Win32.cSIDL_PROFILE `catchIOError` \ _ ->
            getFolderPath Win32.cSIDL_WINDOWS
      getFolderPath what = Win32.sHGetFolderPath nullPtr what nullPtr 0
-@@ -1799,7 +1936,9 @@
+@@ -1799,7 +1935,9 @@
      XdgConfig -> get False "XDG_CONFIG_HOME" ".config"
      XdgCache  -> get True  "XDG_CACHE_HOME"  ".cache"
    where
@@ -505,7 +504,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      get isLocal _ _ = Win32.sHGetFolderPath nullPtr which nullPtr 0
        where which | isLocal   = win32_cSIDL_LOCAL_APPDATA
                    | otherwise = Win32.cSIDL_APPDATA
-@@ -1869,7 +2008,10 @@
+@@ -1869,7 +2007,10 @@
                          -> IO FilePath
  getAppUserDataDirectory appName = do
    modifyIOError (`ioeAddLocation` "getAppUserDataDirectory") $ do
@@ -517,7 +516,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      s <- Win32.sHGetFolderPath nullPtr Win32.cSIDL_APPDATA nullPtr 0
      return (s++'\\':appName)
  #else
-@@ -1900,7 +2042,9 @@
+@@ -1900,7 +2041,9 @@
  getUserDocumentsDirectory :: IO FilePath
  getUserDocumentsDirectory = do
    modifyIOError (`ioeAddLocation` "getUserDocumentsDirectory") $ do
@@ -528,7 +527,7 @@ diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/D
      Win32.sHGetFolderPath nullPtr Win32.cSIDL_PERSONAL nullPtr 0
  #else
      getEnv "HOME"
-@@ -1934,7 +2078,9 @@
+@@ -1934,7 +2077,9 @@
  -}
  getTemporaryDirectory :: IO FilePath
  getTemporaryDirectory =
