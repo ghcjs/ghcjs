@@ -226,13 +226,6 @@ data BootPrograms = BootPrograms { _bpGhcjs      :: Program Required
                                  , _bpNode       :: Program Required
                                  , _bpHaddock    :: Program Required
                                  , _bpNpm        :: Program Optional
-                                 , _bpGit        :: Program Optional
-                                 , _bpAlex       :: Program Optional
-                                 , _bpHappy      :: Program Optional
-                                 , _bpCpp        :: Program Optional
-                                 , _bpBash       :: Program Optional
-                                 , _bpAutoreconf :: Program Optional
-                                 , _bpMake       :: Program Optional
                                  } deriving (Data, Typeable)
 
 data BootEnv = BootEnv { _beSettings  :: BootSettings
@@ -307,10 +300,7 @@ instance Yaml.FromJSON BootPrograms where
     <$> v ..: "ghcjs" <*> v ..: "ghcjs-pkg" <*> v ..: "ghcjs-run"
     <*> v ..: "ghc"   <*> v ..: "ghc-pkg"
     <*> v ..: "cabal" <*> v ..: "node"      <*> v ..: "haddock-ghcjs"
-    <*> v ..: "npm"   <*> v ..: "git"       <*> v ..: "alex"
-    <*> v ..: "happy"
-    <*> v ..: "cpp"   <*> v ..: "bash"      <*> v ..: "autoreconf"
-    <*> v ..: "make"
+    <*> v ..: "npm"
     where
       o ..: p = ((\t -> Program p t Nothing Nothing []) <$> o .: p) <|>
                 (withArgs p =<< o .: p)
@@ -665,10 +655,6 @@ preparePackage pkg
   | "./" `T.isPrefixOf` pkg || "../" `T.isPrefixOf` pkg = sub $ do
     msg trace ("preparing package " <> pkg)
     cd (fromText pkg)
-    e <- ask
-    whenM (test_f "configure.ac") $
-      make "configure" ["configure.ac"]
-        (msg info ("generating configure script for " <> pkg) >> autoreconf_)
     rm_rf "dist"
   | otherwise = return ()
 
@@ -855,12 +841,7 @@ ghc_         = runE_ bpGhc
 ghc_pkg      = runE  bpGhcPkg
 ghcjs_pkg    = runE  bpGhcjsPkg
 ghcjs_pkg_   = runE_ bpGhcjsPkg
-alex_        = runE_ bpAlex
-happy_       = runE_ bpHappy
 haddock_     = runE_ bpHaddock
--- tar_         = runE_ bpTar
-git_         = runE_ bpGit
-cpp          = runE  bpCpp
 cabal        = runE  bpCabal
 cabal_       = runE_ bpCabal
 npm_         = runE_ bpNpm
@@ -959,13 +940,12 @@ cabalInstallFlags parmakeGhcjs = do
            , "--prefix",        toTextI instDir
            , bool haddock "--enable-documentation" "--disable-documentation"
            , "--haddock-html"
--- fixme comment is outdated?
--- workaround for hoogle support being broken in haddock for GHC 7.10RC1
            , "--haddock-hoogle"
            , "--haddock-hyperlink-source"
+           , "-fghci"
            , bool prof
-                  "--enable-library-profiling"
-                  "--disable-library-profiling"
+                  "--enable-profiling"
+                  "--disable-profiling"
            ] ++
            -- don't slow down Windows builds too much,
            -- on other platforms we get this more
@@ -980,19 +960,6 @@ cabalInstallFlags parmakeGhcjs = do
                      , bj debug "--ghcjs-options=-debug"
                      , bj (v > info) "-v2"
                      ]
-
-configure_  = run_ (Program "configure"
-                            "./configure"
-                            Nothing
-                            (Just "./configure")
-                            [])
-
-#ifdef WINDOWS
-autoreconf_ = runE_ bpBash ["autoreconf"]
-#else
-autoreconf_ = runE_ bpAutoreconf []
-#endif
-runMake_    = runE_ bpMake
 
 ignoreExcep a = a `catchAny`
   (\e -> msg info $ "ignored exception: " <> showT e)
@@ -1220,8 +1187,8 @@ checkProgramVersions bs pgms = do
           v      = mapM (readMaybe . T.unpack . T.dropWhile (== 'v')) . T.splitOn "." . T.takeWhile (/='-') $ verTxt :: Maybe [Integer]
       case v of
         Just (x:y:z:_)
-          | x > 0 || y > 10 || (y == 10 && z >= 28) -> return pgms
-          | otherwise -> failWith ("minimum required version for node.js is 0.10.28, found: " <> verTxt)
+          | x >= 6 -> return pgms
+          | otherwise -> failWith ("minimum required version for node.js is 6.0.0, found: " <> verTxt)
         _             -> failWith ("unrecognized version for node.js: " <> verTxt)
 
 -- | read the boot configuration yaml file
