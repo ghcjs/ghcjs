@@ -1,9 +1,13 @@
 {-# LANGUAGE MagicHash, DeriveDataTypeable, CPP #-}
 #ifdef __GHCJS__
-{-# LANGUAGE JavaScriptFFI, GHCForeignImportPrim #-}
+{-# LANGUAGE JavaScriptFFI,
+             GHCForeignImportPrim,
+             UnliftedFFITypes,
+             UnboxedTuples
+  #-}
 #endif
 
-module GHCJS.Prim ( JSVal(..)
+module GHCJS.Prim ( JSVal(..), JSVal#
                   , JSException(..)
                   , WouldBlockException(..)
 #ifdef ghcjs_HOST_OS
@@ -19,6 +23,17 @@ module GHCJS.Prim ( JSVal(..)
                   , jsNull
                   , getProp
                   , getProp'
+                  , getProp#
+                  , unsafeGetProp
+                  , unsafeGetProp'
+                  , unsafeGetProp#
+                  , unpackJSString#
+                  , unpackJSStringUtf8#
+                  , unsafeUnpackJSString#
+                  , unsafeUnpackJSStringUtf8#
+                  , unpackJSStringUtf8##
+                  , unsafeUnpackJSStringUtf8##
+
 #endif
                   ) where
 
@@ -28,14 +43,19 @@ import           Unsafe.Coerce (unsafeCoerce)
 import           GHC.Prim
 import qualified GHC.Exception as Ex
 import qualified GHC.Exts as Exts
+import qualified GHC.CString as GHC
+import           GHC.IO
+
 {-
   JSVal is a boxed type that can be used as FFI
   argument or result.
 -}
 #ifdef ghcjs_HOST_OS
-data JSVal = JSVal ByteArray#
+data JSVal  = JSVal ByteArray#
+type JSVal# = ByteArray#
 #else
-data JSVal = JSVal Addr#
+data JSVal  = JSVal Addr#
+type JSVal# = Addr#
 #endif
 
 {-
@@ -70,7 +90,13 @@ fromJSString = unsafeCoerce . js_fromJSString
 
 toJSString :: String -> JSVal
 toJSString = js_toJSString . unsafeCoerce . seqList
-{-# INLINE toJSString #-}
+{-# INLINE [0] toJSString #-}
+{-# RULES
+"GHCJSPRIM toJSString/literal" forall a.
+  toJSString (unpackCString# a) = JSVal (unsafeUnpackJSString## a)
+"GHCJSPRIM toJSString/literalUtf8" forall a.
+  toJSString (unpackCStringUtf8# a) = JSVal (unsafeUnpackJSStringUtf8## a)
+  #-}
 
 fromJSArray :: JSVal -> IO [JSVal]
 fromJSArray = unsafeCoerce . js_fromJSArray
@@ -100,15 +126,111 @@ isUndefined = js_isUndefined
 
 jsNull :: JSVal
 jsNull = js_null
-{-# INLINE jsNull #-}
+{-# INLINE CONLIKE jsNull #-}
 
 getProp :: JSVal -> String -> IO JSVal
 getProp o p = js_getProp o (unsafeCoerce $ seqList p)
-{-# INLINE getProp #-}
+{-# INLINE [0] getProp #-}
+{-# RULES
+"GHCJSPRIM getProp/literal" forall o a.
+  getProp o (GHC.unpackCString# a) = getProp# o a
+"GHCJSPRIM getProp/literalUtf8" forall o a.
+  getProp o (GHC.unpackCStringUtf8# a) = getPropUtf8# o a
+  #-}
+
+-- | only safe on immutable object
+unsafeGetProp :: JSVal -> String -> JSVal
+unsafeGetProp o p = js_unsafeGetProp o (unsafeCoerce $ seqList p)
+{-# INLINE [0] unsafeGetProp #-}
+{-# RULES
+"GHCJSPRIM unsafeGetProp/literal" forall o a.
+  unsafeGetProp o (GHC.unpackCString# a) = unsafeGetProp# o a
+"GHCJSPRIM unsafeGetProp/literalUtf8" forall o a.
+  unsafeGetProp o (GHC.unpackCStringUtf8# a) = unsafeGetPropUtf8# o a
+  #-}
 
 getProp' :: JSVal -> JSVal -> IO JSVal
 getProp' o p = js_getProp' o p
-{-# INLINE getProp' #-}
+{-# INLINE [0] getProp' #-}
+{-# RULES
+"GHCJSPRIM getProp'/literal" forall o a.
+  getProp' o (unsafeUnpackJSString# a) = getProp# o a
+"GHCJSPRIM getProp'/literalUtf8" forall o a.
+  getProp' o (unsafeUnpackJSStringUtf8# a) = getPropUtf8# o a
+  #-}
+
+-- | only safe on immutable object
+unsafeGetProp' :: JSVal -> JSVal -> JSVal
+unsafeGetProp' o p = js_unsafeGetProp' o p
+{-# INLINE [0] unsafeGetProp' #-}
+{-# RULES
+"GHCJSPRIM unsafeGetProp'/literal" forall o a.
+  unsafeGetProp' o (unsafeUnpackJSString# a) = unsafeGetPropUtf8# o a
+"GHCJSPRIM unsafeGetProp'/literalUtf8" forall o a.
+  unsafeGetProp' o (unsafeUnpackJSStringUtf8# a) = unsafeGetPropUtf8# o a
+  #-}
+
+
+-- | only safe on immutable Addr#
+getProp# :: JSVal -> Addr# -> IO JSVal
+getProp# (JSVal o) p = IO $
+  \s -> case getPropUtf8## o p s of (# s', v #) -> (# s', JSVal v #)
+{-# INLINE [0] getProp# #-}
+-- js_getProp# o p
+
+-- | only safe on immutable Addr#
+getPropUtf8# :: JSVal -> Addr# -> IO JSVal
+getPropUtf8# (JSVal o) p = IO $
+  \s -> case getPropUtf8## o p s of (# s', v #) -> (# s', JSVal v #)
+{-# INLINE [0] getPropUtf8# #-}
+
+getPropUtf8## :: JSVal# -> Addr# -> State# s -> (# State# s, JSVal# #)
+getPropUtf8## o p = js_getPropUtf8## o p
+{-# NOINLINE getPropUtf8## #-}
+
+-- | only safe on immutable Addr# and JSVal
+unsafeGetProp# :: JSVal -> Addr# -> JSVal
+unsafeGetProp# (JSVal o) p = JSVal (unsafeGetPropUtf8## o p)
+{-# INLINE [0] unsafeGetProp# #-}
+
+-- | only safe on immutable Addr# and JSVal
+unsafeGetPropUtf8# :: JSVal -> Addr# -> JSVal
+unsafeGetPropUtf8# (JSVal o) p = JSVal (unsafeGetPropUtf8## o p)
+{-# INLINE [0] unsafeGetPropUtf8# #-}
+
+unsafeGetPropUtf8## :: JSVal# -> Addr# -> JSVal#
+unsafeGetPropUtf8## o p = js_unsafeGetPropUtf8## o p
+{-# NOINLINE unsafeGetPropUtf8## #-}
+
+unpackJSString# :: Addr# -> IO JSVal
+unpackJSString# a = IO $
+  \s -> case unpackJSStringUtf8## a s of (# s', v #) -> (# s', JSVal v #)
+{-# INLINE [0] unpackJSString# #-}
+
+unpackJSStringUtf8# :: Addr# -> IO JSVal
+unpackJSStringUtf8# a = IO $
+  \s -> case unpackJSStringUtf8## a s of (# s', v #) -> (# s', JSVal v #)
+{-# INLINE [0] unpackJSStringUtf8# #-}
+
+unpackJSStringUtf8## :: Addr# -> State# s -> (# State# s, JSVal# #)
+unpackJSStringUtf8## a s = js_unpackJSStringUtf8## a s
+{-# NOINLINE unpackJSStringUtf8## #-}
+
+-- | only safe on immutable Addr#
+unsafeUnpackJSString# :: Addr# -> JSVal
+unsafeUnpackJSString# a = JSVal (unsafeUnpackJSStringUtf8## a)
+  -- js_unsafeUnpackJSString# a
+{-# INLINE [0] unsafeUnpackJSString# #-}
+
+-- | only safe on immutable Addr#
+unsafeUnpackJSStringUtf8# :: Addr# -> JSVal
+unsafeUnpackJSStringUtf8# a = JSVal (unsafeUnpackJSStringUtf8## a)
+{-# INLINE [0] unsafeUnpackJSStringUtf8# #-}
+
+unsafeUnpackJSStringUtf8## :: Addr# -> JSVal#
+unsafeUnpackJSStringUtf8## a = js_unsafeUnpackJSStringUtf8## a
+{-# NOINLINE unsafeUnpackJSStringUtf8## #-}
+
 
 -- reduce the spine and all list elements to whnf
 seqList :: [a] -> [a]
@@ -151,8 +273,27 @@ foreign import javascript unsafe "$r = null;"
 foreign import javascript unsafe "$1[h$fromHsString($2)]"
   js_getProp :: JSVal -> Exts.Any -> IO JSVal
 
+foreign import javascript unsafe "$1[h$fromHsString($2)]"
+  js_unsafeGetProp :: JSVal -> Exts.Any -> JSVal
+
 foreign import javascript unsafe "$1[$2]"
   js_getProp' :: JSVal -> JSVal -> IO JSVal
+
+foreign import javascript unsafe "$1[$2]"
+  js_unsafeGetProp' :: JSVal -> JSVal -> JSVal
+
+foreign import javascript unsafe "$1[h$decodeUtf8z($2_1, $2_2)]"
+  js_getPropUtf8## :: JSVal# -> Addr# -> State# s -> (# State# s, JSVal# #)
+
+foreign import javascript unsafe "$1[h$decodeUtf8z($2_1, $2_2)]"
+  js_unsafeGetPropUtf8## :: JSVal# -> Addr# -> JSVal#
+
+foreign import javascript unsafe "h$decodeUtf8z($1_1, $1_2)"
+  js_unpackJSStringUtf8## :: Addr# -> State# s -> (# State# s, JSVal# #)
+
+
+foreign import javascript unsafe "h$decodeUtf8z($1_1, $1_2)"
+  js_unsafeUnpackJSStringUtf8## :: Addr# -> JSVal#
 
 #endif
 
@@ -167,4 +308,3 @@ instance Show WouldBlockException where
   show _ = "thread would block"
 
 instance Ex.Exception WouldBlockException
-
