@@ -118,6 +118,12 @@ Library
                      Compiler.Settings,
                      Compiler.Utils,
                      Compiler.Variants,
+                     Compiler.DriverPipeline,
+                     Compiler.GhciMonad,
+                     Compiler.GhciTags,
+                     Compiler.InteractiveEval,
+                     Compiler.InteractiveUI,
+                     Compiler.GhcMake,
                      Compiler.JMacro,
                      Compiler.JMacro.Base,
                      Compiler.JMacro.Lens,
@@ -167,12 +173,17 @@ Library
                    stringsearch               >= 0.3 && < 0.4,
                    base16-bytestring          >= 0.1 && < 0.2,
                    cryptohash,
+                   haskeline                  >= 0.7 && < 0.8,
                    -- for JMacro
                    regex-posix                >= 0.90 && < 0.100,
                    safe                       >= 0.3  && < 0.4,
                    parsec                     >= 3.1  && < 3.2,
                    haskell-src-exts           >= 1.16 && < 1.19,
                    haskell-src-meta           >= 0.6.0.3  && < 0.8
+    if os(Windows)
+      build-depends: Win32
+    else
+      build-depends: unix
     exposed: True
     buildable: True
     hs-source-dirs: src lib/ghcjs-th
