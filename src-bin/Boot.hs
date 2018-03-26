@@ -942,6 +942,9 @@ cabalInstallFlags parmakeGhcjs = do
            , "--haddock-html"
            , "--haddock-hoogle"
            , "--haddock-hyperlink-source"
+           , "--enable-debug-info"
+           , "--disable-library-stripping"
+           , "--disable-executable-stripping"
            , "-fghci"
            , bool prof
                   "--enable-profiling"
@@ -951,9 +954,6 @@ cabalInstallFlags parmakeGhcjs = do
            -- on other platforms we get this more
            -- or less for free, thanks to dynamic-too
            bool isWindows [ "--enable-shared"] [] ++
-           -- workaround for Cabal bug?
-           bool isWindows [ "--disable-executable-stripping"
-                          , "--disable-library-stripping"] [] ++
            catMaybes [ (((bool parmakeGhcjs
                                "--ghcjs-options=-j"
                                "-j")<>) . showT) <$> j
