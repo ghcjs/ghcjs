@@ -953,7 +953,7 @@ cabalInstallFlags parmakeGhcjs = do
            -- don't slow down Windows builds too much,
            -- on other platforms we get this more
            -- or less for free, thanks to dynamic-too
-           bool isWindows [ "--enable-shared"] [] ++
+           bool isWindows [] ["--enable-shared"] ++
            catMaybes [ (((bool parmakeGhcjs
                                "--ghcjs-options=-j"
                                "-j")<>) . showT) <$> j
