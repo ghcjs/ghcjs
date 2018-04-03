@@ -20,7 +20,11 @@ TARGET="$GHCJSROOT/lib"
 cd "$TARGET"
 
 echo "creating boot archive"
-tar --dereference --exclude-backups --exclude-vcs-ignores -X "$SOURCEDIR/updateBootArchive.tarExcludes" -cvf boot.tar boot
+if [ -x "$(command -v gtar)" ]; then
+  gtar --dereference --exclude-backups --exclude-vcs-ignores -X "$SOURCEDIR/updateBootArchive.tarExcludes" -cvf boot.tar boot
+else
+  tar --dereference --exclude-backups --exclude-vcs-ignores -X "$SOURCEDIR/updateBootArchive.tarExcludes" -cvf boot.tar boot
+fi
 rm -f "$TARGET/../data/boot.tar"
 mv boot.tar "$TARGET/../data/boot.tar"
 

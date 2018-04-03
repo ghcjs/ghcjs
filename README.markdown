@@ -19,6 +19,8 @@ $ git submodule update --init
 $ ./utils/makePackages.sh
 ```
 
+If you are building on macOS, you will need the gnu version of tar. You can install this with `brew install gnu-tar`, which makes it accessible at `gtar`. The `./utils/makePackages.sh` will automatically pick up on this.
+
 #### building the compiler
 
 GHCJS depends on a few "local" packages in the source tree. You can use
