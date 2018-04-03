@@ -422,10 +422,6 @@ finishTHp js_env endProcess m runner = do
   when endProcess $
     maybe (void $ terminateProcess ph)
       (\_ -> return ()) =<< timeout 30000000 (waitForProcess ph)
-  modifyMVar_ ( thRunners js_env )
-              ( pure
-              . if endProcess then id else consIdleRunner runner
-              . deleteActiveRunner m )
   return mu
 
 finishTHAll :: GhcjsEnv -> IO ()
