@@ -1152,9 +1152,12 @@ allocCls dynMiddle xs = do
     toCl :: (Id, StgRhs)
          -> G (Either JStat (Ident,JExpr,[JExpr],CostCentreStack))
     -- statics
-    toCl (i, StgRhsCon cc con []) = do
+    {- making zero-arg constructors static is problematic, see #646
+       proper candidates for this optimization should have been floated
+       already
+      toCl (i, StgRhsCon cc con []) = do
       ii <- jsIdI i
-      Left <$> (return (decl ii) <> allocCon ii con cc [])
+      Left <$> (return (decl ii) <> allocCon ii con cc []) -}
     toCl (i, StgRhsCon cc con [a]) | isUnboxableCon con = do
       ii <- jsIdI i
       Left <$> (return (decl ii) <> (allocCon ii con cc =<< genArg a))
