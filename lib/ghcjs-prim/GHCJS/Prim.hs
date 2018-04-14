@@ -93,9 +93,9 @@ toJSString = js_toJSString . unsafeCoerce . seqList
 {-# INLINE [0] toJSString #-}
 {-# RULES
 "GHCJSPRIM toJSString/literal" forall a.
-  toJSString (unpackCString# a) = JSVal (unsafeUnpackJSString## a)
+  toJSString (GHC.unpackCString# a) = JSVal (unsafeUnpackJSStringUtf8## a)
 "GHCJSPRIM toJSString/literalUtf8" forall a.
-  toJSString (unpackCStringUtf8# a) = JSVal (unsafeUnpackJSStringUtf8## a)
+  toJSString (GHC.unpackCStringUtf8# a) = JSVal (unsafeUnpackJSStringUtf8## a)
   #-}
 
 fromJSArray :: JSVal -> IO [JSVal]
