@@ -1,4 +1,13 @@
-{-# LANGUAGE CPP, QuasiQuotes, TupleSections, OverloadedStrings, LambdaCase, MultiWayIf, TemplateHaskell, ViewPatterns, BangPatterns #-}
+{-# LANGUAGE CPP,
+             QuasiQuotes,
+             TupleSections,
+             OverloadedStrings,
+             LambdaCase,
+             MultiWayIf,
+             TemplateHaskell,
+             ViewPatterns,
+             BangPatterns
+  #-}
 
 {-
   Main generator module
@@ -32,6 +41,7 @@ import           TyCon
 import           Util
 import           Type hiding (typeSize)
 import           RepType
+import           TysPrim
 import           Name
 import           GHC
 import           Id

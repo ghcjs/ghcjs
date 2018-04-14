@@ -34,7 +34,6 @@ import           TcType hiding (Check)
 import           Type
 import           TyCon
 
-import           Data.Monoid
 import qualified Data.Set as S
 
 import           Compiler.JMacro (j, je, JExpr(..), JStat(..), Ident(..))
@@ -61,10 +60,11 @@ isInlinePrimOp p = p `S.notMember` notInlinePrims
       , TakeMVarOp, PutMVarOp, ReadMVarOp
       , DelayOp
       , WaitReadOp, WaitWriteOp
+      , ForkOp, ForkOnOp
       , KillThreadOp
       , YieldOp
+      , CompactAdd, CompactAddWithSharing
       , SeqOp
-      , ForkOp, ForkOnOp
       ]
 
 
@@ -312,8 +312,8 @@ genPrim _ _ IndexByteArrayOp_Int16 [r] [a,i] =
 genPrim _ _ IndexByteArrayOp_Int32 [r] [a,i] =
   PrimInline [j| `r` = `a`.i3[`i`]; |]
 genPrim _ _ IndexByteArrayOp_Int64 [r1,r2] [a,i] =
-  PrimInline [j| `r1` = `a`.i3[`i`<<1];
-                 `r2` = `a`.i3[(`i`<<1)+1];
+  PrimInline [j| `r1` = `a`.i3[(`i`<<1)+1];
+                 `r2` = `a`.i3[`i`<<1];
                |]
 genPrim _ _ IndexByteArrayOp_Word8 [r] [a,i] =
   PrimInline [j| `r` = `a`.u8[`i`]; |]
@@ -322,8 +322,8 @@ genPrim _ _ IndexByteArrayOp_Word16 [r] [a,i] =
 genPrim _ _ IndexByteArrayOp_Word32 [r] [a,i] =
   PrimInline [j| `r` = `a`.i3[`i`]; |]
 genPrim _ _ IndexByteArrayOp_Word64 [r1,r2] [a,i] =
-  PrimInline [j| `r1` = `a`.i3[`i`<<1];
-                 `r2` = `a`.i3[(`i`<<1)+1];
+  PrimInline [j| `r1` = `a`.i3[(`i`<<1)+1];
+                 `r2` = `a`.i3[`i`<<1];
                |]
 genPrim _ _ ReadByteArrayOp_Char [r] [a,i] =
   PrimInline [j| `r` = `a`.u8[`i`]; |]
@@ -355,15 +355,15 @@ genPrim _ _ ReadByteArrayOp_Int16 [r] [a,i] =
 genPrim _ _ ReadByteArrayOp_Int32 [r] [a,i] =
   PrimInline [j| `r` = `a`.i3[`i`]; |]
 genPrim _ _ ReadByteArrayOp_Int64 [r1,r2] [a,i] =
-  PrimInline [j| `r1` = `a`.i3[`i`<<1];
-                 `r2` = `a`.i3[(`i`<<1)+1];
+  PrimInline [j| `r1` = `a`.i3[(`i`<<1)+1];
+                 `r2` = `a`.i3[`i`<<1];
                |]
 genPrim _ _ ReadByteArrayOp_Word8 [r] [a,i] = PrimInline [j| `r` = `a`.u8[`i`]; |]
 genPrim _ _ ReadByteArrayOp_Word16 [r] [a,i] = PrimInline [j| `r` = `a`.u1[`i`]; |]
 genPrim _ _ ReadByteArrayOp_Word32 [r] [a,i] = PrimInline [j| `r` = `a`.i3[`i`]; |]
 genPrim _ _ ReadByteArrayOp_Word64 [r1,r2] [a,i] =
-  PrimInline [j| `r1` = `a`.i3[`i`<<1];
-                 `r2` = `a`.i3[(`i`<<1)+1];
+  PrimInline [j| `r1` = `a`.i3[(`i`<<1)+1];
+                 `r2` = `a`.i3[`i`<<1];
                |]
 genPrim _ _ WriteByteArrayOp_Char [] [a,i,e] = PrimInline [j| `a`.u8[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_WideChar [] [a,i,e] = PrimInline [j| `a`.i3[`i`] = `e`; |]
@@ -379,15 +379,15 @@ genPrim _ _ WriteByteArrayOp_Int8 [] [a,i,e] = PrimInline [j| `a`.dv.setInt8(`i`
 genPrim _ _ WriteByteArrayOp_Int16 [] [a,i,e]     = PrimInline [j| `a`.dv.setInt16(`i`<<1, `e`, false); |]
 genPrim _ _ WriteByteArrayOp_Int32 [] [a,i,e]     = PrimInline [j| `a`.i3[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_Int64 [] [a,i,e1,e2] =
-  PrimInline [j| `a`.i3[`i`<<1] = `e1`;
-                 `a`.i3[(`i`<<1)+1] = `e2`;
+  PrimInline [j| `a`.i3[(`i`<<1)+1] = `e1`;
+                 `a`.i3[`i`<<1] = `e2`;
                |]
 genPrim _ _ WriteByteArrayOp_Word8 [] [a,i,e]     = PrimInline [j| `a`.u8[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_Word16 [] [a,i,e]     = PrimInline [j| `a`.u1[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_Word32 [] [a,i,e]     = PrimInline [j| `a`.i3[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_Word64 [] [a,i,e1,e2] =
-  PrimInline [j| `a`.i3[`i`<<1] = `e1`;
-                 `a`.i3[(`i`<<1)+1] = `e2`;
+  PrimInline [j| `a`.i3[(`i`<<1)+1] = `e1`;
+                 `a`.i3[`i`<<1] = `e2`;
                |]
 -- fixme we can do faster by copying 32 bit ints or doubles
 genPrim _ _ CopyByteArrayOp [] [a1,o1,a2,o2,n] =
@@ -398,11 +398,14 @@ genPrim _ _ CopyByteArrayOp [] [a1,o1,a2,o2,n] =
 genPrim d t CopyMutableByteArrayOp [] xs@[_a1,_o1,_a2,_o2,_n] = genPrim d t CopyByteArrayOp [] xs
 genPrim d t CopyByteArrayToAddrOp [] xs@[_a1,_o1,_a2,_o2,_n] = genPrim d t CopyByteArrayOp [] xs
 genPrim d t CopyMutableByteArrayToAddrOp [] xs@[_a1,_o1,_a2,_o2,_n] = genPrim d t CopyByteArrayOp [] xs
+genPrim d t CopyAddrToByteArrayOp [] xs@[_ba,_bo,_aa,_ao,_n] = genPrim d t CopyByteArrayOp [] xs
+
 genPrim _ _ SetByteArrayOp [] [a,o,n,v] =
   PrimInline [j| for(var i=0;i<`n`;i++) {
                    `a`.u8[`o`+i] = `v`;
                  }
                |]
+
 genPrim _ _ NewArrayArrayOp [r] [n] = PrimInline (newArray r n jnull)
 genPrim _ _ SameMutableArrayArrayOp [r] [a1,a2] = PrimInline [j| `r` = (`a1` === `a2`) ? 1 : 0 |]
 genPrim _ _ UnsafeFreezeArrayArrayOp [r] [a] = PrimInline [j| `r` = `a` |]
@@ -465,22 +468,22 @@ genPrim _ _ IndexOffAddrOp_Int8 [c] [a,o,i] = PrimInline [j| `c` = `a`.u8[`o`+`i
 genPrim _ _ IndexOffAddrOp_Int16 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt16(`o`+(`i`<<1),true); |]
 genPrim _ _ IndexOffAddrOp_Int32 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
 genPrim _ _ IndexOffAddrOp_Int64 [c1,c2] [a,o,i] =
-   PrimInline [j| `c1` = `a`.dv.getInt32(`o`+(`i`<<3),true);
-                  `c2` = `a`.dv.getInt32(`o`+(`i`<<3)+4,true);
+   PrimInline [j| `c1` = `a`.dv.getInt32(`o`+(`i`<<3)+4,true);
+                  `c2` = `a`.dv.getInt32(`o`+(`i`<<3),true);
                 |]
 genPrim _ _ IndexOffAddrOp_Word8 [c] [a,o,i] = PrimInline [j| `c` = `a`.u8[`o`+`i`]; |]
 genPrim _ _ IndexOffAddrOp_Word16 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getUint16(`o`+(`i`<<1),true); |]
 genPrim _ _ IndexOffAddrOp_Word32 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
 genPrim _ _ IndexOffAddrOp_Word64 [c1,c2] [a,o,i] =
-   PrimInline [j| `c1` = `a`.dv.getInt32(`o`+(`i`<<3),true);
-                  `c2` = `a`.dv.getInt32(`o`+(`i`<<3)+4,true);
+   PrimInline [j| `c1` = `a`.dv.getInt32(`o`+(`i`<<3)+4,true);
+                  `c2` = `a`.dv.getInt32(`o`+(`i`<<3),true);
                 |]
 genPrim _ _ ReadOffAddrOp_Char [c] [a,o,i] =
    PrimInline [j| `c` = `a`.u8[`o`+`i`]; |]
 genPrim _ _ ReadOffAddrOp_WideChar [c] [a,o,i] =
    PrimInline [j| `c` = `a`.dv.getUint32(`o`+(`i`<<2),true); |]
 genPrim _ _ ReadOffAddrOp_Int [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
-genPrim _ _ ReadOffAddrOp_Word [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getUint32(`o`+(`i`<<2),true); |]
+genPrim _ _ ReadOffAddrOp_Word [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
 genPrim _ _ ReadOffAddrOp_Addr [c1,c2] [a,o,i] =
   PrimInline [j| var x = `i`<<2;
                  if(`a`.arr && `a`.arr[`o`+ x]) {
@@ -497,12 +500,16 @@ genPrim _ _ ReadOffAddrOp_Double [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getFl
 genPrim _ _ ReadOffAddrOp_Int8   [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt8(`o`+`i`); |]
 genPrim _ _ ReadOffAddrOp_Int16  [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt16(`o`+(`i`<<1),true); |]
 genPrim _ _ ReadOffAddrOp_Int32  [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
+genPrim _ _ ReadOffAddrOp_Int64  [c1,c2] [a,o,i] =
+  PrimInline [j| `c1` = `a`.dv.getInt32(`o`+(`i`<<3)+4,true);
+                 `c2` = `a`.dv.getInt32(`o`+(`i`<<3),true);
+               |]
 genPrim _ _ ReadOffAddrOp_Word8  [c] [a,o,i] = PrimInline [j| `c` = `a`.u8[`o`+`i`]; |]
 genPrim _ _ ReadOffAddrOp_Word16 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getUint16(`o`+(`i`<<1),true); |]
-genPrim _ _ ReadOffAddrOp_Word32 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getUint32(`o`+(`i`<<2),true); |]
+genPrim _ _ ReadOffAddrOp_Word32 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
 genPrim _ _ ReadOffAddrOp_Word64 [c1,c2] [a,o,i] =
-   PrimInline [j| `c1` = `a`.dv.getInt32(`o`+(`i`<<3),true);
-                  `c2` = `a`.dv.getInt32(`o`+(`i`<<3)+4,true);
+   PrimInline [j| `c1` = `a`.dv.getInt32(`o`+(`i`<<3)+4,true);
+                  `c2` = `a`.dv.getInt32(`o`+(`i`<<3),true);
                 |]
 genPrim _ _ WriteOffAddrOp_Char [] [a,o,i,v]     = PrimInline [j| `a`.u8[`o`+`i`] = `v`; |]
 genPrim _ _ WriteOffAddrOp_WideChar [] [a,o,i,v] = PrimInline [j| `a`.dv.setUint32(`o`+(`i`<<2), `v`,true); |]
@@ -518,14 +525,14 @@ genPrim _ _ WriteOffAddrOp_Double [] [a,o,i,v]  = PrimInline [j| `a`.dv.setFloat
 genPrim _ _ WriteOffAddrOp_Int8 [] [a,o,i,v]    = PrimInline [j| `a`.dv.setInt8(`o`+`i`, `v`); |]
 genPrim _ _ WriteOffAddrOp_Int16 [] [a,o,i,v]   = PrimInline [j| `a`.dv.setInt16(`o`+(`i`<<1), `v`, true); |]
 genPrim _ _ WriteOffAddrOp_Int32 [] [a,o,i,v]   = PrimInline [j| `a`.dv.setInt32(`o`+(`i`<<2), `v`, true); |]
-genPrim _ _ WriteOffAddrOp_Int64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.dv.setInt32(`o`+(`i`<<3), `v1`, true);
-                                                                   `a`.dv.setInt32(`o`+(`i`<<3)+4, `v2`, true);
+genPrim _ _ WriteOffAddrOp_Int64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.dv.setInt32(`o`+(`i`<<3)+4, `v1`, true);
+                                                                   `a`.dv.setInt32(`o`+(`i`<<3), `v2`, true);
                                                                  |]
 genPrim _ _ WriteOffAddrOp_Word8 [] [a,o,i,v]   = PrimInline [j| `a`.u8[`o`+`i`] = `v`; |]
 genPrim _ _ WriteOffAddrOp_Word16 [] [a,o,i,v]  = PrimInline [j| `a`.dv.setUint16(`o`+(`i`<<1), `v`, true); |]
-genPrim _ _ WriteOffAddrOp_Word32 [] [a,o,i,v]  = PrimInline [j| `a`.dv.setUint32(`o`+(`i`<<2), `v`, true); |]
-genPrim _ _ WriteOffAddrOp_Word64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.dv.setUint32(`o`+(`i`<<3), `v1`, true);
-                                                                    `a`.dv.setUint32(`o`+(`i`<<3)+4, `v2`, true);
+genPrim _ _ WriteOffAddrOp_Word32 [] [a,o,i,v]  = PrimInline [j| `a`.dv.setInt32(`o`+(`i`<<2), `v`, true); |]
+genPrim _ _ WriteOffAddrOp_Word64 [] [a,o,i,v1,v2] = PrimInline [j| `a`.dv.setInt32(`o`+(`i`<<3)+4, `v1`, true);
+                                                                    `a`.dv.setInt32(`o`+(`i`<<3), `v2`, true);
                                                                   |]
 genPrim _ _ NewMutVarOp       [r] [x]   = PrimInline [j| `r` = new h$MutVar(`x`);  |]
 genPrim _ _ ReadMutVarOp      [r] [m]   = PrimInline [j| `r` = `m`.val; |]
