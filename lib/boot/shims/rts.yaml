@@ -6,6 +6,7 @@ js:
   - lib/closure-library/closure/goog/math/long.js
   - src/structs.js
   - src/mem.js
+  - src/compact.js
   - src/gc.js
   - src/errno.js
   - src/md5.js

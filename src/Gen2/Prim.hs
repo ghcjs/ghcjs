@@ -634,6 +634,39 @@ genPrim _ _ MakeStableNameOp [r] [a] = PrimInline [j| `r` = h$makeStableName(`a`
 genPrim _ _ EqStableNameOp [r] [s1,s2] = PrimInline [j| `r` = h$eqStableName(`s1`, `s2`); |]
 genPrim _ _ StableNameToIntOp [r] [s] = PrimInline [j| `r` = h$stableNameInt(`s`); |]
 
+genPrim _ _ CompactNewOp [c] [s] =
+  PrimInline [j| `c` = h$compactNew(`s`); |]
+genPrim _ _ CompactResizeOp [] [s] =
+  PrimInline [j| h$compactResize(`s`); |]
+genPrim _ _ CompactContainsOp [r] [c,v] =
+  PrimInline [j| `r` = h$compactContains(`c`, `v`); |]
+genPrim _ _ CompactContainsAnyOp [r] [v] =
+  PrimInline [j| `r` = h$compactContainsAny(`v`); |]
+genPrim _ _ CompactGetFirstBlockOp [ra,ro,s] [c] =
+  PrimInline [j| `ra` = h$compactGetFirstBlock(`c`);
+                 `ro` = `Ret1`;
+                 `s`  = `Ret2`;
+               |]
+genPrim _ _ CompactGetNextBlockOp [ra,ro,s] [c,a,o] =
+  PrimInline [j| `ra` = h$compactGetNextBlock(`c`,`a`,`o`);
+                 `ro` = `Ret1`;
+                 `s`  = `Ret2`;
+               |]
+genPrim _ _ CompactAllocateBlockOp [ra,ro] [size,sa,so] =
+  PrimInline [j| `ra` = h$compactAllocateBlock(`size`,`sa`,`so`);
+                 `ro` = `Ret1`;
+               |]
+genPrim _ _ CompactFixupPointersOp [newroota, newrooto] [blocka,blocko,roota,rooto] =
+  PrimInline [j| `newroota` = h$compactFixupPointers(`blocka`,`blocko`,`roota`,`rooto`);
+                 `newrooto` = `Ret1`;
+               |]
+genPrim _ _ CompactAdd [_r] [c,o] =
+  PRPrimCall [j| return h$compactAdd(`c`,`o`); |]
+genPrim _ _ CompactAddWithSharing [_r] [c,o] =
+  PRPrimCall [j| return h$compactAddWithSharing(`c`,`o`); |]
+genPrim _ _ CompactSize [s] [c] =
+  PrimInline [j| `s` = h$compactSize(`c`); |]
+
 genPrim _ _ ReallyUnsafePtrEqualityOp [r] [p1,p2] = PrimInline [j| `r` = `p1`===`p2`?1:0; |]
 genPrim _ _ ParOp [r] [_a] = PrimInline [j| `r` = 0; |]
 {-
