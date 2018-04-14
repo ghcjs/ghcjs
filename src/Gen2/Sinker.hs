@@ -139,12 +139,7 @@ foldArgsE f (StgCase e b a alts) =
           <*> sequenceA (map (\(ac,bs,e) -> (,,) ac bs <$> foldArgsE f e) alts)
 foldArgsE f (StgLet b e)               = StgLet <$> foldArgs f b <*> foldArgsE f e
 foldArgsE f (StgLetNoEscape b e)       = StgLetNoEscape <$> foldArgs f b <*> foldArgsE f e
-#if __GLASGOW_HASKELL__ < 709
-foldArgsE f (StgSCC cc b1 b2 e)        = StgSCC cc b1 b2 <$> foldArgsE f e
-foldArgsE f (StgTick m i e)            = StgTick m i <$> foldArgsE f e
-#else
 foldArgsE f (StgTick i e)              = StgTick i <$> foldArgsE f e
-#endif
 foldArgsE _ e                          = pure e
 
 foldArgsA :: Fold StgArg Id

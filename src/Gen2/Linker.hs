@@ -38,6 +38,8 @@ import           Control.Monad
 import           Control.Parallel.Strategies
 
 import           Data.Array
+import qualified Data.Aeson               as Aeson
+import           Data.Aeson               ((.=))
 import           Data.Binary
 import           Data.ByteString          (ByteString)
 import qualified Data.ByteString          as B
@@ -111,6 +113,7 @@ data LinkResult = LinkResult
   { linkOut         :: BL.ByteString -- ^ compiled Haskell code
   , linkOutStats    :: LinkerStats   -- ^ statistics about generated code
   , linkOutMetaSize :: Int64         -- ^ size of packed metadata in generated code
+  , linkForeignRefs :: [ForeignRef]  -- ^ foreign code references in compiled haskell code
   , linkLibRTS      :: [FilePath]    -- ^ library code to load with the RTS
   , linkLibA        :: [FilePath]    -- ^ library code to load after RTS
   , linkLibAArch    :: [FilePath]    -- ^ library code to load from archives after RTS
@@ -135,7 +138,7 @@ link :: DynFlags
 link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStaticDeps
   | gsNoJSExecutables settings = return ()
   | otherwise = do
-      LinkResult lo lstats lmetasize llW lla llarch lbase <-
+      LinkResult lo lstats lmetasize lfrefs llW lla llarch lbase <-
         link' dflags env settings out include pkgs objFiles jsFiles
               isRootFun extraStaticDeps
       let genBase = isJust (gsGenBase settings)
@@ -144,6 +147,11 @@ link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStatic
       createDirectoryIfMissing False out
       BL.writeFile (out </> "out" <.> jsExt) lo
       when (not $ gsOnlyOut settings) $ do
+        let frefsFile   = if genBase then "out.base.frefs" else "out.frefs"
+            jsonFrefs  = Aeson.encode lfrefs
+        BL.writeFile (out </> frefsFile <.> "json") jsonFrefs
+        BL.writeFile (out </> frefsFile <.> "js")
+                     ("h$checkForeignRefs(" <> jsonFrefs <> ");")
         when (not $ gsNoStats settings) $ do
           let statsFile = if genBase then "out.base.stats" else "out.stats"
           TL.writeFile (out </> statsFile) (linkerStats lmetasize lstats)
@@ -225,6 +233,7 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
       (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims dflags [] (filter (isAlreadyLinked base) pkgs')
       (shimsBefore, shimsAfter) <- getShims dflags jsFiles pkgs''
       return $ LinkResult outJs stats metaSize
+                 (concatMap (\(_,_,_,_,_,r) -> r) code)
                  (filter (`notElem` alreadyLinkedBefore) shimsBefore)
                  (filter (`notElem` alreadyLinkedAfter)  shimsAfter)
                  pkgArchs base'
@@ -243,14 +252,14 @@ renderLinker :: GhcjsSettings
              -> DynFlags
              -> CompactorState
              -> Set Fun
-             -> [(Package, Module, JStat, [ClosureInfo], [StaticInfo])] -- ^ linked code per module
+             -> [(Package, Module, JStat, [ClosureInfo], [StaticInfo], [ForeignRef])] -- ^ linked code per module
              -> (BL.ByteString, Int64, CompactorState, LinkerStats)
 renderLinker settings dflags renamerState rtsDeps code =
-  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,ci,si) -> (s,ci,si)) code)
+  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,ci,si,_) -> (s,ci,si)) code)
       pe = TLE.encodeUtf8 . (<>"\n") . displayT . renderPretty 0.8 150 . pretty
       rendered  = parMap rdeepseq pe compacted
       renderedMeta = pe meta
-      mkStat (p,m,_,_,_) b = ((p,m), BL.length b)
+      mkStat (p,m,_,_,_,_) b = ((p,m), BL.length b)
   in ( mconcat rendered <> renderedMeta
      , BL.length renderedMeta
      , renamerState'
@@ -455,7 +464,7 @@ collectDeps :: DynFlags
             -> Set Fun -- ^ roots
             -> [LinkableUnit] -- ^ more roots
             -> IO ( Set LinkableUnit
-                  , [(Package, Module, JStat, [ClosureInfo], [StaticInfo])]
+                  , [(Package, Module, JStat, [ClosureInfo], [StaticInfo], [ForeignRef])]
                   )
 collectDeps dflags lookup packages base roots units = do
   allDeps <- getDeps (fmap fst lookup) base roots units
@@ -474,7 +483,7 @@ collectDeps dflags lookup packages base roots units = do
 extractDeps :: Map (Package, Module) IntSet
             -> Deps
             -> DepsLocation
-            -> IO (Maybe (Package, Module, JStat, [ClosureInfo], [StaticInfo]))
+            -> IO (Maybe (Package, Module, JStat, [ClosureInfo], [StaticInfo], [ForeignRef]))
 extractDeps units deps loc =
   case M.lookup (pkg, mod) units of
     Nothing       -> return Nothing
@@ -496,7 +505,8 @@ extractDeps units deps loc =
                             , mod
                             , mconcat (map oiStat l)
                             , concatMap oiClInfo l
-                            , concatMap oiStatic l)
+                            , concatMap oiStatic l
+                            , concatMap oiFImports l)
                     in evaluate (rnf x) >> return (Just x)
 
 mkPackage :: InstalledUnitId -> Package

@@ -18,6 +18,8 @@ import           StgSyn
 import           Unique
 import           UniqFM
 import           SrcLoc
+import           ForeignCall (Safety(..), CCallConv(..))
+import           FastString
 
 import           Control.Applicative
 import qualified Control.Exception as Ex
@@ -227,11 +229,12 @@ data GenGroupState = GenGroupState
   , _ggsStackDepth    :: Int            -- ^ current stack depth
   , _ggsExtraDeps     :: Set OtherSymb  -- ^ extra dependencies for the linkable unit that contains this group
   , _ggsGlobalIdCache :: GlobalIdCache
+  , _ggsForeignRefs   :: [ForeignRef]
 --  , _ggsGlobalRefs    :: [[Id]]
   }
 
 instance Default GenGroupState where
-  def = GenGroupState [] [] [] [] 0 S.empty emptyGlobalIdCache -- []
+  def = GenGroupState [] [] [] [] 0 S.empty emptyGlobalIdCache [] -- []
 
 type C = State GenState JStat
 type G = State GenState
@@ -273,6 +276,25 @@ emitClosureInfo ci = gsGroup . ggsClosureInfo %= (ci:)
 -- | emit static data for the binding group
 emitStatic :: Text -> StaticVal -> Maybe Ident -> G ()
 emitStatic ident val cc = gsGroup . ggsStatic %= (StaticInfo ident val cc :)
+
+emitForeign :: Maybe RealSrcSpan
+            -> Text
+            -> Safety
+            -> CCallConv
+            -> [Text]
+            -> Text
+            -> G ()
+emitForeign mbSpan pattern safety cconv arg_tys res_ty =
+  gsGroup . ggsForeignRefs %= (ForeignRef spanTxt pattern safety cconv arg_tys res_ty :)
+  where
+    spanTxt = case mbSpan of
+                Just sp -> T.pack $
+                  unpackFS (srcSpanFile sp) ++
+                  " " ++
+                  show (srcSpanStartLine sp, srcSpanStartCol sp) ++
+                  "-" ++
+                  show (srcSpanEndLine sp, srcSpanEndCol sp)
+                Nothing -> "<unknown>"
 
 adjPushStack :: Int -> G ()
 adjPushStack n = do

@@ -130,12 +130,13 @@ data ExprCtx = ExprCtx
        , _ctxLne        :: UniqSet Id -- ^ all lne-bound things
        , _ctxLneFrameBs :: UniqFM Int -- ^ binds in current lne frame (defined at size)
        , _ctxLneFrame   :: [(Id,Int)] -- ^ contents of current lne frame
+       , _ctxSrcSpan    :: Maybe RealSrcSpan
        }
 
 makeLenses ''ExprCtx
 
 instance Show ExprCtx where
-  show (ExprCtx top tgt eval lne _lnefbs lnef) =
+  show (ExprCtx top tgt eval lne _lnefbs lnef _mbSpan) =
     "ExprCtx\n" ++ unlines [show top, show tgt, sus eval, sus lne, show lnef]
     where
       sus = show . nonDetEltsUniqSet
@@ -209,6 +210,7 @@ data LinkableUnit = LinkableUnit
   , luIdDeps       :: [Id]          -- ^ identifiers this unit depends on
   , luOtherDeps    :: [OtherSymb]   -- ^ symbols not from a haskell id that this unit depends on
   , luRequired     :: Bool          -- ^ always link this unit
+  , luForeignRefs  :: [ForeignRef]
   } deriving (Eq, Ord, Show)
 
 -- | Generate the ingredients for the linkable units for this module
@@ -243,9 +245,9 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
         staticInit <-
           initStaticPtrs (collectStaticInfo [l | StgTopLifted l <- ss])
         (st', [], bs) <- serializeLinkableUnit m st [] [] []
-                         . O.optimize
+                         ( O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
-                         $ mconcat (reverse glbl) <> staticInit
+                         $ mconcat (reverse glbl) <> staticInit) [] []
         return ( st'
                , LinkableUnit bs
                               []
@@ -253,6 +255,7 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
                               []
                               []
                               False
+                              []
                  : lus
                )
 
@@ -271,9 +274,9 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
         extraTl   <- use (gsGroup . ggsToplevelStats)
         si        <- use (gsGroup . ggsStatic)
         let stat = mempty -- mconcat (reverse extraTl) <> b1 ||= e1 <> b2 ||= e2
-        (st', _ss, bs) <- serializeLinkableUnit m st [bnd] [] si $
-                          jsSaturate (Just $ modulePrefix m n) stat
-        pure (st', Just $ LinkableUnit bs [bnd] [] [] [] False)
+        (st', _ss, bs) <- serializeLinkableUnit m st [bnd] [] si
+                          (jsSaturate (Just $ modulePrefix m n) stat) [] []
+        pure (st', Just $ LinkableUnit bs [bnd] [] [] [] False [])
       generateBlock st (StgTopLifted decl) n =
         trace' ("generateBlock:\n" ++ showIndent decl) $
        do
@@ -283,16 +286,17 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
         si        <- use (gsGroup . ggsStatic)
         unf       <- use gsUnfloated
         extraDeps <- use (gsGroup . ggsExtraDeps)
+        fRefs     <- use (gsGroup . ggsForeignRefs)
         resetGroup
         let allDeps  = collectIds unf decl
             topDeps  = collectTopIds decl
             required = hasExport decl
-        (st', _ss, bs) <- serializeLinkableUnit m st topDeps ci si
-                           . O.optimize
-                           . jsSaturate (Just $ modulePrefix m n)
-                           $ mconcat (reverse extraTl) <> tl
+            stat     = O.optimize
+                     . jsSaturate (Just $ modulePrefix m n)
+                     $ mconcat (reverse extraTl) <> tl
+        (st', _ss, bs) <- serializeLinkableUnit m st topDeps ci si stat [] fRefs
         return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq`
-          (st', Just $ LinkableUnit bs topDeps [] allDeps (S.toList extraDeps) required)
+          (st', Just $ LinkableUnit bs topDeps [] allDeps (S.toList extraDeps) required fRefs)
 
 data SomeStaticPtr = SomeStaticPtr
   { sspId          :: Id
@@ -360,10 +364,12 @@ serializeLinkableUnit :: HasDebugCallStack
                       -> [ClosureInfo]
                       -> [StaticInfo]
                       -> JStat               -- generated code for the unit
+                      -> [Object.ExpFun]
+                      -> [Object.ForeignRef]
                       -> G (Object.SymbolTable, [Text], BL.ByteString)
-serializeLinkableUnit _m st i ci si stat = do
+serializeLinkableUnit _m st i ci si stat fe fi = do
   i' <- mapM idStr i
-  let (st', o) = Object.serializeStat st ci si stat
+  let (st', o) = Object.serializeStat st ci si stat fe fi
   rnf i' `seq` rnf o `seq` return (st', i', o)
     where
       idStr i = itxt <$> jsIdI i
@@ -427,7 +433,7 @@ genDependencyData dflags mod units = do
       oneDep :: LinkableUnit
              -> Int
              -> StateT DependencyDataCache G (Int, Object.BlockDeps, Bool, [Object.Fun])
-      oneDep (LinkableUnit _ idExports otherExports idDeps otherDeps req) n = do
+      oneDep (LinkableUnit _ idExports otherExports idDeps otherDeps req frefs) n = do
         (edi, bdi) <- partitionEithers <$> mapM (lookupIdFun n) idDeps
         (edo, bdo) <- partitionEithers <$> mapM lookupOtherFun otherDeps
         expi <- mapM lookupExportedId (filter isExportedId idExports)
@@ -436,7 +442,8 @@ genDependencyData dflags mod units = do
         let bdeps = Object.BlockDeps
                       (IS.toList . IS.fromList . filter (/=n) $ bdi++bdo)
                       (S.toList . S.fromList $ edi++edo)
-                      [] -- fixme support foreign exported
+                      -- [] -- fixme support foreign exported
+                      -- frefs
         return (n, bdeps, req, expi++expo)
 
       idModule :: Id -> Maybe Module
@@ -603,7 +610,7 @@ genToplevelRhs i rhs@(StgRhsClosure cc _bi [] _upd_flag {- srt -} args body) = d
   eid@(TxtI eidt) <- jsEnIdI i
   (TxtI idt)   <- jsIdI i
 --  pushGlobalRefs
-  body <- genBody (ExprCtx i [] emptyUniqSet emptyUniqSet emptyUFM []) i R2 args body
+  body <- genBody (ExprCtx i [] emptyUniqSet emptyUniqSet emptyUFM [] Nothing) i R2 args body
   (lidents, lids) <- unzip <$> liftToGlobal (jsSaturate (Just . T.pack $ "ghcjs_tmp_sat_") body)
   let lidents' = map (\(TxtI t) -> t) lidents
 --  li
@@ -804,7 +811,7 @@ genExpr0 top (StgConApp con args _) = do
   c <- genCon top con as
   return (c, ExprInline (Just as))
 genExpr0 top (StgOpApp (StgFCallOp f _) args t) =
-   genForeignCall f t (top ^. ctxTarget) args
+   genForeignCall top f t (top ^. ctxTarget) args
 genExpr0 top (StgOpApp (StgPrimOp op) args t)    = genPrimOp top op args t
 genExpr0 top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall top c args t
 genExpr0 _   (StgLam{}) = panic "genExpr: StgLam"
@@ -822,6 +829,8 @@ genExpr0 top (StgTick (ProfNote cc count scope) e) = do
   setSCCstats <- ifProfilingM $ setCC cc count scope
   (stats, result) <- genExpr top e
   return (setSCCstats <> stats, result)
+genExpr0 top (StgTick (SourceNote span _sname) e) =
+  genExpr (top & ctxSrcSpan .~ Just span) e
 genExpr0 top (StgTick _m e) = genExpr top e
 
 might_be_a_function :: HasDebugCallStack => Type -> Bool
@@ -1108,7 +1117,7 @@ genEntry ctx i rhs@(StgRhsClosure cc _bi live upd_flag args body) = resetSlots $
                                 sr
   emitToplevel (ei ||= JFunc [] (ll <> upd <> setcc <> body))
   where
-    entryCtx = ExprCtx i [] (ctx ^. ctxEval) (ctx ^. ctxLne) emptyUFM []
+    entryCtx = ExprCtx i [] (ctx ^. ctxEval) (ctx ^. ctxLne) emptyUFM [] (ctx ^. ctxSrcSpan)
 
 genEntryType :: HasDebugCallStack => [Id] -> G CIType
 genEntryType []   = return CIThunk
@@ -1708,19 +1717,23 @@ allocateStaticList _ _ = panic "allocateStaticList: unexpected literal in list"
 -- currently marshalling:
 --   String literals passed as real JS string
 --   Ptr ghcjs-base.GHCJS.Types.JSChar -> JavaScript String
-genFFIArg :: StgArg -> G (JStat, [JExpr])
-genFFIArg (StgLitArg (MachStr str)) =
+genFFIArg :: Bool -> StgArg -> G (JStat, [JExpr])
+genFFIArg isJavaScriptCc (StgLitArg (MachStr str)) =
   case decodeModifiedUTF8 str of
     Just t -> return (mempty, [toJExpr $ T.unpack t])
     _      -> panic "genFFIArg: cannot encode FFI string literal"
-genFFIArg (StgLitArg l) = (mempty,) <$> genLit l
-genFFIArg a@(StgVarArg i)
+genFFIArg isJavaScriptCc (StgLitArg l) = (mempty,) <$> genLit l
+genFFIArg isJavaScriptCc a@(StgVarArg i)
+    | tycon == byteArrayPrimTyCon || tycon == mutableByteArrayPrimTyCon = do
+        (\x -> (mempty,[x,jint 0])) <$> jsId i
     | isVoid r                  = return (mempty, [])
 --    | Just x <- marshalFFIArg a = x
     | isMultiVar r              = (mempty,) <$> mapM (jsIdN i) [1..varSize r]
     | otherwise                 = (\x -> (mempty,[x])) <$> jsId i
    where
-     r = uTypeVt . stgArgType $ a
+     tycon  = tyConAppTyCon (unwrapType arg_ty)
+     arg_ty = stgArgType a
+     r      = uTypeVt arg_ty
 
 genIdArg :: HasDebugCallStack => Id -> G [JExpr]
 genIdArg i = genArg (StgVarArg i)
@@ -1994,12 +2007,14 @@ argJSStringLitUnfolding (StgVarArg v)
 argJSStringLitUnfolding _ = Nothing
 
 genForeignCall :: HasDebugCallStack
-               => ForeignCall
+               => ExprCtx
+               -> ForeignCall
                -> Type
                -> [JExpr]
                -> [StgArg]
                -> G (JStat, ExprResult)
-genForeignCall (CCall (CCallSpec (StaticTarget _ tgt Nothing True)
+genForeignCall top
+               (CCall (CCallSpec (StaticTarget _ tgt Nothing True)
                                  JavaScriptCallConv
                                  PlayRisky))
                t
@@ -2011,7 +2026,8 @@ genForeignCall (CCall (CCallSpec (StaticTarget _ tgt Nothing True)
       return ( assignj obj (ValExpr (JHash $ M.fromList pairs'))
              , ExprInline Nothing
              )
-genForeignCall (CCall (CCallSpec ccTarget cconv safety)) t tgt args =
+genForeignCall top (CCall (CCallSpec ccTarget cconv safety)) t tgt args = do
+  emitForeign (top ^. ctxSrcSpan) (T.pack lbl) safety cconv (map showArgType args) (showType t)
   (,exprResult) <$> parseFFIPattern catchExcep async isJsCc lbl t tgt' args
   where
     isJsCc = cconv == JavaScriptCallConv
@@ -2119,7 +2135,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
       case parseFfiJME pat u of
         Right (ValExpr (JVar (TxtI _ident))) -> mkApply pat
         Right expr | not async && length tgt < 2 -> do
-          (statPre, ap) <- argPlaceholders args
+          (statPre, ap) <- argPlaceholders javascriptCc args
           let rp  = resultPlaceholders async t ret
               env = M.fromList (rp ++ ap)
           if length tgt == 1
@@ -2132,7 +2148,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
           Right stat -> do
             let rp = resultPlaceholders async t ret
             let cp = callbackPlaceholders callback
-            (statPre, ap) <- argPlaceholders args
+            (statPre, ap) <- argPlaceholders javascriptCc args
             let env = M.fromList (rp ++ ap ++ cp)
             return $ statPre <> (everywhere (mkT $ replaceIdent env) stat) -- fixme trace?
   where
@@ -2141,11 +2157,11 @@ parseFFIPattern' callback javascriptCc pat t ret args
     -- automatic apply, build call and result copy
     mkApply f
       | Just cb <- callback = do
-         (stats, as) <- unzip <$> mapM genFFIArg args
+         (stats, as) <- unzip <$> mapM (genFFIArg javascriptCc) args
          cs <- use gsSettings
          return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as++[cb])
       | (ts@(_:_)) <- tgt = do
-         (stats, as) <- unzip <$> mapM genFFIArg args
+         (stats, as) <- unzip <$> mapM (genFFIArg javascriptCc) args
          (statR, (t:ts')) <- return (mempty, ts)
          cs <- use gsSettings
          return $ traceCall cs as
@@ -2154,7 +2170,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
                 <> copyResult ts'
                 <> statR
       | otherwise = do
-         (stats, as) <- unzip <$> mapM genFFIArg args
+         (stats, as) <- unzip <$> mapM (genFFIArg javascriptCc) args
          cs <- use gsSettings
          return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as)
         where f' = toJExpr (TxtI $ T.pack f)
@@ -2171,6 +2187,15 @@ parseFFIPattern' callback javascriptCc pat t ret args
     traceCall cs as
         | csTraceForeign cs = [j| h$traceForeign(`pat`, `as`); |]
         | otherwise         = mempty
+
+showArgType :: StgArg -> Text
+showArgType a = showType (stgArgType a)
+
+showType :: Type -> Text
+showType t
+  | Just tc <- tyConAppTyCon_maybe (unwrapType t) =
+      T.pack (show tc)
+  | otherwise = "<unknown>"
 
 -- parse and saturate ffi splice
 parseFfiJME :: String -> Int -> Either P.ParseError JExpr
@@ -2214,9 +2239,9 @@ resultPlaceholders False t rs =
 
 -- $1, $2, $3 for single, $1_1, $1_2 etc for dual
 -- void args not counted
-argPlaceholders :: [StgArg] -> G (JStat, [(Ident,JExpr)])
-argPlaceholders args = do
-  (stats, idents0) <- unzip <$> mapM genFFIArg args
+argPlaceholders :: Bool -> [StgArg] -> G (JStat, [(Ident,JExpr)])
+argPlaceholders isJavaScriptCc args = do
+  (stats, idents0) <- unzip <$> mapM (genFFIArg isJavaScriptCc) args
   let idents = filter (not . null) idents0
   return $ (mconcat stats, concat
     (zipWith (\is n -> mkPlaceholder True ("$"++show n) is) idents [(1::Int)..]))

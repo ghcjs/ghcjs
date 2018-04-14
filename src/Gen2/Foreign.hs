@@ -635,11 +635,7 @@ mk_alt return_result (Just prim_res_ty, wrap_result)
                 -- The ccall returns a non-() value
   | isUnboxedTupleType prim_res_ty = do
     let
-#if __GLASGOW_HASKELL__ >= 711
         Just ls = fmap dropRuntimeRepArgs (tyConAppArgs_maybe prim_res_ty)
-#else
-        Just ls = tyConAppArgs_maybe prim_res_ty
-#endif
         arity = 1 + length ls
     args_ids {-@(result_id:as)-} <- mapM newSysLocalDs ls
     state_id <- newSysLocalDs realWorldStatePrimTy
@@ -648,12 +644,7 @@ mk_alt return_result (Just prim_res_ty, wrap_result)
           mkCoreUbxTup ls (map Var args_ids)
         the_rhs = return_result (Var state_id)
                                 (wrap_result result_tup)
-#if __GLASGOW_HASKELL__ >= 711
         ccall_res_ty = mkTupleTy Unboxed (realWorldStatePrimTy : ls)
-#else
-        ccall_res_ty = mkTyConApp (tupleTyCon Unboxed arity)
-                                  (realWorldStatePrimTy : ls)
-#endif
         the_alt      = ( DataAlt (tupleDataCon Unboxed arity)
                        , (state_id : args_ids)
                        , the_rhs
@@ -666,13 +657,8 @@ mk_alt return_result (Just prim_res_ty, wrap_result)
     let
         the_rhs = return_result (Var state_id)
                                 (wrap_result (Var result_id))
-#if __GLASGOW_HASKELL__ >= 711
         ccall_res_ty = mkTupleTy Unboxed [realWorldStatePrimTy, prim_res_ty]
         the_alt      = (DataAlt (tupleDataCon Unboxed 2), [state_id, result_id], the_rhs)
-#else
-        ccall_res_ty = mkTyConApp unboxedPairTyCon [realWorldStatePrimTy, prim_res_ty]
-        the_alt      = (DataAlt unboxedPairDataCon, [state_id, result_id], the_rhs)
-#endif
     return (ccall_res_ty, the_alt)
 
 fun_type_arg_stdcall_info :: DynFlags -> CCallConv -> Type -> Maybe Int
@@ -690,13 +676,8 @@ jsResultWrapper result_ty
   -- Base case 1a: unboxed tuples
   | Just (tc, args) <- splitTyConApp_maybe result_ty
   , isUnboxedTupleTyCon tc {- && False -} = do
-#if __GLASGOW_HASKELL__ >= 711
     let args' = dropRuntimeRepArgs args
     (tys, wrappers) <- unzip <$> mapM jsResultWrapper args'
-#else
-    let args' = args
-    (tys, wrappers) <- unzip <$> mapM jsResultWrapper args'
-#endif
     matched <- mapM (mapM newSysLocalDs) tys
     let tys'    = catMaybes tys
         arity   = length args'
@@ -709,11 +690,7 @@ jsResultWrapper result_ty
       if null tys'
         then (Nothing, \_ -> resWrap)
         else let innerArity = length tys'
-#if __GLASGOW_HASKELL__ >= 711
                  innerTy    = mkTupleTy Unboxed tys'
-#else
-                 innerTy    = mkTyConApp (tupleTyCon Unboxed innerArity) tys'
-#endif
                  innerCon   = tupleDataCon Unboxed innerArity
                  inner :: CoreExpr -> CoreExpr
                  inner e    = mkWildCase e innerTy result_ty
@@ -730,13 +707,8 @@ jsResultWrapper result_ty
   -- fixme: levity args?
   | Just (tc, args) <- splitTyConApp_maybe result_ty
   , isBoxedTupleTyCon tc = do
-#if __GLASGOW_HASKELL__ >= 711
       let args'   = dropRuntimeRepArgs args
           innerTy = mkTupleTy Unboxed args'
-#else
-      let args'   = args
-          innerTy = mkTyConApp (tupleTyCon Unboxed (length args')) args'
-#endif
       (inner_res, w) <- jsResultWrapper innerTy
       matched <- mapM newSysLocalDs args'
       let inner e = mkWildCase (w e) innerTy result_ty

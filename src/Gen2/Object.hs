@@ -48,12 +48,12 @@ module Gen2.Object ( object
                    , SymbolTable
                    , ObjUnit (..)
                    , Deps (..), BlockDeps (..)
+                   , ForeignRef (..), ExpFun (..)
                    , Fun (..), showFun
                    , Package (..), showPkg
                    , versionTag, versionTagLength
                    ) where
 
-import           Control.Applicative
 import           Control.DeepSeq
 import           Control.Exception (bracket, evaluate)
 import           Control.Lens
@@ -122,7 +122,8 @@ instance NFData Deps
 data BlockDeps = BlockDeps
   { blockBlockDeps       :: [Int] -- ^ dependencies on blocks in this object
   , blockFunDeps         :: [Fun] -- ^ dependencies on exported symbols in other objects
-  , blockForeignExported :: [ExpFun]
+  -- , blockForeignExported :: [ExpFun]
+  -- , blockForeignImported :: [ForeignRef]
   } deriving (Show, Generic)
 
 instance NFData BlockDeps
@@ -131,6 +132,7 @@ data ExpFun = ExpFun { isIO   :: !Bool
                      , args   :: [JSFFIType]
                      , result :: !JSFFIType
                      } deriving (Eq, Ord, Show)
+
 
 {- | we use the convention that the first unit (0) is a module-global
      unit that's always included when something from the module
@@ -250,10 +252,12 @@ unexpected err = ask >>= \e ->
   error (oeName e ++ ": " ++ err)
 
 -- one toplevel block in the object file
-data ObjUnit = ObjUnit { oiSymbols :: [Text]         -- toplevel symbols (stored in index)
-                       , oiClInfo  :: [ClosureInfo]  -- closure information of all closures in block
-                       , oiStatic  :: [StaticInfo]   -- static closure data
-                       , oiStat    :: JStat          -- the code
+data ObjUnit = ObjUnit { oiSymbols  :: [Text]         -- toplevel symbols (stored in index)
+                       , oiClInfo   :: [ClosureInfo]  -- closure information of all closures in block
+                       , oiStatic   :: [StaticInfo]   -- static closure data
+                       , oiStat     :: JStat          -- the code
+                       , oiFExports :: [ExpFun]
+                       , oiFImports :: [ForeignRef]
                        }
 
 -- | build an object file
@@ -263,8 +267,8 @@ object :: Deps        -- ^ the dependencies
 object ds units = object' symbs ds xs
   where
     (xs, symbs) = go emptySymbolTable units
-    go st0 (ObjUnit sy cl si st : ys) =
-      let (st1, bs)  = serializeStat st0 cl si st
+    go st0 (ObjUnit sy cl si st fe fi : ys) =
+      let (st1, bs)  = serializeStat st0 cl si st fe fi
           (bss, st2) = go st1 ys
       in  ((sy,bs):bss, st2)
     go st0 [] = ([], st0)
@@ -273,9 +277,11 @@ serializeStat :: SymbolTable
               -> [ClosureInfo]
               -> [StaticInfo]
               -> JStat
+              -> [ExpFun]
+              -> [ForeignRef]
               -> (SymbolTable, ByteString)
-serializeStat st ci si s =
-  let (st', bs) = runPutS st (put ci >> put s >> put si) -- fixme order
+serializeStat st ci si s fe fi =
+  let (st', bs) = runPutS st (put ci >> put s >> put si >> put fe >> put fi) -- fixme order
       bs' = B.toStrict bs
   in  (st', B.fromChunks [bs'])
 
@@ -336,8 +342,13 @@ instance Objectable Deps where
              <*> ((\xs -> listArray (0, length xs - 1) xs) <$> get)
 
 instance Objectable BlockDeps where
-  put (BlockDeps bbd bfd bfe) = put bbd >> put bfd >> put bfe
-  get = BlockDeps <$> get <*> get <*> get
+  put (BlockDeps bbd bfd) = put bbd >> put bfd
+  get = BlockDeps <$> get <*> get
+
+instance Objectable ForeignRef where
+  put (ForeignRef span pat safety cconv arg_tys res_ty) =
+    put span >> put pat >> putEnum safety >> putEnum cconv >> put arg_tys >> put res_ty
+  get = ForeignRef <$> get <*> get <*> getEnum <*> getEnum <*> get <*> get
 
 instance Objectable ExpFun where
   put (ExpFun isIO args res) = put isIO >> put args >> put res
@@ -404,8 +415,8 @@ readObjectKeys' name p st bsidx bsobjs = catMaybes (zipWith readObj [0..] idx)
     where
       idx = getIndex name st bsidx
       readObj n (x,off)
-        | p n x     = let (ci, s, si) = runGetS name st ((,,) <$> get <*> get <*> get) (B.drop off bsobjs) -- fixme order!
-                      in  Just (ObjUnit x ci si s)
+        | p n x     = let (ci, s, si, fe, fi) = runGetS name st ((,,,,) <$> get <*> get <*> get <*> get <*> get) (B.drop off bsobjs) -- fixme order!
+                      in  Just (ObjUnit x ci si s fe fi)
         | otherwise = Nothing
 
 getSymbolTable :: ByteString -> SymbolTableR
@@ -467,7 +478,7 @@ showObject :: [ObjUnit] -> TL.Text
 showObject xs = mconcat (zipWith showSymbol xs [0..])
   where
     showSymbol :: ObjUnit -> Int -> TL.Text
-    showSymbol (ObjUnit symbs cis sis stat) n -- fixme show static data
+    showSymbol (ObjUnit symbs cis sis stat _fexp _fimp) n -- fixme show static data
       | "h$debug" `elem` symbs =
            "/*\n" <> (TL.fromStrict $ T.unlines ( stat ^.. template . _JStr )) <> "\n*/\n"
       | otherwise = TL.unlines
@@ -489,11 +500,12 @@ showDeps (Deps p m r e b) =
     listOf n f xs = "  " <> n <> ":\n" <>
                     TL.unlines (map (TL.pack . ("  - "++) . f) xs)
     blockExps = IM.fromListWith (++) $ map (\(f,n) -> (n,[f])) (M.toList e)
-    dumpBlock (n, (BlockDeps bbd bfd bfe)) = TL.pack (show n) <> " ->\n" <>
+    dumpBlock (n, (BlockDeps bbd bfd)) = TL.pack (show n) <> " ->\n" <>
       listOf "block deps" show bbd <>
 
-      listOf "external deps" showFun bfd <>
-      listOf "exports"       showFun (fromMaybe [] $ IM.lookup n blockExps) {- <>
+      listOf "external deps" showFun bfd {- <>
+      listOf "exports"       showFun (fromMaybe [] $ IM.lookup n blockExps) <>
+      listOf "foreign refs"  show bfi <>
       listOf "foreign exports" fixme bfe fixme -}
 
 showPkg :: Package -> TL.Text

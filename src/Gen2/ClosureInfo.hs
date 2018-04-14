@@ -4,14 +4,17 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module Gen2.ClosureInfo where
 
 import           Control.DeepSeq
 import           GHC.Generics
 
+import           Data.Aeson (ToJSON(..), object, (.=))
 import           Data.Array
 import           Data.Bits ((.|.), shiftL)
+import qualified Data.Binary     as DB
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
 import           Data.Default
@@ -27,6 +30,8 @@ import           Compiler.JMacro
 import           Gen2.StgAst ()
 import           Gen2.Utils
 
+import           BasicTypes ( SourceText(..) )
+import           ForeignCall (CCallSpec(..), CCallConv(..), Safety(..), CCallTarget(..))
 import           DynFlags
 import           StgSyn
 import           DataCon
@@ -69,6 +74,53 @@ data VarType = PtrV     -- pointer = reference to heap object (closure object)
                 deriving (Eq, Ord, Show, Enum, Bounded, Generic)
 
 instance NFData VarType
+
+data ForeignRef = ForeignRef { foreignRefSrcSpan  :: Text
+                             , foreignRefPattern  :: Text
+                             , foreignRefSafety   :: Safety
+                             , foreignRefCConv    :: CCallConv
+                             , foreignRefArgs     :: [Text]
+                             , foreignRefResult   :: Text
+                             } deriving (Eq, Ord, Show, Generic)
+
+instance NFData ForeignRef
+instance DB.Binary ForeignRef
+instance ToJSON ForeignRef where
+  toJSON (ForeignRef srcSpan pat sfty cc args res) = object
+    [ "span"      .= srcSpan
+    , "pattern"   .= pat
+    , "safety"    .= safetyText sfty
+    , "cconv"     .= cconvText cc
+    , "arguments" .= args
+    , "result"    .= res
+    ]
+
+-- instance ToJSON
+
+safetyText :: Safety -> Text
+safetyText PlaySafe          = "safe"
+safetyText PlayInterruptible = "interruptible"
+safetyText PlayRisky         = "unsafe"
+
+cconvText :: CCallConv -> Text
+cconvText StdCallConv        = "stdcall"
+cconvText CCallConv          = "ccall"
+cconvText CApiConv           = "capi"
+cconvText PrimCallConv       = "prim"
+cconvText JavaScriptCallConv = "javascript"
+
+-- fixme, remove these orphans
+deriving instance Generic Safety
+deriving instance Enum Safety
+deriving instance Ord Safety
+instance DB.Binary Safety
+instance NFData Safety
+
+deriving instance Generic CCallConv
+deriving instance Enum CCallConv
+deriving instance Ord CCallConv
+instance DB.Binary CCallConv
+instance NFData CCallConv
 
 -- can we unbox C x to x, only if x is represented as a Number
 isUnboxableCon :: DataCon -> Bool
@@ -161,7 +213,7 @@ uTypeVt0 ut
 primRepVt :: HasDebugCallStack => PrimRep -> VarType
 primRepVt VoidRep     = VoidV
 primRepVt LiftedRep   = PtrV -- fixme does ByteArray# ever map to this?
-primRepVt UnliftedRep = PtrV
+primRepVt UnliftedRep = RtsObjV
 primRepVt IntRep      = IntV
 primRepVt WordRep     = IntV
 primRepVt Int64Rep    = LongV
