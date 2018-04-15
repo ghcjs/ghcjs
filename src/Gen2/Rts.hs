@@ -799,7 +799,7 @@ fun h$printReg r {
       var iv = "";
       if(r.f.n === "integer-gmp:GHC.Integer.Type.Jp#" ||
          r.f.n === "integer-gmp:GHC.Integer.Type.Jn#") {
-         iv = ' [' + r.d1.join(',') + '](' + h$ghcjsbn_tmp_toJSBN(r.d1).toString() + ')'
+         iv = ' [' + r.d1.join(',') + '](' + h$ghcjsbn_showBase(r.d1, 10) + ')'
       } else if(r.f.n === "integer-gmp:GHC.Integer.Type.S#") {
          iv = ' (S: ' + r.d1 + ')';
       }
@@ -905,7 +905,7 @@ fun h$dumpStackTop stack start sp {
                    var iv = "";
                    if(s.f.n === "integer-gmp:GHC.Integer.Type.Jp#" ||
                      s.f.n === "integer-gmp:GHC.Integer.Type.Jn#") {
-                     iv = ' [' + s.d1.join(',') + '](' + h$ghcjsbn_tmp_toJSBN(s.d1).toString() + ')'
+                     iv = ' [' + s.d1.join(',') + '](' + h$ghcjsbn_showBase(s.d1, 10) + ')'
                    } else if(s.f.n === "integer-gmp:GHC.Integer.Type.S#") {
                      iv = ' (S: ' + s.d1 + ')';
                    }
