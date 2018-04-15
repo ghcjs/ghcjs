@@ -193,8 +193,8 @@ dumpAst st _settings dflags s
   | buildingDebug dflags = (st', [(["h$debug", "h$dumpAst"], bs)])
   | otherwise            = (st, [])
       where
-        (st', bs) = Object.serializeStat st [] [] [j| h$dumpAst = `x` |]
-        x = intercalate "\n\n" (map showIndent s)
+        (st', bs) = Object.serializeStat st [] [] [j| h$dumpAst = `x` |] [] []
+        x = T.intercalate "\n\n" (map (T.pack . showIndent) s)
 
 -- | variable prefix for the nth block in module
 modulePrefix :: Module -> Int -> Text
