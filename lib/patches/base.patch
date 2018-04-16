@@ -230,7 +230,7 @@ diff -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
  import GHC.Conc.Sync
  
 -#ifndef mingw32_HOST_OS
-+#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
++#if !defined(mingw32_HOST_OS)
  import GHC.Conc.Signal
  #endif
 diff -Nru upstream/pkg/base/GHC/Event/Manager.hs boot/pkg/base/GHC/Event/Manager.hs
