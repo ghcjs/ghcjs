@@ -58,14 +58,11 @@ diff -Nru upstream/pkg/unix/System/Posix/Signals.hsc boot/pkg/unix/System/Posix/
    error "installHandler: not available for Parallel Haskell"
 -#else
 -
-+##elif defined(ghcjs_HOST_OS)
-+installHandler =
-+  error "installHandler: not available for GHCJS"
 +##else
  installHandler sig handler _maybe_mask = do
    ensureIOManagerIsRunning  -- for the threaded RTS
  
-@@ -441,7 +443,7 @@
+@@ -441,7 +440,7 @@
          siginfoError  = Errno errno,
          siginfoSpecific = extra }
  

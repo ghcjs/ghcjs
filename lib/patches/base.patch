@@ -214,14 +214,14 @@ diff -Nru upstream/pkg/base/GHC/Conc/Windows.hs boot/pkg/base/GHC/Conc/Windows.h
  
 +#endif
 diff -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
---- upstream/pkg/base/GHC/Conc.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Conc.hs	2018-01-09 08:27:50.750813861 +0000
+--- upstream/pkg/base/GHC/Conc.hs	2018-02-15 22:31:54.000000000 +0000
++++ boot/pkg/base/GHC/Conc.hs	2018-04-16 11:09:28.873261698 +0000
 @@ -95,7 +95,7 @@
          , asyncWriteBA
  #endif
  
 -#ifndef mingw32_HOST_OS
-+#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
++#if !defined(mingw32_HOST_OS)
          , Signal, HandlerFun, setHandler, runHandlers
  #endif
  
