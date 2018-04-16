@@ -1880,9 +1880,9 @@ allocCon :: Ident -> DataCon -> CostCentreStack -> [JExpr] -> C
 allocCon to con cc xs
   | isBoolTy (dataConType con) || isUnboxableCon con = do
       return [j| `to` = `allocUnboxedCon con xs`; |]
-  | null xs = do
+{-  | null xs = do
       i <- jsId (dataConWorkId con)
-      return (assignj to i)
+      return (assignj to i) -}
   | otherwise = do
       e <- enterDataCon con
       cs <- use gsSettings
