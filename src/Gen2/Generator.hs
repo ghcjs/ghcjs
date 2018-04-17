@@ -721,9 +721,10 @@ genBody0 :: HasDebugCallStack
          -> C
 genBody0 ctx i startReg args e = do
   la <- loadArgs startReg args
+  lav <- verifyRuntimeReps args
   let ids = take (resultSize args $ idType i) (map toJExpr $ enumFrom R1)
   (e, _r) <-  trace' ("genBody0 ids:\n" ++ show ids) (genExpr (ctx & ctxTarget .~ ids) e)
-  return $ la <> e <> returnStack -- [j| return `Stack`[`Sp`]; |]
+  return $ la <> lav <> e <> returnStack -- [j| return `Stack`[`Sp`]; |]
 
 -- find the result type after applying the function to the arguments
 resultSize :: HasDebugCallStack => [Id] -> Type -> Int
@@ -1100,6 +1101,7 @@ genEntry _ _i (StgRhsCon _cc _con _args) = return () -- mempty -- error "local d
 
 genEntry ctx i rhs@(StgRhsClosure cc _bi live upd_flag args body) = resetSlots $ do
   ll    <- loadLiveFun live
+  llv   <- verifyRuntimeReps live
   upd   <- genUpdFrame upd_flag i
   body  <- genBody entryCtx i R2 args body
   ei    <- jsEntryIdI i
@@ -1115,7 +1117,7 @@ genEntry ctx i rhs@(StgRhsClosure cc _bi live upd_flag args body) = resetSlots $
                                 (fixedLayout $ map (uTypeVt . idType) live)
                                 et
                                 sr
-  emitToplevel (ei ||= JFunc [] (ll <> upd <> setcc <> body))
+  emitToplevel (ei ||= JFunc [] (ll <> llv <> upd <> setcc <> body))
   where
     entryCtx = ExprCtx i [] (ctx ^. ctxEval) (ctx ^. ctxLne) emptyUFM [] (ctx ^. ctxSrcSpan)
 
@@ -1319,11 +1321,14 @@ genRet0 ctx e at as l = withNewIdent f
     fun free = resetSlots $ do
       decs          <- declIds e
       load          <- flip assignAll [R1 ..] <$> genIdsI e
+      loadv         <- verifyRuntimeReps [e]
       ras           <- loadRetArgs free
+      rasv          <- verifyRuntimeReps (map (\(x,_,_)->x) free)
       restoreCCS    <- ifProfilingM $ popUnknown [jCurrentCCS]
       rlne          <- popLneFrame False lneLive ctx'
+      rlnev         <- verifyRuntimeReps (map fst $ take lneLive (ctx' ^. ctxLneFrame))
       (alts, _altr) <- genAlts ctx' e at Nothing as
-      return $ decs <> load  <> ras <> restoreCCS <> rlne <> alts <>
+      return $ decs <> load <> loadv <> ras <> rasv <> restoreCCS <> rlne <> rlnev <> alts <>
                returnStack
 
 
@@ -1403,8 +1408,10 @@ genAlts :: HasDebugCallStack
         -> G (JStat, ExprResult)
 genAlts top e at me as =
   trace''
-  ("genAlts0\n" ++ unlines ([{- show top, -} show e, show at] ++ map show as))
-  (genAlts0 top e at me as)
+  ("genAlts0\n" ++ unlines ([{- show top, -} show e, show at] ++ map show as)) $ do
+    ver <- verifyMatchRep e at
+    (st, er) <- genAlts0 top e at me as
+    pure (ver <> st, er)
   --(\(_,s,r) -> (s,r)) <$> mkAlgBranch top e alt
 
 
@@ -2351,3 +2358,39 @@ isInlineApp v i [StgVarArg a]
   , isNewTyCon (dataConTyCon dc)
   , isStrictType (idType a) || a `elementOfUniqSet` v || isStrictId a = True
 isInlineApp _ _ _ = False
+
+verifyMatchRep :: HasDebugCallStack => Id -> AltType -> C
+#ifndef RUNTIME_ASSERTIONS
+verifyMatchRep _ _ = pure mempty
+#else
+verifyMatchRep x (AlgAlt tc) = do
+  ix <- genIds x
+  pure $ ApplStat (ValExpr (JVar (TxtI "h$verify_match_alg")))
+                  (ValExpr(JStr(T.pack (show tc))):ix)
+verifyMatchRep _ _ = pure mempty
+#endif
+
+verifyRuntimeReps :: HasDebugCallStack => [Id] -> C
+#ifndef RUNTIME_ASSERTIONS
+verifyRuntimeReps _  = pure mempty
+#else
+verifyRuntimeReps xs = mconcat <$> mapM verifyRuntimeRep xs
+  where
+    verifyRuntimeRep i = do
+      i' <- genIds i
+      pure $ go i' (idVt i)
+    go js         (VoidV:vs) = go js vs
+    go (j1:j2:js) (LongV:vs) = v "h$verify_rep_long" [j1,j2] <> go js vs
+    go (j1:j2:js) (AddrV:vs) = v "h$verify_rep_addr" [j1,j2] <> go js vs
+    go (j:js)     (v:vs)     = ver j v                       <> go js vs
+    go []         []         = mempty
+    go _          _          = panic
+      ("verifyRuntimeReps: inconsistent sizes: " ++ show xs)
+    ver j PtrV    = v "h$verify_rep_heapobj" [j]
+    ver j IntV    = v "h$verify_rep_int"     [j]
+    ver j RtsObjV = v "h$verify_rep_rtsobj"  [j]
+    ver j DoubleV = v "h$verify_rep_double"  [j]
+    ver j ArrV    = v "h$verify_rep_arr"     [j]
+    ver _ _       = mempty
+    v f as = ApplStat (ValExpr (JVar (TxtI f))) as
+#endif

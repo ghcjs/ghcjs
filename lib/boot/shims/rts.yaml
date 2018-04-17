@@ -20,3 +20,4 @@ js:
   - src/stm.js
   - src/staticpointer.js
   - src/hscore.js
+  - src/verify.js

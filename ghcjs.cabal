@@ -49,6 +49,16 @@ flag no-wrapper-install
   default:     False
   manual:      True
 
+flag disable-optimizer
+  description: disable the GHCJS optimizer, for debugging purposes
+  default:     False
+  manual:      True
+
+flag runtime-assertions
+  description: add runtime assertions to the generated code, for debugging purposes (this makes the code much bigger and slower!)
+  default:     False
+  manual:      True
+
 Library
     if os(Windows)
       cpp-options: -DWINDOWS
@@ -153,6 +163,11 @@ Library
     hs-source-dirs: src
     include-dirs: include
     GHC-Options: -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-unused-do-bind -fprof-auto-calls
+    if flag(disable-optimizer)
+      cpp-options: -DDISABLE_OPTIMIZER
+    if flag(runtime-assertions)
+      cpp-options: -DRUNTIME_ASSERTIONS
+
 -- the compiler executable, Setup.hs installs a wrapper script that
 -- supplies the installation directory
 Executable ghcjs
