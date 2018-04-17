@@ -61,6 +61,8 @@ var ctx = { global: global
           , clearTimeout: clearTimeout
           , setInterval: setInterval
           , clearInterval: clearInterval
+          , setImmediate: setImmediate
+          , clearImmediate: clearImmediate
           , Buffer: Buffer
           , ArrayBuffer: ArrayBuffer
           , DataView: DataView
@@ -101,5 +103,3 @@ function reportGlobals(b, c) {
         }
     }
 }
-
-
