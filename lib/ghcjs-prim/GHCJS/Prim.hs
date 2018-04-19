@@ -214,7 +214,7 @@ unpackJSStringUtf8# a = IO $
 
 unpackJSStringUtf8## :: Addr# -> State# s -> (# State# s, JSVal# #)
 unpackJSStringUtf8## a s = js_unpackJSStringUtf8## a s
-{-# NOINLINE unpackJSStringUtf8## #-}
+{-# INLINE [0] unpackJSStringUtf8## #-}
 
 -- | only safe on immutable Addr#
 unsafeUnpackJSString# :: Addr# -> JSVal
@@ -229,7 +229,7 @@ unsafeUnpackJSStringUtf8# a = JSVal (unsafeUnpackJSStringUtf8## a)
 
 unsafeUnpackJSStringUtf8## :: Addr# -> JSVal#
 unsafeUnpackJSStringUtf8## a = js_unsafeUnpackJSStringUtf8## a
-{-# NOINLINE unsafeUnpackJSStringUtf8## #-}
+{-# INLINE [0] unsafeUnpackJSStringUtf8## #-}
 
 
 -- reduce the spine and all list elements to whnf

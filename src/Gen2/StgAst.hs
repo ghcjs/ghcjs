@@ -73,6 +73,8 @@ instance Show Var where show v = "(" ++ show (Var.varName v) ++ "[" ++
                                  "]" ++ if isGlobalId v then "G" else "L" ++
                                  " <" ++ show (idDetails v) ++ "> :: " ++
                                  show (Var.varType v) ++ ")"
+                                 ++
+                                 "{{" ++ show (idUnfolding v) ++ "}}"
 instance Show IdDetails where
   show VanillaId          = "VanillaId"
   show (RecSelId {})      = "RecSelId"
@@ -85,6 +87,13 @@ instance Show IdDetails where
   show (DFunId {})        = "DFunId"
   show CoVarId            = "CoVarId"
   show (JoinId {})        = "JoinId"
+
+instance Show Unfolding where
+  show NoUnfolding = "NoUnfolding"
+  show BootUnfolding = "BootUnfolding"
+  show (OtherCon {}) = "OtherCon"
+  show (DFunUnfolding {}) = "DFunUnfolding"
+  show (CoreUnfolding {}) = "CoreUnfolding"
 
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat

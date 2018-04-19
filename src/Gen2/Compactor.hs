@@ -186,12 +186,12 @@ packStrings settings dflags cstate code =
       newOffsetsMap = HM.union (stOffsets origStringTable)
                                (fmap (stringSymbolIdx,) offsetIndex)
 
-      newIdentsMap :: HashMap Text (Either Int Int)
+      newIdentsMap :: HashMap Text (ByteString, Either Int Int)
       newIdentsMap =
         let f (StaticInfo s (StaticUnboxed (StaticUnboxedString bs)) _)
-              = Just (s, Left . fst $ newOffsetsMap HM.! bs)
+              = Just (s, (bs, Left . fst $ newOffsetsMap HM.! bs))
             f (StaticInfo s (StaticUnboxed (StaticUnboxedStringOffset bs)) _)
-              = Just (s, Right . snd $ newOffsetsMap HM.! bs)
+              = Just (s, (bs, Right . snd $ newOffsetsMap HM.! bs))
             f _ = Nothing
         in HM.union (stIdents origStringTable)
                     (HM.fromList $ mapMaybe f allStatics)
@@ -201,8 +201,8 @@ packStrings settings dflags cstate code =
 
       replaceSymbol :: Text -> Maybe JVal
       replaceSymbol t =
-        let f (Left i)  = JVar (TxtI $ newTableIdents ! i)
-            f (Right o) = JInt (fromIntegral o)
+        let f (_, Left i)  = JVar (TxtI $ newTableIdents ! i)
+            f (_, Right o) = JInt (fromIntegral o)
         in  fmap f (HM.lookup t newIdentsMap)
 
       cstate0 :: CompactorState
@@ -229,7 +229,57 @@ packStrings settings dflags cstate code =
       rewriteVals v = v
 
       rewriteStat :: JStat -> JStat
-      rewriteStat st = st & valsS %~ rewriteVals
+      rewriteStat st = st & exprsS %~ rewriteApps
+                          & valsS %~ rewriteVals
+
+      matchStringLiteral :: JExpr -> Maybe Text
+      matchStringLiteral (ApplExpr (ValExpr (JVar (TxtI f)))
+                                   [ (ValExpr (JVar (TxtI t1)))
+                                   , (ValExpr (JVar (TxtI t2)))
+                                   ])
+        | f == "h$decodeUtf8z"
+        , Just (bs1, Left {})  <- HM.lookup t1 newIdentsMap
+        , Just (bs2, Right {}) <- HM.lookup t2 newIdentsMap
+        , bs1 == bs2
+        , Just bsd <- U.decodeModifiedUTF8 bs1
+        = Just bsd
+      matchStringLiteral _ = Nothing
+
+      matchBuildObject :: [JExpr] -> Maybe [(Text, JExpr)]
+      matchBuildObject []       = Just []
+      matchBuildObject (k:v:xs)
+        | Just t  <- matchStringLiteral k
+        , Just ys <- matchBuildObject xs
+        = Just ((t,v):ys)
+      matchBuildObject _ = Nothing
+
+      rewriteApps :: JExpr -> JExpr
+      rewriteApps e
+        | Just t <- matchStringLiteral e = ValExpr (JStr t)
+      rewriteApps (ApplExpr (ValExpr (JVar (TxtI f))) xs)
+        | f == "h$buildObject"
+        , Just pairs <- matchBuildObject xs =
+          ValExpr (JHash (M.fromList pairs))
+      rewriteApps (ApplExpr e1 e2)     =
+        ApplExpr (rewriteApps e1) (map rewriteApps e2)
+      rewriteApps (SelExpr s i)        =
+        SelExpr (rewriteApps s) i
+      rewriteApps (IdxExpr e1 e2)      =
+        IdxExpr (rewriteApps e1) (rewriteApps e2)
+      rewriteApps (InfixExpr op e1 e2) =
+        InfixExpr op (rewriteApps e1) (rewriteApps e2)
+      rewriteApps (UOpExpr uop e)      =
+        UOpExpr uop (rewriteApps e)
+      rewriteApps (IfExpr e1 e2 e3)    =
+        IfExpr (rewriteApps e1) (rewriteApps e2) (rewriteApps e3)
+      rewriteApps (ValExpr v)          = ValExpr (rewriteAppsV v)
+      rewriteApps x                    = x
+
+      rewriteAppsV :: JVal -> JVal
+      rewriteAppsV (JList xs) = JList (map rewriteApps xs)
+      rewriteAppsV (JHash m)  = JHash (fmap rewriteApps m)
+      rewriteAppsV (JFunc args st) = JFunc args (st & exprsS %~ rewriteApps)
+      rewriteAppsV x               = x
 
       rewriteStatic :: StaticInfo -> Maybe StaticInfo
       rewriteStatic (StaticInfo i
@@ -245,8 +295,8 @@ packStrings settings dflags cstate code =
       rewriteStaticArg :: StaticArg -> StaticArg
       rewriteStaticArg a@(StaticObjArg t) =
         case HM.lookup t newIdentsMap of
-          Just (Right v)       -> StaticLitArg (IntLit $ fromIntegral v)
-          Just (Left idx)      -> StaticObjArg (newTableIdents ! idx)
+          Just (_, Right v)    -> StaticLitArg (IntLit $ fromIntegral v)
+          Just (_, Left idx)   -> StaticObjArg (newTableIdents ! idx)
           _                    -> a
       rewriteStaticArg (StaticConArg v es)
         = StaticConArg v (map rewriteStaticArg es)
@@ -705,6 +755,28 @@ renderBase = DB.runPut . putBase
 
 loadBase :: FilePath -> IO Base
 loadBase file = DB.runGet (getBase file) <$> BL.readFile file
+
+----------------------------
+
+{-# INLINE exprsS #-}
+exprsS :: Traversal' JStat JExpr
+exprsS f d@(DeclStat {})      = pure d
+exprsS f (ReturnStat e)       = ReturnStat     <$> f e
+exprsS f (IfStat e s1 s2)     = IfStat         <$> f e <*> exprsS f s1 <*> exprsS f s2
+exprsS f (WhileStat b e s)    = WhileStat b    <$> f e <*> exprsS f s
+exprsS f (ForInStat b i e s)  = ForInStat b    <$> pure i <*> f e <*> exprsS f s
+exprsS f (SwitchStat e xs s)  = SwitchStat     <$> f e <*> (traverse . traverseCase) f xs <*> exprsS f s
+  where traverseCase g (e,s) = (,) <$> g e <*> exprsS g s
+exprsS f (TryStat s1 i s2 s3) = TryStat        <$> exprsS f s1 <*> pure i <*> exprsS f s2 <*> exprsS f s3
+exprsS f (BlockStat xs)       = BlockStat   <$> (traverse . exprsS) f xs
+exprsS f (ApplStat e es)      = ApplStat    <$> f e <*> traverse f es
+exprsS f (UOpStat op e)       = UOpStat op  <$> f e
+exprsS f (AssignStat e1 e2)   = AssignStat  <$> f e1 <*> f e2
+exprsS _ (UnsatBlock{})       = error "exprsS: UnsatBlock"
+exprsS _ (AntiStat{})         = error "exprsS: AntiStat"
+exprsS f (LabelStat l s)      = LabelStat l <$> exprsS f s
+exprsS _ b@(BreakStat{})      = pure b
+exprsS _ c@(ContinueStat{})   = pure c
 
 ----------------------------
 

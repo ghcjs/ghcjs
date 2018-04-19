@@ -82,7 +82,7 @@ data CompactorState = CompactorState
 data StringTable = StringTable
   { stTableIdents :: !(Array Int Text)
   , stOffsets     :: !(HashMap ByteString (Int, Int))  -- ^ content of the table
-  , stIdents      :: !(HashMap Text       (Either Int Int))  -- ^ identifiers in the table
+  , stIdents      :: !(HashMap Text       (ByteString, Either Int Int))  -- ^ identifiers in the table
   } deriving (Show)
 
 instance DB.Binary StringTable where

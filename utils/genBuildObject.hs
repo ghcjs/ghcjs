@@ -74,7 +74,7 @@ genBuildAL body m res = unlines $
   , ""
   , m' ++ " :: [J] -> " ++ res
   , m' ++ " xs = " ++ body
-  , "{-# INLINE [1] " ++ m' ++ " #-}"
+  , "{-# INLINE [0] " ++ m' ++ " #-}"
   , "{-# RULES \"" ++ m' ++ "/empty\" " ++ m' ++ " [] = js_emptyArray" ++ m ++ " #-}"
   ] ++ map mkRule sizes
   where
@@ -137,4 +137,3 @@ genBuild n imp args sig = unlines
   , "  js_" ++ n ++ " :: " ++ sig
   , ""
   ]
-

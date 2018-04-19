@@ -44,6 +44,7 @@ import           RepType
 import           TysPrim
 import           Name
 import           GHC
+import qualified Var
 import           Id
 
 import           Control.Applicative
@@ -596,11 +597,6 @@ genToplevelRhs i rhs@(StgRhsClosure cc _bi _ upd args body)
   | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _)) _)
      [StgLitArg (MachInt _is_js_conv), StgLitArg (MachStr _js_name), StgVarArg _tgt] _) <- body,
      t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
-  -- top-level strings
-  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey
-     && isUpdatable upd && null args = genStrThunk i False bs cc
-  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey
-     && isUpdatable upd && null args = genStrThunk i True bs cc
 -- general cases:
 genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
@@ -613,11 +609,12 @@ genToplevelRhs i rhs@(StgRhsClosure cc _bi [] _upd_flag {- srt -} args body) = d
   body <- genBody (ExprCtx i [] emptyUniqSet emptyUniqSet emptyUFM [] Nothing) i R2 args body
   (lidents, lids) <- unzip <$> liftToGlobal (jsSaturate (Just . T.pack $ "ghcjs_tmp_sat_") body)
   let lidents' = map (\(TxtI t) -> t) lidents
+
 --  li
 --  refs <- popGlobalRefs
   CIStaticRefs sr0 <- genStaticRefsRhs rhs
   let sri = filter (`notElem` lidents') sr0
-      sr   = CIStaticRefs sri
+      sr  = CIStaticRefs sri
 
 --  emitToplevel $ AssignStat (ValExpr (JVar $ TxtI ("h$globalRefs_" <> idt)))
 --                            (ValExpr (JList $ map (ValExpr . JVar) lidents ++ [jnull] ++ map (ValExpr . JVar . TxtI) sri))
@@ -638,7 +635,7 @@ genToplevelRhs i rhs@(StgRhsClosure cc _bi [] _upd_flag {- srt -} args body) = d
   emitClosureInfo (ClosureInfo eidt
                                regs
                                idt
-                               (fixedLayout $ map (uTypeVt . idType) lids) -- (CILayoutFixed 0 [])
+                               (fixedLayout $ map (uTypeVt . idType) lids)
                                et
                                sr)
   ccId <- costCentreStackLbl cc
@@ -850,37 +847,6 @@ genApp :: HasDebugCallStack
        -> Id
        -> [StgArg]
        -> G (JStat, ExprResult)
--- special cases for unpacking C Strings, avoid going through a typed array when possible
-genApp ctx i [StgLitArg (MachStr bs)]
-    | [top] <- (ctx ^. ctxTarget), getUnique i == unpackCStringIdKey =
-        (,ExprInline Nothing) . assignj top <$> do
-          prof <- csProf <$> use gsSettings
-          let profArg = if prof then [jCafCCS] else []
-          return $ case decodeModifiedUTF8 bs of
-            Just t  -> ApplExpr (jsv "h$ustra") $ [toJExpr t] ++ profArg
-            Nothing -> ApplExpr (jsv "h$urstra") $ [toJExpr $ map (chr.fromIntegral) (B.unpack bs)] ++ profArg
-    | [top] <- (ctx ^. ctxTarget), getUnique i == unpackCStringUtf8IdKey =
-        (,ExprInline Nothing) . assignj top <$> do
-          prof <- csProf <$> use gsSettings
-          let profArg = if prof then [jCafCCS] else []
-          return $ case decodeModifiedUTF8 bs of
-            Just t  -> ApplExpr (jsv "h$ustr") $ [toJExpr t] ++ profArg
-            Nothing -> ApplExpr (jsv "h$urstr") $ [toJExpr $ map toInteger (B.unpack bs)] ++ profArg
--- special cases for JSString literals
---    | [top] <- ctxTarget ctx, Just t <- decodeModifiedUtf8 bs, matchVarName "ghcjs-prim" "GHCJS.Prim.unpackJSString" i =
---        (,ExprInline Nothing) . assignj top <$> do
---    | [top] <- ctxTarget ctx, Just t <- decodeModifiedUtf8 bs, matchVarName "ghcjs-prim" "GHCJS.Prim.unpackJSStringUtf8" i =
---        (,ExprInline Nothing) . assignj top <$> do
- -- we could handle unpackNBytes# here, but that's probably not common
- -- enough to warrant a special case
-genApp ctx i [StgLitArg (MachStr bs), x]
-    | [top] <- (ctx ^. ctxTarget), getUnique i == unpackCStringAppendIdKey, Just d <- decodeModifiedUTF8 bs = do
-        -- fixme breaks assumption in codegen if bs doesn't decode
-        prof <- csProf <$> use gsSettings
-        let profArg = if prof then [jCafCCS] else []
-        a <- genArg x
-        return ([j| `top` = `ApplExpr (jsv "h$appendToHsStringA") $ [toJExpr d, toJExpr a] ++ profArg`; |]
-               ,ExprInline Nothing)
 genApp top i a
     | Just n <- top ^. ctxLneFrameBs . to (flip lookupUFM i) = do -- let-no-escape
         as'      <- concatMapM genArg a
@@ -2348,11 +2314,6 @@ isInlineApp v i [] = isUnboxedTupleType (idType i) ||
                      isStrictType (idType i) ||
                      i `elementOfUniqSet` v ||
                      isStrictId i
-isInlineApp _ i [StgLitArg (MachStr _)]
-  | getUnique i `elem` [ unpackCStringIdKey
-                       , unpackCStringUtf8IdKey
-                       , unpackCStringAppendIdKey
-                       ] = True
 isInlineApp v i [StgVarArg a]
   | DataConWrapId dc <- idDetails i
   , isNewTyCon (dataConTyCon dc)
