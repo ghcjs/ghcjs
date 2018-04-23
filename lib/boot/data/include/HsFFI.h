@@ -13,10 +13,9 @@
  *
  * ---------------------------------------------------------------------------*/
 
-#ifndef HSFFI_H
-#define HSFFI_H
+#pragma once
 
-#ifdef __cplusplus
+#if defined(__cplusplus)
 extern "C" {
 #endif
 
@@ -111,7 +110,4 @@ typedef void*			HsStablePtr;
 }
 #endif
 
-#endif /* HSFFI_H */
-
 #endif
-

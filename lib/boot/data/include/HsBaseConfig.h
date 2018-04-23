@@ -312,7 +312,7 @@
 #define CONST_SIGINT 2
 
 /* Define to 1 if you have the `clock_gettime' function. */
-/* #undef HAVE_CLOCK_GETTIME */
+#define HAVE_CLOCK_GETTIME 1
 
 /* Define to 1 if you have the <ctype.h> header file. */
 #define HAVE_CTYPE_H 1
@@ -331,6 +331,9 @@
 
 /* Define to 1 if you have the <fcntl.h> header file. */
 #define HAVE_FCNTL_H 1
+
+/* Define if you have flock support. */
+#define HAVE_FLOCK 1
 
 /* Define to 1 if you have the `ftruncate' function. */
 #define HAVE_FTRUNCATE 1
@@ -377,6 +380,9 @@
 /* Define to 1 if you have the <memory.h> header file. */
 #define HAVE_MEMORY_H 1
 
+/* Define if you have open file descriptor lock support. */
+/* #undef HAVE_OFD_LOCKING */
+
 /* Define if you have poll support. */
 #define HAVE_POLL 1
 
@@ -406,6 +412,9 @@
 
 /* Define to 1 if you have the <sys/event.h> header file. */
 #define HAVE_SYS_EVENT_H 1
+
+/* Define to 1 if you have the <sys/file.h> header file. */
+#define HAVE_SYS_FILE_H 1
 
 /* Define to 1 if you have the <sys/resource.h> header file. */
 #define HAVE_SYS_RESOURCE_H 1
@@ -452,6 +461,9 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #define HAVE_UNISTD_H 1
 
+/* Define to 1 if you have the `unsetenv' function. */
+#define HAVE_UNSETENV 1
+
 /* Define to 1 if you have the <utime.h> header file. */
 #define HAVE_UTIME_H 1
 
@@ -494,8 +506,17 @@
 /* Define to Haskell type for float */
 #define HTYPE_FLOAT Float
 
+/* Define to Haskell type for fsblkcnt_t */
+#define HTYPE_FSBLKCNT_T Word32
+
+/* Define to Haskell type for fsfilcnt_t */
+#define HTYPE_FSFILCNT_T Word32
+
 /* Define to Haskell type for gid_t */
 #define HTYPE_GID_T Word32
+
+/* Define to Haskell type for id_t */
+#define HTYPE_ID_T Word32
 
 /* Define to Haskell type for ino_t */
 #define HTYPE_INO_T Word64
@@ -556,6 +577,9 @@
 
 /* Define to Haskell type for tcflag_t */
 #define HTYPE_TCFLAG_T Word32
+
+/* Define to Haskell type for timer_t */
+#define HTYPE_TIMER_T Ptr ()
 
 /* Define to Haskell type for time_t */
 #define HTYPE_TIME_T Int32
@@ -620,10 +644,50 @@
 /* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1
 
+/* Define if stdlib.h declares unsetenv to return void. */
+/* #undef UNSETENV_RETURNS_VOID */
+
+/* Enable extensions on AIX 3, Interix.  */
+#ifndef _ALL_SOURCE
+# define _ALL_SOURCE 1
+#endif
+/* Enable GNU extensions on systems that have them.  */
+#ifndef _GNU_SOURCE
+# define _GNU_SOURCE 1
+#endif
+/* Enable threading extensions on Solaris.  */
+#ifndef _POSIX_PTHREAD_SEMANTICS
+# define _POSIX_PTHREAD_SEMANTICS 1
+#endif
+/* Enable extensions on HP NonStop.  */
+#ifndef _TANDEM_SOURCE
+# define _TANDEM_SOURCE 1
+#endif
+/* Enable general extensions on Solaris.  */
+#ifndef __EXTENSIONS__
+# define __EXTENSIONS__ 1
+#endif
+
+
+/* Enable large inode numbers on Mac OS X 10.5.  */
+#ifndef _DARWIN_USE_64_BIT_INODE
+# define _DARWIN_USE_64_BIT_INODE 1
+#endif
+
 /* Number of bits in a file offset, on hosts where this is settable. */
 /* #undef _FILE_OFFSET_BITS */
 
 /* Define for large files, on AIX-style hosts. */
 /* #undef _LARGE_FILES */
+
+/* Define to 1 if on MINIX. */
+/* #undef _MINIX */
+
+/* Define to 2 if the system does not provide POSIX.1 features except with
+   this defined. */
+/* #undef _POSIX_1_SOURCE */
+
+/* Define to 1 if you need to in order for `stat' and other things to work. */
+/* #undef _POSIX_SOURCE */
 
 #endif

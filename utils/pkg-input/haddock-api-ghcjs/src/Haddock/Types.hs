@@ -1,8 +1,6 @@
 {-# LANGUAGE CPP, DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveTraversable, StandaloneDeriving, TypeFamilies, RecordWildCards #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-} -- Note [Pass sensitive types]
-                                      -- in module GHC.PlaceHolder
-
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -----------------------------------------------------------------------------
@@ -59,7 +57,7 @@ type InstIfaceMap  = Map Module InstalledInterface  -- TODO: rename
 type DocMap a      = Map Name (MDoc a)
 type ArgMap a      = Map Name (Map Int (MDoc a))
 type SubMap        = Map Name [Name]
-type DeclMap       = Map Name [LHsDecl Name]
+type DeclMap       = Map Name [LHsDecl GhcRn]
 type InstMap       = Map SrcSpan Name
 type FixMap        = Map Name Fixity
 type DocPaths      = (FilePath, Maybe FilePath) -- paths to HTML and sources
@@ -101,10 +99,7 @@ data Interface = Interface
     -- | Declarations originating from the module. Excludes declarations without
     -- names (instances and stand-alone documentation comments). Includes
     -- names of subordinate declarations mapped to their parent declarations.
-  , ifaceDeclMap         :: !(Map Name [LHsDecl Name])
-
-    -- | Bundled pattern synonym declarations for specific types.
-  , ifaceBundledPatSynMap :: !(Map Name [Name])
+  , ifaceDeclMap         :: !(Map Name [LHsDecl GhcRn])
 
     -- | Documentation of declarations originating from the module (including
     -- subordinates).
@@ -116,11 +111,10 @@ data Interface = Interface
   , ifaceRnDocMap        :: !(DocMap DocName)
   , ifaceRnArgMap        :: !(ArgMap DocName)
 
-  , ifaceSubMap          :: !(Map Name [Name])
   , ifaceFixMap          :: !(Map Name Fixity)
 
-  , ifaceExportItems     :: ![ExportItem Name]
-  , ifaceRnExportItems   :: ![ExportItem DocName]
+  , ifaceExportItems     :: ![ExportItem GhcRn]
+  , ifaceRnExportItems   :: ![ExportItem DocNameI]
 
     -- | All names exported by the module.
   , ifaceExports         :: ![Name]
@@ -138,8 +132,8 @@ data Interface = Interface
   , ifaceFamInstances    :: ![FamInst]
 
     -- | Orphan instances
-  , ifaceOrphanInstances :: ![DocInstance Name]
-  , ifaceRnOrphanInstances :: ![DocInstance DocName]
+  , ifaceOrphanInstances :: ![DocInstance GhcRn]
+  , ifaceRnOrphanInstances :: ![DocInstance DocNameI]
 
     -- | The number of haddockable and haddocked items in the module, as a
     -- tuple. Haddockable items are the exports and the module itself.
@@ -186,10 +180,6 @@ data InstalledInterface = InstalledInterface
     -- | Haddock options for this module (prune, ignore-exports, etc).
   , instOptions          :: [DocOption]
 
-  , instSubMap           :: Map Name [Name]
-
-  , instBundledPatSynMap :: Map Name [Name]
-  
   , instFixMap           :: Map Name Fixity
   }
 
@@ -205,8 +195,6 @@ toInstalledIface interface = InstalledInterface
   , instExports          = ifaceExports          interface
   , instVisibleExports   = ifaceVisibleExports   interface
   , instOptions          = ifaceOptions          interface
-  , instSubMap           = ifaceSubMap           interface
-  , instBundledPatSynMap = ifaceBundledPatSynMap interface
   , instFixMap           = ifaceFixMap           interface
   }
 
@@ -225,21 +213,21 @@ data ExportItem name
         expItemDecl :: !(LHsDecl name)
 
         -- | Bundled patterns for a data type declaration
-      , expItemPats :: ![(HsDecl name, DocForDecl name)]
+      , expItemPats :: ![(HsDecl name, DocForDecl (IdP name))]
 
         -- | Maybe a doc comment, and possibly docs for arguments (if this
         -- decl is a function or type-synonym).
-      , expItemMbDoc :: !(DocForDecl name)
+      , expItemMbDoc :: !(DocForDecl (IdP name))
 
         -- | Subordinate names, possibly with documentation.
-      , expItemSubDocs :: ![(name, DocForDecl name)]
+      , expItemSubDocs :: ![(IdP name, DocForDecl (IdP name))]
 
         -- | Instances relevant to this declaration, possibly with
         -- documentation.
       , expItemInstances :: ![DocInstance name]
 
         -- | Fixity decls relevant to this declaration (including subordinates).
-      , expItemFixities :: ![(name, Fixity)]
+      , expItemFixities :: ![(IdP name, Fixity)]
 
         -- | Whether the ExportItem is from a TH splice or not, for generating
         -- the appropriate type of Source link.
@@ -249,10 +237,10 @@ data ExportItem name
   -- | An exported entity for which we have no documentation (perhaps because it
   -- resides in another package).
   | ExportNoDecl
-      { expItemName :: !name
+      { expItemName :: !(IdP name)
 
         -- | Subordinate names.
-      , expItemSubs :: ![name]
+      , expItemSubs :: ![IdP name]
       }
 
   -- | A section heading.
@@ -265,11 +253,11 @@ data ExportItem name
       , expItemSectionId :: !String
 
         -- | Section heading text.
-      , expItemSectionText :: !(Doc name)
+      , expItemSectionText :: !(Doc (IdP name))
       }
 
   -- | Some documentation.
-  | ExportDoc !(MDoc name)
+  | ExportDoc !(MDoc (IdP name))
 
   -- | A cross-reference to another module.
   | ExportModule !Module
@@ -309,14 +297,10 @@ data DocName
      -- documentation, as far as Haddock knows.
   deriving (Eq, Data)
 
-type instance PostRn DocName NameSet  = PlaceHolder
-type instance PostRn DocName Fixity   = PlaceHolder
-type instance PostRn DocName Bool     = PlaceHolder
-type instance PostRn DocName [Name]   = PlaceHolder
+data DocNameI
 
-type instance PostTc DocName Kind     = PlaceHolder
-type instance PostTc DocName Type     = PlaceHolder
-type instance PostTc DocName Coercion = PlaceHolder
+type instance IdP DocNameI = DocName
+
 
 instance NamedThing DocName where
   getName (Documented name _) = name
@@ -363,7 +347,7 @@ data InstType name
   | TypeInst  (Maybe (HsType name)) -- ^ Body (right-hand side)
   | DataInst (TyClDecl name)        -- ^ Data constructors
 
-instance (OutputableBndrId a)
+instance (SourceTextX a, OutputableBndrId a)
          => Outputable (InstType a) where
   ppr (ClassInst { .. }) = text "ClassInst"
       <+> ppr clsiCtx
@@ -382,7 +366,7 @@ instance (OutputableBndrId a)
 -- 'PseudoFamilyDecl' type is introduced.
 data PseudoFamilyDecl name = PseudoFamilyDecl
     { pfdInfo :: FamilyInfo name
-    , pfdLName :: Located name
+    , pfdLName :: Located (IdP name)
     , pfdTyVars :: [LHsType name]
     , pfdKindSig :: LFamilyResultSig name
     }
@@ -404,13 +388,12 @@ mkPseudoFamilyDecl (FamilyDecl { .. }) = PseudoFamilyDecl
 
 
 -- | An instance head that may have documentation and a source location.
-type DocInstance name = (InstHead name, Maybe (MDoc name), Located name)
+type DocInstance name = (InstHead name, Maybe (MDoc (IdP name)), Located (IdP name), Maybe Module)
 
--- | The head of an instance. Consists of a class name, a list of kind
--- parameters, a list of type parameters and an instance type
+-- | The head of an instance. Consists of a class name, a list of type
+-- parameters (which may be annotated with kinds), and an instance type
 data InstHead name = InstHead
-    { ihdClsName :: name
-    , ihdKinds :: [HsType name]
+    { ihdClsName :: IdP name
     , ihdTypes :: [HsType name]
     , ihdInstType :: InstType name
     }
@@ -443,6 +426,8 @@ type LDoc id = Located (Doc id)
 type Doc id = DocH (ModuleName, OccName) id
 type MDoc id = MetaDoc (ModuleName, OccName) id
 
+type DocMarkup id a = DocMarkupH (ModuleName, OccName) id a
+
 instance (NFData a, NFData mod)
          => NFData (DocH mod a) where
   rnf doc = case doc of
@@ -469,6 +454,7 @@ instance (NFData a, NFData mod)
     DocProperty a             -> a `deepseq` ()
     DocExamples a             -> a `deepseq` ()
     DocHeader a               -> a `deepseq` ()
+    DocTable a                -> a `deepseq` ()
 
 #if !MIN_VERSION_ghc_api_ghcjs(8,0,2)
 -- These were added to GHC itself in 8.0.2
@@ -489,38 +475,18 @@ instance NFData Picture where
 instance NFData Example where
   rnf (Example a b) = a `deepseq` b `deepseq` ()
 
+instance NFData id => NFData (Table id) where
+    rnf (Table h b) = h `deepseq` b `deepseq` ()
+
+instance NFData id => NFData (TableRow id) where
+    rnf (TableRow cs) = cs `deepseq` ()
+
+instance NFData id => NFData (TableCell id) where
+    rnf (TableCell i j c) = i `deepseq` j `deepseq` c `deepseq` ()
 
 exampleToString :: Example -> String
 exampleToString (Example expression result) =
     ">>> " ++ expression ++ "\n" ++  unlines result
-
-
-data DocMarkup id a = Markup
-  { markupEmpty                :: a
-  , markupString               :: String -> a
-  , markupParagraph            :: a -> a
-  , markupAppend               :: a -> a -> a
-  , markupIdentifier           :: id -> a
-  , markupIdentifierUnchecked  :: (ModuleName, OccName) -> a
-  , markupModule               :: String -> a
-  , markupWarning              :: a -> a
-  , markupEmphasis             :: a -> a
-  , markupBold                 :: a -> a
-  , markupMonospaced           :: a -> a
-  , markupUnorderedList        :: [a] -> a
-  , markupOrderedList          :: [a] -> a
-  , markupDefList              :: [(a,a)] -> a
-  , markupCodeBlock            :: a -> a
-  , markupHyperlink            :: Hyperlink -> a
-  , markupAName                :: String -> a
-  , markupPic                  :: Picture -> a
-  , markupMathInline           :: String -> a
-  , markupMathDisplay          :: String -> a
-  , markupProperty             :: String -> a
-  , markupExample              :: [Example] -> a
-  , markupHeader               :: Header a -> a
-  }
-
 
 data HaddockModInfo name = HaddockModInfo
   { hmi_description :: Maybe (Doc name)
@@ -605,6 +571,18 @@ makeModuleQual qual aliases mdl =
     OptFullQual       -> FullQual
     OptNoQual         -> NoQual
 
+-- | Whether to hide empty contexts
+-- Since pattern synonyms have two contexts with different semantics, it is
+-- important to all of them, even if one of them is empty.
+data HideEmptyContexts
+  = HideEmptyContexts
+  | ShowEmptyToplevelContexts
+
+-- | When to qualify @since@ annotations with their package
+data SinceQual
+  = Always
+  | External -- ^ only qualify when the thing being annotated is from
+             -- an external package
 
 -----------------------------------------------------------------------------
 -- * Error handling
@@ -688,14 +666,14 @@ instance Monad ErrMsgGhc where
 -- * Pass sensitive types
 -----------------------------------------------------------------------------
 
-type instance PostRn DocName NameSet        = PlaceHolder
-type instance PostRn DocName Fixity         = PlaceHolder
-type instance PostRn DocName Bool           = PlaceHolder
-type instance PostRn DocName Name           = DocName
-type instance PostRn DocName (Located Name) = Located DocName
-type instance PostRn DocName [Name]         = PlaceHolder
-type instance PostRn DocName DocName        = DocName
+type instance PostRn DocNameI NameSet        = PlaceHolder
+type instance PostRn DocNameI Fixity         = PlaceHolder
+type instance PostRn DocNameI Bool           = PlaceHolder
+type instance PostRn DocNameI Name           = DocName
+type instance PostRn DocNameI (Located Name) = Located DocName
+type instance PostRn DocNameI [Name]         = PlaceHolder
+type instance PostRn DocNameI DocName        = DocName
 
-type instance PostTc DocName Kind     = PlaceHolder
-type instance PostTc DocName Type     = PlaceHolder
-type instance PostTc DocName Coercion = PlaceHolder
+type instance PostTc DocNameI Kind     = PlaceHolder
+type instance PostTc DocNameI Type     = PlaceHolder
+type instance PostTc DocNameI Coercion = PlaceHolder

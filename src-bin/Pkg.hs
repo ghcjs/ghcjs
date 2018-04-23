@@ -1,6 +1,6 @@
 {-
   Somehwat modified ghc-pkg, customizes default database locations and lib names
-  based on GHC 8.2.1 release
+  based on GHC 8.4.2 release
  -}
 
 {-# LANGUAGE CPP #-}
@@ -16,8 +16,8 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- We never want to link against terminfo while bootstrapping.
-#ifdef BOOTSTRAPPING
-#ifdef WITH_TERMINFO
+#if defined(BOOTSTRAPPING)
+#if defined(WITH_TERMINFO)
 #undef WITH_TERMINFO
 #endif
 #endif
@@ -49,7 +49,7 @@ import Distribution.Backpack
 import Distribution.Types.UnqualComponentName
 import Distribution.Types.MungedPackageName
 import Distribution.Types.MungedPackageId
-import Distribution.Simple.Utils (fromUTF8, toUTF8, writeUTF8File, readUTF8File)
+import Distribution.Simple.Utils (fromUTF8BS, toUTF8BS, writeUTF8File, readUTF8File)
 import qualified Data.Version as Version
 import System.FilePath as FilePath
 import qualified System.FilePath.Posix as FilePath.Posix
@@ -70,6 +70,9 @@ import System.Directory ( doesDirectoryExist, getDirectoryContents,
                           getCurrentDirectory )
 import System.Exit ( exitWith, ExitCode(..) )
 import System.Environment ( getArgs, getProgName, getEnv )
+#if defined(darwin_HOST_OS) || defined(linux_HOST_OS)
+import System.Environment ( getExecutablePath )
+#endif
 import System.IO
 import System.IO.Error
 import GHC.IO.Exception (IOErrorType(InappropriateType))
@@ -79,8 +82,6 @@ import qualified Data.Foldable as F
 import qualified Data.Traversable as F
 import qualified Data.Set as Set
 import qualified Data.Map as Map
-
-import qualified Data.ByteString.Char8 as BS
 
 #if defined(mingw32_HOST_OS)
 -- mingw32 needs these for getExecDir
@@ -96,11 +97,11 @@ import System.Posix hiding (fdToHandle)
 import qualified System.Info(os)
 #endif
 
-#ifdef WITH_TERMINFO
+#if defined(WITH_TERMINFO)
 import System.Console.Terminfo as Terminfo
 #endif
 
-#ifdef mingw32_HOST_OS
+#if defined(mingw32_HOST_OS)
 # if defined(i386_HOST_ARCH)
 #  define WINDOWS_CCONV stdcall
 # elif defined(x86_64_HOST_ARCH)
@@ -292,8 +293,8 @@ usageHeader prog = substProg prog $
   "\n" ++
   "  $p dot\n" ++
   "    Generate a graph of the package dependencies in a form suitable\n" ++
-  "    for input for the graphviz tools.  For example, to generate a PDF" ++
-  "    of the dependency graph: ghcjs-pkg dot | tred | dot -Tpdf >pkgs.pdf" ++
+  "    for input for the graphviz tools.  For example, to generate a PDF\n" ++
+  "    of the dependency graph: ghcjs-pkg dot | tred | dot -Tpdf >pkgs.pdf\n" ++
   "\n" ++
   "  $p find-module {module}\n" ++
   "    List registered packages exposing module {module} in the global\n" ++
@@ -1300,8 +1301,8 @@ instance GhcPkg.BinaryStringRep ModuleName where
   toStringRep   = toStringRep . display
 
 instance GhcPkg.BinaryStringRep String where
-  fromStringRep = fromUTF8 . BS.unpack
-  toStringRep   = BS.pack . toUTF8
+  fromStringRep = fromUTF8BS
+  toStringRep   = toUTF8BS
 
 instance GhcPkg.BinaryStringRep UnitId where
   fromStringRep = mkUnitId . fromStringRep
@@ -1456,7 +1457,7 @@ listPackages verbosity my_flags mPackageName mModuleName = do
 
   if simple_output then show_simple stack else do
 
-#ifndef WITH_TERMINFO
+#if !defined(WITH_TERMINFO)
     mapM_ show_normal stack
 #else
     let
@@ -2093,6 +2094,7 @@ dieForcible s = die (s ++ " (use --force to override)")
 -----------------------------------------
 -- Cut and pasted from ghc/compiler/main/SysTools
 
+getLibDir :: IO (Maybe String)
 #if defined(mingw32_HOST_OS)
 subst :: Char -> Char -> String -> String
 subst a b ls = map (\ x -> if x == a then b else x) ls
@@ -2100,7 +2102,6 @@ subst a b ls = map (\ x -> if x == a then b else x) ls
 unDosifyPath :: FilePath -> FilePath
 unDosifyPath xs = subst '\\' '/' xs
 
-getLibDir :: IO (Maybe String)
 getLibDir = do base   <- getExecDir "/ghcjs-pkg.exe"
                case base of
                  Nothing    -> return Nothing
@@ -2133,8 +2134,18 @@ getExecPath = try_size 2048 -- plenty, PATH_MAX is 512 under Win32.
 
 foreign import WINDOWS_CCONV unsafe "windows.h GetModuleFileNameW"
   c_GetModuleFileName :: Ptr () -> CWString -> Word32 -> IO Word32
+#elif defined(darwin_HOST_OS) || defined(linux_HOST_OS)
+-- TODO: a) this is copy-pasta from SysTools.hs / getBaseDir. Why can't we reuse
+--          this here? and parameterise getBaseDir over the executable (for
+--          windows)?
+--          Answer: we can not, because if we share `getBaseDir` via `ghc-boot`,
+--                  that would add `base` as a dependency for windows.
+--       b) why is the windows getBaseDir logic, not part of getExecutablePath?
+--          it would be much wider available then and we could drop all the
+--          custom logic?
+--          Answer: yes this should happen. No one has found the time just yet.
+getLibDir = Just . (\p -> p </> "lib") . takeDirectory . takeDirectory <$> getExecutablePath
 #else
-getLibDir :: IO (Maybe String)
 getLibDir = return Nothing
 #endif
 

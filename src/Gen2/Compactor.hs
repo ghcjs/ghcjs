@@ -1110,7 +1110,9 @@ data HashBuilder = HashBuilder !BB.Builder ![Text]
 
 instance Monoid HashBuilder where
   mempty = HashBuilder mempty mempty
-  mappend (HashBuilder b1 l1) (HashBuilder b2 l2) =
+
+instance Semigroup HashBuilder where
+  (<>) (HashBuilder b1 l1) (HashBuilder b2 l2) =
     HashBuilder (b1 <> b2) (l1 <> l2)
 
 {-

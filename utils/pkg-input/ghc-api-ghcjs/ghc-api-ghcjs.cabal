@@ -1,5 +1,5 @@
 Name: ghc-api-ghcjs
-Version: 8.2.2
+Version: 8.4.0
 License: BSD3
 License-File: LICENSE
 Author: The GHC Team
@@ -69,7 +69,7 @@ Library
     Default-Language: Haskell2010
     Exposed: False
 
-    Build-Depends: base       >= 4   && < 5,
+    Build-Depends: base       >= 4.9 && < 5,
                    deepseq    >= 1.4 && < 1.5,
                    directory  >= 1   && < 1.4,
                    process    >= 1   && < 1.7,
@@ -79,22 +79,25 @@ Library
                    containers >= 0.5 && < 0.6,
                    array      >= 0.1 && < 0.6,
                    filepath   >= 1   && < 1.5,
-                   template-haskell-ghcjs == 2.12.*,
+                   template-haskell-ghcjs == 2.13.*,
                    hpc        == 0.6.*,
                    transformers == 0.5.*,
-                   ghc-boot   == 8.2.*,
-                   ghc-boot-th == 8.2.*,
-                   ghci-ghcjs == 8.2.*,
-                   hoopl      >= 3.10.2 && < 3.11
+                   ghc-boot   == 8.4.*,
+                   ghc-boot-th == 8.4.*,
+                   ghci-ghcjs == 8.4.*
 
     if os(windows)
-        Build-Depends: Win32  >= 2.3 && < 2.6
+        Build-Depends: Win32  >= 2.3 && < 2.7
     else
         if flag(terminfo)
             Build-Depends: terminfo == 0.4.*
         Build-Depends: unix   == 2.7.*
 
-    GHC-Options: -Wall -fno-warn-name-shadowing
+    GHC-Options: -Wall
+                 -Wno-name-shadowing
+                 -Wnoncanonical-monad-instances
+                 -Wnoncanonical-monadfail-instances
+                 -Wnoncanonical-monoid-instances
 
     if flag(debug)
         CPP-Options: -DDEBUG
@@ -135,13 +138,13 @@ Library
     Include-Dirs: compiler compiler/parser compiler/utils
 
     if flag(stage1)
-      CPP-options: -DSTAGE1 -DSTAGE=1
+        CPP-options: -DSTAGE1 -DSTAGE=1
     else
-      if flag(stage2)
-        CPP-options: -DSTAGE2 -DSTAGE=2
-      else
-        if flag(stage3)
-          CPP-options: -DSTAGE3 -STAGE=3
+        if flag(stage2)
+            CPP-options: -DSTAGE2 -DSTAGE=2
+        else
+            if flag(stage3)
+                CPP-options: -DSTAGE3 -DSTAGE=3
 
     Install-Includes: compiler/HsVersions.h, includes/ghc_boot_platform.h
 
@@ -184,12 +187,22 @@ Library
         compiler/utils
         compiler/vectorise
 
+    -- we use an explicit Prelude
+    Default-Extensions:
+        NoImplicitPrelude
+
+    Other-Modules:
+        GhcPrelude
+
     Exposed-Modules:
+        Ar
+        FileCleanup
         DriverBkp
         BkpSyn
         NameShape
         RnModIface
         Avail
+        AsmUtils
         BasicTypes
         ConLike
         DataCon
@@ -256,6 +269,7 @@ Library
         CmmType
         CmmUtils
         CmmLayoutStack
+        EnumSet
         MkGraph
         PprBase
         PprC
@@ -331,6 +345,7 @@ Library
         HsImpExp
         HsLit
         PlaceHolder
+        HsExtension
         HsPat
         HsSyn
         HsTypes
@@ -377,7 +392,12 @@ Library
         PprTyThing
         StaticPtrTable
         SysTools
+        SysTools.BaseDir
         SysTools.Terminal
+        SysTools.ExtraObj
+        SysTools.Info
+        SysTools.Process
+        SysTools.Tasks
         Elf
         TidyPgm
         Ctype
@@ -397,7 +417,6 @@ Library
         TysWiredIn
         CostCentre
         ProfInit
-        SCCfinal
         RnBinds
         RnEnv
         RnExpr
@@ -407,6 +426,9 @@ Library
         RnSource
         RnSplice
         RnTypes
+        RnFixity
+        RnUtils
+        RnUnbound
         CoreMonad
         CSE
         FloatIn
@@ -433,6 +455,7 @@ Library
         StgSyn
         CallArity
         DmdAnal
+        Exitify
         WorkWrap
         WwLib
         FamInst
@@ -528,6 +551,7 @@ Library
         UniqDFM
         UniqDSet
         UniqFM
+        UniqMap
         UniqSet
         Util
         Vectorise.Builtins.Base
@@ -559,8 +583,12 @@ Library
         Vectorise.Env
         Vectorise.Exp
         Vectorise
+        Hoopl.Block
+        Hoopl.Collections
         Hoopl.Dataflow
-        Hoopl
+        Hoopl.Graph
+        Hoopl.Label
+        Hoopl.Unique
 --        CgInfoTbls used in ghci/DebuggerUtils
 --        CgHeapery  mkVirtHeapOffsets used in ghci
 
@@ -640,10 +668,3 @@ Library
             RtClosureInspect
             DebuggerUtils
             GHCi
-
-    if !flag(stage1)
-        -- ghc:Serialized moved to ghc-boot:GHC.Serialized.  So for
-        -- compatibility with GHC 7.10 and earlier, we reexport it
-        -- under the old name.
-        reexported-modules:
-            ghc-boot:GHC.Serialized as Serialized

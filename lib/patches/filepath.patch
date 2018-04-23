@@ -1,6 +1,6 @@
 diff -Nru upstream/pkg/filepath/filepath.cabal boot/pkg/filepath/filepath.cabal
---- upstream/pkg/filepath/filepath.cabal	2018-01-09 08:27:52.000000000 +0000
-+++ boot/pkg/filepath/filepath.cabal	2018-01-09 10:09:15.907700603 +0000
+--- upstream/pkg/filepath/filepath.cabal	2018-01-23 23:17:57.000000000 +0100
++++ boot/pkg/filepath/filepath.cabal	2018-01-23 23:17:57.000000000 +0100
 @@ -47,6 +47,10 @@
          System.FilePath.Posix
          System.FilePath.Windows
@@ -10,19 +10,19 @@ diff -Nru upstream/pkg/filepath/filepath.cabal boot/pkg/filepath/filepath.cabal
 +            System.FilePath.Current
 +
      build-depends:
-         base >= 4 && < 4.11
+         base >= 4 && < 4.12
  
 diff -Nru upstream/pkg/filepath/System/FilePath/Current.hs boot/pkg/filepath/System/FilePath/Current.hs
---- upstream/pkg/filepath/System/FilePath/Current.hs	1970-01-01 00:00:00.000000000 +0000
-+++ boot/pkg/filepath/System/FilePath/Current.hs	2018-01-09 09:42:02.322726494 +0000
+--- upstream/pkg/filepath/System/FilePath/Current.hs	1970-01-01 01:00:00.000000000 +0100
++++ boot/pkg/filepath/System/FilePath/Current.hs	2018-01-22 18:25:10.000000000 +0100
 @@ -0,0 +1,4 @@
 +{-# LANGUAGE CPP #-}
 +#define MODULE_NAME     Current
 +#define IS_CURRENT      1
 +#include "Internal.hs"
 diff -Nru upstream/pkg/filepath/System/FilePath/Internal.hs boot/pkg/filepath/System/FilePath/Internal.hs
---- upstream/pkg/filepath/System/FilePath/Internal.hs	2018-01-09 08:27:52.000000000 +0000
-+++ boot/pkg/filepath/System/FilePath/Internal.hs	2018-01-09 10:33:35.378062650 +0000
+--- upstream/pkg/filepath/System/FilePath/Internal.hs	2018-01-23 23:17:57.000000000 +0100
++++ boot/pkg/filepath/System/FilePath/Internal.hs	2018-01-23 23:17:59.000000000 +0100
 @@ -1,4 +1,6 @@
 -#if __GLASGOW_HASKELL__ >= 704
 +#ifdef IS_CURRENT

@@ -475,8 +475,8 @@ prepareLibDir = subBuild $ do
   sub $ cd (ghcLib </> "include") >> cp_r "." incNative
   sub $ cd (ghcLib </> "rts") >> cp_r "." rtsLib
   sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
-  cp (ghcLib </> "settings")          (ghcjsLib </> "settings")
-  cp (ghcLib </> "platformConstants") (ghcjsLib </> "platformConstants")
+  mapM_ (\file -> cp (ghcLib </> file) (ghcjsLib </> file))
+        ["settings", "platformConstants", "llvm-targets"]
   let unlitDest    = ghcjsLib </> "bin" </> exe "unlit"
       ghcjsRunDest = ghcjsLib </> exe "ghcjs-run"
   ghcjsRunSrc <- view (bePrograms . bpGhcjsRun . pgmLoc . to fromJust)
@@ -610,7 +610,7 @@ installStage1 :: B ()
 installStage1 = subBuild $ do
   prim <- view (beStages . bstGhcPrim)
   installStage "0" [prim]
-  fixGhcPrim
+  -- fixGhcPrim
   installStage "1a" =<< stagePackages bstStage1a
   s <- ask
   installGhcjsPrim

@@ -1,7 +1,13 @@
 diff -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
---- upstream/pkg/base/base.cabal	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/base.cabal	2018-01-09 08:27:50.750813861 +0000
-@@ -50,7 +50,7 @@
+--- upstream/pkg/base/base.cabal	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/base.cabal	2018-04-20 04:53:27.802394699 +0200
+@@ -1,4 +1,4 @@
+-cabal-version:  2.1
++cabal-version:  2.2
+ name:           base
+ version:        4.11.0.0
+ -- NOTE: Don't forget to update ./changelog.md
+@@ -51,7 +51,7 @@
  Flag integer-gmp
      Description: Use integer-gmp
      Manual: True
@@ -10,7 +16,7 @@ diff -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
  
  Library
      default-language: Haskell2010
-@@ -343,7 +343,7 @@
+@@ -351,7 +351,7 @@
          consUtils.h
  
      -- OS Specific
@@ -19,87 +25,18 @@ diff -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
          -- Windows requires some extra libraries for linking because the RTS
          -- is no longer re-exporting them.
          -- msvcrt: standard C library. The RTS will automatically include this,
-@@ -361,27 +361,29 @@
+@@ -369,6 +369,7 @@
          other-modules:
              System.CPUTime.Windows
      else
--        exposed-modules:
--            GHC.Event
-+        if !impl(ghcjs)
-+            exposed-modules:
-+                GHC.Event
-+            other-modules:
-+                GHC.Event.Arr
-+                GHC.Event.Array
-+                GHC.Event.Clock
-+                GHC.Event.Control
-+                GHC.Event.EPoll
-+                GHC.Event.IntTable
-+                GHC.Event.Internal
-+                GHC.Event.KQueue
-+                GHC.Event.Manager
-+                GHC.Event.PSQ
-+                GHC.Event.Poll
-+                GHC.Event.Thread
-+                GHC.Event.TimerManager
-+                GHC.Event.Unique
-+
-+                System.CPUTime.Posix.ClockGetTime
-+                System.CPUTime.Posix.Times
-+                System.CPUTime.Posix.RUsage
++      if !impl(ghcjs)
+         exposed-modules:
+             GHC.Event
          other-modules:
--            GHC.Event.Arr
--            GHC.Event.Array
--            GHC.Event.Clock
--            GHC.Event.Control
--            GHC.Event.EPoll
--            GHC.Event.IntTable
--            GHC.Event.Internal
--            GHC.Event.KQueue
--            GHC.Event.Manager
--            GHC.Event.PSQ
--            GHC.Event.Poll
--            GHC.Event.Thread
--            GHC.Event.TimerManager
--            GHC.Event.Unique
--
--            System.CPUTime.Posix.ClockGetTime
--            System.CPUTime.Posix.Times
--            System.CPUTime.Posix.RUsage
-             System.CPUTime.Unsupported
- 
-     -- We need to set the unit id to base (without a version number)
-diff -Nru upstream/pkg/base/Data/Semigroup.hs boot/pkg/base/Data/Semigroup.hs
---- upstream/pkg/base/Data/Semigroup.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/Data/Semigroup.hs	2018-01-09 08:27:50.750813861 +0000
-@@ -84,7 +84,7 @@
- import           Data.Monoid         (Alt (..))
- import qualified Data.Monoid         as Monoid
- import           Data.Void
--#ifndef mingw32_HOST_OS
-+#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
- import           GHC.Event           (Event, Lifetime)
- #endif
- import           GHC.Generics
-@@ -719,7 +719,7 @@
- instance Semigroup a => Semigroup (IO a) where
-     (<>) = liftA2 (<>)
- 
--#ifndef mingw32_HOST_OS
-+#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
- -- | @since 4.10.0.0
- instance Semigroup Event where
-     (<>) = mappend
 diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
---- upstream/pkg/base/GHC/Conc/IO.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Conc/IO.hs	2018-01-09 08:27:50.750813861 +0000
-@@ -59,24 +59,26 @@
- import GHC.Real ( fromIntegral )
- import System.Posix.Types
- 
--#ifdef mingw32_HOST_OS
-+#if defined(mingw32_HOST_OS)
- import qualified GHC.Conc.Windows as Windows
+--- upstream/pkg/base/GHC/Conc/IO.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Conc/IO.hs	2018-04-20 05:03:46.748039161 +0200
+@@ -64,19 +64,21 @@
  import GHC.Conc.Windows (asyncRead, asyncWrite, asyncDoProc, asyncReadBA,
                           asyncWriteBA, ConsoleEvent(..), win32ConsoleHandler,
                           toWin32ConsoleEvent)
@@ -109,19 +46,19 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
  #endif
  
  ensureIOManagerIsRunning :: IO ()
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 -ensureIOManagerIsRunning = Event.ensureIOManagerIsRunning
 -#else
 +#if defined(mingw32_HOST_OS)
  ensureIOManagerIsRunning = Windows.ensureIOManagerIsRunning
 +#elif defined(ghcjs_HOST_OS)
-+ensureIOManagerIsRunning = return ()
++ensureIOManagerIsRunning = pure ()
 +#else
 +ensureIOManagerIsRunning = Event.ensureIOManagerIsRunning
  #endif
  
  ioManagerCapabilitiesChanged :: IO ()
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
  ioManagerCapabilitiesChanged = Event.ioManagerCapabilitiesChanged
  #else
@@ -130,7 +67,7 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
  -- that has been used with 'threadWaitRead', use 'closeFdWith'.
  threadWaitRead :: Fd -> IO ()
  threadWaitRead fd
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
    | threaded  = Event.threadWaitRead fd
  #endif
@@ -139,7 +76,7 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
  -- that has been used with 'threadWaitWrite', use 'closeFdWith'.
  threadWaitWrite :: Fd -> IO ()
  threadWaitWrite fd
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
    | threaded  = Event.threadWaitWrite fd
  #endif
@@ -148,7 +85,7 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
  -- in the file descriptor.
  threadWaitReadSTM :: Fd -> IO (Sync.STM (), IO ())
  threadWaitReadSTM fd
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
    | threaded  = Event.threadWaitReadSTM fd
  #endif
@@ -157,7 +94,7 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
  -- in the file descriptor.
  threadWaitWriteSTM :: Fd -> IO (Sync.STM (), IO ())
  threadWaitWriteSTM fd
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
    | threaded  = Event.threadWaitWriteSTM fd
  #endif
@@ -166,29 +103,23 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
              -> Fd            -- ^ File descriptor to close.
              -> IO ()
  closeFdWith close fd
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
    | threaded  = Event.closeFdWith close fd
  #endif
    | otherwise = close fd
-@@ -178,9 +180,9 @@
- --
- threadDelay :: Int -> IO ()
+@@ -180,7 +182,7 @@
  threadDelay time
--#ifdef mingw32_HOST_OS
-+#if defined(mingw32_HOST_OS)
+ #if defined(mingw32_HOST_OS)
    | threaded  = Windows.threadDelay time
 -#else
 +#elif !defined(ghcjs_HOST_OS)
    | threaded  = Event.threadDelay time
  #endif
    | otherwise = IO $ \s ->
-@@ -193,9 +195,9 @@
- --
- registerDelay :: Int -> IO (TVar Bool)
+@@ -195,7 +197,7 @@
  registerDelay usecs
--#ifdef mingw32_HOST_OS
-+#if defined(mingw32_HOST_OS)
+ #if defined(mingw32_HOST_OS)
    | threaded = Windows.registerDelay usecs
 -#else
 +#elif !defined(ghcjs_HOST_OS)
@@ -196,8 +127,8 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
  #endif
    | otherwise = errorWithoutStackTrace "registerDelay: requires -threaded"
 diff -Nru upstream/pkg/base/GHC/Conc/Windows.hs boot/pkg/base/GHC/Conc/Windows.hs
---- upstream/pkg/base/GHC/Conc/Windows.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Conc/Windows.hs	2018-01-09 08:27:50.750813861 +0000
+--- upstream/pkg/base/GHC/Conc/Windows.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Conc/Windows.hs	2018-01-23 23:17:57.000000000 +0100
 @@ -19,6 +19,9 @@
  
  -- #not-home
@@ -214,28 +145,36 @@ diff -Nru upstream/pkg/base/GHC/Conc/Windows.hs boot/pkg/base/GHC/Conc/Windows.h
  
 +#endif
 diff -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
---- upstream/pkg/base/GHC/Conc.hs	2018-02-15 22:31:54.000000000 +0000
-+++ boot/pkg/base/GHC/Conc.hs	2018-04-16 11:09:28.873261698 +0000
-@@ -95,7 +95,7 @@
+--- upstream/pkg/base/GHC/Conc.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Conc.hs	2018-04-20 05:07:18.566023075 +0200
+@@ -95,14 +95,14 @@
          , asyncWriteBA
  #endif
  
--#ifndef mingw32_HOST_OS
-+#if !defined(mingw32_HOST_OS)
+-#if !defined(mingw32_HOST_OS)
++#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
          , Signal, HandlerFun, setHandler, runHandlers
  #endif
  
+         , ensureIOManagerIsRunning
+         , ioManagerCapabilitiesChanged
+ 
+-#if defined(mingw32_HOST_OS)
++#if defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
+         , ConsoleEvent(..)
+         , win32ConsoleHandler
+         , toWin32ConsoleEvent
 @@ -116,6 +116,6 @@
  import GHC.Conc.IO
  import GHC.Conc.Sync
  
--#ifndef mingw32_HOST_OS
-+#if !defined(mingw32_HOST_OS)
+-#if !defined(mingw32_HOST_OS)
++#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
  import GHC.Conc.Signal
  #endif
 diff -Nru upstream/pkg/base/GHC/Event/Manager.hs boot/pkg/base/GHC/Event/Manager.hs
---- upstream/pkg/base/GHC/Event/Manager.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Event/Manager.hs	2018-01-09 08:27:50.750813861 +0000
+--- upstream/pkg/base/GHC/Event/Manager.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Event/Manager.hs	2018-01-23 23:17:57.000000000 +0100
 @@ -19,6 +19,9 @@
  -- polling if available. Otherwise we use multi-shot polling.
  
@@ -254,8 +193,8 @@ diff -Nru upstream/pkg/base/GHC/Event/Manager.hs boot/pkg/base/GHC/Event/Manager
 +#endif
 +
 diff -Nru upstream/pkg/base/GHC/Event/Thread.hs boot/pkg/base/GHC/Event/Thread.hs
---- upstream/pkg/base/GHC/Event/Thread.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Event/Thread.hs	2018-01-09 08:27:50.758812985 +0000
+--- upstream/pkg/base/GHC/Event/Thread.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Event/Thread.hs	2018-01-23 23:17:57.000000000 +0100
 @@ -1,7 +1,11 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE BangPatterns, NoImplicitPrelude #-}
@@ -276,8 +215,8 @@ diff -Nru upstream/pkg/base/GHC/Event/Thread.hs boot/pkg/base/GHC/Event/Thread.h
 +#endif
 +
 diff -Nru upstream/pkg/base/GHC/Event/TimerManager.hs boot/pkg/base/GHC/Event/TimerManager.hs
---- upstream/pkg/base/GHC/Event/TimerManager.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Event/TimerManager.hs	2018-01-09 08:27:50.758812985 +0000
+--- upstream/pkg/base/GHC/Event/TimerManager.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Event/TimerManager.hs	2018-04-20 05:09:10.385066871 +0200
 @@ -8,6 +8,9 @@
    #-}
  
@@ -288,14 +227,15 @@ diff -Nru upstream/pkg/base/GHC/Event/TimerManager.hs boot/pkg/base/GHC/Event/Ti
      ( -- * Types
        TimerManager
  
-@@ -241,3 +244,4 @@
- editTimeouts :: TimerManager -> TimeoutEdit -> IO ()
- editTimeouts mgr g = atomicModifyIORef' (emTimeouts mgr) $ \tq -> (g tq, ())
- 
+@@ -252,3 +255,5 @@
+                       -- minimum element didn't change.
+                       t0 /= t1
+                     _ -> True
++
 +#endif
 diff -Nru upstream/pkg/base/GHC/Event.hs boot/pkg/base/GHC/Event.hs
---- upstream/pkg/base/GHC/Event.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Event.hs	2018-01-09 08:27:50.758812985 +0000
+--- upstream/pkg/base/GHC/Event.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Event.hs	2018-01-23 23:17:57.000000000 +0100
 @@ -1,5 +1,6 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE NoImplicitPrelude #-}
@@ -319,8 +259,8 @@ diff -Nru upstream/pkg/base/GHC/Event.hs boot/pkg/base/GHC/Event.hs
  
 +#endif
 diff -Nru upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs
---- upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2018-01-09 08:27:50.758812985 +0000
+--- upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2018-01-23 23:17:57.000000000 +0100
 @@ -29,6 +29,7 @@
  
  import System.Posix.Internals
@@ -339,9 +279,9 @@ diff -Nru upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs boot/pkg/base/GHC/IO
 +mkCodePageEncoding = ""
 +#endif
 diff -Nru upstream/pkg/base/GHC/IO/Encoding.hs boot/pkg/base/GHC/IO/Encoding.hs
---- upstream/pkg/base/GHC/IO/Encoding.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/IO/Encoding.hs	2018-01-09 08:27:50.758812985 +0000
-@@ -140,8 +140,11 @@
+--- upstream/pkg/base/GHC/IO/Encoding.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/IO/Encoding.hs	2018-01-23 23:17:57.000000000 +0100
+@@ -141,8 +141,11 @@
  
  -- | @since 4.5.0.0
  initLocaleEncoding, initFileSystemEncoding, initForeignEncoding :: TextEncoding
@@ -356,9 +296,9 @@ diff -Nru upstream/pkg/base/GHC/IO/Encoding.hs boot/pkg/base/GHC/IO/Encoding.hs
  -- because some iconvs (in particular GNU iconv) will brokenly UTF-8 encode
  -- lone surrogates without complaint.
 diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
---- upstream/pkg/base/GHC/IO/FD.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/IO/FD.hs	2018-01-09 08:27:50.758812985 +0000
-@@ -501,6 +501,10 @@
+--- upstream/pkg/base/GHC/IO/FD.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/IO/FD.hs	2018-04-20 05:08:33.136377573 +0200
+@@ -497,6 +497,10 @@
  
  readRawBufferPtr :: String -> FD -> Ptr Word8 -> Int -> CSize -> IO Int
  readRawBufferPtr loc !fd !buf !off !len
@@ -369,7 +309,7 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
    | isNonBlocking fd = unsafe_read -- unsafe is ok, it can't block
    | otherwise    = do r <- throwErrnoIfMinus1 loc
                                  (unsafe_fdReady (fdFD fd) 0 0 0)
-@@ -514,10 +518,19 @@
+@@ -510,10 +514,19 @@
      read        = if threaded then safe_read else unsafe_read
      unsafe_read = do_read (c_read (fdFD fd) (buf `plusPtr` off) len)
      safe_read   = do_read (c_safe_read (fdFD fd) (buf `plusPtr` off) len)
@@ -389,7 +329,7 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
    | isNonBlocking fd  = unsafe_read -- unsafe is ok, it can't block
    | otherwise    = do r <- unsafe_fdReady (fdFD fd) 0 0 0
                        if r /= 0 then safe_read
-@@ -531,9 +544,14 @@
+@@ -527,9 +540,14 @@
                         n    -> return (fromIntegral n)
     unsafe_read  = do_read (c_read (fdFD fd) (buf `plusPtr` off) len)
     safe_read    = do_read (c_safe_read (fdFD fd) (buf `plusPtr` off) len)
@@ -404,7 +344,7 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
    | isNonBlocking fd = unsafe_write -- unsafe is ok, it can't block
    | otherwise   = do r <- unsafe_fdReady (fdFD fd) 1 0 0
                       if r /= 0
-@@ -546,9 +564,17 @@
+@@ -542,9 +560,17 @@
      write         = if threaded then safe_write else unsafe_write
      unsafe_write  = do_write (c_write (fdFD fd) (buf `plusPtr` off) len)
      safe_write    = do_write (c_safe_write (fdFD fd) (buf `plusPtr` off) len)
@@ -422,7 +362,7 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
    | isNonBlocking fd = unsafe_write -- unsafe is ok, it can't block
    | otherwise   = do r <- unsafe_fdReady (fdFD fd) 1 0 0
                       if r /= 0 then write
-@@ -561,9 +587,14 @@
+@@ -557,9 +583,14 @@
      write         = if threaded then safe_write else unsafe_write
      unsafe_write  = do_write (c_write (fdFD fd) (buf `plusPtr` off) len)
      safe_write    = do_write (c_safe_write (fdFD fd) (buf `plusPtr` off) len)
@@ -436,19 +376,19 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
 +#endif
  
  foreign import ccall unsafe "fdReady"
-   unsafe_fdReady :: CInt -> CInt -> CInt -> CInt -> IO CInt
-@@ -647,7 +678,7 @@
+   unsafe_fdReady :: CInt -> CInt -> Int64 -> CInt -> IO CInt
+@@ -643,7 +674,7 @@
  -- -----------------------------------------------------------------------------
  -- utils
  
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
  throwErrnoIfMinus1RetryOnBlock  :: String -> IO CSsize -> IO CSsize -> IO CSsize
  throwErrnoIfMinus1RetryOnBlock loc f on_block  =
    do
 diff -Nru upstream/pkg/base/GHC/Stack/CCS.hsc boot/pkg/base/GHC/Stack/CCS.hsc
---- upstream/pkg/base/GHC/Stack/CCS.hsc	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Stack/CCS.hsc	2018-01-09 08:27:50.758812985 +0000
+--- upstream/pkg/base/GHC/Stack/CCS.hsc	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Stack/CCS.hsc	2018-04-20 04:59:17.951884430 +0200
 @@ -15,7 +15,7 @@
  -- @since 4.5.0.0
  -----------------------------------------------------------------------------
@@ -458,31 +398,31 @@ diff -Nru upstream/pkg/base/GHC/Stack/CCS.hsc boot/pkg/base/GHC/Stack/CCS.hsc
  module GHC.Stack.CCS (
      -- * Call stacks
      currentCallStack,
-@@ -64,6 +64,22 @@
+@@ -75,6 +75,22 @@
  clearCCS :: IO a -> IO a
  clearCCS (IO m) = IO $ \s -> clearCCS## m s
  
-+##ifdef ghcjs_HOST_OS
++##if defined(ghcjs_HOST_OS)
 +ccsCC :: Ptr CostCentreStack -> IO (Ptr CostCentre)
 +ccsCC p = peekByteOff p 4
-+ 
++
 +ccsParent :: Ptr CostCentreStack -> IO (Ptr CostCentreStack)
 +ccsParent p = peekByteOff p 8
-+ 
++
 +ccLabel :: Ptr CostCentre -> IO CString
 +ccLabel p = peekByteOff p 4
-+ 
++
 +ccModule :: Ptr CostCentre -> IO CString
 +ccModule p = peekByteOff p 8
 +
 +ccSrcSpan :: Ptr CostCentre -> IO CString
 +ccSrcSpan p = peekByteOff p 12
 +##else
+ -- | Get the 'CostCentre' at the head of a 'CostCentreStack'.
  ccsCC :: Ptr CostCentreStack -> IO (Ptr CostCentre)
  ccsCC p = (# peek CostCentreStack, cc) p
- 
-@@ -78,6 +94,7 @@
- 
+@@ -94,6 +110,7 @@
+ -- | Get the source span of a 'CostCentre'.
  ccSrcSpan :: Ptr CostCentre -> IO CString
  ccSrcSpan p = (# peek CostCentre, srcloc) p
 +##endif
@@ -490,21 +430,21 @@ diff -Nru upstream/pkg/base/GHC/Stack/CCS.hsc boot/pkg/base/GHC/Stack/CCS.hsc
  -- | Returns a @[String]@ representing the current call stack.  This
  -- can be useful for debugging.
 diff -Nru upstream/pkg/base/GHC/Stats.hsc boot/pkg/base/GHC/Stats.hsc
---- upstream/pkg/base/GHC/Stats.hsc	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Stats.hsc	2018-01-09 08:27:50.758812985 +0000
+--- upstream/pkg/base/GHC/Stats.hsc	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Stats.hsc	2018-01-23 23:17:57.000000000 +0100
 @@ -1,3 +1,4 @@
 +{-# LANGUAGE CPP #-}
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE NoImplicitPrelude #-}
  {-# LANGUAGE RecordWildCards #-}
 diff -Nru upstream/pkg/base/GHC/TopHandler.hs boot/pkg/base/GHC/TopHandler.hs
---- upstream/pkg/base/GHC/TopHandler.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/TopHandler.hs	2018-01-09 08:27:50.762812547 +0000
+--- upstream/pkg/base/GHC/TopHandler.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/TopHandler.hs	2018-04-20 05:06:02.658515647 +0200
 @@ -94,7 +94,9 @@
        topHandler
  
  install_interrupt_handler :: IO () -> IO ()
--#ifdef mingw32_HOST_OS
+-#if defined(mingw32_HOST_OS)
 +#if defined(ghcjs_HOST_OS)
 +install_interrupt_handler _ = return ()
 +#elif defined(mingw32_HOST_OS)
@@ -515,7 +455,7 @@ diff -Nru upstream/pkg/base/GHC/TopHandler.hs boot/pkg/base/GHC/TopHandler.hs
  unreachable = fail "If you can read this, shutdownHaskellAndExit did not exit."
  
  exitHelper :: CInt -> Int -> IO a
--#ifdef mingw32_HOST_OS
+-#if defined(mingw32_HOST_OS)
 +#if defined(mingw32_HOST_OS) || defined(ghcjs_HOST_OS)
  exitHelper exitKind r =
    shutdownHaskellAndExit (fromIntegral r) exitKind >> unreachable
@@ -524,14 +464,14 @@ diff -Nru upstream/pkg/base/GHC/TopHandler.hs boot/pkg/base/GHC/TopHandler.hs
  
  exitInterrupted :: IO a
  exitInterrupted =
--#ifdef mingw32_HOST_OS
+-#if defined(mingw32_HOST_OS)
 +#if defined(mingw32_HOST_OS) || defined(ghcjs_HOST_OS)
    safeExit 252
  #else
    -- we must exit via the default action for SIGINT, so that the
 diff -Nru upstream/pkg/base/GHC/Windows.hs boot/pkg/base/GHC/Windows.hs
---- upstream/pkg/base/GHC/Windows.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/GHC/Windows.hs	2018-01-09 08:27:50.762812547 +0000
+--- upstream/pkg/base/GHC/Windows.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/GHC/Windows.hs	2018-01-23 23:17:57.000000000 +0100
 @@ -21,6 +21,10 @@
  -----------------------------------------------------------------------------
  
@@ -550,8 +490,8 @@ diff -Nru upstream/pkg/base/GHC/Windows.hs boot/pkg/base/GHC/Windows.hs
 +
 +#endif
 diff -Nru upstream/pkg/base/System/CPUTime.hsc boot/pkg/base/System/CPUTime.hsc
---- upstream/pkg/base/System/CPUTime.hsc	2018-01-10 07:10:41.000000000 +0000
-+++ boot/pkg/base/System/CPUTime.hsc	2018-01-18 20:13:48.175423969 +0000
+--- upstream/pkg/base/System/CPUTime.hsc	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/System/CPUTime.hsc	2018-01-23 23:17:57.000000000 +0100
 @@ -1,5 +1,8 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE CPP, CApiFFI #-}
@@ -597,8 +537,8 @@ diff -Nru upstream/pkg/base/System/CPUTime.hsc boot/pkg/base/System/CPUTime.hsc
 +
 +##endif
 diff -Nru upstream/pkg/base/System/Environment/ExecutablePath.hsc boot/pkg/base/System/Environment/ExecutablePath.hsc
---- upstream/pkg/base/System/Environment/ExecutablePath.hsc	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/System/Environment/ExecutablePath.hsc	2018-01-09 08:27:50.762812547 +0000
+--- upstream/pkg/base/System/Environment/ExecutablePath.hsc	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/System/Environment/ExecutablePath.hsc	2018-01-23 23:17:57.000000000 +0100
 @@ -18,6 +18,13 @@
  
  module System.Environment.ExecutablePath ( getExecutablePath ) where
@@ -613,7 +553,7 @@ diff -Nru upstream/pkg/base/System/Environment/ExecutablePath.hsc boot/pkg/base/
  -- The imports are purposely kept completely disjoint to prevent edits
  -- to one OS implementation from breaking another.
  
-@@ -173,3 +180,5 @@
+@@ -248,3 +255,5 @@
  --------------------------------------------------------------------------------
  
  #endif
@@ -621,8 +561,8 @@ diff -Nru upstream/pkg/base/System/Environment/ExecutablePath.hsc boot/pkg/base/
 +##endif
 \ No newline at end of file
 diff -Nru upstream/pkg/base/System/Posix/Internals.hs boot/pkg/base/System/Posix/Internals.hs
---- upstream/pkg/base/System/Posix/Internals.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/System/Posix/Internals.hs	2018-01-09 08:27:50.762812547 +0000
+--- upstream/pkg/base/System/Posix/Internals.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/System/Posix/Internals.hs	2018-01-23 23:17:57.000000000 +0100
 @@ -1,6 +1,9 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE CPP, NoImplicitPrelude, CApiFFI #-}
@@ -859,22 +799,22 @@ diff -Nru upstream/pkg/base/System/Posix/Internals.hs boot/pkg/base/System/Posix
  -}
 -
 diff -Nru upstream/pkg/base/System/Timeout.hs boot/pkg/base/System/Timeout.hs
---- upstream/pkg/base/System/Timeout.hs	2018-01-09 08:27:50.000000000 +0000
-+++ boot/pkg/base/System/Timeout.hs	2018-01-09 08:27:50.762812547 +0000
+--- upstream/pkg/base/System/Timeout.hs	2018-01-23 23:17:56.000000000 +0100
++++ boot/pkg/base/System/Timeout.hs	2018-04-20 04:55:26.736703458 +0200
 @@ -18,7 +18,7 @@
  
  module System.Timeout ( timeout ) where
  
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
  import Control.Monad
  import GHC.Event           (getSystemTimerManager,
                              registerTimeout, unregisterTimeout)
-@@ -80,7 +80,7 @@
+@@ -85,7 +85,7 @@
  timeout n f
      | n <  0    = fmap Just f
      | n == 0    = return Nothing
--#ifndef mingw32_HOST_OS
+-#if !defined(mingw32_HOST_OS)
 +#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
      | rtsSupportsBoundThreads = do
          -- In the threaded RTS, we use the Timer Manager to delay the

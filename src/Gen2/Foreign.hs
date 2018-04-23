@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP, FlexibleContexts, TypeFamilies #-}
 {-
   This module takes over desugaring and typechecking foreign declarations and calls
   from GHC. foreign import javascript should be desugared differently
@@ -10,6 +10,8 @@
 
 module Gen2.Foreign where
 
+import Prelude hiding ((<>))
+
 import Control.Monad
 
 import Data.Maybe
@@ -18,6 +20,7 @@ import Data.List (isPrefixOf, unzip4)
 import Hooks
 import DynFlags
 
+import HsExtension
 import Id
 import IdInfo
 import OrdList
@@ -97,8 +100,8 @@ installForeignHooks generatingJs dflags =
    desugar foreign declarations for JavaScript
 -}
 
-ghcjsDsForeigns :: [LForeignDecl Id]
-           -> DsM (ForeignStubs, OrdList Binding)
+ghcjsDsForeigns :: [LForeignDecl GhcTc]
+                -> DsM (ForeignStubs, OrdList Binding)
 ghcjsDsForeigns []
   = return (NoStubs, nilOL)
 ghcjsDsForeigns fos = do
@@ -824,7 +827,7 @@ maybeJsNarrow _dflags tycon
   default handler prints an error message and terminates the
   program.
 -}
-ghcjsNativeDsForeigns :: [LForeignDecl Id]
+ghcjsNativeDsForeigns :: [LForeignDecl GhcTc]
                       -> DsM (ForeignStubs, OrdList (Id, CoreExpr))
 ghcjsNativeDsForeigns fos = do
   dflags <- getDynFlags
@@ -838,21 +841,21 @@ ghcjsNativeDsForeigns fos = do
         ForeignStubs h (inclGhcjs $$ c $$ s)
       inclGhcjs = text "#include \"ghcjs.h\""
 
-      convertForeignDecl :: DynFlags -> LForeignDecl Id -> LForeignDecl Id
+      convertForeignDecl :: DynFlags -> LForeignDecl GhcTc -> LForeignDecl GhcTc
       convertForeignDecl dflags (L l (ForeignImport n t c (CImport (L lc JavaScriptCallConv) _safety mheader _spec txt))) =
         (L l (ForeignImport n t c (CImport (noLoc CCallConv) (noLoc PlaySafe) mheader (convertSpec dflags n) txt)))
       convertForeignDecl _dflags (L l (ForeignExport n t c (CExport (L _ (CExportStatic srcTxt lbl JavaScriptCallConv)) txt))) =
         (L l (ForeignExport n t c (CExport (noLoc (CExportStatic srcTxt lbl CCallConv)) txt)))
       convertForeignDecl _ x = x
 
-      convertSpec :: DynFlags -> Located Id -> CImportSpec
+      -- convertSpec :: DynFlags -> Located GhcTc -> CImportSpec
       convertSpec dflags i = CFunction (StaticTarget NoSourceText (stubName dflags (unLoc i)) Nothing True)
 
-      stubName :: DynFlags -> Id -> FastString
+      -- stubName :: DynFlags -> Id -> FastString
       stubName dflags i = mkFastString $
         "__ghcjs_stub_" ++ zEncodeString (showSDocOneLine dflags (ppr $ idName i))
 
-      importStub :: DynFlags -> LForeignDecl Id -> Maybe SDoc
+      importStub :: DynFlags -> LForeignDecl GhcTc -> Maybe SDoc
       importStub dflags (L _l (ForeignImport n _t c (CImport (L _ JavaScriptCallConv) (L _ safety) _mheader spec _txt))) =
         Just (mkImportStub dflags (unLoc n) c safety spec)
       importStub _ _ = Nothing
@@ -946,19 +949,20 @@ jsTySigLit dflags isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe
                  hsFloat  = ("StgFloat",  'f')
                  hsDouble = ("StgDouble", 'd')
 
-ghcjsTcForeignImports :: [LForeignDecl Name]
-                      -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
+ghcjsTcForeignImports :: [LForeignDecl GhcRn]
+                      -> TcM ([Id], [LForeignDecl GhcTc], Bag GlobalRdrElt)
 ghcjsTcForeignImports decls
   = do { (ids, decls, gres) <- mapAndUnzip3M ghcjsTcFImport $
                                filter isForeignImport decls
        ; return (ids, decls, unionManyBags gres) }
 
-foreignDeclCtxt :: ForeignDecl Name -> SDoc
+foreignDeclCtxt :: ForeignDecl GhcRn -> SDoc
 foreignDeclCtxt fo
   = hang (ptext (sLit "When checking declaration:"))
        2 (ppr fo)
 
-ghcjsTcFImport :: LForeignDecl Name -> TcM (Id, LForeignDecl Id, Bag GlobalRdrElt)
+ghcjsTcFImport :: LForeignDecl GhcRn
+               -> TcM (Id, LForeignDecl GhcTc, Bag GlobalRdrElt)
 ghcjsTcFImport (L dloc fo@(ForeignImport (L nloc nm) hs_ty _ imp_decl))
   = setSrcSpan dloc $ addErrCtxt (foreignDeclCtxt fo)  $
     do { sig_ty <- tcHsSigType (ForSigCtxt nm) hs_ty
@@ -1108,16 +1112,16 @@ checkRepTyCon check_tc ty
     | otherwise
       = False
 
-ghcjsNativeTcForeignImports :: [LForeignDecl Name]
-                            -> TcM ([Id], [LForeignDecl Id], Bag GlobalRdrElt)
+ghcjsNativeTcForeignImports :: [LForeignDecl GhcRn]
+                            -> TcM ([Id], [LForeignDecl GhcTcId], Bag GlobalRdrElt)
 ghcjsNativeTcForeignImports = ghcjsTcForeignImports
 
-ghcjsNativeTcForeignExports :: [LForeignDecl Name]
-                            -> TcM (LHsBinds TcId, [LForeignDecl TcId], Bag GlobalRdrElt)
+ghcjsNativeTcForeignExports :: [LForeignDecl GhcRn]
+                            -> TcM (LHsBinds GhcTcId, [LForeignDecl GhcTcId], Bag GlobalRdrElt)
 ghcjsNativeTcForeignExports = ghcjsTcForeignExports
 
-ghcjsTcForeignExports :: [LForeignDecl Name]
-                 -> TcM (LHsBinds TcId, [LForeignDecl TcId], Bag GlobalRdrElt)
+ghcjsTcForeignExports :: [LForeignDecl GhcRn]
+                      -> TcM (LHsBinds GhcTc, [LForeignDecl GhcTc], Bag GlobalRdrElt)
 -- For the (Bag GlobalRdrElt) result,
 -- see Note [Newtype constructor usage in foreign declarations]
 ghcjsTcForeignExports decls
@@ -1127,7 +1131,8 @@ ghcjsTcForeignExports decls
        (b, f, gres2) <- setSrcSpan loc (ghcjsTcFExport fe)
        return (b `consBag` binds, L loc f : fs, gres1 `unionBags` gres2)
 
-ghcjsTcFExport :: ForeignDecl Name -> TcM (LHsBind Id, ForeignDecl Id, Bag GlobalRdrElt)
+ghcjsTcFExport :: ForeignDecl GhcRn
+               -> TcM (LHsBind GhcTc, ForeignDecl GhcTc, Bag GlobalRdrElt)
 ghcjsTcFExport fo@(ForeignExport (L loc nm) hs_ty _ spec)
   = addErrCtxt (foreignDeclCtxt fo) $ do
 

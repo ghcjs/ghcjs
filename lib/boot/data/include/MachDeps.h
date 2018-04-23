@@ -1,13 +1,9 @@
-#ifndef ghcjs_HOST_OS
-#include "../include_native/MachDeps.h"
-#else
-
 /* -----------------------------------------------------------------------------
  *
  * (c) The University of Glasgow 2002
- * 
+ *
  * Definitions that characterise machine specific properties of basic
- * types (C & Haskell).
+ * types (C & Haskell) of a target platform.
  *
  * NB: Keep in sync with HsFFI.h and StgTypes.h.
  * NB: THIS FILE IS INCLUDED IN HASKELL SOURCE!
@@ -17,8 +13,32 @@
  *
  * ---------------------------------------------------------------------------*/
 
-#ifndef MACHDEPS_H
-#define MACHDEPS_H
+#pragma once
+
+/* Don't allow stage1 (cross-)compiler embed assumptions about target
+ * platform. When ghc-stage1 is being built by ghc-stage0 is should not
+ * refer to target defines. A few past examples:
+ *  - https://ghc.haskell.org/trac/ghc/ticket/13491
+ *  - https://phabricator.haskell.org/D3122
+ *  - https://phabricator.haskell.org/D3405
+ *
+ * In those cases code change assumed target defines like SIZEOF_HSINT
+ * are applied to host platform, not target platform.
+ *
+ * So what should be used instead in STAGE=1?
+ *
+ * To get host's equivalent of SIZEOF_HSINT you can use Bits instances:
+ *    Data.Bits.finiteBitSize (0 :: Int)
+ *
+ * To get target's values it is preferred to use runtime target
+ * configuration from 'targetPlatform :: DynFlags -> Platform'
+ * record. A few wrappers are already defined and used throughout GHC:
+ *    wORD_SIZE :: DynFlags -> Int
+ *    wORD_SIZE dflags = pc_WORD_SIZE (sPlatformConstants (settings dflags))
+ *
+ * Hence we hide these macros from -DSTAGE=1
+ */
+#if !defined(STAGE) || STAGE >= 2
 
 /* Sizes of C types come from here... */
 #include "ghcautoconf.h"
@@ -31,19 +51,6 @@
  * In the heap, the type may take up more space: eg. SIZEOF_INT8 == 1,
  * but it takes up SIZEOF_HSWORD (4 or 8) bytes in the heap.
  */
-
-/* First, check some assumptions.. */
-#if SIZEOF_CHAR != 1
-#error GHC untested on this architecture: sizeof(char) != 1
-#endif
-
-#if SIZEOF_SHORT != 2
-#error GHC untested on this architecture: sizeof(short) != 2
-#endif
-
-#if SIZEOF_UNSIGNED_INT != 4
-#error GHC untested on this architecture: sizeof(unsigned int) != 4
-#endif
 
 #define SIZEOF_HSCHAR           SIZEOF_WORD32
 #define ALIGNMENT_HSCHAR        ALIGNMENT_WORD32
@@ -69,59 +76,48 @@
 #define SIZEOF_HSSTABLEPTR      SIZEOF_VOID_P
 #define ALIGNMENT_HSSTABLEPTR   ALIGNMENT_VOID_P
 
-#define SIZEOF_INT8             SIZEOF_CHAR
-#define ALIGNMENT_INT8          ALIGNMENT_CHAR
+#define SIZEOF_INT8             SIZEOF_INT8_T
+#define ALIGNMENT_INT8          ALIGNMENT_INT8_T
 
-#define SIZEOF_WORD8            SIZEOF_UNSIGNED_CHAR
-#define ALIGNMENT_WORD8         ALIGNMENT_UNSIGNED_CHAR
+#define SIZEOF_WORD8            SIZEOF_UINT8_T
+#define ALIGNMENT_WORD8         ALIGNMENT_UINT8_T
 
-#define SIZEOF_INT16            SIZEOF_SHORT
-#define ALIGNMENT_INT16         ALIGNMENT_SHORT
+#define SIZEOF_INT16            SIZEOF_INT16_T
+#define ALIGNMENT_INT16         ALIGNMENT_INT16_T
 
-#define SIZEOF_WORD16           SIZEOF_UNSIGNED_SHORT
-#define ALIGNMENT_WORD16        ALIGNMENT_UNSIGNED_SHORT
+#define SIZEOF_WORD16           SIZEOF_UINT16_T
+#define ALIGNMENT_WORD16        ALIGNMENT_UINT16_T
 
-#define SIZEOF_INT32            SIZEOF_INT
-#define ALIGNMENT_INT32         ALIGNMENT_INT
+#define SIZEOF_INT32            SIZEOF_INT32_T
+#define ALIGNMENT_INT32         ALIGNMENT_INT32_T
 
-#define SIZEOF_WORD32           SIZEOF_UNSIGNED_INT
-#define ALIGNMENT_WORD32        ALIGNMENT_UNSIGNED_INT
+#define SIZEOF_WORD32           SIZEOF_UINT32_T
+#define ALIGNMENT_WORD32        ALIGNMENT_UINT32_T
 
-#if SIZEOF_LONG == 8
-#define SIZEOF_INT64            SIZEOF_LONG
-#define ALIGNMENT_INT64         ALIGNMENT_LONG
-#define SIZEOF_WORD64           SIZEOF_UNSIGNED_LONG
-#define ALIGNMENT_WORD64        ALIGNMENT_UNSIGNED_LONG
-#elif HAVE_LONG_LONG && SIZEOF_LONG_LONG == 8
-#define SIZEOF_INT64            SIZEOF_LONG_LONG
-#define ALIGNMENT_INT64         ALIGNMENT_LONG_LONG
-#define SIZEOF_WORD64           SIZEOF_UNSIGNED_LONG_LONG
-#define ALIGNMENT_WORD64        ALIGNMENT_UNSIGNED_LONG_LONG
-#else
-#error Cannot find a 64bit type.
-#endif
+#define SIZEOF_INT64            SIZEOF_INT64_T
+#define ALIGNMENT_INT64         ALIGNMENT_INT64_T
 
-#ifndef WORD_SIZE_IN_BITS
+#define SIZEOF_WORD64           SIZEOF_UINT64_T
+#define ALIGNMENT_WORD64        ALIGNMENT_UINT64_T
+
+#if !defined(WORD_SIZE_IN_BITS)
 #if SIZEOF_HSWORD == 4
 #define WORD_SIZE_IN_BITS       32
 #define WORD_SIZE_IN_BITS_FLOAT 32.0
-#else 
+#else
 #define WORD_SIZE_IN_BITS       64
 #define WORD_SIZE_IN_BITS_FLOAT 64.0
 #endif
 #endif
 
-#ifndef TAG_BITS
+#if !defined(TAG_BITS)
 #if SIZEOF_HSWORD == 4
 #define TAG_BITS                2
-#else 
+#else
 #define TAG_BITS                3
 #endif
 #endif
 
 #define TAG_MASK ((1 << TAG_BITS) - 1)
 
-#endif /* MACHDEPS_H */
-
-#endif
-
+#endif /* !defined(STAGE) || STAGE >= 2 */

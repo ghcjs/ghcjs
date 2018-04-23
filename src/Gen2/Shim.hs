@@ -27,7 +27,7 @@ js:
 module Gen2.Shim where
 
 import           DynFlags
-import qualified SysTools
+import qualified FileCleanup
 
 import           Control.Applicative hiding ((<|>))
 import           Control.Lens hiding ((<.>))
@@ -117,7 +117,7 @@ tryReadShimFile dflags file = do
                  , sOpt_P = jsCppOpts (sOpt_P s)
                  }
           dflags1 = dflags { settings = s1 }
-      outfile <- SysTools.newTempName dflags "jspp"
+      outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
       Utils.doCpp dflags1 True False file outfile
       B.readFile outfile
 
@@ -145,8 +145,8 @@ readShimsArchive dflags archive = do
                   }
       dflags1 = dflags { settings = s1 }
   srcs' <- forM srcs $ \(_filename, b) -> do
-    infile  <- SysTools.newTempName dflags "jspp"
-    outfile <- SysTools.newTempName dflags "jspp"
+    infile  <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
+    outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
     BL.writeFile infile b
     Utils.doCpp dflags1 True False infile outfile
     B.readFile outfile
@@ -237,5 +237,3 @@ versionRangeToBuildDep (SingleVersion ver) = "== " <> showVersion ver
 versionRangeToBuildDep (Interval lo hi) = T.intercalate " && " $ catMaybes
                                                     [((">= " <>) . showVersion) <$> lo,
                                                      (("< "  <>) . showVersion) <$> hi]
-
-

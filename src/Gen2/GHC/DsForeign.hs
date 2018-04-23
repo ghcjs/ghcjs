@@ -7,10 +7,15 @@ Desugaring foreign declarations (see also DsCCall).
 -}
 
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Gen2.GHC.DsForeign where
 
 -- #include "HsVersions.h"
+-- import GhcPrelude
+import Prelude hiding ((<>))
+
 import TcRnMonad        -- temp
 
 import CoreSyn
@@ -50,6 +55,7 @@ import OrdList
 import Pair
 import Util
 import Hooks
+import Encoding
 
 import Data.Maybe
 import Data.List
@@ -69,14 +75,14 @@ is the same as
 so we reuse the desugaring code in @DsCCall@ to deal with these.
 -}
 
-type Binding = (Id, CoreExpr)   -- No rec/nonrec structure;
-                                -- the occurrence analyser will sort it all out
+type Binding = (Id, CoreExpr) -- No rec/nonrec structure;
+                              -- the occurrence analyser will sort it all out
 
-dsForeigns :: [LForeignDecl Id]
+dsForeigns :: [LForeignDecl GhcTc]
            -> DsM (ForeignStubs, OrdList Binding)
 dsForeigns fos = getHooked dsForeignsHook dsForeigns' >>= ($ fos)
 
-dsForeigns' :: [LForeignDecl Id]
+dsForeigns' :: [LForeignDecl GhcTc]
             -> DsM (ForeignStubs, OrdList Binding)
 dsForeigns' []
   = return (NoStubs, nilOL)
@@ -199,7 +205,7 @@ dsFCall fn_id co fcall mDeclHeader = do
         (tv_bndrs, rho)      = tcSplitForAllTyVarBndrs ty
         (arg_tys, io_res_ty) = tcSplitFunTys rho
 
-    args <- newSysLocalsDs arg_tys
+    args <- newSysLocalsDs arg_tys  -- no FFI levity-polymorphism
     (val_args, arg_wrappers) <- mapAndUnzipM unboxArg (map Var args)
 
     let
@@ -273,20 +279,7 @@ dsFCall fn_id co fcall mDeclHeader = do
         wrap_rhs'    = Cast wrap_rhs co
         fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfoldingWithArity
                                                 (length args) wrap_rhs'
-{-
-        -- Build the worker
-        worker_ty     = mkForAllTys tv_bndrs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
-        the_ccall_app = mkFCall dflags ccall_uniq fcall' val_args ccall_result_ty
-        work_rhs      = mkLams tvs (mkLams work_arg_ids the_ccall_app)
-        work_id       = mkSysLocal (fsLit "$wccall") work_uniq worker_ty
 
-        -- Build the wrapper
-        work_app     = mkApps (mkVarApps (Var work_id) tvs) val_args
-        wrapper_body = foldr ($) (res_wrapper work_app) arg_wrappers
-        wrap_rhs     = mkLams (tvs ++ args) wrapper_body
-        wrap_rhs'    = Cast wrap_rhs co
-        fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfolding (Just (length args)) wrap_rhs'
--}
     return ([(work_id, work_rhs), (fn_id_w_inl, wrap_rhs')], empty, cDoc)
 
 {-
@@ -311,8 +304,8 @@ dsPrimCall fn_id co fcall = do
         ty                   = pFst $ coercionKind co
         (tvs, fun_ty)        = tcSplitForAllTys ty
         (arg_tys, io_res_ty) = tcSplitFunTys fun_ty
-    -- MASSERT( fst (span isNamedBinder bndrs) `equalLength` tvs )
-    args <- newSysLocalsDs arg_tys
+
+    args <- newSysLocalsDs arg_tys  -- no FFI levity-polymorphism
 
     ccall_uniq <- newUnique
     dflags <- getDynFlags
@@ -422,18 +415,12 @@ dsFExportDynamic :: Id
                  -> CCallConv
                  -> DsM ([Binding], SDoc, SDoc)
 dsFExportDynamic id co0 cconv = do
-    -- MASSERT( fst (span isNamedBinder bndrs) `equalLength` tvs )
-      -- make sure that the named binders all come first
-    fe_id <-  newSysLocalDs ty
     mod <- getModule
     dflags <- getDynFlags
-    let
-        -- hack: need to get at the name of the C stub we're about to generate.
-        -- TODO: There's no real need to go via String with
-        -- (mkFastString . zString). In fact, is there a reason to convert
-        -- to FastString at all now, rather than sticking with FastZString?
-        fe_nm    = mkFastString (zString (zEncodeFS (moduleNameFS (moduleName mod))) ++ "_" ++ toCName dflags fe_id)
-
+    let fe_nm = mkFastString $ zEncodeString
+            (moduleStableString mod ++ "$" ++ toCName dflags id)
+        -- Construct the label based on the passed id, don't use names
+        -- depending on Unique. See #13807 and Note [Unique Determinism].
     cback <- newSysLocalDs arg_ty
     newStablePtrId <- dsLookupGlobalId newStablePtrName
     stable_ptr_tycon <- dsLookupTyCon stablePtrTyConName
@@ -451,7 +438,7 @@ dsFExportDynamic id co0 cconv = do
           to be entered using an external calling convention
           (stdcall, ccall).
          -}
-        adj_args      = [ mkIntLit dflags (toInteger $ ccallConvToInt cconv)
+        adj_args      = [ mkIntLit dflags (toInteger (ccallConvToInt cconv))
                         , Var stbl_value
                         , Lit (MachLabel fe_nm mb_sz_args IsFunction)
                         , Lit (mkMachString typestring)
@@ -486,10 +473,10 @@ dsFExportDynamic id co0 cconv = do
     return ([fed], h_code, c_code)
 
  where
-   ty                       = pFst (coercionKind co0)
-   (tvs,sans_foralls)       = tcSplitForAllTys ty
-   ([arg_ty], fn_res_ty)    = tcSplitFunTys sans_foralls
-   Just (io_tc, res_ty)     = tcSplitIOType_maybe fn_res_ty
+  ty                       = pFst (coercionKind co0)
+  (tvs,sans_foralls)       = tcSplitForAllTys ty
+  ([arg_ty], fn_res_ty)    = tcSplitFunTys sans_foralls
+  Just (io_tc, res_ty)     = tcSplitIOType_maybe fn_res_ty
         -- Must have an IO type; hence Just
 
 
@@ -554,10 +541,10 @@ mkFExportCBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
 
   type_string
       -- libffi needs to know the result type too:
-      | libffi    = primTyDescChar dflags res_hty ++ arg_type_string
+      | libffi    = primTyDescChar dflags res_hty : arg_type_string
       | otherwise = arg_type_string
 
-  arg_type_string = concat [primTyDescChar dflags ty | (_,_,ty,_) <- arg_info]
+  arg_type_string = [primTyDescChar dflags ty | (_,_,ty,_) <- arg_info]
                 -- just the real args
 
   -- add some auxiliary args; the stable ptr in the wrapper case, and
@@ -730,6 +717,12 @@ toCType = f False
            -- through one layer of type synonym etc.
            | Just t' <- coreView t
               = f voidOK t'
+           -- This may be an 'UnliftedFFITypes'-style ByteArray# argument
+           -- (which is marshalled like a Ptr)
+           | Just byteArrayPrimTyCon        == tyConAppTyConPicky_maybe t
+              = (Nothing, text "const void*")
+           | Just mutableByteArrayPrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "void*")
            -- Otherwise we don't know the C type. If we are allowing
            -- void then return that; otherwise something has gone wrong.
            | voidOK = (Nothing, text "void")
@@ -797,26 +790,25 @@ getPrimTyOf ty
         prim_ty
      _other -> pprPanic "DsForeign.getPrimTyOf" (ppr ty)
   where
-    rep_ty = unwrapType ty
+        rep_ty = unwrapType ty
 
 -- represent a primitive type as a Char, for building a string that
 -- described the foreign function type.  The types are size-dependent,
 -- e.g. 'W' is a signed 32-bit integer.
-primTyDescChar :: DynFlags -> Type -> String
+primTyDescChar :: DynFlags -> Type -> Char
 primTyDescChar dflags ty
- | ty `eqType` unitTy = "v"
+ | ty `eqType` unitTy = 'v'
  | otherwise
- = map repChar (typePrimRep (getPrimTyOf ty))
+ = case typePrimRep1 (getPrimTyOf ty) of
+     IntRep      -> signed_word
+     WordRep     -> unsigned_word
+     Int64Rep    -> 'L'
+     Word64Rep   -> 'l'
+     AddrRep     -> 'p'
+     FloatRep    -> 'f'
+     DoubleRep   -> 'd'
+     _           -> pprPanic "primTyDescChar" (ppr ty)
   where
-    repChar r = case r of
-      IntRep      -> signed_word
-      WordRep     -> unsigned_word
-      Int64Rep    -> 'L'
-      Word64Rep   -> 'l'
-      AddrRep     -> 'p'
-      FloatRep    -> 'f'
-      DoubleRep   -> 'd'
-      _           -> pprPanic "primTyDescChar" (ppr ty)
     (signed_word, unsigned_word)
        | wORD_SIZE dflags == 4  = ('W','w')
        | wORD_SIZE dflags == 8  = ('L','l')

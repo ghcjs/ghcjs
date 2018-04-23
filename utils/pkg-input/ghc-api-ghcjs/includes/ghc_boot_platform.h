@@ -15,6 +15,7 @@
 #define BUILD_ARCH "x86_64"
 #define HOST_ARCH "x86_64"
 #define TARGET_ARCH "x86_64"
+#define LLVM_TARGET "x86_64-unknown-linux"
 
 #define linux_BUILD_OS 1
 #define linux_HOST_OS 1

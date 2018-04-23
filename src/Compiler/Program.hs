@@ -24,21 +24,24 @@ import           Data.IORef
 
 -- The official GHC API
 import qualified GHC
-import GHC              ( Ghc, GhcMonad(..),
+import GHC              ( -- DynFlags(..), HscTarget(..),
+                          -- GhcMode(..), GhcLink(..),
+                          Ghc, GhcMonad(..),
                           LoadHowMuch(..) )
 import CmdLineParser
 
 -- Implementations of the various modes (--show-iface, mkdependHS. etc.)
 import LoadIface        ( showIface )
 import HscMain          ( newHscEnv )
-import DriverPipeline   ( compileFile )
+import DriverPipeline   ( oneShot, compileFile )
 import DriverMkDepend   ( doMkDependHS )
-#ifdef GHCI
-import InteractiveUI    ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
+import DriverBkp   ( doBackpack )
+#if defined(GHCI)
+import GHCi.UI          ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
 #endif
 
 -- Frontend plugins
--- #ifdef GHCI
+-- #if defined(GHCI)
 import DynamicLoading   ( loadFrontendPlugin )
 import Plugins
 -- #else
@@ -46,18 +49,15 @@ import Plugins
 -- #endif
 import Module           ( ModuleName )
 
+
 -- Various other random stuff that we need
 import Config
 import Constants
 import HscTypes
-#if __GLASGOW_HASKELL__ >= 709
-import Packages         ( pprPackages, pprPackagesSimple, pprModuleMap )
-#else
-import Packages         ( dumpPackages )
-#endif
+import Packages         ( pprPackages, pprPackagesSimple )
 import DriverPhases
 import BasicTypes       ( failed )
-import DynFlags
+import DynFlags hiding (WarnReason(..))
 import ErrUtils
 import FastString
 import Outputable
@@ -143,40 +143,37 @@ main = do
     -- what version of GHC it's using before package.conf exists, so
     -- starting the session fails.
     case mode of
-         Left preStartupMode ->
+        Left preStartupMode ->
             do case preStartupMode of
                    ShowSupportedExtensions   -> showSupportedExtensions
                    ShowVersion               -> Ghcjs.printVersion
                    ShowNumVersion            -> Ghcjs.printNumericVersion
                    ShowNumGhcVersion         -> putStrLn cProjectVersion
                    ShowOptions isInteractive -> showOptions isInteractive
-         Right postStartupMode -> do
-          when (not booting) (Ghcjs.checkIsBooted mbMinusB)
+
+        Right postStartupMode -> do
+            when (not booting) (Ghcjs.checkIsBooted mbMinusB)
+
             -- start our GHC session
+            GHC.runGhc mbMinusB $ do
 
-          let runPostStartup native = GHC.runGhc mbMinusB $ do
+            dflags <- GHC.getSessionDynFlags
 
-               dflags <- GHC.getSessionDynFlags
-               GHC.setSessionDynFlags dflags
-
-               case postStartupMode of
-                Left preLoadMode -> do
+            case postStartupMode of
+                Left preLoadMode ->
                     liftIO $ do
                         case preLoadMode of
                             ShowInfo               -> showInfo ghcjsSettings dflags
                             ShowGhcUsage           -> showGhcUsage  dflags
                             ShowGhciUsage          -> showGhciUsage dflags
                             PrintWithDynFlags f    -> putStrLn (f ghcjsSettings dflags)
-                    return True
                 Right postLoadMode ->
-                    main' postLoadMode dflags argv3 flagWarnings ghcjsSettings native
-          skipJs <- if not (Ghcjs.gsNativeToo ghcjsSettings) && not (Ghcjs.gsNativeExecutables ghcjsSettings)
-                      then return False
-                      else runPostStartup True
-          when (not skipJs) (void $ runPostStartup False)
+                    main' postLoadMode dflags argv3 flagWarnings ghcjsSettings False
 
-main' :: PostLoadMode -> DynFlags -> [Located String] -> [Located String] -> Ghcjs.GhcjsSettings -> Bool
-      -> Ghc Bool
+main' :: PostLoadMode -> DynFlags -> [Located String] -> [Warn]
+      -> Ghcjs.GhcjsSettings
+      -> Bool
+      -> Ghc ()
 main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   -- set the default GhcMode, HscTarget and GhcLink.  The HscTarget
   -- can be further adjusted on a module by module basis, using only
@@ -204,7 +201,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
                     in dflags0c
                 _ ->
                     dflags0
-      dflags2 = dflags1{ ghcMode   = mode,
+      dflags1a = dflags1{ ghcMode   = mode,
                          hscTarget = lang,
                          ghcLink   = link,
                          verbosity = case postLoadMode of
@@ -216,14 +213,35 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
       -- can be overriden from the command-line
       -- XXX: this should really be in the interactive DynFlags, but
       -- we don't set that until later in interactiveUI
-      dflags3  | DoInteractive <- postLoadMode = imp_qual_enabled
-               | DoEval _      <- postLoadMode = imp_qual_enabled
-               | otherwise                     = dflags2
-        where imp_qual_enabled = dflags2 `gopt_set` Opt_ImplicitImportQualified
+      -- We also set -fignore-optim-changes and -fignore-hpc-changes,
+      -- which are program-level options. Again, this doesn't really
+      -- feel like the right place to handle this, but we don't have
+      -- a great story for the moment.
+      dflags2  | DoInteractive <- postLoadMode = def_ghci_flags
+               | DoEval _      <- postLoadMode = def_ghci_flags
+               | otherwise                     = dflags1a
+        where def_ghci_flags = dflags1 `gopt_set` Opt_ImplicitImportQualified
+                                       `gopt_set` Opt_IgnoreOptimChanges
+                                       `gopt_set` Opt_IgnoreHpcChanges
 
         -- The rest of the arguments are "dynamic"
         -- Leftover ones are presumably files
-  (dflags4, fileish_args, dynamicFlagWarnings) <- GHC.parseDynamicFlags dflags3 args
+  (dflags3, fileish_args, dynamicFlagWarnings) <-
+      GHC.parseDynamicFlags dflags2 args
+
+  let dflags4 = case lang of
+                HscInterpreted | not (gopt Opt_ExternalInterpreter dflags3) ->
+                    let platform = targetPlatform dflags3
+                        dflags3a = updateWays $ dflags3 { ways = interpWays }
+                        dflags3b = foldl gopt_set dflags3a
+                                 $ concatMap (wayGeneralFlags platform)
+                                             interpWays
+                        dflags3c = foldl gopt_unset dflags3b
+                                 $ concatMap (wayUnsetGeneralFlags platform)
+                                             interpWays
+                    in dflags3c
+                _ ->
+                    dflags3
 
   GHC.prettyPrintGhcErrors dflags4 $ do
 
@@ -282,30 +300,30 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
                    liftIO (Ghcjs.compilationProgressMsg dflags3
                      (if native then "generating native" else "generating JavaScript"))
 
-  skipJs <- handleSourceError (\e -> do
+  handleSourceError (\e -> do
        GHC.printException e
        liftIO $ exitWith (ExitFailure 1)) $ do
     case postLoadMode of
-       ShowInterface f        -> liftIO (doShowIface dflags6 f) >> return True
-       DoMake                 -> phaseMsg >> doMake jsEnv ghcjsSettings native srcs >> return False
-       DoMkDependHS           -> doMkDependHS (map fst srcs) >> return True
-       StopBefore p           -> phaseMsg >> liftIO (Ghcjs.ghcjsOneShot jsEnv ghcjsSettings native hsc_env p srcs) >> return False
-       DoInteractive          -> ghciUI srcs Nothing >> return True
-       DoEval exprs           -> (ghciUI srcs $ Just $ reverse exprs) >> return True
-       DoAbiHash              -> abiHash (map fst srcs) >> return True
-       ShowPackages           -> liftIO $ showPackages dflags6 >> return True
-       DoGenerateLib          -> Ghcjs.generateLib ghcjsSettings >> return True
-       DoPrintRts             -> liftIO (Ghcjs.printRts dflags6) >> return True
-       DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings normal_fileish_paths) >> return True
-       DoPrintObj obj         -> liftIO (Ghcjs.printObj obj) >> return True
-       DoPrintDeps obj        -> liftIO (Ghcjs.printDeps obj) >> return True
-       DoBuildJsLibrary       -> liftIO (Ghcjs.buildJsLibrary dflags6 (map fst srcs) js_objs objs) >> return True
+       ShowInterface f        -> liftIO (doShowIface dflags6 f)
+       DoMake                 -> phaseMsg >> doMake jsEnv ghcjsSettings native srcs
+       DoMkDependHS           -> doMkDependHS (map fst srcs)
+       StopBefore p           -> phaseMsg >> liftIO (Ghcjs.ghcjsOneShot jsEnv ghcjsSettings native hsc_env p srcs)
+       DoInteractive          -> ghciUI srcs Nothing
+       DoEval exprs           -> (ghciUI srcs $ Just $ reverse exprs)
+       DoAbiHash              -> abiHash (map fst srcs)
+       ShowPackages           -> liftIO $ showPackages dflags6
+       DoGenerateLib          -> Ghcjs.generateLib ghcjsSettings
+       DoPrintRts             -> liftIO (Ghcjs.printRts dflags6)
+       DoInstallExecutable    -> liftIO (Ghcjs.installExecutable dflags6 ghcjsSettings normal_fileish_paths)
+       DoPrintObj obj         -> liftIO (Ghcjs.printObj obj)
+       DoPrintDeps obj        -> liftIO (Ghcjs.printDeps obj)
+       DoBuildJsLibrary       -> liftIO (Ghcjs.buildJsLibrary dflags6 (map fst srcs) js_objs objs)
 
   liftIO $ dumpFinalStats dflags6
-  return skipJs
+  return ()
 
 ghciUI :: [(FilePath, Maybe Phase)] -> Maybe [String] -> Ghc ()
-#ifndef GHCI
+#if !defined(GHCI)
 ghciUI _ _ = throwGhcException (CmdLineError "not built for interactive use")
 #else
 ghciUI     = interactiveUI defaultGhciSettings
@@ -589,7 +607,7 @@ isDoEvalMode :: Mode -> Bool
 isDoEvalMode (Right (Right (DoEval _))) = True
 isDoEvalMode _ = False
 
-#ifdef GHCI
+#if defined(GHCI)
 isInteractiveMode :: PostLoadMode -> Bool
 isInteractiveMode DoInteractive = True
 isInteractiveMode _             = False
@@ -628,7 +646,7 @@ isCompManagerMode _             = False
 parseModeFlags :: [Located String]
                -> IO (Mode,
                       [Located String],
-                      [Located String])
+                      [Warn])
 parseModeFlags args = do
   let ((leftover, errs1, warns), (mModeFlag, errs2, flags')) =
           runCmdLine (processArgs mode_flags args)
@@ -636,9 +654,11 @@ parseModeFlags args = do
       mode = case mModeFlag of
              Nothing     -> doMakeMode
              Just (m, _) -> m
+
   -- See Note [Handling errors when parsing commandline flags]
   unless (null errs1 && null errs2) $ throwGhcException $ errorsToGhcException $
-      map (("on the commandline", )) $ map unLoc errs1 ++ errs2
+      map (("on the commandline", )) $ map (unLoc . errMsg) errs1 ++ errs2
+
   return (mode, flags' ++ leftover, warns)
 
 type ModeM = CmdLineP (Maybe (Mode, String), [String], [Located String])
@@ -832,7 +852,7 @@ showBanner :: PostLoadMode -> DynFlags -> IO ()
 showBanner _postLoadMode dflags = do
    let verb = verbosity dflags
 
-#ifdef GHCI
+#if defined(GHCI)
    -- Show the GHCi banner
    when (isInteractiveMode _postLoadMode && verb >= 1) $ putStrLn ghciWelcomeMsg
 #endif
@@ -901,12 +921,12 @@ dumpFastStringStats dflags = do
                          ])
         -- we usually get more "has z-encoding" than "z-encoded", because
         -- when we z-encode a string it might hash to the exact same string,
-        -- which will is not counted as "z-encoded".  Only strings whose
+        -- which is not counted as "z-encoded".  Only strings whose
         -- Z-encoding is different from the original string are counted in
         -- the "z-encoded" total.
   putMsg dflags msg
   where
-   x `pcntOf` y = int ((x * 100) `quot` y) <> char '%'
+   x `pcntOf` y = int ((x * 100) `quot` y) Outputable.<> char '%'
 
 countFS :: Int -> Int -> Int -> [[FastString]] -> (Int, Int, Int)
 countFS entries longest has_z [] = (entries, longest, has_z)
@@ -928,7 +948,7 @@ dumpPackagesSimple dflags = putMsg dflags (pprPackagesSimple dflags)
 -- Frontend plugin support
 
 doFrontend :: ModuleName -> [(String, Maybe Phase)] -> Ghc ()
--- #ifndef GHCI
+-- #if !defined(GHCI)
 -- doFrontend modname _ = pluginError [modname]
 -- #else
 doFrontend modname srcs = do

@@ -19,7 +19,7 @@ library
                        bytestring,
                        containers
   if impl(ghcjs)
-    build-depends:     template-haskell >= 2.12 && < 2.13,
+    build-depends:     template-haskell >= 2.12 && < 2.14,
                        ghci
   else
     build-depends:     template-haskell-ghcjs,

@@ -36,6 +36,7 @@ import BasicTypes
 import SimplCore
 import CoreTidy
 import SysTools hiding ( linkDynLib )
+import SysTools.ExtraObj
 import Platform
 import ErrUtils
 import DriverPhases
@@ -191,7 +192,7 @@ link' env settings extraJs buildJs dflags batch_attempt_linking hpt
         let
             staticLink = case ghcLink dflags of
                           LinkStaticLib -> True
-                          _ -> platformBinariesAreStaticLibs (targetPlatform dflags)
+                          _ -> False
 
             home_mod_infos = eltsUDFM hpt
 
@@ -226,8 +227,10 @@ link' env settings extraJs buildJs dflags batch_attempt_linking hpt
 
         -- Don't showPass in Batch mode; doLink will do that for us.
         let link = case ghcLink dflags of
-                LinkBinary    -> if buildJs then ghcjsLinkJsBinary env settings extraJs else linkBinary
-                LinkStaticLib -> linkStaticLibCheck
+                LinkBinary    -> if buildJs
+                                 then ghcjsLinkJsBinary env settings extraJs
+                                 else linkBinary
+                LinkStaticLib -> linkStaticLib
                 LinkDynLib    -> linkDynLibCheck
                 other         -> panicBadLink other
 
@@ -297,11 +300,14 @@ linkDynLibCheck dflags o_files dep_packages
 
     linkDynLib dflags o_files dep_packages
 
-linkStaticLibCheck :: DynFlags -> [String] -> [InstalledUnitId] -> IO ()
-linkStaticLibCheck dflags o_files dep_packages
+linkStaticLib :: DynFlags -> [String] -> [InstalledUnitId] -> IO ()
+linkStaticLib dflags o_files dep_packages
+  = -- XXX looks like this needs to be updated
+{-
  = do
     when (platformOS (targetPlatform dflags) `notElem` [OSiOS, OSDarwin]) $
       throwGhcExceptionIO (ProgramError "Static archive creation only supported on Darwin/OS X/iOS")
+-}
     linkBinary' True dflags o_files dep_packages
 
 findHSLib :: DynFlags -> [String] -> String -> IO (Maybe FilePath)
@@ -318,12 +324,6 @@ touchObjectFile :: DynFlags -> FilePath -> IO ()
 touchObjectFile dflags path = do
   createDirectoryIfMissing True $ takeDirectory path
   SysTools.touch dflags "Touching object file" path
-
-haveRtsOptsFlags :: DynFlags -> Bool
-haveRtsOptsFlags dflags =
-         isJust (rtsOpts dflags) || case rtsOptsEnabled dflags of
-                                        RtsOptsSafeOnly -> False
-                                        _ -> True
 
 {-
 linkBinary' :: Bool -> DynFlags -> [FilePath] -> [PackageKey] -> IO ()
@@ -537,7 +537,7 @@ linkBinary' staticLink dflags o_files dep_packages = do
         get_pkg_lib_path_opts l
          | osElfTarget (platformOS platform) &&
            dynLibLoader dflags == SystemDependent &&
-           ghcLink dflags /= LinkStaticLib -- not (gopt Opt_Static dflags)
+           WayDyn `elem` ways dflags
             = let libpath = if gopt Opt_RelativeDynlibPaths dflags
                             then "$ORIGIN" </>
                                  (l `makeRelativeTo` full_output_fn)
@@ -554,7 +554,7 @@ linkBinary' staticLink dflags o_files dep_packages = do
                   -- elf_begin: I/O error: region read: Is a directory
                   rpathlink = if (platformOS platform) == OSSolaris2
                               then []
-                              else ["-Wl,-rpath-link", "-Wl," ++ l]
+                              else ["-Xlinker", "-rpath-link", "-Xlinker", l]
               in ["-L" ++ l] ++ rpathlink ++ rpath
          | osMachOTarget (platformOS platform) &&
            dynLibLoader dflags == SystemDependent &&
@@ -629,14 +629,12 @@ linkBinary' staticLink dflags o_files dep_packages = do
                          ]
                    | otherwise            = []
 
-    let thread_opts
-         | WayThreaded `elem` ways dflags =
-            let os = platformOS (targetPlatform dflags)
-            in if os `elem` [OSMinGW32, OSFreeBSD, OSOpenBSD, OSAndroid,
-                             OSNetBSD, OSHaiku, OSQNXNTO, OSiOS, OSDarwin]
-               then []
-               else ["-lpthread"]
-         | otherwise               = []
+        thread_opts | WayThreaded `elem` ways dflags = [
+#if NEED_PTHREAD_LIB
+                        "-lpthread"
+#endif
+                        ]
+                    | otherwise               = []
 
     rc_objs <- maybeCreateManifest dflags output_fn
 
@@ -651,10 +649,8 @@ linkBinary' staticLink dflags o_files dep_packages = do
                       ++ map SysTools.Option (
                          []
 
-                      -- See Note [No PIE eating when linking]
-                      ++ (if sGccSupportsNoPie mySettings
-                             then ["-no-pie"]
-                             else [])
+                      -- See Note [No PIE when linking]
+                      ++ picCCOpts dflags
 
                       -- Permit the linker to auto link _symbol to _imp_symbol.
                       -- This lets us link against DLLs without needing an "import library".
@@ -672,7 +668,7 @@ linkBinary' staticLink dflags o_files dep_packages = do
                       -- on x86.
                       ++ (if sLdSupportsCompactUnwind mySettings &&
                              not staticLink &&
-                             (platformOS platform == OSDarwin || platformOS platform == OSiOS) &&
+                             (platformOS platform == OSDarwin) &&
                              case platformArch platform of
                                ArchX86 -> True
                                ArchX86_64 -> True
@@ -680,13 +676,6 @@ linkBinary' staticLink dflags o_files dep_packages = do
                                ArchARM64  -> True
                                _ -> False
                           then ["-Wl,-no_compact_unwind"]
-                          else [])
-
-                      -- '-no_pie'
-                      -- iOS uses 'dynamic-no-pic', so we must pass this to ld to suppress a warning; see #7722
-                      ++ (if platformOS platform == OSiOS &&
-                             not staticLink
-                          then ["-Wl,-no_pie"]
                           else [])
 
                       -- '-Wl,-read_only_relocs,suppress'

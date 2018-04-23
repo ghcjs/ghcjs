@@ -42,9 +42,8 @@ import           Gen2.Utils
 -- Initialization
 
 initCostCentres :: CollectedCCs -> G ()
-initCostCentres (local_CCs, extern_CCs, singleton_CCSs) = do
+initCostCentres (local_CCs, singleton_CCSs) = do
     mapM_ emitCostCentreDecl local_CCs
-    mapM_ emitCostCentreDecl extern_CCs
     mapM_ emitCostCentreStackDecl singleton_CCSs
 
 emitCostCentreDecl :: CostCentre -> G ()
@@ -147,14 +146,16 @@ costCentreLbl :: CostCentre -> G Ident
 costCentreLbl cc = TxtI . T.pack <$> costCentreLbl' cc
 
 costCentreStackLbl' :: CostCentreStack -> G (Maybe String)
-costCentreStackLbl' ccs
-  | noCCSAttached ccs  = return Nothing -- pprPanic "no ccs attached" (ppr ccs)
-  | isCurrentCCS ccs   = return $ Just "h$currentThread.ccs" -- FIXME
-  | dontCareCCS == ccs = return $ Just "h$CCS_DONT_CARE"
-  | otherwise          =
-      case maybeSingletonCCS ccs of
-        Just cc -> Just <$> singletonCCSLbl' cc
-        Nothing -> pprPanic "ccsVar" (ppr ccs)
+costCentreStackLbl' ccs = do
+  df <- use gsDynFlags
+  if buildingProf df then f else pure Nothing
+  where
+    f | isCurrentCCS ccs   = return $ Just "h$currentThread.ccs" -- FIXME
+      | dontCareCCS == ccs = return $ Just "h$CCS_DONT_CARE"
+      | otherwise          =
+          case maybeSingletonCCS ccs of
+            Just cc -> Just <$> singletonCCSLbl' cc
+            Nothing -> pure Nothing
 
 costCentreStackLbl :: CostCentreStack -> G (Maybe Ident)
 costCentreStackLbl ccs = fmap (TxtI . T.pack) <$> costCentreStackLbl' ccs
@@ -170,4 +171,8 @@ singletonCCSLbl :: CostCentre -> G Ident
 singletonCCSLbl cc = TxtI . T.pack <$> singletonCCSLbl' cc
 
 ccsVarJ :: CostCentreStack -> G (Maybe JExpr)
-ccsVarJ ccs = fmap (ValExpr . JVar) <$> costCentreStackLbl ccs
+ccsVarJ ccs = do
+  df <- use gsDynFlags
+  if (buildingProf df)
+    then fmap (ValExpr . JVar) <$> costCentreStackLbl ccs
+    else pure Nothing

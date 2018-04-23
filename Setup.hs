@@ -67,7 +67,7 @@ ghcjsPostCopy :: Args
               -> IO ()
 ghcjsPostCopy args flags descr lbi
   | any (\(flag, enabled) -> unFlagName flag == "no-wrapper-install" && enabled)
-        (configConfigurationsFlags (configFlags lbi)) =
+        (unFlagAssignment $ configConfigurationsFlags (configFlags lbi)) =
         return () {- User has opted to skip wrapper script installation.
                      Let's hope they know what they're doing.
 

@@ -47,8 +47,11 @@ packages:
     - ./pkg/ghci
     - ./pkg/pretty
     - ./pkg/template-haskell
+    - ./pkg/parsec
     - ./pkg/process
     - ./pkg/time
+    - ./pkg/text
+    - ./pkg/mtl
     - IfUnix:    ./pkg/unix
     - IfWindows: ./pkg/Win32
 

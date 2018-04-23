@@ -64,6 +64,7 @@ data Message
   | AddForeignFile      TH.ForeignSrcLang String
   | AddDependentFile    FilePath
   | AddTopDecls         [TH.Dec]
+  | AddCorePlugin       String
   | IsExtEnabled        TH.Extension
   | ExtsEnabled
   -- | compiler to node responses
@@ -80,6 +81,7 @@ data Message
   | AddForeignFile'
   | AddDependentFile'
   | AddTopDecls'
+  | AddCorePlugin'
   | IsExtEnabled'       Bool
   | ExtsEnabled'        [TH.Extension]
   | QFail'

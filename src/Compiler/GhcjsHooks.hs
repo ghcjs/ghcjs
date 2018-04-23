@@ -27,6 +27,7 @@ import           Control.Monad
 
 import qualified Data.ByteString      as B
 import qualified Data.Map             as M
+import qualified Data.Set             as S
 
 import           System.Directory     (copyFile, createDirectoryIfMissing)
 import           System.FilePath
@@ -234,11 +235,13 @@ ghcjsCompileModule settings jsEnv env core mod = do
     cms    = compiledModules jsEnv
     dflags = hsc_dflags env
     compile = do
-      core_binds <- corePrepPgm env
-                                mod'
-                                (ms_location mod)
-                                (cg_binds core)
-                                (cg_tycons core)
-      let stg = coreToStg dflags mod' core_binds
-      (stg', cCCs) <- stg2stg dflags mod' stg
-      return $ variantRender gen2Variant settings dflags mod' stg' cCCs
+      (prepd_binds, local_ccs) <- corePrepPgm env
+                                              mod'
+                                              (ms_location mod)
+                                              (cg_binds core)
+                                              (cg_tycons core)
+      let (stg, (caf_ccs, caf_cc_stacks)) = coreToStg dflags mod' prepd_binds
+      stg' <- stg2stg dflags stg
+      let cost_centre_info =
+            (S.toList local_ccs ++ caf_ccs, caf_cc_stacks)
+      return $ variantRender gen2Variant settings dflags mod' stg' cost_centre_info

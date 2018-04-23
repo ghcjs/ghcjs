@@ -2,7 +2,7 @@
 -- ../../configure.  Make sure you are editing ghci.cabal.in, not ghci.cabal.
 
 name:           ghci-ghcjs
-version:        8.2.2
+version:        8.4.0
 license:        BSD3
 license-file:   LICENSE
 category:       GHC
@@ -57,6 +57,7 @@ library
 
     exposed-modules:
         GHCi.BreakArray
+        GHCi.BinaryArray
         GHCi.Message
         GHCi.ResolvedBCO
         GHCi.RemoteTypes
@@ -68,15 +69,15 @@ library
 
     Build-Depends:
         array            == 0.5.*,
-        base             >= 4.8 && < 4.11,
+        base             >= 4.8 && < 4.12,
         binary           == 0.8.*,
         bytestring       == 0.10.*,
         containers       == 0.5.*,
         deepseq          == 1.4.*,
         filepath         == 1.4.*,
-        ghc-boot         == 8.2.*,
-        ghc-boot-th      == 8.2.*,
-        template-haskell-ghcjs == 2.12.*,
+        ghc-boot         == 8.4.*,
+        ghc-boot-th      == 8.4.*,
+        template-haskell-ghcjs == 2.13.*,
         transformers     == 0.5.*
 
     if !os(windows)

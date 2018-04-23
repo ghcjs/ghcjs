@@ -209,7 +209,7 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
       (rdPkgs, rds) <- rtsDeps dflags
       c   <- newMVar M.empty
       let rtsPkgs     =  map stringToInstalledUnitId
-                             ["@rts", "@rts_" ++ rtsBuildTag dflags]
+                             ["@rts", "@rts_" ++ buildTag dflags]
           pkgs' :: [InstalledUnitId]
           pkgs'       = nub (rtsPkgs ++ rdPkgs ++ reverse objPkgs ++ reverse pkgs)
           pkgs''      = filter (not . (isAlreadyLinked base)) pkgs'

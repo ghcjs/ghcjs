@@ -141,6 +141,8 @@ instance NFData JStat
 type JsLabel = Text
 
 
+instance Semigroup JStat where (<>) = mappend
+
 instance Monoid JStat where
     mempty = BlockStat []
     mappend (BlockStat xs) (BlockStat ys) = BlockStat $ xs ++ ys

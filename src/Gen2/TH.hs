@@ -25,6 +25,7 @@ import qualified Gen2.Cache          as Gen2
 import qualified Gen2.Rts            as Gen2
 import qualified Gen2.Utils          as Utils
 
+import           HsExtension
 import           CoreToStg
 import           CoreUtils
 import           CorePrep
@@ -45,7 +46,7 @@ import           Maybes
 import           UniqFM
 import           UniqSet
 import           SimplStg
-import           Serialized
+import           GHC.Serialized
 import           Annotations
 import           Convert
 import           RnEnv
@@ -114,16 +115,16 @@ import           UniqDFM
 
 #include "HsVersions.h"
 
-convertE :: SrcSpan -> ByteString -> TcM (LHsExpr RdrName)
+convertE :: SrcSpan -> ByteString -> TcM (LHsExpr GhcPs)
 convertE = convertTH (get :: Get TH.Exp)   convertToHsExpr
 
-convertP :: SrcSpan -> ByteString -> TcM (LPat RdrName)
+convertP :: SrcSpan -> ByteString -> TcM (LPat GhcPs)
 convertP = convertTH (get :: Get TH.Pat)   convertToPat
 
-convertT :: SrcSpan -> ByteString -> TcM (LHsType RdrName)
+convertT :: SrcSpan -> ByteString -> TcM (LHsType GhcPs)
 convertT = convertTH (get :: Get TH.Type)  convertToHsType
 
-convertD :: SrcSpan -> ByteString -> TcM [LHsDecl RdrName]
+convertD :: SrcSpan -> ByteString -> TcM [LHsDecl GhcPs]
 convertD = convertTH (get :: Get [TH.Dec]) convertToHsDecls
 
 convertTH :: Binary a
@@ -143,7 +144,7 @@ convertAnn _ bs = return (toSerialized B.unpack bs)
 ghcjsRunMeta :: GhcjsEnv
              -> GhcjsSettings
              -> MetaRequest
-             -> LHsExpr Id
+             -> LHsExpr GhcTc
              -> TcM MetaResult
 ghcjsRunMeta js_env js_settings req expr =
   let m :: (hs_syn -> MetaResult) -> String -> TH.THResultType
@@ -173,7 +174,7 @@ ghcjsRunMeta' :: GhcjsEnv
               -> Bool
               -> (hs_syn -> SDoc)
               -> (SrcSpan -> ByteString -> TcM hs_syn)
-              -> LHsExpr Id
+              -> LHsExpr GhcTc
               -> TcM hs_syn
 ghcjsRunMeta' js_env js_settings desc tht show_code ppr_code cvt expr = do
   traceTc "About to run" (ppr expr)
@@ -228,9 +229,15 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
       prep_expr     <- corePrepExpr dflags hsc_env ds_expr
       n             <- modifyMVar (thSplice js_env)
                                   (\n -> let n' = n+1 in pure (n',n'))
-      let stg_pgm0 = coreToStg dflags (mod n) [bind n u prep_expr]
-      (stg_pgm1, c) <- stg2stg dflags (mod n) stg_pgm0
-      return (Gen2.generate js_settings dflags (mod n) stg_pgm1 c, symb n)
+      let (stg_pgm0, cost_centre_info) =
+            coreToStg dflags (mod n) [bind n u prep_expr]
+      stg_pgm1 <- stg2stg dflags stg_pgm0
+      return (Gen2.generate js_settings
+                            dflags
+                            (mod n)
+                            stg_pgm1
+                            cost_centre_info
+             , symb n)
   where
     symb n     = "h$thrunnerZCThRunner" <> T.pack (show n) <> "zithExpr"
     thExpr n u = mkVanillaGlobal (mkExternalName u
@@ -375,6 +382,7 @@ handleRunnerReq runner msg =
       TH.AddForeignFile lang src -> TH.qAddForeignFile lang src       >>  pure TH.AddForeignFile'
       TH.AddDependentFile f      -> TH.qAddDependentFile f            >>  pure TH.AddDependentFile'
       TH.AddTopDecls decs        -> TH.qAddTopDecls decs              >>  pure TH.AddTopDecls'
+      TH.AddCorePlugin name      -> TH.qAddCorePlugin name            >>  pure TH.AddCorePlugin'
       TH.IsExtEnabled ext        -> TH.IsExtEnabled'                  <$> TH.qIsExtEnabled ext
       TH.ExtsEnabled             -> TH.ExtsEnabled'                   <$> TH.qExtsEnabled
       _                          -> term >> error "handleRunnerReq: unexpected request"

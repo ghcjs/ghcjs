@@ -1,9 +1,15 @@
 diff -Nru upstream/pkg/ghc-prim/ghc-prim.cabal boot/pkg/ghc-prim/ghc-prim.cabal
---- upstream/pkg/ghc-prim/ghc-prim.cabal	2018-01-09 07:35:13.707685154 +0000
-+++ boot/pkg/ghc-prim/ghc-prim.cabal	2018-01-09 08:27:56.566224517 +0000
-@@ -23,22 +23,24 @@
-     Description: Include GHC.Prim in exposed-modules
-     default: False
+--- upstream/pkg/ghc-prim/ghc-prim.cabal	2018-01-22 15:47:42.000000000 +0100
++++ boot/pkg/ghc-prim/ghc-prim.cabal	2018-04-19 17:54:32.594011051 +0200
+@@ -1,4 +1,4 @@
+-cabal-version:  2.1
++cabal-version:  2.2
+ name:           ghc-prim
+ version:        0.5.2.0
+ -- NOTE: Don't forget to update ./changelog.md
+@@ -19,22 +19,24 @@
+     location: http://git.haskell.org/ghc.git
+     subdir:   libraries/ghc-prim
  
 -custom-setup
 -    setup-depends: base >= 4 && < 5, Cabal >= 1.23
@@ -31,8 +37,8 @@ diff -Nru upstream/pkg/ghc-prim/ghc-prim.cabal boot/pkg/ghc-prim/ghc-prim.cabal
  
      build-depends: rts == 1.0.*
 diff -Nru upstream/pkg/ghc-prim/Setup.hs boot/pkg/ghc-prim/Setup.hs
---- upstream/pkg/ghc-prim/Setup.hs	2018-01-09 07:35:13.707685154 +0000
-+++ boot/pkg/ghc-prim/Setup.hs	2018-01-09 08:27:56.566224517 +0000
+--- upstream/pkg/ghc-prim/Setup.hs	2018-01-22 15:36:44.000000000 +0100
++++ boot/pkg/ghc-prim/Setup.hs	2018-01-23 23:18:02.000000000 +0100
 @@ -6,21 +6,29 @@
  import Control.Monad
  import Data.List

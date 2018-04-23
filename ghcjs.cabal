@@ -1,5 +1,5 @@
 Name:           ghcjs
-Version:        8.2.0.1
+Version:        8.4.0.1
 Synopsis:       Haskell to JavaScript compiler
 Description:    Haskell to JavaScript compiler based on GHC
 Category:       compiler, web
@@ -114,7 +114,7 @@ Library
 
     build-depends: base           >= 4        && < 5,
                    Cabal          >= 2,
-                   ghc-api-ghcjs  >= 8.1     && < 8.3,
+                   ghc-api-ghcjs  >= 8.3     && < 8.5,
                    ghcjs-th,
                    ghc-boot,
                    ghci-ghcjs,
@@ -129,10 +129,10 @@ Library
                    syb            >= 0.6      && < 0.8,
                    bytestring     >= 0.10     && < 0.11,
                    attoparsec     >= 0.12     && < 0.14,
-                   aeson          >= 1.2      && < 1.3,
+                   aeson          >= 1.2      && < 1.4,
                    text           >= 1.2      && < 1.3,
                    wl-pprint-text >= 1.1      && < 1.2,
-                   lens           >= 4.15     && < 4.16,
+                   lens           >= 4.15     && < 4.17,
                    yaml           >= 0.8      && < 0.9,
                    time,
                    transformers,
@@ -146,7 +146,6 @@ Library
                    parallel       >= 3.2      && < 3.3,
                    cryptohash     >= 0.11     && < 0.12,
                    hashable,
-                   unordered-containers,
                    optparse-applicative       >= 0.14 && < 0.15,
                    stringsearch               >= 0.3 && < 0.4,
                    base16-bytestring          >= 0.1 && < 0.2,
@@ -156,7 +155,7 @@ Library
                    safe                       >= 0.3  && < 0.4,
                    parsec                     >= 3.1  && < 3.2,
                    -- fixme haskell-src-exts, bump?
-                   haskell-src-exts           >= 1.16 && < 1.19,
+                   haskell-src-exts           >= 1.20 && < 1.21,
                    haskell-src-meta           >= 0.6.0.3  && < 0.9
     exposed: True
     buildable: True
@@ -361,7 +360,7 @@ test-suite test
 
 Custom-Setup
   Setup-Depends:      base,
-                      Cabal >= 2 && < 2.1,
+                      Cabal >= 2.1 && < 2.3,
                       containers,
                       filepath,
                       directory,

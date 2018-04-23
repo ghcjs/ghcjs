@@ -22,6 +22,7 @@ import           Control.Applicative
 import qualified Control.Exception        as E
 import           Control.Monad
 import           Control.Monad.Fail
+import           Control.Monad.IO.Class
 
 import           Data.Binary
 import           Data.Binary.Get
@@ -100,6 +101,9 @@ instance Monad GHCJSQ where
 instance MonadFail GHCJSQ where
   fail err = GHCJSQ $ \s -> E.throw (GHCJSQException s Nothing err)
 
+instance MonadIO GHCJSQ where
+  liftIO m = GHCJSQ $ \s -> fmap (,s) m
+
 getState :: GHCJSQ QState
 getState = GHCJSQ $ \s -> return (s,s)
 
@@ -172,6 +176,9 @@ instance TH.Quasi GHCJSQ where
     in return (lookup (qsMap s), s)
   qPutQ k = GHCJSQ $ \s ->
     return ((), s { qsMap = M.insert (typeOf k) (toDyn k) (qsMap s) })
+  qAddCorePlugin plugin = do
+    AddCorePlugin' <- sendRequestQ (AddCorePlugin plugin)
+    return ()
 
 makeAnnPayload :: forall a. Data a => a -> ByteString
 makeAnnPayload x =

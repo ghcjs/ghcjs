@@ -1,3 +1,7 @@
+#ifndef ghcjs_HOST_OS
+#include "../include_native/Stg.h"
+#else
+
 /* -----------------------------------------------------------------------------
  *
  * (c) The GHC Team, 1998-2009
@@ -23,8 +27,11 @@
  *
  * ---------------------------------------------------------------------------*/
 
-#ifndef STG_H
-#define STG_H
+#pragma once
+
+#if !(__STDC_VERSION__ >= 199901L)
+# error __STDC_VERSION__ does not advertise C99 or later
+#endif
 
 /*
  * If we are compiling a .hc file, then we want all the register
@@ -37,7 +44,7 @@
  * IN_STG_CODE is not defined, and the register variables will not be
  * active.
  */
-#ifndef IN_STG_CODE
+#if !defined(IN_STG_CODE)
 # define IN_STG_CODE 1
 
 // Turn on C99 for .hc code.  This gives us the INFINITY and NAN
@@ -47,13 +54,22 @@
 // We need _BSD_SOURCE so that math.h defines things like gamma
 // on Linux
 # define _BSD_SOURCE
+
+// On AIX we need _BSD defined, otherwise <math.h> includes <stdlib.h>
+# if defined(_AIX)
+#  define _BSD 1
+# endif
+
+// '_BSD_SOURCE' is deprecated since glibc-2.20
+// in favour of '_DEFAULT_SOURCE'
+# define _DEFAULT_SOURCE
 #endif
 
 #if IN_STG_CODE == 0 || defined(llvm_CC_FLAVOR)
 // C compilers that use an LLVM back end (clang or llvm-gcc) do not
 // correctly support global register variables so we make sure that
 // we do not declare them for these compilers.
-# define NO_GLOBAL_REG_DECLS	/* don't define fixed registers */
+# define NO_GLOBAL_REG_DECLS    /* don't define fixed registers */
 #endif
 
 /* Configuration */
@@ -120,51 +136,52 @@
  * EXTERN_INLINE is for functions that we want to inline sometimes
  * (we also compile a static version of the function; see Inlines.c)
  */
-#if defined(__GNUC__) || defined( __INTEL_COMPILER)
 
-# define INLINE_HEADER static inline
-# define INLINE_ME inline
-# define STATIC_INLINE INLINE_HEADER
+// We generally assume C99 semantics albeit these two definitions work fine even
+// when gnu90 semantics are active (i.e. when __GNUC_GNU_INLINE__ is defined or
+// when a GCC older than 4.2 is used)
+//
+// The problem, however, is with 'extern inline' whose semantics significantly
+// differs between gnu90 and C99
+#define INLINE_HEADER static inline
+#define STATIC_INLINE static inline
 
-// The special "extern inline" behaviour is now only supported by gcc
-// when _GNUC_GNU_INLINE__ is defined, and you have to use
-// __attribute__((gnu_inline)).  So when we don't have this, we use
-// ordinary static inline.
-//
-// Apple's gcc defines __GNUC_GNU_INLINE__ without providing
-// gnu_inline, so we exclude MacOS X and fall through to the safe
-// version.
-//
-#if defined(__GNUC_GNU_INLINE__) && !defined(__APPLE__)
-#  if defined(KEEP_INLINES)
-#    define EXTERN_INLINE inline
-#  else
-#    define EXTERN_INLINE extern inline __attribute__((gnu_inline))
-#  endif
-#else
-#  if defined(KEEP_INLINES)
-#    define EXTERN_INLINE
-#  else
-#    define EXTERN_INLINE INLINE_HEADER
-#  endif
+// Figure out whether `__attributes__((gnu_inline))` is needed
+// to force gnu90-style 'external inline' semantics.
+#if defined(FORCE_GNU_INLINE)
+// disable auto-detection since HAVE_GNU_INLINE has been defined externally
+#elif defined(__GNUC_GNU_INLINE__) && __GNUC__ == 4 && __GNUC_MINOR__ == 2
+// GCC 4.2.x didn't properly support C99 inline semantics (GCC 4.3 was the first
+// release to properly support C99 inline semantics), and therefore warned when
+// using 'extern inline' while in C99 mode unless `__attributes__((gnu_inline))`
+// was explicitly set.
+# define FORCE_GNU_INLINE 1
 #endif
 
-#elif defined(_MSC_VER)
-
-# define INLINE_HEADER __inline static
-# define INLINE_ME __inline
-# define STATIC_INLINE INLINE_HEADER
-
+#if defined(FORCE_GNU_INLINE)
+// Force compiler into gnu90 semantics
 # if defined(KEEP_INLINES)
-#  define EXTERN_INLINE __inline
+#  define EXTERN_INLINE inline __attribute__((gnu_inline))
 # else
-#  define EXTERN_INLINE __inline extern
+#  define EXTERN_INLINE extern inline __attribute__((gnu_inline))
 # endif
-
+#elif defined(__GNUC_GNU_INLINE__)
+// we're currently in gnu90 inline mode by default and
+// __attribute__((gnu_inline)) may not be supported, so better leave it off
+# if defined(KEEP_INLINES)
+#  define EXTERN_INLINE inline
+# else
+#  define EXTERN_INLINE extern inline
+# endif
 #else
-
-# error "Don't know how to inline functions with your C compiler."
-
+// Assume C99 semantics (yes, this curiously results in swapped definitions!)
+// This is the preferred branch, and at some point we may drop support for
+// compilers not supporting C99 semantics altogether.
+# if defined(KEEP_INLINES)
+#  define EXTERN_INLINE extern inline
+# else
+#  define EXTERN_INLINE inline
+# endif
 #endif
 
 
@@ -191,6 +208,16 @@
 
 #define STG_UNUSED    GNUC3_ATTRIBUTE(__unused__)
 
+/* Prevent functions from being optimized.
+   See Note [Windows Stack allocations] */
+#if defined(__clang__)
+#define STG_NO_OPTIMIZE __attribute__((optnone))
+#elif defined(__GNUC__) || defined(__GNUG__)
+#define STG_NO_OPTIMIZE __attribute__((optimize("O0")))
+#else
+#define STG_NO_OPTIMIZE /* nothing */
+#endif
+
 /* -----------------------------------------------------------------------------
    Global type definitions
    -------------------------------------------------------------------------- */
@@ -209,19 +236,71 @@ typedef StgInt    I_;
 typedef StgWord StgWordArray[];
 typedef StgFunPtr       F_;
 
-#define EI_(X)          extern StgWordArray (X) GNU_ATTRIBUTE(aligned (8))
-#define II_(X)          static StgWordArray (X) GNU_ATTRIBUTE(aligned (8))
+/* byte arrays (and strings): */
+#define EB_(X)    extern const char X[]
+#define IB_(X)    static const char X[]
+/* static (non-heap) closures (requires alignment for pointer tagging): */
+#define EC_(X)    extern       StgWordArray (X) GNU_ATTRIBUTE(aligned (8))
+#define IC_(X)    static       StgWordArray (X) GNU_ATTRIBUTE(aligned (8))
+/* writable data (does not require alignment): */
+#define ERW_(X)   extern       StgWordArray (X)
+#define IRW_(X)   static       StgWordArray (X)
+/* read-only data (does not require alignment): */
+#define ERO_(X)   extern const StgWordArray (X)
+#define IRO_(X)   static const StgWordArray (X)
+/* stg-native functions: */
 #define IF_(f)    static StgFunPtr GNUC3_ATTRIBUTE(used) f(void)
-#define FN_(f)    StgFunPtr f(void)
-#define EF_(f)    extern StgFunPtr f(void)
+#define FN_(f)           StgFunPtr f(void)
+#define EF_(f)           StgFunPtr f(void) /* External Cmm functions */
+/* foreign functions: */
+#define EFF_(f)   void f() /* See Note [External function prototypes] */
+
+/* Note [External function prototypes]  See Trac #8965, #11395
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In generated C code we need to distinct between two types
+of external symbols:
+1.  Cmm functions declared by 'EF_' macro (External Functions)
+2.    C functions declared by 'EFF_' macro (External Foreign Functions)
+
+Cmm functions are simple as they are internal to GHC.
+
+C functions are trickier:
+
+The external-function macro EFF_(F) used to be defined as
+    extern StgFunPtr f(void)
+i.e a function of zero arguments.  On most platforms this doesn't
+matter very much: calls to these functions put the parameters in the
+usual places anyway, and (with the exception of varargs) things just
+work.
+
+However, the ELFv2 ABI on ppc64 optimises stack allocation
+(http://gcc.gnu.org/ml/gcc-patches/2013-11/msg01149.html): a call to a
+function that has a prototype, is not varargs, and receives all parameters
+in registers rather than on the stack does not require the caller to
+allocate an argument save area.  The incorrect prototypes cause GCC to
+believe that all functions declared this way can be called without an
+argument save area, but if the callee has sufficiently many arguments then
+it will expect that area to be present, and will thus corrupt the caller's
+stack.  This happens in particular with calls to runInteractiveProcess in
+libraries/process/cbits/runProcess.c, and led to Trac #8965.
+
+The simplest fix appears to be to declare these external functions with an
+unspecified argument list rather than a void argument list.  This is no
+worse for platforms that don't care either way, and allows a successful
+bootstrap of GHC 7.8 on little-endian Linux ppc64 (which uses the ELFv2
+ABI).
+
+Another case is m68k ABI where 'void*' return type is returned by 'a0'
+register while 'long' return type is returned by 'd0'. Thus we trick
+external prototype return neither of these types to workaround #11395.
+*/
+
 
 /* -----------------------------------------------------------------------------
    Tail calls
    -------------------------------------------------------------------------- */
 
 #define JMP_(cont) return((StgFunPtr)(cont))
-#define FB_
-#define FE_
 
 /* -----------------------------------------------------------------------------
    Other Stg stuff...
@@ -295,7 +374,7 @@ INLINE_HEADER StgDouble PK_DBL    (W_ p_src[])                 { return *(StgDou
  * independently - unfortunately this code isn't writable in C, we
  * have to use inline assembler.
  */
-#if sparc_HOST_ARCH
+#if defined(sparc_HOST_ARCH)
 
 #define ASSIGN_DBL(dst0,src) \
     { StgPtr dst = (StgPtr)(dst0); \
@@ -437,38 +516,6 @@ INLINE_HEADER StgInt64 PK_Int64(W_ p_src[])
 #endif /* SIZEOF_HSWORD == 4 */
 
 /* -----------------------------------------------------------------------------
-   Split markers
-   -------------------------------------------------------------------------- */
-
-#if defined(USE_SPLIT_MARKERS)
-#if defined(LEADING_UNDERSCORE)
-#define __STG_SPLIT_MARKER __asm__("\n___stg_split_marker:");
-#else
-#define __STG_SPLIT_MARKER __asm__("\n__stg_split_marker:");
-#endif
-#else
-#define __STG_SPLIT_MARKER /* nothing */
-#endif
-
-/* -----------------------------------------------------------------------------
-   Write-combining store
-   -------------------------------------------------------------------------- */
-
-INLINE_HEADER void
-wcStore (StgPtr p, StgWord w)
-{
-#ifdef x86_64_HOST_ARCH
-    __asm__(
-   "movnti\t%1, %0"
-   : "=m" (*p)
-   : "r" (w)
-   );
-#else
-      *p = w;
-#endif
-}
-
-/* -----------------------------------------------------------------------------
    Integer multiply with overflow
    -------------------------------------------------------------------------- */
 
@@ -491,7 +538,7 @@ wcStore (StgPtr p, StgWord w)
 
 #if SIZEOF_VOID_P == 4
 
-#ifdef WORDS_BIGENDIAN
+#if defined(WORDS_BIGENDIAN)
 #define RTS_CARRY_IDX__ 0
 #define RTS_REM_IDX__  1
 #else
@@ -544,4 +591,4 @@ typedef union {
 })
 #endif
 
-#endif /* STG_H */
+#endif

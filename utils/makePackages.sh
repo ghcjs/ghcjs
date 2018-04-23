@@ -232,7 +232,7 @@ mkdir -p "boot/pkg"
 for PKG in base array binary bytestring containers deepseq directory \
            filepath ghc-boot ghc-boot-th ghci integer-gmp integer-simple \
            parallel pretty primitive process random stm template-haskell \
-           time transformers unix vector Win32; do
+           mtl parsec text time transformers unix vector Win32; do
   copy_patch_boot_package_sdist "$PKG" ""
 done
 
@@ -410,7 +410,7 @@ for FILE in Convert.hs Doc.hs GhcUtils.hs InterfaceFile.hs Interface.hs ModuleTr
   copy_file "$GHCSRC/utils/haddock/haddock-api/src/Haddock" "$FILE"
 done
 
-for DIR in Backends Interface; do
+for DIR in Backends Interface Utils; do
   copy_dir "$GHCSRC/utils/haddock/haddock-api/src/Haddock" "$DIR"
 done
 ) # haddock-api-ghcjs/src/Haddock
@@ -423,11 +423,11 @@ done
 mkdir -p "haddock-library-ghcjs"
 (
 cd "haddock-library-ghcjs"
-for FILE in LICENSE Setup.hs; do
+for FILE in LICENSE Setup.hs CHANGES.md; do
   copy_file "$GHCSRC/utils/haddock/haddock-library" "$FILE"
 done
 
-for DIR in src test vendor; do
+for DIR in src test fixtures vendor; do
   copy_dir "$GHCSRC/utils/haddock/haddock-library" "$DIR"
 done
 )

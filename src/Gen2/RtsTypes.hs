@@ -389,8 +389,10 @@ initState df m unfloat =
 runGen :: DynFlags -> Module -> UniqFM StgExpr -> G a -> a
 runGen df m unfloat = flip evalState (initState df m unfloat)
 
+instance Semigroup C where
+  (<>) = liftM2 (<>)
+
 instance Monoid C where
-  mappend = liftM2 (<>)
   mempty  = return mempty
 
 data Special = Stack
