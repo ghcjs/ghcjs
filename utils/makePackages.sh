@@ -154,7 +154,7 @@ copy_patch_boot_package_sdist() {
   cabal sdist --builddir=dist-install
   )
   # unpack the source distribution
-  for SRCDISTTMP in $PKGSRC/dist/$PKG-*.tar.gz; do
+  for SRCDISTTMP in $PKGSRC/dist-install/$PKG-*.tar.gz; do
     SRCDIST="$SRCDISTTMP"
   done
   (
@@ -227,6 +227,12 @@ TARGET=$PWD
 # Boot Packages
 
 mkdir -p "boot/pkg"
+
+# temporary fix for time package
+(
+cd "$GHCSRC/libraries/time"
+cp dist-install/build/lib/include/HsTimeConfig.h lib/include/HsTimeConfig.h
+)
 
 # copy packages by source distribution
 for PKG in base array binary bytestring containers deepseq directory \
