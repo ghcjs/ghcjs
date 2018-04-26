@@ -150,8 +150,8 @@ copy_patch_boot_package_sdist() {
   # collect the files of the upstream package by making a source distribution
   (
   cd "$PKGSRC"
-  rm -f "dist/$PKG-*.tar.gz"
-  cabal sdist
+  rm -f "dist-install/$PKG-*.tar.gz"
+  cabal sdist --builddir=dist-install
   )
   # unpack the source distribution
   for SRCDISTTMP in $PKGSRC/dist/$PKG-*.tar.gz; do
