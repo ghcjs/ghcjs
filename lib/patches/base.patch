@@ -1,11 +1,11 @@
 diff -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
---- upstream/pkg/base/base.cabal	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/base.cabal	2018-04-20 04:53:27.802394699 +0200
+--- upstream/pkg/base/base.cabal	2018-04-26 09:55:16.000000000 +0000
++++ boot/pkg/base/base.cabal	2018-04-26 09:55:16.675026534 +0000
 @@ -1,4 +1,4 @@
 -cabal-version:  2.1
 +cabal-version:  2.2
  name:           base
- version:        4.11.0.0
+ version:        4.11.1.0
  -- NOTE: Don't forget to update ./changelog.md
 @@ -51,7 +51,7 @@
  Flag integer-gmp
@@ -145,14 +145,14 @@ diff -Nru upstream/pkg/base/GHC/Conc/Windows.hs boot/pkg/base/GHC/Conc/Windows.h
  
 +#endif
 diff -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
---- upstream/pkg/base/GHC/Conc.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Conc.hs	2018-04-20 05:07:18.566023075 +0200
+--- upstream/pkg/base/GHC/Conc.hs	2018-04-26 09:55:16.000000000 +0000
++++ boot/pkg/base/GHC/Conc.hs	2018-04-27 04:46:13.499651376 +0000
 @@ -95,14 +95,14 @@
          , asyncWriteBA
  #endif
  
 -#if !defined(mingw32_HOST_OS)
-+#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
++#if !defined(mingw32_HOST_OS) || defined(ghcjs_HOST_OS)
          , Signal, HandlerFun, setHandler, runHandlers
  #endif
  
@@ -169,7 +169,7 @@ diff -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
  import GHC.Conc.Sync
  
 -#if !defined(mingw32_HOST_OS)
-+#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
++#if !defined(mingw32_HOST_OS) || defined(ghcjs_HOST_OS)
  import GHC.Conc.Signal
  #endif
 diff -Nru upstream/pkg/base/GHC/Event/Manager.hs boot/pkg/base/GHC/Event/Manager.hs
