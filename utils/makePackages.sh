@@ -56,6 +56,7 @@ done
 SOURCEDIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 PKGINPUT="$SOURCEDIR/pkg-input"
+PKGCACHE="$SOURCEDIR/pkg-cache"
 GHCJSROOT="$SOURCEDIR/.."
 TARGET="$GHCJSROOT/lib"
 
@@ -215,6 +216,64 @@ copy_patch_boot_package_list() {
   fi
 
 }
+
+# prepare the GHC source tree if needed
+(
+cd "$GHCSRC"
+if [ ! -f ./configure ]; then
+    echo "booting GHC tree"
+    ./boot
+fi
+
+if [ ! -f ./compiler/ghc.cabal ]; then
+    echo "configuring GHC tree"
+    ./configure
+fi
+
+if [ ! -f ./libraries/time/lib/include/HsTimeConfig.h ]; then
+    echo "configuring time package"
+(
+cd libraries/time
+./configure
+)
+fi
+
+# genprimopcode tool
+if [ ! -f ./inplace/bin/genprimopcode ]
+then
+(
+mkdir -p inplace/bin
+cd utils/genprimopcode
+cabal build --ignore-sandbox --builddir=dist
+cp dist/build/genprimopcode/genprimopcode ../../inplace/bin
+)
+fi
+
+# add cached files if needed
+(
+echo "processing cache"
+cd "$PKGCACHE/ghc"
+shopt -s globstar
+for CACHED in ./**/*
+do
+    # echo "cached entry: $CACHED"
+    if [ -f "$CACHED" ]
+    then
+        if [ -f "$GHCSRC/$CACHED" ]
+        then
+          # exists: update cached version
+          cp "$GHCSRC/$CACHED" "$CACHED"
+        else
+          # does not exist: copy cached version into GHC tree
+          mkdir -p "$GHCSRC/${CACHED%/*}"
+          cp "$CACHED" "$GHCSRC/$CACHED"
+        fi
+    fi
+done
+
+)
+
+)
 
 # update the file lists below lists if files are added to GHC
 
