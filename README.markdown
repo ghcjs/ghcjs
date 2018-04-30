@@ -15,7 +15,7 @@ installed under the name `ghc-api-ghcjs`
 ```
 $ git clone https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
-$ git submodule update --init
+$ git submodule update --init --recursive
 $ ./utils/makePackages.sh
 ```
 
@@ -109,8 +109,8 @@ Example:
 
 ```
 #!/bin/sh
-topdir="/home/luite/.ghcjs/x86_64-linux-8.2.0.1-8.2.2/ghcjs"
-executablename="/home/luite/haskell/ghcjs-8.2/ghcjs/.cabal-sandbox/libexec/x86_64-linux-ghc-8.2.2/ghcjs-8.2.0.1/ghcjs"
+topdir="/home/luite/.ghcjs/x86_64-linux-8.4.0.1-8.4.2/ghcjs"
+executablename="/home/luite/haskell/ghcjs-8.4/ghcjs/.cabal-sandbox/libexec/x86_64-linux-ghc-8.4.2/ghcjs-8.4.0.1/ghcjs"
 exec "$executablename" -B"$topdir" ${1+"$@"}
 ```
 
