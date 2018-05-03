@@ -1722,14 +1722,7 @@ allocateStaticList _ _ = panic "allocateStaticList: unexpected literal in list"
 
 -- generate arg to be passed to FFI call, with marshalling JStat to be run
 -- before the call
--- currently marshalling:
---   String literals passed as real JS string
---   Ptr ghcjs-base.GHCJS.Types.JSChar -> JavaScript String
 genFFIArg :: Bool -> StgArg -> G (JStat, [JExpr])
-genFFIArg isJavaScriptCc (StgLitArg (MachStr str)) =
-  case decodeModifiedUTF8 str of
-    Just t -> return (mempty, [toJExpr $ T.unpack t])
-    _      -> panic "genFFIArg: cannot encode FFI string literal"
 genFFIArg isJavaScriptCc (StgLitArg l) = (mempty,) <$> genLit l
 genFFIArg isJavaScriptCc a@(StgVarArg i)
     | tycon == byteArrayPrimTyCon || tycon == mutableByteArrayPrimTyCon = do
@@ -1799,18 +1792,11 @@ genStrThunk i nonAscii str cc = do
 genLit :: HasDebugCallStack => Literal -> G [JExpr]
 genLit (MachChar c)      = return [ [je| `ord c` |] ]
 genLit (MachStr  str)    =
-  case decodeModifiedUTF8 str of
-    Just t -> withNewIdent $ \ident -> do
-      -- this should do modified UTF8
-      emitToplevel [j| `decl ident`;
-                       `ident` = h$str(`T.unpack t`);
-                     |]
-      return [ [je| `ident`() |], [je| 0 |] ]
-    Nothing -> withNewIdent $ \ident -> do
-      emitToplevel [j| `decl ident`;
-                       `ident` = h$rstr(`map toInteger (B.unpack str)`);
-                     |]
-      return [ [je| `ident`() |], [je| 0 |] ]
+  withNewIdent $ \strLit@(TxtI strLitT) ->
+    withNewIdent $ \strOff@(TxtI strOffT) -> do
+      emitStatic strLitT (StaticUnboxed (StaticUnboxedString str)) Nothing
+      emitStatic strOffT (StaticUnboxed (StaticUnboxedStringOffset str)) Nothing
+      return [ ValExpr (JVar strLit), ValExpr (JVar strOff) ]
 genLit MachNullAddr      = return [ [je| null |], [je| 0 |] ]
 genLit (MachInt i)       = return [ [je| `intLit i` |] ]
 genLit (MachInt64 i)     = return [ [je| `intLit (shiftR i 32)` |]
@@ -2190,7 +2176,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
       | otherwise = e
         where
           (TxtI i') = i
-          err = error (pat ++ ": invalid placeholder, check function type: " ++ show i')
+          err = error (pat ++ ": invalid placeholder, check function type: " ++ show (i', args, t))
     replaceIdent _ e = e
     traceCall cs as
         | csTraceForeign cs = [j| h$traceForeign(`pat`, `as`); |]
