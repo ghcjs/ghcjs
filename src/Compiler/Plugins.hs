@@ -82,15 +82,11 @@ import Control.Concurrent.MVar
 
 import qualified Compiler.Info as Info
 
-import NameEnv
-import Data.IORef -- debug
 import LoadIface
 import Control.Monad
 import RdrName
 import SrcLoc
 import TcRnMonad
-
-import Unsafe.Coerce
 
 getValueSafely :: DynFlags -> GhcjsEnv
                -> HscEnv -> Name -> Type -> IO (Maybe a)

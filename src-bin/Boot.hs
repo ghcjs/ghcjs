@@ -37,7 +37,7 @@
 module Main where
 
 import           Prelude
-  hiding (FilePath, forM_, elem, mapM, mapM_, any, all, concat, concatMap)
+  hiding (FilePath, elem, mapM, mapM_, any, all, concat, concatMap)
 
 import qualified Prelude
 
@@ -50,7 +50,7 @@ import           Control.Applicative
 import qualified Control.Exception               as Ex
 import           Control.Lens                    hiding ((<.>))
 import           Control.Monad
-  (void, when, unless, mplus, join)
+  (void, when, unless, join)
 import           Control.Monad.Reader
   (MonadReader, ReaderT(..), MonadIO, ask, local, lift, liftIO)
 
@@ -67,16 +67,14 @@ import           Data.Maybe
 import           Data.Monoid
 import           Data.Text                       (Text)
 import qualified Data.Text                       as T
-import qualified Data.Text.Encoding              as T
 import qualified Data.Text.IO                    as T
 import           Data.Time.Clock
 import           Data.Traversable
-import           Data.Typeable
 import qualified Data.Vector                     as V
 import           Data.Yaml                       ((.:))
 import qualified Data.Yaml                       as Yaml
 import           Filesystem
-  (getWorkingDirectory, getModified, getSize, canonicalizePath, isDirectory)
+  (getWorkingDirectory, getModified, getSize)
 import           Filesystem.Path
   hiding ((<.>), (</>), null, concat)
 import           Filesystem.Path.CurrentOS       (encodeString)
@@ -84,11 +82,10 @@ import           Filesystem.Path.CurrentOS       (encodeString)
 import           GHC.IO.Encoding
   (setLocaleEncoding, setForeignEncoding, utf8)
 
-import           Options.Applicative             hiding (info, (&))
+import           Options.Applicative             hiding (info)
 import qualified Options.Applicative             as O
 
 import           System.Directory
-import           System.Environment              (getEnvironment, getArgs)
 import           System.Environment.Executable   (getExecutablePath)
 import           System.Exit
   (exitSuccess, exitFailure, ExitCode(..))
@@ -122,6 +119,8 @@ isWindows = False
 #endif
 
 newtype Verbosity = Verbosity Int deriving (Eq, Ord, Data, Typeable)
+
+trace, info, warn, err :: Verbosity
 trace = Verbosity 3
 info  = Verbosity 2
 warn  = Verbosity 1

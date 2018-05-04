@@ -7,7 +7,6 @@ module Compiler.Variants where
 import           Data.ByteString       (ByteString)
 import           Data.Set              (Set)
 
-import           Compiler.Compat
 import           Compiler.Settings
 
 import qualified Gen2.Generator        as Gen2

@@ -24,7 +24,6 @@ import           Panic
 
 
 import           Control.Applicative
-import           Control.Arrow
 import           Control.Lens
 import           Control.Monad.State.Strict
 
@@ -38,7 +37,6 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Builder as BB
-import           Data.ByteString.Builder (Builder)
 import           Data.Char (chr, ord)
 import           Data.Function (on)
 import qualified Data.Graph as G
@@ -50,15 +48,12 @@ import           Data.Int
 import           Data.List
 import           Data.List.Split
 import           Data.Maybe
-import           Data.Monoid
 import qualified Data.Set as S
 import           Data.Set (Set)
 import           Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Encoding as TE
-import qualified Data.Text.Encoding.Error as TE
 
 import           Compiler.JMacro
 import           Compiler.Settings
@@ -70,9 +65,6 @@ import           Gen2.Printer             (pretty)
 import qualified Gen2.Utils as U
 import           Text.PrettyPrint.Leijen.Text (renderPretty, displayT)
 import qualified Crypto.Hash.SHA256 as SHA256
-import           Data.Aeson (ToJSON(..), Value)
-import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Base16 as B16
 
 import System.IO.Unsafe (unsafePerformIO)
 

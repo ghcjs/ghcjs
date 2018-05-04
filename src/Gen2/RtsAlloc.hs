@@ -12,7 +12,6 @@ import           Data.Array
 import           Data.Data.Lens
 import qualified Data.Map as M
 import           Data.Maybe
-import           Data.Monoid
 import qualified Data.Text as T
 
 import           Compiler.JMacro

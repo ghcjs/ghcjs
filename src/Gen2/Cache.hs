@@ -6,7 +6,6 @@
 
 module Gen2.Cache (getCached, putCached) where
 
-import           Control.Applicative
 import qualified Control.Exception      as E
 
 import qualified Crypto.Hash.SHA1       as SHA1
@@ -17,8 +16,6 @@ import qualified Data.Binary.Put        as DB
 import           Data.ByteString        (ByteString)
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy   as BL
-import qualified Data.List
-import           Data.Monoid
 import           Data.Text              (Text)
 import qualified Data.Text              as T
 import qualified Data.Text.Encoding     as T

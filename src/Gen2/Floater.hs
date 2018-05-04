@@ -17,7 +17,6 @@ module Gen2.Floater where
 
 import           Data.Generics.Aliases
 import           Data.Generics.Schemes
-import           Data.Monoid
 
 import           Compiler.JMacro
 
@@ -44,5 +43,3 @@ unlabel x               = x
 isToplevelStatement :: JStat -> Bool
 isToplevelStatement (LabelStat l _) | l == "toplevel" = True
 isToplevelStatement _                                 = False
-
-

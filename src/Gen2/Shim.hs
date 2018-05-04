@@ -29,7 +29,6 @@ module Gen2.Shim where
 import           DynFlags
 import qualified FileCleanup
 
-import           Control.Applicative hiding ((<|>))
 import           Control.Lens hiding ((<.>))
 import           Control.Monad
 

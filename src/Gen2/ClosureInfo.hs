@@ -20,7 +20,6 @@ import qualified Data.ByteString as B
 import           Data.Default
 import qualified Data.Map as M
 import           Data.Maybe
-import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Typeable (Typeable)
@@ -30,8 +29,7 @@ import           Compiler.JMacro
 import           Gen2.StgAst ()
 import           Gen2.Utils
 
-import           BasicTypes ( SourceText(..) )
-import           ForeignCall (CCallSpec(..), CCallConv(..), Safety(..), CCallTarget(..))
+import           ForeignCall (CCallConv(..), Safety(..))
 import           DynFlags
 import           StgSyn
 import           DataCon
@@ -241,31 +239,11 @@ kindPrimRep' :: HasDebugCallStack => SDoc -> Kind -> [PrimRep]
 kindPrimRep' doc ki
   | Just ki' <- coreView ki
   = kindPrimRep' doc ki'
-kindPrimRep' doc (TyConApp typ [runtime_rep])
+kindPrimRep' doc (TyConApp _typ [runtime_rep])
   = -- ASSERT( typ `hasKey` tYPETyConKey )
     runtimeRepPrimRep doc runtime_rep
 kindPrimRep' doc ki
   = pprPanic "kindPrimRep'" (ppr ki $$ doc)
-
-{-
-kindPrimRep' :: Kind -> PrimRep
-kindPrimRep' ki | Just ki' <- coreViewOneStarKind ki = kindPrimRep' ki'
-kindPrimRep' ki -- (TyConApp typ [runtime_rep])
-  | Just (typ, [runtime_rep]) <- repSplitTyConApp_maybe ki
-  = -- ASSERT( typ `hasKey` tYPETyConKey )
-    go runtime_rep
-  where
-    go rr | Just rr' <- coreView rr = go rr'
-    go rr
---     (TyConApp rr_dc args)
-      | Just (rr_dc, args) <- repSplitTyConApp_maybe rr
-      , RuntimeRep fun <- tyConRuntimeRepInfo rr_dc
-      = fun args
-    go rr = PtrRep -- pprPanic "kindPrimRep.go" (ppr rr)
-kindPrimRep' ki = -- WARN( True
-                    -- , text "kindPrimRep defaulting to PtrRep on" <+> ppr ki )
-                 PtrRep  -- this can happen legitimately for, e.g., Any
--}
 
 primTypeVt :: HasDebugCallStack => Type -> VarType
 primTypeVt t = case tyConAppTyCon_maybe (unwrapType t) of
@@ -562,21 +540,6 @@ staticInitStat _prof (StaticInfo i sv cc) =
     StaticList args mt   ->
       ApplStat (jvar "h$stl") $ [jvar i, toJExpr args, toJExpr $ maybe jnull (toJExpr . TxtI) mt] ++ ccArg
     StaticThunk (Just (f,args)) -> ApplStat (jvar "h$stc") $ [jvar i, jvar f, toJExpr args] ++ ccArg
-    --StaticUnboxed (StaticUnboxedString str) -> AssignStat (jvar i) (initStr str)
-
-
-      --  -> withNewIdent $ \ident -> do
-        -- this should do modified UTF8
-    --    emitToplevel [j| `decl ident`;
-    --                     `ident` = h$str(`T.unpack t`);
-  --                     |]
-    --    return [ [je| `ident`() |], [je| 0 |] ]
-    --  Nothing -> withNewIdent $ \ident -> do
-    --    emitToplevel [j| `decl ident`;
-      --                   `ident` = h$rstr(`map toInteger (B.unpack str)`);
-        --               |]
-    -- ApplStat (jvar "h$str")
-    --StaticUnboxed (StaticUnboxedStringOffset str) -> AssignStat (jvar i) (jint 0)
     _                    -> mempty
   where
     ccArg = maybeToList (fmap toJExpr cc)

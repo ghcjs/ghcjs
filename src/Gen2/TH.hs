@@ -44,23 +44,18 @@ import           Unique
 import           Type
 import           Maybes
 import           UniqFM
-import           UniqSet
 import           SimplStg
 import           GHC.Serialized
 import           Annotations
 import           Convert
 import           RnEnv
 import           FastString
-import           RdrName
 import           Bag
-import           IOEnv
 
 import           Control.Concurrent
 import qualified Control.Exception              as E
-import           Control.Lens
 import           Control.Monad
 
-import           Data.Data.Lens
 import qualified Data.IntMap                    as IM
 import qualified Data.Map                       as M
 
@@ -72,20 +67,12 @@ import           Data.ByteString                (ByteString)
 import qualified Data.ByteString                as B
 import qualified Data.ByteString.Base16         as B16
 import qualified Data.ByteString.Lazy           as BL
-import           Data.Function
 import qualified Data.List                      as L
-import           Data.Monoid
 import qualified Data.Set                       as S
 import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as T
-import qualified Data.Text.IO                   as T
 import qualified Data.Text.Lazy.Encoding        as TL
 import qualified Data.Generics.Text             as SYB
-
-import           Distribution.Package (InstalledPackageId(..))
-
-import           GHC.Desugar
-import qualified GHC.Generics
 
 import qualified GHCJS.Prim.TH.Types            as TH
 
@@ -93,15 +80,14 @@ import qualified "template-haskell-ghcjs" Language.Haskell.TH            as TH
 import           "template-haskell-ghcjs" Language.Haskell.TH.Syntax     (Quasi)
 import qualified "template-haskell-ghcjs" Language.Haskell.TH.Syntax     as TH
 
+
 import           System.Process
-  (runInteractiveProcess, terminateProcess, waitForProcess)
+  (terminateProcess, waitForProcess)
 
 import           System.FilePath
 import           System.IO
 import           System.IO.Error
 import           System.Timeout
-
-import           Unsafe.Coerce
 
 import           ErrUtils
 import           HsExpr
@@ -110,7 +96,7 @@ import           DsExpr
 import           HsPat
 import           HsTypes
 import           HsDecls
-import           TcSplice
+import           TcSplice ()
 import           UniqDFM
 
 #include "HsVersions.h"
@@ -246,7 +232,8 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
                                                  src_span)
                                  (exprType ds_expr)
     bind n u e = NonRec (thExpr n u) e
-    mod n      = mkModule thrunnerPackage' (mkModuleName $ "ThRunner" ++ show n)
+    mod n      = mkModule thrunnerPackage'
+                          (mkModuleName $ "ThRunner" ++ show n)
 
 thrunnerPackage :: InstalledUnitId
 thrunnerPackage = stringToInstalledUnitId "thrunner"

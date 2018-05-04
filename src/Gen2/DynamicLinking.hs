@@ -5,36 +5,24 @@
  -}
 
 module Gen2.DynamicLinking ( ghcjsLink
-#if __GLASGOW_HASKELL__ < 711
-                           , ghcjsCompileCoreExpr
-                           , ghcjsGetValueSafely
-#endif
                            , ghcjsDoLink
                            , isGhcjsPrimPackage
                            , ghcjsPrimPackage
                            ) where
 
-import Id
 import Name
 import Outputable hiding ((<>))
 import FastString
 import HscTypes
-import ByteCodeGen
-import VarEnv
 import Panic
 import Util
 import Exception
 import Packages
 import DynFlags
 import Type
-import CoreMonad hiding ( debugTraceMsg )
-import DynamicLoading
 import Module
 import SrcLoc
-import CoreSyn
 import BasicTypes
-import SimplCore
-import CoreTidy
 import SysTools hiding ( linkDynLib )
 import SysTools.ExtraObj
 import Platform
@@ -44,13 +32,11 @@ import DriverPipeline hiding ( linkingNeeded )
 import UniqDFM
 import Maybes hiding ( Succeeded )
 
-import           Control.Applicative
 import           Control.Monad
 
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString as BS
-import           Data.List ( isPrefixOf, sort, nub )
-import           Data.Monoid
+import           Data.List ( nub )
 import qualified Data.Set as S
 import qualified Data.Map as M
 import qualified Data.Text as T
@@ -64,13 +50,7 @@ import           Compiler.Variants
 import qualified Compiler.Utils as Utils
 import qualified Compiler.Info as Info
 
-#if __GLASGOW_HASKELL__ >= 709
 import           SysTools
-import           Linker
-#else
-import           Gen2.GHC.Linker -- use our own version!
-import           Gen2.GHC.SysTools ( ghcjsPackageHsLibs, linkDynLib )
-#endif
 
 import qualified Data.Yaml                as Yaml
 import Compiler.Info (getLibDir)

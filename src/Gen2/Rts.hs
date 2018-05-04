@@ -12,7 +12,6 @@ import           Data.Array
 import           Data.Bits
 import           Data.Char                        (toLower, toUpper)
 import qualified Data.Map                         as M
-import           Data.Monoid
 import qualified Data.Text                        as T
 import qualified Data.Text.Lazy                   as TL
 
@@ -82,7 +81,7 @@ closureConstructors s =
                          if(arguments[0] !== h$ghcjszmprimZCGHCJSziPrimziJSVal_con_e) {
                            for(var i=1;i<arguments.length;i++) {
                              if(arguments[i] === null || arguments[i] === undefined) {
-                               var msg = "warning: undefined or null in argument: " 
+                               var msg = "warning: undefined or null in argument: "
                                       + i + " allocating closure: " + arguments[0].n;
                                h$log(msg);
                                if(console && console.trace) { console.trace(msg); }
@@ -238,7 +237,7 @@ loadRegs = mconcat $ map mkLoad [1..32]
   where
     mkLoad :: Int -> JStat
     mkLoad n = let args   = map (TxtI . T.pack . ("x"++) . show) [1..n]
-                   assign = zipWith (\a r -> [j| `r` = `a`; |]) 
+                   assign = zipWith (\a r -> [j| `r` = `a`; |])
                               args (reverse $ take n (enumFrom R1))
                    fname  = TxtI $ T.pack ("h$l" ++ show n)
                    fun    = JFunc args (mconcat assign)

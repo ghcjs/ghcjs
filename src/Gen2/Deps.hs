@@ -1,21 +1,11 @@
 
 module Gen2.Deps where
 
-import           Data.List
-import           Data.Monoid
-
 import           Id
 import           StgSyn
 import           VarSet
 
 type LiveVars = DVarSet
-{-
-newtype LiveVars = LiveVars LiveVars deriving Eq
-
-instance Monoid LiveVars where
-  mempty  = emptyVarSet
-  mappend = unionVarSet
--}
 
 liveStatic :: LiveVars -> LiveVars
 liveStatic = filterDVarSet isGlobalId
@@ -37,7 +27,7 @@ stgBindRhsLive b =
   in  delDVarSetList (unionDVarSets ls) bs
 
 stgRhsLive :: StgRhs -> LiveVars
-stgRhsLive (StgRhsClosure _ _ fvs _ args e) =
+stgRhsLive (StgRhsClosure _ _ _fvs _ args e) =
   delDVarSetList (stgExprLive True e) args
 stgRhsLive (StgRhsCon _ _ args) =
   mconcat (map stgArgLive args)
@@ -75,7 +65,7 @@ stgAltLive (_altCon, bs, e) =
   delDVarSetList (stgExprLive True e) bs
 
 stgLetNoEscapeLive :: Bool -> StgBinding -> StgExpr -> LiveVars
-stgLetNoEscapeLive someBool b e = error "stgLetNoEscapeLive"
+stgLetNoEscapeLive _someBool _b _e = error "stgLetNoEscapeLive"
 
 bindees :: StgBinding -> [Id]
 bindees (StgNonRec b _e) = [b]

@@ -15,14 +15,13 @@ import Prelude hiding ((<>))
 import Control.Monad
 
 import Data.Maybe
-import Data.List (isPrefixOf, unzip4)
+import Data.List (unzip4)
 
 import Hooks
 import DynFlags
 
 import HsExtension
 import Id
-import IdInfo
 import OrdList
 import Name
 import Bag
@@ -74,13 +73,9 @@ import CmmUtils
 
 import Compiler.Compat
 
-import Gen2.StgAst -- fixme
-
 import GHC.LanguageExtensions
 
-import Data.Char
 import Data.List (stripPrefix)
-import Data.List.Split
 
 type Binding = (Id, CoreExpr)
 

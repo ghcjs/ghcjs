@@ -29,7 +29,6 @@ import           Gen2.ClosureInfo
 import           Gen2.Profiling
 
 import           Data.Bits
-import           Data.Monoid
 import qualified Data.Text as T
 
 t :: T.Text -> T.Text
@@ -672,4 +671,3 @@ moveRegs2 = [j| fun h$moveRegs2 n m {
                           }
                         |]
     -- moveReg n m = [j| h$setReg(`n+m`, h$getReg(`n`)); |]
-

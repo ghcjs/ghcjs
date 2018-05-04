@@ -10,46 +10,22 @@ module Compiler.GhcjsProgram where
 import           GHC
 import           GhcMonad
 import           DynFlags
-import           PackageConfig hiding (Version)
-import           UniqFM
-import           PrimOp
-import           PrelInfo
-import           IfaceEnv
-import           HscTypes
-import           DsMeta
 import           ErrUtils (fatalErrorMsg'')
 import           Panic (handleGhcException)
 import           Exception
 import           Packages (initPackages)
-import           PrelNames
-import           THNames
-import           TyCon
-import           ConLike
-import           DataCon
-import           Id
-import           Constants
-import           BasicTypes (Boxity(..))
-import           TcTypeNats
-import           TysWiredIn
-import           TysPrim
-import           NameCache
 
 import           Control.Applicative
-import           Control.Concurrent.MVar (readMVar)
 import           Control.Monad
 import           Control.Monad.IO.Class
 
 import qualified Data.ByteString as B
-import           Data.IORef
-import           Data.List (isPrefixOf, partition)
-import qualified Data.List as L
+import           Data.List (isPrefixOf)
 import qualified Data.Map as M
 import           Data.Maybe
-import           Data.Monoid
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy.IO as TL
-import           Data.Time.Clock
 
 import           Distribution.System (buildOS, OS(..))
 import           Distribution.Verbosity (deafening, intToVerbosity)
@@ -65,7 +41,6 @@ import           System.Exit
 import           System.FilePath
 import           System.IO
 import           System.Process
-import           System.Timeout
 
 import           Compiler.Compat
 import           Compiler.GhcjsPlatform

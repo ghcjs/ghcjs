@@ -21,7 +21,6 @@ import           SrcLoc
 import           ForeignCall (Safety(..), CCallConv(..))
 import           FastString
 
-import           Control.Applicative
 import qualified Control.Exception as Ex
 import           Control.Lens
 import           Control.Monad.State.Strict
@@ -33,8 +32,7 @@ import           Data.Default
 import           Data.Ix
 import qualified Data.List    as L
 import qualified Data.Map     as M
-import           Data.Maybe   (fromMaybe, listToMaybe, isJust)
-import           Data.Monoid
+import           Data.Maybe   (fromMaybe, isJust)
 import           Data.Set     (Set)
 import qualified Data.Set     as S
 import           Data.Text    (Text)
@@ -310,39 +308,6 @@ addSlots xs = gsGroup . ggsStack %= (xs++)
 
 stackDepth :: Lens' GenState Int
 stackDepth = gsGroup . ggsStackDepth
-
-----------------------------------------------------------
--- global to live floating
-{-
-globalRefs :: Lens' GenState [[Id]]
-globalRefs = gsGroup . ggsGlobalRefs
-
-pushGlobalRefs :: G ()
-pushGlobalRefs = globalRefs %= ([]:)
-
--- fixme return slot
-popGlobalRefs :: G (Maybe [Id])
-popGlobalRefs = do
-  gr <- use globalRefs
-  globalRefs %= drop 1
-  return listToMaybe gr
-
-addGlobalRef :: Id -> G ()
-addGlobalRef i = globalRefs %= addRef
-  where
-    addRef []     = []
-    addRef (x:xs) = (i:x):xs
--}
-{-
-
-  requirements for float:
-    - not unfloated (inline more efficient), although we might lose some sharing
-    -
-
- -}
---pushGlobalRefs = gsGroup .
-
--- popGlobalRefs = undefined
 
 ----------------------------------------------------------
 
@@ -771,13 +736,7 @@ ghcjsThPackage dflags =
     prims = filter ((=="ghcjs-th").fst)
                    (searchModule dflags (mkModuleName "GHCJS.Prim.TH.Eval"))
 
-{-
-wiredInPackages :: [String]
-wiredInPackages = [ "ghcjs-prim" ]
 
-isWiredInPackage :: DynFlags -> PackageKey -> Bool
-isWiredInPackage pkg = pkg `elem` wiredInPackages
--}
 idTypeSuffix :: IdType -> String
 idTypeSuffix IdPlain = ""
 idTypeSuffix IdEntry = "_e"

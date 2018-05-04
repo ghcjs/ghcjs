@@ -20,7 +20,6 @@ import           Data.Int
 import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Word
 
 import           GHC.Generics hiding (Meta)
 
@@ -67,7 +66,7 @@ sectionsLength :: Int
 sectionsLength = 24
 
 buildArchive :: Meta -> [(Entry, ByteString)] -> ByteString
-buildArchive meta entries = 
+buildArchive meta entries =
   versionTag <> sections <> index <> meta' <> entries'
   where
     bl       = fromIntegral . B.length

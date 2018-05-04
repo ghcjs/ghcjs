@@ -19,7 +19,6 @@ import           Data.IntMap            (IntMap)
 import qualified Data.List              as L
 import           Data.Map               (Map)
 import qualified Data.Map               as M
-import           Data.Maybe
 import           Data.Monoid
 import           Data.Set               (Set)
 import           Data.Text              (Text)
@@ -36,7 +35,6 @@ import           System.FilePath        ((</>), searchPathSeparator
 
 import           DynFlags
 import           Module
-import           TcRnTypes
 import           ErrUtils
 import           HscTypes
 import           Panic

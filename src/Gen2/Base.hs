@@ -16,7 +16,6 @@ import qualified Gen2.Object          as Object
 
 import           Compiler.JMacro
 
-import           Control.Arrow
 import           Control.Lens
 import           Control.Monad
 
@@ -24,12 +23,10 @@ import           Data.Array
 import qualified Data.Binary          as DB
 import qualified Data.Binary.Get      as DB
 import qualified Data.Binary.Put      as DB
-import           Data.Hashable
 import           Data.HashMap.Strict  (HashMap)
 import qualified Data.HashMap.Strict  as HM
 import qualified Data.HashSet         as HS
 import qualified Data.Map             as M
-import           Data.Monoid
 import           Data.Set             (Set)
 import qualified Data.Set             as S
 import           Data.Text            (Text)

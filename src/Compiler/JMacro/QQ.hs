@@ -35,7 +35,6 @@ import Data.Char (digitToInt, toLower, isUpper, isAlpha)
 import Data.List (isPrefixOf, sort)
 import Data.Generics (extQ, Data)
 import Data.Maybe (fromMaybe, isJust)
-import Data.Monoid
 import qualified Data.Map as M
 import qualified Data.Text as T
 

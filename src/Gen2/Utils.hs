@@ -13,7 +13,6 @@ import qualified Data.ByteString.Lazy   as BL
 import qualified Data.ByteString.Search as S
 import           Data.Char        (isSpace)
 import           Data.List        (isPrefixOf)
-import           Data.Monoid
 import           Data.Text (Text)
 import qualified Data.Text              as T
 import qualified Data.Text.Encoding     as TE

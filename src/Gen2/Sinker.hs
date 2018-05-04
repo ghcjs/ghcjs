@@ -12,14 +12,12 @@ import Module
 import Literal
 import Gen2.GHC.Digraph
 
-import Control.Applicative
 import Control.Lens
 
 import Data.Char
 import Data.Either
 import Data.List (partition)
 import Data.Maybe
-import Data.Traversable
 
 import Gen2.ClosureInfo
 

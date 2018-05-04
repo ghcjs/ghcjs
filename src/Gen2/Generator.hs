@@ -66,7 +66,6 @@ import           Data.Int
 import           Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet        as IS
-import           Data.Monoid
 import           Data.Maybe
   (isJust, isNothing, catMaybes, fromMaybe, maybeToList, listToMaybe)
 import           Data.Map (Map)
@@ -102,14 +101,12 @@ import           Gen2.Sinker
 import           Gen2.Profiling
 import qualified Gen2.Compactor as Compactor
 
-import qualified Control.Exception
 import           GHC.Float
 
 -- debug
 import           Gen2.Printer             (pretty)
 
 import qualified Data.Text.Lazy           as TL
-import qualified Data.Text.Lazy.Encoding  as TLE
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
 
@@ -513,15 +510,7 @@ moduleNameText m
   | xs == ":Main" = T.pack "Main"
   | otherwise     = T.pack xs
     where xs      = moduleNameString . moduleName $ m
-{-
-modulePackageText :: Module -> Object.Package
-modulePackageText m
-  | isWiredInPackage pkgStr = Object.Package n ""
-  | otherwise               = Object.Package n v
-  where
-    pkgStr = packageKeyString (modulePackageKey m)
-    (n, v) = Linker.splitVersion . T.pack . packageKeyString . modulePackageKey $ m
--}
+
 genToplevel :: StgBinding -> C
 genToplevel (StgNonRec bndr rhs) = genToplevelDecl bndr rhs
 genToplevel (StgRec bs)          =
@@ -570,38 +559,17 @@ genStaticRefs lv
   where
     sv = liveStatic lv
 
-{-
-genStaticRefs {- NoSRT -} = return noStatic
--}
-{-
-genStaticRefs (SRTEntries s) = do
-  unfloated <- use gsUnfloated
-  let xs = filter (\x -> not $ elemUFM x unfloated) (uniqSetToList s)
-  CIStaticRefs <$> mapM getStaticRef xs
--}
-
 getStaticRef :: Id -> G (Maybe Text)
 getStaticRef = fmap (fmap itxt . listToMaybe) . genIdsI
-
-headYikes (x:_) = x
-headYikes []    = panic "headYikes"
 
 genToplevelRhs :: Id
                -> StgRhs
                -> C
--- genTopLevelRhs _ _ | trace' "genToplevelRhs" False = error "genTopLevelRhs"
--- special cases
 genToplevelRhs i rhs@(StgRhsClosure cc _bi _ upd args body)
   -- foreign exports
   | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _)) _)
      [StgLitArg (MachInt _is_js_conv), StgLitArg (MachStr _js_name), StgVarArg _tgt] _) <- body,
      t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
-  -- top-level strings
-{-
-  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringIdKey
-     && isUpdatable upd && null args = genStrThunk i False bs cc
-  | (StgApp upk [StgLitArg (MachStr bs)]) <- body, getUnique upk == unpackCStringUtf8IdKey
-     && isUpdatable upd && null args = genStrThunk i True bs cc -}
 -- general cases:
 genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
@@ -1386,14 +1354,7 @@ optimizeFree offset ids = do
 pushRetArgs :: HasDebugCallStack => [(Id,Int,Bool)] -> JExpr -> C
 pushRetArgs free fun = do
   p <- pushOptimized . (++[(fun,False)]) =<< mapM (\(i,n,b) -> (\es->(es!!(n-1),b)) <$> genIdArg i) free
---  p <- push . (++[fun]) =<< mapM (\(i,n,b) -> (\es->es!!(n-1)) <$> genIdArg i) free
   return p
-{-    where
-      showSlot SlotUnknown = return "unknown"
-      showSlot (SlotId i n) = do
-        (TxtI i') <- jsIdI i
-        return (T.unpack i'++"("++show n ++ ")")
--}
 
 loadRetArgs :: [(Id,Int,Bool)] -> C
 loadRetArgs free = popSkipI 1 =<< ids
@@ -1559,13 +1520,6 @@ mkAlgBranch top d (a, bs, expr) = do
   (ej, er) <- genExpr top expr
   return (cc, b <> ej, er)
 
--- single-var prim
-{-
-mkPrimBranch :: ExprCtx -> [VarType] -> StgAlt -> G (Maybe JExpr, JStat, ExprResult)
-mkPrimBranch top _vt (cond, _bs, _us, e) =
-  (\cc (ej,er) -> (cc,ej,er)) <$> caseCond cond <*> genExpr top e
--}
-
 mkPrimIfBranch :: ExprCtx
                -> [VarType]
                -> StgAlt
@@ -1613,20 +1567,6 @@ genPrimOp top op args t = do
   return $ case genPrim df t op (map toJExpr $ top ^. ctxTarget) as of
              PrimInline s -> (s, ExprInline Nothing)
              PRPrimCall s -> (s, ExprCont)
-{-
-genStackArg :: StgArg -> G [(JExpr, StackSlot)]
-genStackArg a@(StgLitArg _) = map (,SlotUnknown) <$> genArg a
-genStackArg a@(StgVarArg i) = zipWith f [1..] <$> genArg a
-  where
-    f :: Int -> JExpr -> (JExpr, StackSlot)
-    f n e = (e, SlotId i n)
--}
-{-
-genArg :: HasDebugCallStack => StgArg -> G [JExpr]
-genArg arg = do
-  res <- genArg0 arg
-  trace' ("genArg:\n" ++ show arg ++ "\n" ++ show res) (pure res)
--}
 
 genArg :: HasDebugCallStack => StgArg -> G [JExpr]
 genArg (StgLitArg l) = genLit l
@@ -1949,14 +1889,6 @@ jumpToII i args afterLoad
      return (ra <> afterLoad <> [j| return `ei`; |])
   where
     ra = mconcat . reverse $ zipWith (\r a -> [j| `r` = `a`; |]) (enumFrom R2) args
-
--- load arguments and jump to fun directly (not going through trampoline)
-{-
-jumpTo' :: JExpr -> [JExpr] -> JStat
-jumpTo' fun args = ra <> [j| return `fun`(); |]
-  where
-      ra = assignAll (enumFrom R2) args
--}
 
 jumpToFast :: HasDebugCallStack => [StgArg] -> JStat -> C
 jumpToFast as afterLoad = do
