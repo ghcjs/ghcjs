@@ -1,23 +1,53 @@
-FROM haskell:7.8
+FROM ubuntu:16.04
+
+## ensure locale is set during build
+ENV LANG            C.UTF-8
+
+## Haskell environment
+RUN echo 'deb http://ppa.launchpad.net/hvr/ghc/ubuntu xenial main' > \
+      /etc/apt/sources.list.d/ghc.list && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F6F88286 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      cabal-install-2.2 \
+      ghc-8.4.2 \
+      happy-1.19.5 \
+      alex-3.1.7 \
+      zlib1g-dev \
+      libtinfo-dev \
+      libsqlite3-0 \
+      libsqlite3-dev \
+      ca-certificates \
+      build-essential \
+      libgmp-dev \
+      autoconf \
+      automake \
+      curl \
+      g++ \
+      python3 \
+      git
+
+ENV PATH /root/.cabal/bin:/root/.local/bin:/opt/cabal/bin:/opt/ghc/bin:/opt/happy/1.19.5/bin:/opt/alex/3.1.7/bin:$PATH
+
+## node.js
+RUN curl -sL https://deb.nodesource.com/setup_8.x | bash - \
+    && apt-get install -y nodejs
+
+
+## build GHCJS
+WORKDIR /opt
+
+RUN cabal update
 
 ADD . ./ghcjs
 
-RUN apt-get update \
-    && apt-get -y install build-essential git zlib1g-dev libtinfo-dev libgmp-dev autoconf curl
+RUN cd /opt/ghcjs && \
+    ./utils/makePackages.sh && \
+    ./utils/makeSandbox.sh && \
+    cabal install
 
-RUN curl -sL https://deb.nodesource.com/setup | bash - \
-    && apt-get install -y nodejs
+ENV PATH /opt/ghcjs/.cabal-sandbox/bin:$PATH
 
-ENV PATH /root/.cabal/bin:$PATH
+RUN ghcjs-boot -v2 -s ./lib/boot/
 
-RUN cabal update && \
-    cabal install cabal-install Cabal && \
-    echo $PATH && which cabal && cabal --version
-
-RUN git clone https://github.com/ghcjs/ghcjs-prim.git && \
-    cabal install --reorder-goals --max-backjumps=-1 ./ghcjs ./ghcjs-prim
-
-RUN which ghcjs-pkg
-
-RUN ghcjs-boot --dev
 ENTRYPOINT ["ghcjs"]
