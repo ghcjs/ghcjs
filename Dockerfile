@@ -48,6 +48,7 @@ RUN cd /opt/ghcjs && \
 
 ENV PATH /opt/ghcjs/.cabal-sandbox/bin:$PATH
 
-RUN ghcjs-boot -v2 -s ./lib/boot/
+RUN cd /opt/ghcjs && \
+    ghcjs-boot -v2 -s ./lib/boot/
 
 ENTRYPOINT ["ghcjs"]
