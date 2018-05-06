@@ -287,12 +287,6 @@ TARGET=$PWD
 
 mkdir -p "boot/pkg"
 
-# temporary fix for time package
-(
-cd "$GHCSRC/libraries/time"
-cp dist-install/build/lib/include/HsTimeConfig.h lib/include/HsTimeConfig.h
-)
-
 # copy packages by source distribution
 for PKG in base array binary bytestring containers deepseq directory \
            filepath ghc-boot ghc-boot-th ghci integer-gmp integer-simple \
