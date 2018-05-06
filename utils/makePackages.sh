@@ -244,7 +244,7 @@ then
 (
 mkdir -p inplace/bin
 cd utils/genprimopcode
-cabal build --ignore-sandbox --builddir=dist
+cabal build --builddir=dist
 cp dist/build/genprimopcode/genprimopcode ../../inplace/bin
 )
 fi
