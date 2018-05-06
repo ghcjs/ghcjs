@@ -27,7 +27,7 @@ RUN echo 'deb http://ppa.launchpad.net/hvr/ghc/ubuntu xenial main' > \
       python3 \
       git
 
-ENV PATH /root/.cabal/bin:/root/.local/bin:/opt/cabal/bin:/opt/ghc/bin:/opt/happy/1.19.5/bin:/opt/alex/3.1.7/bin:$PATH
+ENV PATH /root/.cabal/bin:/root/.local/bin:/opt/cabal/bin:/opt/ghc/8.4.2/bin:/opt/happy/1.19.5/bin:/opt/alex/3.1.7/bin:$PATH
 
 ## node.js
 RUN curl -sL https://deb.nodesource.com/setup_8.x | bash - \
