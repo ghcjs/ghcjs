@@ -304,7 +304,8 @@ genPrim _ _ IndexByteArrayOp_Float [r] [a,i] =
   PrimInline [j| `r` = `a`.f3[`i`]; |]
 genPrim _ _ IndexByteArrayOp_Double [r] [a,i] =
   PrimInline [j| `r` = `a`.f6[`i`]; |]
--- genPrim _ IndexByteArrayOp_StablePtr
+genPrim _ _ IndexByteArrayOp_StablePtr [r1,r2] [a,i] =
+  PrimInline [j| `r1` = h$stablePtrBuf; `r2` = `a`.i3[`i`]; |]
 genPrim _ _ IndexByteArrayOp_Int8 [r] [a,i] =
   PrimInline [j| `r` = `a`.dv.getInt8(`i`,true); |]
 genPrim _ _ IndexByteArrayOp_Int16 [r] [a,i] =
@@ -347,7 +348,8 @@ genPrim _ _ ReadByteArrayOp_Float [r] [a,i] =
   PrimInline [j| `r` = `a`.f3[`i`]; |]
 genPrim _ _ ReadByteArrayOp_Double [r] [a,i] =
   PrimInline [j| `r` = `a`.f6[`i`]; |]
--- genPrim _ ReadByteArrayOp_StablePtr
+genPrim _ _ ReadByteArrayOp_StablePtr [r1,r2] [a,i] =
+   PrimInline [j| `r1` = h$stablePtrBuf; `r2` = `a`.i3[`i`]; |]
 genPrim _ _ ReadByteArrayOp_Int8 [r] [a,i] =
   PrimInline [j| `r` = `a`.dv.getInt8(`i`,true); |]
 genPrim _ _ ReadByteArrayOp_Int16 [r] [a,i] =
@@ -374,7 +376,8 @@ genPrim _ _ WriteByteArrayOp_Addr [] [a,i,e1,e2] = PrimInline [j| if(!`a`.arr) {
                                                                 |]
 genPrim _ _ WriteByteArrayOp_Float [] [a,i,e] = PrimInline [j| `a`.f3[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_Double [] [a,i,e] = PrimInline [j| `a`.f6[`i`] = `e`; |]
--- genPrim _ WriteByteArrayOp_StablePtr
+genPrim _ _ WriteByteArrayOp_StablePtr [] [a,i,_e1,e2]     = PrimInline [j| `a`.i3[`i`] = `e2`; |]
+
 genPrim _ _ WriteByteArrayOp_Int8 [] [a,i,e] = PrimInline [j| `a`.dv.setInt8(`i`, `e`, false); |]
 genPrim _ _ WriteByteArrayOp_Int16 [] [a,i,e]     = PrimInline [j| `a`.dv.setInt16(`i`<<1, `e`, false); |]
 genPrim _ _ WriteByteArrayOp_Int32 [] [a,i,e]     = PrimInline [j| `a`.i3[`i`] = `e`; |]
@@ -461,9 +464,7 @@ genPrim _ _ IndexOffAddrOp_Addr [ca,co] [a,o,i] =
                |]
 genPrim _ _ IndexOffAddrOp_Float [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getFloat32(`o`+(`i`<<2),true); |]
 genPrim _ _ IndexOffAddrOp_Double [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getFloat64(`o`+(`i`<<3),true); |]
-{-
-IndexOffAddrOp_StablePtr
--}
+genPrim _ _ IndexOffAddrOp_StablePtr [c1,c2] [a,o,i] = PrimInline [j| `c1` = h$stablePtrBuf; `c2` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
 genPrim _ _ IndexOffAddrOp_Int8 [c] [a,o,i] = PrimInline [j| `c` = `a`.u8[`o`+`i`]; |]
 genPrim _ _ IndexOffAddrOp_Int16 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt16(`o`+(`i`<<1),true); |]
 genPrim _ _ IndexOffAddrOp_Int32 [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
@@ -496,7 +497,7 @@ genPrim _ _ ReadOffAddrOp_Addr [c1,c2] [a,o,i] =
                |]
 genPrim _ _ ReadOffAddrOp_Float [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getFloat32(`o`+(`i`<<2),true); |]
 genPrim _ _ ReadOffAddrOp_Double [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getFloat64(`o`+(`i`<<3),true); |]
--- ReadOffAddrOp_StablePtr -- fixme
+genPrim _ _ ReadOffAddrOp_StablePtr [c1,c2] [a,o,i] = PrimInline [j| `c1` = h$stablePtrBuf; `c2` = `a`.dv.getUint32(`o`+(`i`<<2),true); |]
 genPrim _ _ ReadOffAddrOp_Int8   [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt8(`o`+`i`); |]
 genPrim _ _ ReadOffAddrOp_Int16  [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt16(`o`+(`i`<<1),true); |]
 genPrim _ _ ReadOffAddrOp_Int32  [c] [a,o,i] = PrimInline [j| `c` = `a`.dv.getInt32(`o`+(`i`<<2),true); |]
@@ -521,7 +522,7 @@ genPrim _ _ WriteOffAddrOp_Addr [] [a,o,i,va,vo] =
                |]
 genPrim _ _ WriteOffAddrOp_Float [] [a,o,i,v]   = PrimInline [j| `a`.dv.setFloat32(`o`+(`i`<<2), `v`,true); |]
 genPrim _ _ WriteOffAddrOp_Double [] [a,o,i,v]  = PrimInline [j| `a`.dv.setFloat64(`o`+(`i`<<3),`v`,true); |]
--- WriteOffAddrOp_StablePtr
+genPrim _ _ WriteOffAddrOp_StablePtr [] [a,o,i,_v1,v2]  = PrimInline [j| `a`.dv.setUint32(`o`+(`i`<<2), `v2`, true); |]
 genPrim _ _ WriteOffAddrOp_Int8 [] [a,o,i,v]    = PrimInline [j| `a`.dv.setInt8(`o`+`i`, `v`); |]
 genPrim _ _ WriteOffAddrOp_Int16 [] [a,o,i,v]   = PrimInline [j| `a`.dv.setInt16(`o`+(`i`<<1), `v`, true); |]
 genPrim _ _ WriteOffAddrOp_Int32 [] [a,o,i,v]   = PrimInline [j| `a`.dv.setInt32(`o`+(`i`<<2), `v`, true); |]
@@ -626,9 +627,9 @@ genPrim _ _ FinalizeWeakOp     [fl,fin] [w] =
                |]
 genPrim _ _ TouchOp [] [_e] = PrimInline mempty -- fixme what to do?
 
-genPrim _ _ MakeStablePtrOp [s1,s2] [a] = PrimInline [j| `s1` = h$makeStablePtr(`a`); `s2` = `Ret1`; |]
-genPrim _ _ DeRefStablePtrOp [r] [s1,s2] = PrimInline [j| `r` = `s1`.arr[`s2`]; |]
-genPrim _ _ EqStablePtrOp [r] [sa1,sa2,sb1,sb2] = PrimInline [j| `r` = (`sa1` === `sb1` && `sa2` === `sb2`) ? 1 : 0; |]
+genPrim _ _ MakeStablePtrOp [s1,s2] [a] = PrimInline [j| `s1` = h$stablePtrBuf; `s2` = h$makeStablePtr(`a`); |]
+genPrim _ _ DeRefStablePtrOp [r] [_s1,s2] = PrimInline [j| `r` = h$deRefStablePtr(`s2`); |]
+genPrim _ _ EqStablePtrOp [r] [_sa1,sa2,_sb1,sb2] = PrimInline [j| `r` = (`sa2` === `sb2`) ? 1 : 0; |]
 
 genPrim _ _ MakeStableNameOp [r] [a] = PrimInline [j| `r` = h$makeStableName(`a`); |]
 genPrim _ _ EqStableNameOp [r] [s1,s2] = PrimInline [j| `r` = h$eqStableName(`s1`, `s2`); |]

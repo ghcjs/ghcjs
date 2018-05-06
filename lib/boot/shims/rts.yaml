@@ -19,5 +19,6 @@ js:
   - src/thread.js
   - src/stm.js
   - src/staticpointer.js
+  - src/stableptr.js
   - src/hscore.js
   - src/verify.js
