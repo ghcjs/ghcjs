@@ -5,7 +5,7 @@ NODE="node"
 PART="$TEST_PART"
 CABAL="cabal"
 GHCJSBOOT="ghcjs-boot"
-TESTRUNNER="./dist/build/test/test"
+TESTRUNNER="./dist/dist-sandbox-*/build/test/test"
 
 travis_boot() {
     case "$PART" in
@@ -51,7 +51,7 @@ travis_test() {
 }
 
 ghcjs_boot() {
-    "$GHCJSBOOT" --dev --ghcjs-boot-dev-branch "$TRAVIS_BRANCH" --shims-dev-branch "$TRAVIS_BRANCH" --no-haddock --with-node "$NODE" "$@"
+    "$GHCJSBOOT" --no-haddock -v2 -s./lib/boot "$@"
 }
 
 cabal_install() {
