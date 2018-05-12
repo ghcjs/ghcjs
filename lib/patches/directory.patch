@@ -100,9 +100,9 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/Config.hs boot/pkg/di
  -- builds, so we use this ugly workaround where we simply paste the C string
  -- literal directly in here.  This will probably break if the EXE_EXTENSION
 diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/directory/System/Directory/Internal/GHCJS.hs
---- upstream/pkg/directory/System/Directory/Internal/GHCJS.hs	1970-01-01 01:00:00.000000000 +0100
-+++ boot/pkg/directory/System/Directory/Internal/GHCJS.hs	2018-04-20 10:49:53.851897919 +0200
-@@ -0,0 +1,311 @@
+--- upstream/pkg/directory/System/Directory/Internal/GHCJS.hs	1970-01-01 00:00:00.000000000 +0000
++++ boot/pkg/directory/System/Directory/Internal/GHCJS.hs	2018-05-12 15:20:35.864275966 +0000
+@@ -0,0 +1,324 @@
 +{-# LANGUAGE CPP #-}
 +#if defined(ghcjs_HOST_OS)
 +{-# LANGUAGE ForeignFunctionInterface,
@@ -138,16 +138,25 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +getSymbolicLinkMetadata :: FilePath -> IO Metadata
 +getSymbolicLinkMetadata path =
 +  (`ioeSetFileName` path) `modifyIOError` do
-+    js_getFileOrSymlinkStatus =<< js_canonicalizePath (toJSString path)
++    cpath <- throwErrnoIfJSNull "getSymbolicLinkMetadata" $
++      js_canonicalizePath (toJSString path)
++    mdata <- throwErrnoIfJSNull "getSymbolicLinkMetadata" $
++      js_getFileOrSymlinkStatus cpath
++    pure (Metadata mdata)
 +
 +getFileMetadata :: FilePath -> IO Metadata
 +getFileMetadata path =
 +  (`ioeSetFileName` path) `modifyIOError` do
-+    js_getFileStatus =<< js_canonicalizePath (toJSString path)
++      cpath <- throwErrnoIfJSNull "getFileMetadata" $
++        js_canonicalizePath (toJSString path)
++      mdata <- throwErrnoIfJSNull "getFileMetadata" $
++        js_getFileStatus cpath
++      pure (Metadata mdata)
 +
-+-- XXX
 +createSymbolicLinkInternal :: FilePath -> FilePath -> IO ()
-+createSymbolicLinkInternal target link = undefined
++createSymbolicLinkInternal target link =
++  throwErrnoIfMinus1_ "createSymbolicLink" $
++    js_createSymbolicLink (toJSString target) (toJSString link)
 +
 +readSymbolicLink :: FilePath -> IO FilePath
 +readSymbolicLink path = do
@@ -319,6 +328,10 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +  js_createDirectory :: JSString -> IO Int
 +
 +foreign import javascript interruptible
++  "h$directory_createSymbolicLink($1,$2,$c);"
++  js_createSymbolicLink :: JSString -> JSString -> IO Int
++
++foreign import javascript interruptible
 +  "h$directory_removeDirectory($1,$c);"
 +  js_removeDirectory :: JSString -> IO Int
 +
@@ -368,11 +381,11 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +
 +foreign import javascript interruptible
 +  "h$directory_getFileStatus($1,$c);"
-+  js_getFileStatus :: JSString -> IO Metadata
++  js_getFileStatus :: JSString -> IO JSVal
 +
 +foreign import javascript interruptible
 +  "h$directory_getFileOrSymlinkStatus($1,$c);"
-+  js_getFileOrSymlinkStatus :: JSString -> IO Metadata
++  js_getFileOrSymlinkStatus :: JSString -> IO JSVal
 +
 +foreign import javascript unsafe
 +  "h$directory_getFileStatusModificationTime($1)"
