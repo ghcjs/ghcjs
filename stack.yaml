@@ -1,11 +1,10 @@
 # the source tree needs to be "booted" for this stack.yaml file to be usable:
 #
 # $ git submodule update --init --recursive
-# $ (cd ghc && ./boot && ./make)
 # $ ./utils/makePackages.sh
 #
 
-resolver: lts-10.3
+resolver: nightly-2018-05-14
 packages:
   - .
   - ./lib/ghc-api-ghcjs
@@ -14,6 +13,3 @@ packages:
   - ./lib/haddock-api-ghcjs
   - ./lib/haddock-library-ghcjs
   - ./lib/template-haskell-ghcjs
-
-extra-deps:
-  - haskell-src-exts-1.18.2
