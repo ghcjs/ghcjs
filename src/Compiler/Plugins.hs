@@ -72,7 +72,6 @@ import DynamicLoading hiding (getValueSafely, getHValueSafely)
 import GHCi.RemoteTypes
 import qualified SysTools
 import System.FilePath
-import Control.Monad.IO.Class
 import Compiler.Settings
 import Data.Char (isSpace)
 import Data.List
@@ -83,7 +82,6 @@ import Control.Concurrent.MVar
 import qualified Compiler.Info as Info
 
 import LoadIface
-import Control.Monad
 import RdrName
 import SrcLoc
 import TcRnMonad

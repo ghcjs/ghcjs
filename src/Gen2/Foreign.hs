@@ -30,7 +30,7 @@ import ErrUtils
 import HscTypes
 import HsBinds
 import HsDecls
-import Gen2.GHC.DsForeign (dsForeigns, dsForeigns', dsPrimCall)
+import Gen2.GHC.DsForeign (dsForeigns', dsPrimCall)
 import DsMonad
 import Encoding
 import HsUtils

@@ -11,7 +11,6 @@ module Gen2.StgAst where
 
 import           Data.Char     (isSpace)
 import qualified Data.Foldable as F
-import           Data.Monoid
 import           Data.Set      (Set)
 import qualified Data.Set      as S
 import           DataCon

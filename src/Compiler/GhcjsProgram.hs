@@ -55,10 +55,6 @@ import qualified Gen2.Shim        as Gen2
 import qualified Gen2.Rts         as Gen2
 import qualified Gen2.TH          as Gen2
 
--- workaround for platform dependence bugs
-import           Rules (mkRuleBase)
-import qualified Gen2.GHC.PrelRules
-
 getGhcjsSettings :: [Located String] -> IO ([Located String], GhcjsSettings)
 getGhcjsSettings args =
   --when (any (("building" `L.isInfixOf`) . unLoc) args) $

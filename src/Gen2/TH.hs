@@ -23,13 +23,11 @@ import qualified Gen2.Shim           as Gen2
 import qualified Gen2.Object         as Gen2
 import qualified Gen2.Cache          as Gen2
 import qualified Gen2.Rts            as Gen2
-import qualified Gen2.Utils          as Utils
 
 import           HsExtension
 import           CoreToStg
 import           CoreUtils
 import           CorePrep
-import           BasicTypes
 import           Name
 import           Id
 import           Outputable          hiding ((<>))
@@ -40,16 +38,10 @@ import           DynFlags
 import           TcRnMonad
 import           HscTypes
 import           Packages
-import           Unique
-import           Type
 import           Maybes
-import           UniqFM
 import           SimplStg
 import           GHC.Serialized
-import           Annotations
 import           Convert
-import           RnEnv
-import           FastString
 import           Bag
 
 import           Control.Concurrent
@@ -72,7 +64,6 @@ import qualified Data.Set                       as S
 import qualified Data.Text                      as T
 import qualified Data.Text.Encoding             as T
 import qualified Data.Text.Lazy.Encoding        as TL
-import qualified Data.Generics.Text             as SYB
 
 import qualified GHCJS.Prim.TH.Types            as TH
 

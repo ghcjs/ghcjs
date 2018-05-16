@@ -66,8 +66,6 @@ import qualified Gen2.Utils as U
 import           Text.PrettyPrint.Leijen.Text (renderPretty, displayT)
 import qualified Crypto.Hash.SHA256 as SHA256
 
-import System.IO.Unsafe (unsafePerformIO)
-
 type LinkedUnit = (JStat, [ClosureInfo], [StaticInfo])
 
 -- | collect global objects (data / CAFs). rename them and add them to the table

@@ -693,8 +693,6 @@ encodeInstalledUnitId dflags k
   | isGhcjsPrimPackage dflags k = "ghcjs-prim"
   | isGhcjsThPackage dflags k   = "ghcjs-th"
   | otherwise                   = installedUnitIdString k
-  where
-    n = getInstalledPackageName dflags k
 
 {-
    some packages are wired into GHCJS, but not GHC

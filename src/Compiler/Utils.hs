@@ -40,14 +40,12 @@ import           Packages          (getPackageIncludePath)
 import           Config            (cProjectVersionInt)
 import qualified SysTools
 
-import           Control.Applicative
 import qualified Control.Exception as Ex
 import           Control.Monad
 import           Control.Monad.IO.Class
 
 import           Data.Char
 import           Data.List         (isPrefixOf, foldl')
-import           Data.Monoid
 import           Data.Text         (Text)
 import qualified Data.Text         as T
 

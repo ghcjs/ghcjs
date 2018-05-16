@@ -7,7 +7,6 @@ module Compiler.Settings where
 import           Gen2.Base
 import qualified Gen2.Object as Object
 
-import           Control.Applicative
 import qualified Control.Exception as E
 import           Control.Concurrent.MVar
 import           Control.Monad
@@ -19,7 +18,6 @@ import           Data.IntMap            (IntMap)
 import qualified Data.List              as L
 import           Data.Map               (Map)
 import qualified Data.Map               as M
-import           Data.Monoid
 import           Data.Set               (Set)
 import           Data.Text              (Text)
 import qualified Data.Text as T

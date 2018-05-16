@@ -521,9 +521,8 @@ staticDeclStat (StaticInfo si sv _) =
       ssu (StaticUnboxedBool b)   = [je| h$p(`b`) |]
       ssu (StaticUnboxedInt i)    = [je| h$p(`i`) |]
       ssu (StaticUnboxedDouble d) = [je| h$p(`unSaneDouble d`) |]
-      ssu (StaticUnboxedString str) = ApplExpr (initStr str) [] --[je| h$p(`unSaneDouble d`) |]
-      ssu (StaticUnboxedStringOffset str) = jint 0 -- AssignStat (jvar i) (initStr str)
-      ssu (StaticUnboxedDouble d) = [je| h$p(`unSaneDouble d`) |]
+      ssu (StaticUnboxedString str) = ApplExpr (initStr str) []
+      ssu (StaticUnboxedStringOffset {}) = jint 0
 
   -- fixme, we shouldn't do h$di, we need to record the statement to init the thunks
   in maybe [j| h$di(`si'`); |] (\v -> DeclStat si' <> [j| `si'` = `v`; |]) (ssv sv)

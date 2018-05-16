@@ -37,7 +37,6 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Foldable   as F
 import qualified Data.List       as L
 import           Data.Maybe (catMaybes)
-import           Data.Monoid
 import qualified Data.Set        as S
 import qualified Data.Text       as T
 import           Data.Text (Text)
@@ -98,7 +97,7 @@ collectShims base pkgs = do
   return (filesR, filter (`notElem`filesR) filesA)
     where
       f = fmap uniq . mapM (canonicalizePath . (base </>)) . concat
-      (pkgsRts, pkgsAfterRts) = L.partition (("@rts" `T.isPrefixOf`).fst) pkgs
+      (pkgsRts, _pkgsAfterRts) = L.partition (("@rts" `T.isPrefixOf`).fst) pkgs
       uniq xs = let go (x:xs) s
                       | x `S.notMember` s = x : go xs (S.insert x s)
                       | otherwise         = go xs s
@@ -152,7 +151,7 @@ readShimsArchive dflags archive = do
   return (mconcat srcs')
 
 readShim :: FilePath -> (Pkg, Version) -> IO (Maybe Shim)
-readShim base (pkgName, pkgVer) = do
+readShim base (pkgName, _pkgVer) = do
   checkShimsInstallation base
   let configFile = base </> T.unpack pkgName <.> "yaml"
   e <- doesFileExist configFile

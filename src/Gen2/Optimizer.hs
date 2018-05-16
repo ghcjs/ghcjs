@@ -20,7 +20,6 @@
 -}
 module Gen2.Optimizer where
 
-import           Control.Applicative
 import           Control.Lens
 import           Control.Monad
 
@@ -38,7 +37,6 @@ import           Data.List (foldl')
 import qualified Data.List as L
 import qualified Data.Map as M
 import           Data.Maybe
-import           Data.Monoid
 import qualified Data.Set as S
 
 import qualified Data.Text as T

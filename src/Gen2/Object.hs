@@ -55,7 +55,7 @@ module Gen2.Object ( object
                    ) where
 
 import           Control.DeepSeq
-import           Control.Exception (bracket, evaluate)
+import           Control.Exception (bracket)
 import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Trans
@@ -71,7 +71,6 @@ import           Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as C8 (pack, unpack)
 import           Data.Data.Lens
 import           Data.Function (on)
-import qualified Data.Foldable as F
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import           Data.Int
@@ -81,7 +80,7 @@ import qualified Data.IntSet as IS
 import           Data.List (sortBy)
 import           Data.Map (Map)
 import qualified Data.Map as M
-import           Data.Maybe (catMaybes, fromMaybe)
+import           Data.Maybe (catMaybes)
 import           Data.Monoid
 import           Data.Set (Set)
 import qualified Data.Set as S
@@ -499,7 +498,7 @@ showDeps (Deps p m r e b) =
   where
     listOf n f xs = "  " <> n <> ":\n" <>
                     TL.unlines (map (TL.pack . ("  - "++) . f) xs)
-    blockExps = IM.fromListWith (++) $ map (\(f,n) -> (n,[f])) (M.toList e)
+    -- blockExps = IM.fromListWith (++) $ map (\(f,n) -> (n,[f])) (M.toList e)
     dumpBlock (n, (BlockDeps bbd bfd)) = TL.pack (show n) <> " ->\n" <>
       listOf "block deps" show bbd <>
 
