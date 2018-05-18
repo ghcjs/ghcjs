@@ -285,6 +285,9 @@ TARGET=$PWD
 ###############################################################################
 # Boot Packages
 
+# clean packages first
+rm -rf "boot/pkg"
+
 mkdir -p "boot/pkg"
 
 # copy packages by source distribution
