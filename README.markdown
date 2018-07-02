@@ -19,7 +19,7 @@ $ git submodule update --init --recursive
 $ ./utils/makePackages.sh
 ```
 
-If you are building on macOS, you will need the gnu version of tar. You can install this with `brew install gnu-tar`, which makes it accessible at `gtar`. The `./utils/makePackages.sh` will automatically pick up on this.
+The `./utils/makePackages.sh` script requires Bash version 4.0 or greater. If you are building on macOS, you will need the gnu version of tar. You can install this with `brew install gnu-tar`, which makes it accessible at `gtar`. The `./utils/makePackages.sh` will automatically pick up on this.
 
 #### building the compiler
 
