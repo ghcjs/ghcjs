@@ -23,7 +23,7 @@ diff -Nru upstream/pkg/integer-gmp/integer-gmp.cabal boot/pkg/integer-gmp/intege
 diff -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits/ghcjsbn.js
 --- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1970-01-01 01:00:00.000000000 +0100
 +++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2018-01-22 18:25:10.000000000 +0100
-@@ -0,0 +1,2013 @@
+@@ -0,0 +1,2008 @@
 +/*
 +   GHCJS bignum library for integer-gmp package
 +
@@ -1857,11 +1857,6 @@ diff -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits
 +
 +  } */
 +  ASSERTVALID_W(r, "index_b result");
-+}
-+
-+// Bool -> BigNat -> Double
-+function h$ghcjsbn_toDouble_b(nonNeg, b) {
-+  throw new Error("toDouble_b");
 +}
 +
 +function h$ghcjsbn_byteArrayToBigNat(ba, len) {
