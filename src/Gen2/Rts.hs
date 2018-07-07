@@ -866,11 +866,6 @@ fun h$flushStdout_e {
 var !h$flushStdout = h$static_thunk(h$flushStdout_e);
 
 var h$start = new Date();
-fun h$dumpRes cl {
-   h$printcl cl;
-   var end = new Date();
-   h$log("elapsed time: " + (end.getTime()-h$start.getTime()) + "ms");
-}
 
 // fixme move somewhere else
 
