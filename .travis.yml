@@ -1,3 +1,8 @@
+sudo: required
+dist: trusty
+language: generic
+
+# TODO: investigate whether Tavis' CI stages could be used here
 env:
     - GHCVER=8.2.2 TEST_PART=CORE1
     - GHCVER=8.2.2 TEST_PART=CORE2
@@ -8,17 +13,19 @@ addons:
     apt:
         sources:
             - hvr-ghc
+            - sourceline: 'deb https://deb.nodesource.com/node_6.x trusty main'
+              key_url: 'https://deb.nodesource.com/gpgkey/nodesource.gpg.key'
         packages:
             - build-essential
             - nodejs
-            - cabal-install-2.0.0.1
+            - cabal-install-2.2
             - ghc-8.2.2
-            - alex-3.2.3
-            - happy-1.19.8
+            - alex-3.1.7
+            - happy-1.19.5
 
 before_install:
     - nvm install 8
-    - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/2.0/bin:/opt/alex/3.2.3/bin:/opt/happy/1.19.8/bin:$PATH
+    - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/2.2/bin:/opt/alex/3.1.7/bin:/opt/happy/1.19.5/bin:$PATH
 
 install:
     - travis_retry cabal update
