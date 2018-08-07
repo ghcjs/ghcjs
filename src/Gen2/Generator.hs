@@ -1662,10 +1662,10 @@ allocateStaticList _ _ = panic "allocateStaticList: unexpected literal in list"
 
 -- generate arg to be passed to FFI call, with marshalling JStat to be run
 -- before the call
-genFFIArg :: Bool -> StgArg -> G (JStat, [JExpr])
-genFFIArg isJavaScriptCc (StgLitArg l) = (mempty,) <$> genLit l
-genFFIArg isJavaScriptCc a@(StgVarArg i)
-    | tycon == byteArrayPrimTyCon || tycon == mutableByteArrayPrimTyCon = do
+genFFIArg :: CCallConv -> StgArg -> G (JStat, [JExpr])
+genFFIArg cconv (StgLitArg l) = (mempty,) <$> genLit l
+genFFIArg cconv a@(StgVarArg i)
+    | (cconv == CCallConv) && (tycon == byteArrayPrimTyCon || tycon == mutableByteArrayPrimTyCon) = do
         (\x -> (mempty,[x,jint 0])) <$> jsId i
     | isVoid r                  = return (mempty, [])
 --    | Just x <- marshalFFIArg a = x
@@ -1917,7 +1917,7 @@ selectApply fast (args, as) = do
 -- fixme: what if the call returns a thunk?
 genPrimCall :: ExprCtx -> PrimCall -> [StgArg] -> Type -> G (JStat, ExprResult)
 genPrimCall top (PrimCall lbl _) args t = do
-  j <- parseFFIPattern False False False ("h$" ++ unpackFS lbl) t (map toJExpr $ top ^. ctxTarget) args
+  j <- parseFFIPattern False False PrimCallConv ("h$" ++ unpackFS lbl) t (map toJExpr $ top ^. ctxTarget) args
   return (j, ExprInline Nothing)
 
 getObjectKeyValuePairs :: [StgArg] -> Maybe [(Text, StgArg)]
@@ -1954,7 +1954,7 @@ genForeignCall top
              )
 genForeignCall top (CCall (CCallSpec ccTarget cconv safety)) t tgt args = do
   emitForeign (top ^. ctxSrcSpan) (T.pack lbl) safety cconv (map showArgType args) (showType t)
-  (,exprResult) <$> parseFFIPattern catchExcep async isJsCc lbl t tgt' args
+  (,exprResult) <$> parseFFIPattern catchExcep async cconv lbl t tgt' args
   where
     isJsCc = cconv == JavaScriptCallConv
 
@@ -1995,27 +1995,27 @@ genForeignCall top (CCall (CCallSpec ccTarget cconv safety)) t tgt args = do
   2. $r1, $r2                binary return
   3. $r1, $r2, $r3_1, $r3_2  unboxed tuple return
  -}
-parseFFIPattern :: Bool  -- ^ catch exception and convert them to haskell exceptions
-                -> Bool  -- ^ async (only valid with javascript calling conv)
-                -> Bool  -- ^ using javascript calling convention
+parseFFIPattern :: Bool       -- ^ catch exception and convert them to haskell exceptions
+                -> Bool       -- ^ async (only valid with javascript calling conv)
+                -> CCallConv  -- ^ calling convention
                 -> String
                 -> Type
                 -> [JExpr]
                 -> [StgArg]
                 -> C
-parseFFIPattern catchExcep async jscc pat t es as
+parseFFIPattern catchExcep async cconv pat t es as
   | catchExcep = do
-      c <- parseFFIPatternA async jscc pat t es as
+      c <- parseFFIPatternA async cconv pat t es as
       return [j| try {
                    `c`;
                  } catch(e) {
                    return h$throwJSException(e);
                  }
                |]
-  | otherwise  = parseFFIPatternA async jscc pat t es as
+  | otherwise  = parseFFIPatternA async cconv pat t es as
 
-parseFFIPatternA :: Bool  -- ^ async
-                 -> Bool  -- ^ using JavaScript calling conv
+parseFFIPatternA :: Bool       -- ^ async
+                 -> CCallConv  -- ^calling conv
                  -> String
                  -> Type
                  -> [JExpr]
@@ -2023,9 +2023,9 @@ parseFFIPatternA :: Bool  -- ^ async
                  -> C
 -- async calls get an extra callback argument
 -- call it with the result
-parseFFIPatternA True True pat t es as  = do
+parseFFIPatternA True JavaScriptCallConv pat t es as  = do
   cb <- makeIdent
-  stat <- parseFFIPattern' (Just (toJExpr cb)) True pat t es as
+  stat <- parseFFIPattern' (Just (toJExpr cb)) JavaScriptCallConv pat t es as
   return [j| `decl cb`;
              var x = { mv: null };
              `cb` = h$mkForeignCallback(x);
@@ -2042,26 +2042,26 @@ parseFFIPatternA True True pat t es as  = do
            |]
      where nrst = typeSize t
            copyResult d = assignAll es (map (\i -> [je| `d`[`i`] |]) [0..nrst-1])
-parseFFIPatternA _async javascriptCc pat t es as =
-  parseFFIPattern' Nothing javascriptCc pat t es as
+parseFFIPatternA _async cconv pat t es as =
+  parseFFIPattern' Nothing cconv pat t es as
 
 -- parseFFIPatternA _ _ _ _ _ _ = error "parseFFIPattern: non-JavaScript pattern must be synchronous"
 
 parseFFIPattern' :: Maybe JExpr -- ^ Nothing for sync, Just callback for async
-                 -> Bool        -- ^ javascript calling convention used
+                 -> CCallConv   -- ^ calling convention used
                  -> String      -- ^ pattern called
                  -> Type        -- ^ return type
                  -> [JExpr]     -- ^ expressions to return in (may be more than necessary)
                  -> [StgArg]    -- ^ arguments
                  -> C
-parseFFIPattern' callback javascriptCc pat t ret args
-  | not javascriptCc = mkApply pat
+parseFFIPattern' callback cconv pat t ret args
+  | cconv /= JavaScriptCallConv = mkApply pat
   | otherwise = do
       u <- freshUnique
       case parseFfiJME pat u of
         Right (ValExpr (JVar (TxtI _ident))) -> mkApply pat
         Right expr | not async && length tgt < 2 -> do
-          (statPre, ap) <- argPlaceholders javascriptCc args
+          (statPre, ap) <- argPlaceholders cconv args
           let rp  = resultPlaceholders async t ret
               env = M.fromList (rp ++ ap)
           if length tgt == 1
@@ -2074,7 +2074,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
           Right stat -> do
             let rp = resultPlaceholders async t ret
             let cp = callbackPlaceholders callback
-            (statPre, ap) <- argPlaceholders javascriptCc args
+            (statPre, ap) <- argPlaceholders cconv args
             let env = M.fromList (rp ++ ap ++ cp)
             return $ statPre <> (everywhere (mkT $ replaceIdent env) stat) -- fixme trace?
   where
@@ -2083,11 +2083,11 @@ parseFFIPattern' callback javascriptCc pat t ret args
     -- automatic apply, build call and result copy
     mkApply f
       | Just cb <- callback = do
-         (stats, as) <- unzip <$> mapM (genFFIArg javascriptCc) args
+         (stats, as) <- unzip <$> mapM (genFFIArg cconv) args
          cs <- use gsSettings
          return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as++[cb])
       | (ts@(_:_)) <- tgt = do
-         (stats, as) <- unzip <$> mapM (genFFIArg javascriptCc) args
+         (stats, as) <- unzip <$> mapM (genFFIArg cconv) args
          (statR, (t:ts')) <- return (mempty, ts)
          cs <- use gsSettings
          return $ traceCall cs as
@@ -2096,7 +2096,7 @@ parseFFIPattern' callback javascriptCc pat t ret args
                 <> copyResult ts'
                 <> statR
       | otherwise = do
-         (stats, as) <- unzip <$> mapM (genFFIArg javascriptCc) args
+         (stats, as) <- unzip <$> mapM (genFFIArg cconv) args
          cs <- use gsSettings
          return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as)
         where f' = toJExpr (TxtI $ T.pack f)
@@ -2165,9 +2165,9 @@ resultPlaceholders False t rs =
 
 -- $1, $2, $3 for single, $1_1, $1_2 etc for dual
 -- void args not counted
-argPlaceholders :: Bool -> [StgArg] -> G (JStat, [(Ident,JExpr)])
-argPlaceholders isJavaScriptCc args = do
-  (stats, idents0) <- unzip <$> mapM (genFFIArg isJavaScriptCc) args
+argPlaceholders :: CCallConv -> [StgArg] -> G (JStat, [(Ident,JExpr)])
+argPlaceholders cconv args = do
+  (stats, idents0) <- unzip <$> mapM (genFFIArg cconv) args
   let idents = filter (not . null) idents0
   return $ (mconcat stats, concat
     (zipWith (\is n -> mkPlaceholder True ("$"++show n) is) idents [(1::Int)..]))
