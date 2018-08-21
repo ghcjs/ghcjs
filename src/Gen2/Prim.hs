@@ -294,6 +294,21 @@ genPrim _ _ ShrinkMutableByteArrayOp_Char [] [a,n] =
                    `a`.dv = r.dv;
                  }
                |]
+genPrim _ _ CompareByteArraysOp [r] [a1,o1,a2,o2,n] =
+  PrimInline [j| `r` = 0;
+                 for (var i=0; i < `n`; i++) {
+                   var x = `a1`.u8[i + `o1`];
+                   var y = `a2`.u8[i + `o2`];
+                   if(x < y) {
+                     `r` = (-1);
+                     break;
+                   }
+                   if(x > y) {
+                     `r` = 1;
+                     break;
+                   }
+                 }
+               |]
 genPrim d t CopyMutableArrayOp  [] [a1,o1,a2,o2,n] =
   genPrim d t CopyArrayOp [] [a1,o1,a2,o2,n]
 genPrim _ _ CloneArrayOp        [r] [a,start,n] =
