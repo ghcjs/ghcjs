@@ -409,8 +409,8 @@ genPrim _ _ WriteByteArrayOp_Float [] [a,i,e] = PrimInline [j| `a`.f3[`i`] = `e`
 genPrim _ _ WriteByteArrayOp_Double [] [a,i,e] = PrimInline [j| `a`.f6[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_StablePtr [] [a,i,_e1,e2]     = PrimInline [j| `a`.i3[`i`] = `e2`; |]
 
-genPrim _ _ WriteByteArrayOp_Int8 [] [a,i,e] = PrimInline [j| `a`.dv.setInt8(`i`, `e`, false); |]
-genPrim _ _ WriteByteArrayOp_Int16 [] [a,i,e]     = PrimInline [j| `a`.dv.setInt16(`i`<<1, `e`, false); |]
+genPrim _ _ WriteByteArrayOp_Int8 [] [a,i,e] = PrimInline [j| `a`.dv.setInt8(`i`, `e`, true); |]
+genPrim _ _ WriteByteArrayOp_Int16 [] [a,i,e]     = PrimInline [j| `a`.dv.setInt16(`i`<<1, `e`, true); |]
 genPrim _ _ WriteByteArrayOp_Int32 [] [a,i,e]     = PrimInline [j| `a`.i3[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_Int64 [] [a,i,e1,e2] =
   PrimInline [j| `a`.i3[(`i`<<1)+1] = `e1`;
