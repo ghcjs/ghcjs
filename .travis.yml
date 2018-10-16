@@ -12,33 +12,33 @@ env:
     - GHCVER=8.2.2 TEST_PART=PROFILING
     - GHCVER=8.2.2 TEST_PART=GHCJS
 
-addons:
-    apt:
-        sources:
-            - hvr-ghc
-            - sourceline: 'deb https://deb.nodesource.com/node_6.x trusty main'
-              key_url: 'https://deb.nodesource.com/gpgkey/nodesource.gpg.key'
-        packages:
-            - build-essential
-            - nodejs
-            - cabal-install-2.2
-            - ghc-8.2.2
-            - alex-3.1.7
-            - happy-1.19.5
+#addons:
+#    apt:
+#        sources:
+#            - hvr-ghc
+#            - sourceline: 'deb https://deb.nodesource.com/node_6.x trusty main'
+#              key_url: 'https://deb.nodesource.com/gpgkey/nodesource.gpg.key'
+#        packages:
+#            - build-essential
+#            - nodejs
+#            - cabal-install-2.2
+#            - ghc-8.2.2
+#            - alex-3.1.7
+#            - happy-1.19.5
 
 before_install:
     - docker pull ubuntu:bionic
     - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/2.2/bin:/opt/alex/3.1.7/bin:/opt/happy/1.19.5/bin:$PATH
     - docker run -d -e PATH -v $PWD:/code --name build ubuntu:bionic sleep 4000000000
+    - docker exec -it build apt-get install -y software-properties-common
     - docker exec -it build add-apt-repository -y ppa:hvr/ghc
     - docker exec -it build /bin/sh -c 'curl -sL https://deb.nodesource.com/setup_10.x | sudo -E bash -'
     - docker exec -it build apt-get update
-    - docker exec -it build apt-get install build-essential nodejs cabal-install-2.2 ghc-8.2.2 alex-3.1.7 happy-1.19.5
+    - docker exec -it build apt-get install -y build-essential nodejs cabal-install-2.2 ghc-8.2.2 alex-3.1.7 happy-1.19.5
     - docker exec -it build nvm install 8
 
 install:
-    - docker exec -it build /bin/sh -c 'cabal update || cabal update || cabal update'
-    - git submodule update --init --recursive
+    - docker exec -it build /bin/sh -c 'cd /code; cabal update || cabal update || cabal update'
     - docker exec -it build /bin/sh -c 'cd /code; ./utils/makePackages.sh'
     - docker exec -it build /bin/sh -c 'cd /code; cabal install --only-dependencies --enable-tests --enable-benchmarks'
     - docker exec -it build /bin/sh -c 'cd /code; cabal install --enable-tests --enable-benchmarks -v -j1 --ghc-options="+RTS -c -RTS"'
