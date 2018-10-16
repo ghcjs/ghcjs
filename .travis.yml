@@ -2,6 +2,9 @@ sudo: required
 dist: trusty
 language: generic
 
+services:
+    - docker
+
 # TODO: investigate whether Tavis' CI stages could be used here
 env:
     - GHCVER=8.2.2 TEST_PART=CORE1
@@ -24,27 +27,31 @@ addons:
             - happy-1.19.5
 
 before_install:
-    - nvm install 8
+    - docker pull ubuntu:bionic
+    - docker run -d -v $PWD:/code --name build ubuntu:bionic sleep 4000000000
+    - docker exec -it build add-apt-repository -y ppa:hvr/ghc
+    - docker exec -it build /bin/sh -c 'curl -sL https://deb.nodesource.com/setup_10.x | sudo -E bash -'
+    - docker exec -it build apt-get update
+    - docker exec -it build apt-get install build-essential nodejs cabal-install-2.2 ghc-8.2.2 alex-3.1.7 happy-1.19.5
+    - docker exec -it build nvm install 8
     - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/2.2/bin:/opt/alex/3.1.7/bin:/opt/happy/1.19.5/bin:$PATH
 
 install:
-    - travis_retry cabal update
+    - docker exec -it build /bin/sh -c 'cabal update || cabal update || cabal update'
     - git submodule update --init --recursive
-    - ./utils/makePackages.sh
-    - cabal install --only-dependencies --enable-tests --enable-benchmarks
-    - cabal install --enable-tests --enable-benchmarks -v -j1 --ghc-options="+RTS -c -RTS"
-    - ghcjs --version
-    - ghcjs-boot --version
-    - ./test/runTravis.sh boot
-    - ghcjs-pkg list
+    - docker exec -it build /bin/sh -c 'cd /code; ./utils/makePackages.sh'
+    - docker exec -it build /bin/sh -c 'cd /code; cabal install --only-dependencies --enable-tests --enable-benchmarks'
+    - docker exec -it build /bin/sh -c 'cd /code; cabal install --enable-tests --enable-benchmarks -v -j1 --ghc-options="+RTS -c -RTS"'
+    - docker exec -it build /bin/sh -c 'cd /code; ghcjs --version'
+    - docker exec -it build /bin/sh -c 'cd /code; ghcjs-boot --version'
+    - docker exec -it build /bin/sh -c 'cd /code; ./test/runTravis.sh boot'
+    - docker exec -it build /bin/sh -c 'cd /code; ghcjs-pkg list'
 
 script:
-    - ./test/runTravis.sh test
+    - docker exec -it build /bin/sh -c 'cd /code; ./test/runTravis.sh test'
 
 notifications:
   irc:
     channels: "irc.freenode.net#ghcjs"
     skip_join: true
   email: true
-
-sudo: false
