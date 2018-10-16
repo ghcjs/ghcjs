@@ -8,9 +8,9 @@ services:
 # TODO: investigate whether Tavis' CI stages could be used here
 env:
     - GHCVER=8.2.2 TEST_PART=CORE1
-    - GHCVER=8.2.2 TEST_PART=CORE2
-    - GHCVER=8.2.2 TEST_PART=PROFILING
-    - GHCVER=8.2.2 TEST_PART=GHCJS
+#    - GHCVER=8.2.2 TEST_PART=CORE2
+#    - GHCVER=8.2.2 TEST_PART=PROFILING
+#    - GHCVER=8.2.2 TEST_PART=GHCJS
 
 #addons:
 #    apt:
