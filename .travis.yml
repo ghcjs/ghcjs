@@ -28,7 +28,7 @@ env:
 
 before_install:
     - docker pull ubuntu:bionic
-    - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/2.2/bin:/opt/alex/3.1.7/bin:/opt/happy/1.19.5/bin:$PATH
+    - export PATH=$HOME/.cabal/bin:/opt/ghc/$GHCVER/bin:/opt/cabal/2.2/bin:/opt/alex/3.1.7/bin:/opt/happy/1.19.5/bin:/usr/local/bin:$PATH
     - docker run -d -e PATH -v $PWD:/code --name build ubuntu:bionic sleep 4000000000
     - docker exec -it build apt-get update
     - docker exec -it build apt-get install -y software-properties-common curl
@@ -36,6 +36,7 @@ before_install:
     - docker exec -it build /bin/sh -c 'curl -sL https://deb.nodesource.com/setup_10.x | bash -'
     - docker exec -it build apt-get update
     - docker exec -it build apt-get install -y build-essential nodejs cabal-install-2.2 ghc-8.2.2 alex-3.1.7 happy-1.19.5
+    - docker exec -it build /bin/sh -c 'echo $PATH'
     - docker exec -it build nvm install 8
 
 install:
