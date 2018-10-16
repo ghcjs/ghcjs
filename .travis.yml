@@ -29,6 +29,8 @@ before_install:
 
 install:
     - travis_retry cabal update
+    - git submodule update --init --recursive
+    - ./utils/makePackages.sh
     - cabal install --only-dependencies --enable-tests --enable-benchmarks
     - cabal install --enable-tests --enable-benchmarks -v -j1 --ghc-options="+RTS -c -RTS"
     - ghcjs --version
