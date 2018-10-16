@@ -35,7 +35,7 @@ before_install:
     - docker exec -it build add-apt-repository -y ppa:hvr/ghc
     - docker exec -it build /bin/sh -c 'curl -sL https://deb.nodesource.com/setup_10.x | bash -'
     - docker exec -it build apt-get update
-    - docker exec -it build apt-get install -y build-essential nodejs cabal-install-2.2 ghc-8.2.2 alex-3.1.7 happy-1.19.5
+    - docker exec -it build apt-get install -y build-essential nodejs cabal-install-2.2 ghc-8.2.2 alex-3.1.7 happy-1.19.5 nodejs
     - docker exec -it build /bin/sh -c 'echo $PATH'
     - docker exec -it build nvm install 8
 
