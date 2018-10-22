@@ -528,6 +528,9 @@ isThunk c = [je| `c`.f.t === `Thunk` |]
 isThunk' :: JExpr -> JExpr
 isThunk' f = [je| `f`.t === `Thunk` |]
 
+isBlackhole :: JExpr -> JExpr
+isBlackhole c = [je| `c`.f.t === `Blackhole` |]
+
 isFun :: JExpr -> JExpr
 isFun c = [je| `c`.f.t === `Fun` |]
 

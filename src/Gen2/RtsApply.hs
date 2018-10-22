@@ -46,6 +46,7 @@ rtsApply dflags s =
                        , updates dflags s
                        , papGen dflags s
                        , moveRegs2
+                       , selectors dflags s
                        ]
 
 -- specialized apply for these
@@ -514,11 +515,31 @@ updates _dflags s =
   [j|
       fun h$upd_frame {
         var updatee = `Stack`[`Sp` - 1];
+        `traceRts s $ t"h$upd_frame updatee alloc: " |+ SelExpr updatee (TxtI "alloc")`;
         // wake up threads blocked on blackhole
         var waiters = updatee.d2;
         if(waiters !== null) {
           for(var i=0;i<waiters.length;i++) {
             h$wakeupThread(waiters[i]);
+          }
+        }
+        // update selectors
+        if(typeof updatee.m === 'object' && updatee.m.sel) {
+          var s = updatee.m.sel;
+          for(var i=0;i<s.length;i++) {
+            var si = s[i];
+            var sir = si.d2(`R1`);
+            if(typeof sir === 'object') {
+              si.f  = sir.f;
+              si.d1 = sir.d1;
+              si.d2 = sir.d2;
+              si.m  = sir.m;
+            } else {
+              si.f  = h$unbox_e;
+              si.d1 = sir;
+              si.d2 = null;
+              si.m  = 0;
+            }
           }
         }
         // overwrite the object
@@ -554,6 +575,73 @@ updates _dflags s =
   |]
   where
     updateCC updatee = [j| `updatee`.cc = `jCurrentCCS`; |]
+
+selectors :: DynFlags -> CgSettings -> JStat
+selectors df s =
+  mkSel "1"   (\x -> [je| `x`.d1 |]) <>
+  mkSel "2a"  (\x -> [je| `x`.d2 |]) <>
+  mkSel "2b"  (\x -> [je| `x`.d2.d1 |]) <>
+  mconcat (map mkSelN [3..16])
+   where
+    mkSelN :: Int -> JStat
+    mkSelN x = mkSel (T.pack $ show x)
+                     (\e -> SelExpr [je| `e`.d2 |]
+                            (TxtI $ T.pack ("d" ++ show (x-1)))
+                     )
+    mkSel :: T.Text -> (JExpr -> JExpr) -> JStat
+    mkSel name sel =
+      [j| `decl (TxtI createName)`;
+          `v createName` = function (r) {
+            `traceRts s $ t"selector create: " |+ name |+ t" for " |+ SelExpr r (TxtI "alloc")`;
+            if(`isThunk r` || `isBlackhole r`) {
+              return h$mkSelThunk(r, `v entryName`, `v resName`);
+            } else {
+              return `sel r`;
+            }
+          };
+
+          `decl (TxtI resName)`;
+          `v resName` = function(r) {
+            `traceRts s $ t"selector result: " |+ name |+ t" for " |+ SelExpr r (TxtI "alloc")`;
+            return `sel r`;
+          };
+
+          `decl (TxtI entryName)`;
+          `v entryName` = function() {
+            var tgt = `R1`.d1;
+            `traceRts s $ t"selector entry: " |+ name |+ t" for " |+ SelExpr tgt (TxtI "alloc")`;
+            if(`isThunk tgt` || `isBlackhole tgt`) {
+              `Sp`++;
+              `Stack`[`Sp`] = `v frameName`;
+              return h$e(tgt);
+            } else {
+              return h$e(`sel tgt`);
+              // `R1` = `sel tgt`;
+              // return `Stack`[`Sp`];
+            }
+          };
+
+          `ClosureInfo entryName (CIRegs 0 [PtrV]) ("select " <> name) (CILayoutFixed 1 [PtrV]) CIThunk noStatic`;
+
+          `decl (TxtI frameName)`;
+          `v frameName` = function() {
+          `traceRts s $ t"selector frame: " |+ name`;
+            // R1 = sel (toJExpr R1);
+            `Sp`--;
+            return h$e(`sel (toJExpr R1)`);
+            // `Stack`[`Sp`];
+          };
+
+          `ClosureInfo frameName (CIRegs 0 [PtrV]) ("select " <> name <> " frame") (CILayoutFixed 0 []) CIStackFrame noStatic`;
+        |]
+      where
+        v x   = JVar (TxtI x)
+        n ext =  "h$c_sel_" <> name <> ext
+        createName = n ""
+        resName    = n "_res"
+        entryName  = n "_e"
+        frameName  = n "_frame_e"
+
 
 {-
   Partial applications. There are two different kinds of partial application:

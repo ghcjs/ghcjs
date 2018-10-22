@@ -959,6 +959,24 @@ genBind ctx bndr =
      ctx' = clearCtxStack ctx
 
      assign :: Id -> StgRhs -> G (Maybe JStat)
+     assign b (StgRhsClosure _ccs _bi [the_fv] _upd [] expr)
+       | let strip = snd . stripStgTicksTop (not . tickishIsCode)
+       , StgCase (StgApp scrutinee []) _ (AlgAlt _) [(DataAlt _, params, sel_expr)] <- strip expr
+       , StgApp selectee [] <- strip sel_expr
+       , let params_w_offsets = zip params (scanl' (+) 1 $ map (typeSize . idType) params)
+       , let total_size = sum (map (typeSize . idType) params)
+       , the_fv == scrutinee
+       , Just the_offset <- assocMaybe params_w_offsets selectee
+       , the_offset <= 16 -- fixme make this some configurable constant
+       = do
+           let sel_tag | the_offset == 2 = if total_size == 2 then "2a"
+                                                              else "2b"
+                       | otherwise       = show the_offset
+           [tgt] <- genIdsI b
+           [the_fvj] <- genIds the_fv
+           return $ Just
+             (tgt ||= ApplExpr (ValExpr (JVar (TxtI ("h$c_sel_" <> T.pack sel_tag))))
+                              [the_fvj])
      assign b (StgRhsClosure _ccs _bi _free _upd [] expr)
        | snd (isInlineExpr (ctx ^. ctxEval) expr) = do
            d   <- declIds b
