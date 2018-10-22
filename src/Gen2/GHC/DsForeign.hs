@@ -53,7 +53,6 @@ import Platform
 import Config
 import OrdList
 import Pair
-import Util
 import Hooks
 import Encoding
 
@@ -160,7 +159,7 @@ dsCImport id co (CLabel cid) cconv _ _ = do
               | tyConUnique tycon == funPtrTyConKey ->
                  IsFunction
              _ -> IsData
-   (resTy, foRhs) <- resultWrapper ty
+   (_resTy, foRhs) <- resultWrapper ty
    -- ASSERT(fromJust resTy `eqType` addrPrimTy)    -- typechecker ensures this
    let
         rhs = foRhs (Lit (MachLabel cid stdcall_info fod))
@@ -784,7 +783,7 @@ getPrimTyOf ty
   -- with a single primitive-typed argument (see TcType.legalFEArgTyCon).
   | otherwise =
   case splitDataProductType_maybe rep_ty of
-     Just (_, _, data_con, [prim_ty]) ->
+     Just (_, _, _data_con, [prim_ty]) ->
         -- ASSERT(dataConSourceArity data_con == 1)
         -- ASSERT2(isUnliftedType prim_ty, ppr prim_ty)
         prim_ty
