@@ -1665,7 +1665,8 @@ allocateStaticList _ _ = panic "allocateStaticList: unexpected literal in list"
 genFFIArg :: Bool -> StgArg -> G (JStat, [JExpr])
 genFFIArg isJavaScriptCc (StgLitArg l) = (mempty,) <$> genLit l
 genFFIArg isJavaScriptCc a@(StgVarArg i)
-    | tycon == byteArrayPrimTyCon || tycon == mutableByteArrayPrimTyCon = do
+    | not isJavaScriptCc &&
+      (tycon == byteArrayPrimTyCon || tycon == mutableByteArrayPrimTyCon) = do
         (\x -> (mempty,[x,jint 0])) <$> jsId i
     | isVoid r                  = return (mempty, [])
 --    | Just x <- marshalFFIArg a = x
