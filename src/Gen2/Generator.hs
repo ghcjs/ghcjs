@@ -741,12 +741,12 @@ resultSize0 xxs@(x:xs) t
   --                           resultSize0 xs (snd . splitFunTy $ t'')
 --       _                          -> 1 -- possibly newtype family, must be boxed
 resultSize0 [] t
-  -- - | isRuntimeRepKindedTy t = 0
-  -- - | isRuntimeRepTy t = 0
-  -- | Debug.Trace.trace ("resultSize0: " ++ show t) False = undefined
-  | Nothing <- isLiftedType_maybe t = [(LiftedRep, 1)]
-  | otherwise = -- sum . map (varSize . primRepVt) $ typePrimRep (unwrapType t)
-       typeTarget t
+  | isRuntimeRepKindedTy t' = []
+  | isRuntimeRepTy t' = []
+  | Nothing <- isLiftedType_maybe t' = [(LiftedRep, 1)]
+  | otherwise = typeTarget t
+  where
+    t' = unwrapType t
        -- map (\t -> (t, varSize (primRepVt t))) $ typePrimRep (unwrapType t)
     {- trace' "resultSize0 eol" $ -}
   -- case repType t of
