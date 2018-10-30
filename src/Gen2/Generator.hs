@@ -2345,11 +2345,6 @@ isInlineApp v i [] = isUnboxedTupleType (idType i) ||
                      isStrictType (idType i) ||
                      i `elementOfUniqSet` v ||
                      isStrictId i
-isInlineApp _ i [StgLitArg (MachStr _)]
-  | getUnique i `elem` [ unpackCStringIdKey
-                       , unpackCStringUtf8IdKey
-                       , unpackCStringAppendIdKey
-                       ] = True
 isInlineApp v i [StgVarArg a]
   | DataConWrapId dc <- idDetails i
   , isNewTyCon (dataConTyCon dc)
