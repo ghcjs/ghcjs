@@ -264,51 +264,12 @@ genPrim _ _ CopyArrayOp         [] [a,o1,ma,o2,n] =
                    `ma`[i+`o2`] = `a`[i+`o1`];
                  }
                |]
--- This implementation does not perform in-place shrinking of the byte array.
--- It only reuses the original byte array if the new given length is exactly
--- equal to old length. This implementation matches the expected semantics
--- for this primitive, but it is probably possible to make this more efficient.
-genPrim _ _ ResizeMutableByteArrayOp_Char [r] [a,n] = 
-  PrimInline [j| if(`a`.len == `n`) {
-                   `r` = `a`;
-                 } else {
-                   `r` = h$newByteArray(`n`);
-                   for(var i=`n` - 1; i >= 0; i--) {
-                     `r`.u8[i] = `a`.u8[i];
-                   }
-                 }
-               |]
-genPrim _ _ ShrinkMutableByteArrayOp_Char [] [a,n] = 
-  PrimInline [j| if(`a`.len != `n`) {
-                   var r = h$newByteArray(`n`);
-                   for(var i=`n` - 1; i >= 0; i--) {
-                     r.u8[i] = `a`.u8[i];
-                   }
-                   `a`.buf = r.buf;
-                   `a`.len = r.len;
-                   `a`.i3 = r.i3;
-                   `a`.u8 = r.u8;
-                   `a`.u1 = r.u1;
-                   `a`.f3 = r.f3;
-                   `a`.f6 = r.f6;
-                   `a`.dv = r.dv;
-                 }
-               |]
+genPrim _ _ ResizeMutableByteArrayOp_Char [r] [a,n] =
+  PrimInline [j| `r` = h$resizeMutableByteArray(`a`, `n`); |]
+genPrim _ _ ShrinkMutableByteArrayOp_Char [] [a,n] =
+  PrimInline [j| h$ShrinkMutableByteArray(`a`, `n`); |]
 genPrim _ _ CompareByteArraysOp [r] [a1,o1,a2,o2,n] =
-  PrimInline [j| `r` = 0;
-                 for (var i=0; i < `n`; i++) {
-                   var x = `a1`.u8[i + `o1`];
-                   var y = `a2`.u8[i + `o2`];
-                   if(x < y) {
-                     `r` = (-1);
-                     break;
-                   }
-                   if(x > y) {
-                     `r` = 1;
-                     break;
-                   }
-                 }
-               |]
+  PrimInline [j| `r` = h$compareByteArrays(`a1`,`o1`,`a2`,`o2`,`n`); |]
 genPrim d t CopyMutableArrayOp  [] [a1,o1,a2,o2,n] =
   genPrim d t CopyArrayOp [] [a1,o1,a2,o2,n]
 genPrim _ _ CloneArrayOp        [r] [a,start,n] =
