@@ -176,7 +176,7 @@ Executable ghcjs
     hs-source-dirs: src-bin
     Build-Depends:  base                >= 4    &&  < 5,
                     ghcjs
-    GHC-Options:    -rtsopts -with-rtsopts=-N -with-rtsopts=-K256m -threaded -fprof-auto-calls
+    GHC-Options:    -rtsopts -with-rtsopts=-N -with-rtsopts=-K1024m -threaded -fprof-auto-calls
 
 Executable haddock-ghcjs
     scope: private

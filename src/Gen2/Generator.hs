@@ -677,7 +677,7 @@ loadLiveFun l = do
                             in  decl' v (SelExpr d ident)
 
 dataFields :: Array Int Ident
-dataFields = listArray (1,1024) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..1024])
+dataFields = listArray (1,16384) (map (TxtI . T.pack . ('d':) . show) [(1::Int)..16384])
 
 genBody :: HasDebugCallStack => ExprCtx -> Id -> StgReg -> [Id] -> StgExpr -> C
 genBody ctx i startReg args e =

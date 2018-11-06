@@ -390,7 +390,7 @@ rtsExterns :: Text
 rtsExterns =
   "// GHCJS RTS externs for closure compiler ADVANCED_OPTIMIZATIONS\n\n" <>
   mconcat (map (\x -> "/** @type {*} */\nObject.d" <> T.pack (show x) <> ";\n")
-               [(7::Int)..4096])
+               [(7::Int)..16384])
 
 writeExterns :: FilePath -> IO ()
 writeExterns out = T.writeFile (out </> "all.js.externs") rtsExterns
