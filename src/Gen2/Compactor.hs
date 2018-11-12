@@ -221,8 +221,6 @@ packStrings settings dflags cstate code =
       rewriteValsE (ValExpr v) = ValExpr (rewriteVals v)
       rewriteValsE e = e & exprsE %~ rewriteValsE
 
---      valsE %~ rewriteVals
-
       rewriteVals :: JVal -> JVal
       rewriteVals (JVar (TxtI t))
         | Just v <- replaceSymbol t = v
@@ -821,13 +819,13 @@ exprsS _ c@(ContinueStat{})   = pure c
 -- doesn't traverse through values
 {-# INLINE exprsE #-}
 exprsE :: Traversal' JExpr JExpr
-exprsE f ve@(ValExpr v)      = pure ve -- ValExpr     <$> f v
-exprsE f (SelExpr e i)       = SelExpr     <$> exprsE f e <*> pure i
-exprsE f (IdxExpr e1 e2)     = IdxExpr     <$> exprsE f e1 <*> exprsE f e2
-exprsE f (InfixExpr s e1 e2) = InfixExpr s <$> exprsE f e1 <*> exprsE f e2
-exprsE f (UOpExpr o e)       = UOpExpr o   <$> exprsE f e
-exprsE f (IfExpr e1 e2 e3)   = IfExpr      <$> exprsE f e1 <*> exprsE f e2 <*> exprsE f e3
-exprsE f (ApplExpr e es)     = ApplExpr    <$> exprsE f e <*> (traverse . exprsE) f es
+exprsE f ve@(ValExpr v)      = pure ve
+exprsE f (SelExpr e i)       = SelExpr     <$> f e <*> pure i
+exprsE f (IdxExpr e1 e2)     = IdxExpr     <$> f e1 <*> f e2
+exprsE f (InfixExpr s e1 e2) = InfixExpr s <$> f e1 <*> f e2
+exprsE f (UOpExpr o e)       = UOpExpr o   <$> f e
+exprsE f (IfExpr e1 e2 e3)   = IfExpr      <$> f e1 <*> f e2 <*> f e3
+exprsE f (ApplExpr e es)     = ApplExpr    <$> f e <*> traverse f es
 exprsE _ (UnsatExpr{})       = panic "exprsE: UnsatExpr"
 exprsE _ (AntiExpr{})        = panic "exprsE: AntiExpr"
 
