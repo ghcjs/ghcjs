@@ -1,0 +1,29 @@
+{
+  "name": "ghcjs-profiling",
+  "version": "0.0.1",
+  "main": "./lib/main",
+  "description": "Profiling tools for GHCJS on node.js and Electron",
+  "homepage": "http://github.com/ghcjs/ghcjs",
+  "author": {
+    "name": "Luite Stegeman",
+    "email": "stegeman@gmail.com",
+    "url": "http://luite.com"
+  },
+  "license": "CC0-1.0",
+  "keywords": [
+    "GHCJS",
+    "Haskell",
+    "profile",
+    "profiling"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "http://github.com/ghcjs/ghcjs"
+  },
+  "engines": {
+    "node": ">=0.11.0"
+  },
+  "dependencies": {
+    "is-electron": "^2.2.0"
+  }
+}

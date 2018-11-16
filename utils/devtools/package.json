@@ -1,0 +1,35 @@
+{
+  "name": "ghcjs-electron",
+  "version": "1.0.0",
+  "description": "Helper app for developing GHCJS programs",
+  "main": "electron-main.js",
+  "build": {
+    "appId": "com.luite.ghcjs.ghcjs-dev"
+  },
+  "postinstall": "electron-builder install-app-deps",
+  "scripts": {
+    "start": "electron . --js-flags=\"--expose-gc --allow-natives-syntax\" --ghcjs-electron-dummy-arg",
+    "prof": "electron . --inspect --js-flags=\"--expose-gc --allow-natives-syntax --prof --noprof-lazy --log-timer-events\" --ghcjs-electron-dummy-arg",
+    "perf": "electron . --inspect --js-flags=\"--expose-gc --allow-natives-syntax --trace-deopt --trace-opt-verbose --trace-bailout\" --ghcjs-electron-dummy-arg",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "rebuild": "electron-rebuild -f -w lib/ghcjs-profiling"
+  },
+  "repository": "https://github.com/ghcjs/ghcjs",
+  "keywords": [
+    "GHCJS",
+    "Haskell",
+    "development"
+  ],
+  "author": "Luite Stegeman",
+  "license": "CC0-1.0",
+  "devDependencies": {
+    "debug": ">= 3.1.0",
+    "electron": ">= 4.0.0-beta.1",
+    "electron-rebuild": "^1.8.2",
+    "gc-stats": "^1.2.0",
+    "ghcjs-profiling": "file:lib/ghcjs-profiling",
+    "v8-natives": "^1.1.0",
+    "weak-napi": "^1.0.2"
+  }
+}
