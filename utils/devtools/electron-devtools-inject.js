@@ -227,35 +227,7 @@ InspectorFrontendHost.sendMessageToBackend = function(msg) {
 // process a single incoming message, call the dispatch callback with the updated event
 function rewriteIncomingMessage(msg, dispatch) {
   outp("incoming: " + JSON.stringify(msg));
-  // testMsg();
-  //logConsole("log", [typeof msg, msg]);
-  // logConsoleRaw("log", [{ type: "object",  hasChildren: true, value: JSON.stringify(msg) }]);
-  /*    {"method":"Runtime.consoleAPICalled"
-        ,"params":{"type":"log"
-                  ,"args":   [
-                    {"type":"object"
-                    ,"className":"GHCJSMessageType"
-                    ,"description":"GHCJSMessageType"
-                    ,"objectId":"{\"injectedScriptId\":1,\"id\":2008}"
-                    ,"preview":{"type":"object","description":"GHCJSMessageType","overflow":false,"properties":[]}
-                    }
-                    ,{"type":"string"
-                    , "value":"registerCCS"
-                    },
-                    {"type":"undefined"}],"executionContextId":1,"timestamp":1530735312185.401,"stackTrace":{"callFrames":[{"functionName":"sendToInspector","scriptId":"107","url":"http://localhost:4000/test.js","lineNumber":44,"columnNumber":10},{"functionName":"registerCCS","scriptId":"107","url":"http://localhost:4000/test.js","lineNumber":52,"columnNumber":2}],"parent":{"description":"setTimeout","callFrames":[{"functionName":"","scriptId":"107","url":"http://localhost:4000/test.js","lineNumber":56,"columnNumber":0}]}}}} */
-                    // {"method":"Runtime.consoleAPICalled","params":{"type":"log","args":[{"type":"string","value":"sendToInspector data: {\"id\":963,\"ccs\":[602,394,956,116,371,240,505]}"}],"executionContextId":1,"timestamp":1530736068361.5388,"stackTrace":{"callFrames":[{"functionName":"toInspector","scriptId":"100","url":"/Users/luite/haskell/ghcjs-dev/ghcjs-dev/lib/ghcjs-profiling-new/lib/main.js","lineNumber":11,"columnNumber":12}]}}}
-                    // {"method":"Runtime.consoleAPICalled","params":{"type":"log","args":[{"type":"object","className":"GHCJSMessageType","description":"GHCJSMessageType","objectId":"{\"injectedScriptId\":1,\"id\":292}"},{"type":"string","value":"registerCCS"},{"type":"string","value":"{\"id\":963,\"ccs\":[602,394,956,116,371,240,505]}"}],"executionContextId":1,"timestamp":1530736068361.552,"stackTrace":{"callFrames":[{"functionName":"sendToInspector","scriptId":"99","url":"http://localhost:4000/test.js","lineNumber":44,"columnNumber":10}]}}}
-/*
-if(msg.method == "Runtime.consoleAPICalled" &&
-   msg.params &&
-   msg.params.type == 'log' &&
-   msg.params.args &&
-   msg.params.args[0] &&
-   msg.params.args[0].type == 'object' &&
-   msg.params.args[0].className == 'GHCJSMessageType') {
-    processGHCJSMessage(msg.params.args);
-    return;
-} else */ if(msg.result && msg.result.profile) {
+  if(msg.result && msg.result.profile) {
     function logProfMsg(m) {
       var msg2 = JSON.parse(JSON.stringify(m));
       msg2.result.profile.samples = []; // make it smaller
@@ -288,19 +260,7 @@ var costCentres = {};
 var costCentreStacks = {};
 // fixme: rewrite Haskell source paths to urls somehow?
 var baseURL = '';
-/*
-function processGHCJSMessage(args) {
-  var ty = args[1].value;
-  var data = JSON.parse(args[2].value);
-  if(ty === 'registerCCS') {
-    console.log("registerCCS: " + JSON.stringify(data));
-    costCentreStacks[data.id] = data;
-  } else if(ty === 'registerCC') {
-    console.log("registerCC: " + JSON.stringify(data));
-    costCentres[data.id] = data;
-  }
-}
-*/
+
 /*
 expand cost centre stacks in a profile message
 
@@ -356,23 +316,27 @@ example data
  */
 function updateCostCentres(cb) {
   evaluateOnBackend
-    ( "JSON.stringify({ cc: h$prof_costCentres, ccs: h$prof_costCentreStacks })"
+    ( "JSON.stringify({ cc: h$_prof_costCentres, ccs: h$_prof_costCentreStacks })"
     , function(jo) {
-        lo("got reported cost centres:");
-        lo(jo);
-        var o = JSON.parse(jo);
-        var i;
-        if(o.cc) {
-        for(i=0;i<o.cc.length;i++) {
-          costCentres[o.cc[i].id] = o.cc[i];
+        if(!jo) {
+          lo("did not find cost centres, maybe no Haskell program running?");
+        } else {
+          lo("got reported cost centres:");
+          lo(jo);
+          var o = JSON.parse(jo);
+          var i;
+          if(o.cc) {
+          for(i=0;i<o.cc.length;i++) {
+            costCentres[o.cc[i].id] = o.cc[i];
+          }
         }
-      }
-      if(o.ccs) {
-        for(i=0;i<o.ccs.length;i++) {
-          costCentreStacks[o.ccs[i].id] = o.ccs[i];
+        if(o.ccs) {
+          for(i=0;i<o.ccs.length;i++) {
+            costCentreStacks[o.ccs[i].id] = o.ccs[i];
+          }
         }
+        lo("cost centres updated");
       }
-      lo("cost centres updated");
       cb();
   });
 }
@@ -587,19 +551,13 @@ function processProfilingMessage0(msg) {
 // get the cost centre component value ([0,1023]) of the callFrame
 // returns -1 if the callFrame is not a Haskell cc frame
 function getCCId(cframe) {
-  var prefix = "h$_cc_";
+  var prefix = "h$_prof_ccs_b_";
   if(cframe.functionName.startsWith(prefix)) {
     return parseInt(cframe.functionName.substring(prefix.length));
   } else {
     return -1;
   }
 }
-
-/*
-function mkCCSNodes() {
-
-}
-*/
 
 // process a partial incoming message, call the dispatch callback with the updated event
 function rewriteIncomingMessageChunk(msg, dispatch) {
@@ -802,39 +760,6 @@ function test0() {
 function initHaskellTools() {
 
 }
-
-////////////////////////////////////////////////////////////////////////
-//
-
-var inspectThese =
-  { Bindings: window.Bindings
-  , Common: window.Common
-  , Components: window.Components
-  , DevToolsAPI: window.DevToolsAPI
-  , DevToolsHost: window.DevToolsHost
-  , DomExtension: window.DomExtension
-  , Emulation: window.Emulation
-  , Host: window.Host
-  , InspectorExtensionRegistry: window.InspectorExtensionRegistry
-  , InspectorFrontendAPI: window.InspectorFrontendAPI
-  , InspectorFrontendHost: window.InspectorFrontendHost
-  , InspectorFrontendHostAPI: window.InspectorFrontendHostAPI
-  , Log: window.Log
-  , Main: window.Main
-  , NetworkConditions: window.NetworkConditions
-  , NetworkLog: window.NetworkLog
-  , Persistence: window.Persistence
-  , Platform: window.Platform
-  , Protocol: window.Protocol
-  , Browser: window.Browser
-  , Runtime: window.Runtime
-  , SDK: window.SDK
-  , ServicePort: window.ServicePort
-  , Services: window.Services
-  , UI: window.UI
-};
-
-// document.write(escapeHTML(JSON.stringify(myStringify_r(inspectThese, 0, 4))));
 
 var ranTest = 0;
 function testMsg() {
