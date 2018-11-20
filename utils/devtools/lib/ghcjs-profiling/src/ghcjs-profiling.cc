@@ -73,14 +73,7 @@
 
 // use the old-fashioned Node API
 #include <node.h>
-
 #include <stdio.h>
-// #include <algorithm>
-// #include <execinfo.h>
-// #include "backtrace.h"
-
-// #define UNW_LOCAL_ONLY
-// #include <libunwind.h>
 
 using namespace v8;
 
@@ -94,31 +87,6 @@ const int ccsReturnAddress3   = nCostCentreFuns + 2;
 static uint32_t currentCCS    = 0;
 
 /*
-static void** StackStart = 0;
-static void** StackEnd   = 0;
-
-static void*  Callbacks[16];
-static void** StackSlots[128];
-
-static void**   CostCentres;
-static unsigned CostCentres_len = 0;
-
-static uintptr_t* ReturnAddresses    = 0;
-static int        ReturnAddresses_len = 0;
-
-static uintptr_t CcReturnAddresses[nCostCentreFuns];
-static bool      addressesInitialized = 0;
-*/
-// static uintptr_t ccsReturnAddress1 = 0;
-// static uintptr_t ccsReturnAddress2 = 0;
-// static uintptr_t ccsReturnAddress3 = 0;
-
-
-// static uintptr_t ccsPosition1 = 0;
-// static uintptr_t ccsPosition2 = 0;
-// static uintptr_t ccsPosition3 = 0;
-
-/*
   a code location of one of the functions we're interested in
 
     start == 0 && len == 0 <=> the item location is unknown
@@ -126,8 +94,8 @@ static bool      addressesInitialized = 0;
   cc_code_locations contains an entry for each known item
 
   item numbering:
-    [0,1023]    -> h$_prof_ccs_a_
-    [1024,1026] -> h$_prof_ccs_b_
+    [0,1023]    -> h$_prof_ccs_b_
+    [1024,1026] -> h$_prof_ccs_a_
  */
 typedef struct code_t {
   uintptr_t start;
@@ -135,7 +103,8 @@ typedef struct code_t {
 } code_t;
 
 
-static code_t cc_code[nFunctions];
+static code_t    cc_code[nFunctions];
+static uintptr_t cc_return[nFunctions];
 static std::map<uintptr_t, int> cc_code_locations; // start -> item
 
 bool is_in_code(uintptr_t return_addr, int item) {
@@ -143,18 +112,27 @@ bool is_in_code(uintptr_t return_addr, int item) {
   return return_addr >= c.start && return_addr < c.start + c.len;
 }
 
+int code_offset(uintptr_t return_addr, int item) {
+  return return_addr - cc_code[item].start;
+}
+
 static uintptr_t address_loc_resolver(uintptr_t return_addr_location) {
   uintptr_t ra = *((uintptr_t*)return_addr_location);
   int item = -1;
+  uintptr_t offset = 0;
   if(is_in_code(ra, ccsReturnAddress1)) {
     item = currentCCS & (nCostCentreFuns-1);
+    offset = code_offset(ra, ccsReturnAddress1);
   } else if(is_in_code(ra, ccsReturnAddress2)) {
     item = (currentCCS >> nCostCentreFunsBits) & (nCostCentreFuns-1);
+    offset = code_offset(ra, ccsReturnAddress2);
   } else if(is_in_code(ra, ccsReturnAddress3)) {
     item = (currentCCS >> (2 * nCostCentreFunsBits)) & (nCostCentreFuns-1);
+    offset = code_offset(ra, ccsReturnAddress3);
   }
   if(item != -1 && cc_code[item].start != 0) {
-    return (uintptr_t)(&cc_code[item].start);
+    cc_return[item] = cc_code[item].start + offset;
+    return (uintptr_t)(&cc_return[item]);
   } else {
     return return_addr_location;
   }
@@ -174,11 +152,11 @@ int function_item(const char* name, int len) {
   for(int i=0;i<len;i++) {
     char c = name[i];
     if(!isdigit(c)) break;
-    val = val * 10 + (int)c;
+    val = val * 10 + (int)c - 48;
   }
-  if(ver == 'a' && val >= 0 && val <= 1023) {
+  if(ver == 'b' && val >= 0 && val <= 1023) {
     return val;
-  } else if(ver == 'b' && val >= 0 && val <= 2) {
+  } else if(ver == 'a' && val >= 0 && val <= 2) {
     return val + 1024;
   } else {
     return -1;
@@ -186,7 +164,6 @@ int function_item(const char* name, int len) {
 }
 
 static void jit_code_handler(const JitCodeEvent* event) {
-  // fprintf(stderr, "jit: %i\n", event->type);
   char* name;
   int item;
   uintptr_t cstart = (uintptr_t)event->code_start;
@@ -279,4 +256,3 @@ void Init(Handle<Object> exports, Handle<Object> module) {
 }
 
 NODE_MODULE(NODE_GYP_MODULE_NAME, Init)
-
