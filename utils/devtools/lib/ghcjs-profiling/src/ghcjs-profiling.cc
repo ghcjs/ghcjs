@@ -116,6 +116,33 @@ int code_offset(uintptr_t return_addr, int item) {
   return return_addr - cc_code[item].start;
 }
 
+/**
+  Note:
+
+  This is a bit of a hack.
+
+  The return address location resolver mechanism was designed to allow a
+  tool to instrument the stack and return the original return addresses
+  to the V8 profiler.
+
+  We use it the other way around: The stack stays the same, but we return
+  "instrumented" return addresses encoding the cost centre stack id.
+
+  We make the assumption that our instrumented call sites
+  (h$_prof_ccs_a_x) and the values we resolve (h$_prof_ccs_b_y)
+  are compiled to more or less the same code by the V8 JIT compiler.
+
+  We don't actually know a valid h$_prof_ccs_b_y return address, but
+  we just return the same offset we see from the h$_prof_ccs_a_x
+  code start.
+
+  That seems to work. Using 0 for offset results in a crash.
+
+  If this breaks in the future, perhaps we should do an actual call
+  to determine the correct address after JIT compilation, or
+  we could expose C++ functions that we can call through, if they are
+  preserved in the profiling stack samples.
+ */
 static uintptr_t address_loc_resolver(uintptr_t return_addr_location) {
   uintptr_t ra = *((uintptr_t*)return_addr_location);
   int item = -1;
