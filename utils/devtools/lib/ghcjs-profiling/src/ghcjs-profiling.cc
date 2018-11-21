@@ -173,11 +173,11 @@ static void jit_code_handler(const JitCodeEvent* event) {
       name = new char[event->name.len+1];
       name[event->name.len] = 0;
       strncpy(name, event->name.str, event->name.len);
-      fprintf( stderr
+      /* fprintf( stderr
              , "jit: code added at %p size %lu, name: %s\n"
              , event->code_start
              , event->code_len
-             , name);
+             , name); */
       delete[] name;
       item = function_item(event->name.str, event->name.len);
       if(item != -1) {
@@ -194,12 +194,12 @@ static void jit_code_handler(const JitCodeEvent* event) {
       }
       break;
     case JitCodeEvent::CODE_MOVED:
-      fprintf( stderr
+      /* fprintf( stderr
              , "jit: code moved at %p size %lu to: %p\n"
              , event->code_start
              , event->code_len
              , event->new_code_start
-             );
+             ); */
       it = cc_code_locations.find(cstart);
       if(it != cc_code_locations.end()) {
         item = it->second;
@@ -211,11 +211,11 @@ static void jit_code_handler(const JitCodeEvent* event) {
       }
       break;
     case JitCodeEvent::CODE_REMOVED:
-      fprintf( stderr
+      /* fprintf( stderr
              , "jit: code removed from %p size %lu\n"
              , event->code_start
              , event->code_len
-             );
+             ); */
       it = cc_code_locations.find(cstart);
       if(it != cc_code_locations.end()) {
         item = it->second;
