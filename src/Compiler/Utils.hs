@@ -34,10 +34,16 @@ import           GHC
 import           Platform
 import           HscTypes
 import           Bag
+import           FileCleanup
+import           Module
 import           Outputable        hiding ((<>))
 import           ErrUtils          (mkPlainErrMsg)
-import           Packages          (getPackageIncludePath)
+import           Packages          (getPackageIncludePath, Version
+                                   ,versionBranch, packageNameString
+                                   ,packageVersion, lookupPackage
+                                   ,explicitPackages, PackageConfig)
 import           Config            (cProjectVersionInt)
+import           Panic             (throwGhcExceptionIO)
 import qualified SysTools
 
 import qualified Control.Exception as Ex
@@ -45,9 +51,11 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 
 import           Data.Char
-import           Data.List         (isPrefixOf, foldl')
+import           Data.List         (isPrefixOf, foldl', intercalate)
+import           Data.Maybe        (catMaybes)
 import           Data.Text         (Text)
 import qualified Data.Text         as T
+import           Data.Version      (showVersion)
 
 import           System.Directory  (doesFileExist, copyFile)
 import           System.Environment
@@ -165,13 +173,35 @@ doCpp dflags raw strip_comments input_fn output_fn = do
 
     backend_defs <- getBackendDefs dflags
 
+    let th_defs = [ "-D__GLASGOW_HASKELL_TH__" ]
+    -- Default CPP defines in Haskell source
+    ghcVersionH <- getGhcVersionPathName dflags
+    let hsSourceCppOpts = [ "-include", ghcVersionH ]
+
+    -- MIN_VERSION macros
+    let uids = explicitPackages (pkgState dflags)
+        pkgs = catMaybes (map (lookupPackage dflags) uids)
+    mb_macro_include <-
+        if not (null pkgs) && gopt Opt_VersionMacros dflags
+            then do macro_stub <- newTempName dflags TFL_CurrentModule "h"
+                    writeFile macro_stub (generatePackageVersionMacros pkgs)
+                    -- Include version macros for every *exposed* package.
+                    -- Without -hide-all-packages and with a package database
+                    -- size of 1000 packages, it takes cpp an estimated 2
+                    -- milliseconds to process this file. See Trac #10970
+                    -- comment 8.
+                    return [SysTools.FileOption "-include" macro_stub]
+            else return []
+
     cpp_prog       (   map SysTools.Option verbFlags
                     ++ map SysTools.Option include_paths
                     ++ map SysTools.Option hsSourceCppOpts
                     ++ map SysTools.Option prof_defs
                     ++ map SysTools.Option target_defs
                     ++ map SysTools.Option backend_defs
+                    ++ map SysTools.Option th_defs
                     ++ map SysTools.Option hscpp_opts
+                    ++ mb_macro_include
                     ++ [ SysTools.Option "-undef" ] -- undefine host system definitions
         -- Set the language mode to assembler-with-cpp when preprocessing. This
         -- alleviates some of the C99 macro rules relating to whitespace and the hash
@@ -232,3 +262,47 @@ substPatterns single double = unmatched
                 | otherwise            = a <> unmatched d
           where (a,b)  = T.breakOn "{{" l
                 (_c,d) = T.breakOn "}}" b
+
+-- | Find out path to @ghcversion.h@ file
+getGhcVersionPathName :: DynFlags -> IO FilePath
+getGhcVersionPathName dflags = do
+  candidates <- case ghcVersionFile dflags of
+    Just path -> return [path]
+    Nothing -> (map (</> "ghcversion.h")) <$>
+               (getPackageIncludePath dflags [toInstalledUnitId rtsUnitId])
+
+  found <- filterM doesFileExist candidates
+  case found of
+      []    -> throwGhcExceptionIO (InstallationError
+                                    ("ghcversion.h missing; tried: "
+                                      ++ intercalate ", " candidates))
+      (x:_) -> return x
+
+-- ---------------------------------------------------------------------------
+-- Macros (cribbed from Cabal)
+
+generatePackageVersionMacros :: [PackageConfig] -> String
+generatePackageVersionMacros pkgs = concat
+  -- Do not add any C-style comments. See Trac #3389.
+  [ generateMacros "" pkgname version
+  | pkg <- pkgs
+  , let version = packageVersion pkg
+        pkgname = map fixchar (packageNameString pkg)
+  ]
+
+fixchar :: Char -> Char
+fixchar '-' = '_'
+fixchar c   = c
+
+generateMacros :: String -> String -> Version -> String
+generateMacros prefix name version =
+  concat
+  ["#define ", prefix, "VERSION_",name," ",show (showVersion version),"\n"
+  ,"#define MIN_", prefix, "VERSION_",name,"(major1,major2,minor) (\\\n"
+  ,"  (major1) <  ",major1," || \\\n"
+  ,"  (major1) == ",major1," && (major2) <  ",major2," || \\\n"
+  ,"  (major1) == ",major1," && (major2) == ",major2," && (minor) <= ",minor,")"
+  ,"\n\n"
+  ]
+  where
+    (major1:major2:minor:_) = map show (versionBranch version ++ repeat 0)
