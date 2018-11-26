@@ -13,7 +13,7 @@ installed under the name `ghc-api-ghcjs`
 #### getting and preparing the source tree
 
 ```
-$ git clone https://github.com/ghcjs/ghcjs.git
+$ git clone --branch ghc-8.2 https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init --recursive
 $ ./utils/makePackages.sh
