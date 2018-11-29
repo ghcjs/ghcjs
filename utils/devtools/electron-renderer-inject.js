@@ -1,5 +1,3 @@
-console.log("renderer started");
-
 // make sure we never exit the renderer, since this closes our debugging connection
 process.exit = function(code) {
   console.warn("exit process with code: " + code);
@@ -12,4 +10,3 @@ function Fingerprint2() {
 Fingerprint2.prototype.get = function(f) {
   f("fingerprint", ["finger", "print"]);
 }
-

@@ -1,10 +1,22 @@
 var binding = null;
-var isElectron = require('is-electron');
+var isElectron = require("is-electron");
 const nCostCentreFuns = 1024;
 
+/*
+  the number of additional call frames to "stuff" the call stack
+
+  this determines the maximum length of the cost centre stacks that
+  can be displayed, since the devtools replace these frames with
+  the cost centre stack.
+
+  we should make this a configurable startup option at some point,
+  or raise the value dynamically when we see long cost centre stacks
+  being created
+*/
+const nFrames = 50;
+
 function isProfiling() {
-    // return isElectron() || process.execArgv.indexOf('--prof') > -1;
-    return true;
+  return isElectron() || process.execArgv.indexOf("--prof") > -1;
 }
 
 /*
@@ -14,10 +26,10 @@ function isProfiling() {
 var h$_prof_costCentres = [];
 var h$_prof_costCentreStacks = [];
 
-if(typeof global !== 'undefined') {
+if(typeof global !== "undefined") {
   global.h$_prof_costCentres = h$_prof_costCentres;
   global.h$_prof_costCentreStacks = h$_prof_costCentreStacks;
-} else if(typeof window !== 'undefined') {
+} else if(typeof window !== "undefined") {
   window.h$_prof_costCentres = h$_prof_costCentres;
   window.h$_prof_costCentreStacks = h$_prof_costCentreStacks;
 }
@@ -32,20 +44,20 @@ if(typeof global !== 'undefined') {
  */
 var mkCostCentreFun_src =
 [ "(function(f) {"
-, "  var dummyFunction1 = function() { return 0; };"
-, "  var dummyFunction2 = function() { return \"dummy\"; };"
-, "  var dummyFunction3 = function() { return undefined; };"
-, "  var dummyFunction4 = function() { return new Error().stack; };"
-, "  f(dummyFunction1);"
-, "  f(dummyFunction2);"
-, "  f(dummyFunction3);"
-, "  f(dummyFunction4);"
-, "  %OptimizeFunctionOnNextCall(f);"
-, "  f(dummyFunction1);"
-, "  f(dummyFunction2);"
-, "  f(dummyFunction3);"
-, "  f(dummyFunction4);"
-, "})"
+  , "  var dummyFunction1 = function() { return 0; };"
+  , "  var dummyFunction2 = function() { return \"dummy\"; };"
+  , "  var dummyFunction3 = function() { return undefined; };"
+  , "  var dummyFunction4 = function() { return new Error().stack; };"
+  , "  f(dummyFunction1);"
+  , "  f(dummyFunction2);"
+  , "  f(dummyFunction3);"
+  , "  f(dummyFunction4);"
+  , "  %OptimizeFunctionOnNextCall(f);"
+  , "  f(dummyFunction1);"
+  , "  f(dummyFunction2);"
+  , "  f(dummyFunction3);"
+  , "  f(dummyFunction4);"
+  , "})"
 ];
 /*
   Generate the functions with the names that the native extension recognizes.
@@ -53,34 +65,47 @@ var mkCostCentreFun_src =
  */
 function mkCostCentreFuns() {
   try {
-    var src = mkCostCentreFun_src.join('\n');
-    console.log(src);
+    var src = mkCostCentreFun_src.join("\n");
     var mkCostCentreFun = eval(src);
     var defs = [];
     var i;
     for(i = 0; i < 3; i++) {
-      defs.push("function h$_prof_ccs_a_" + i + "(f) { return f(); }")
+      defs.push("function h$_prof_ccs_a_" + i + "(f) { return f(); }");
     }
     for(i = 0; i < nCostCentreFuns; i++) {
-      defs.push("function h$_prof_ccs_b_" + i + "(f) { return f(); }")
+      defs.push("function h$_prof_ccs_b_" + i + "(f) { return f(); }");
     }
-    var funs = eval('[' + defs.join(',\n') + ']');
+    var funs = eval("[" + defs.join(",\n") + "]");
 
     for(i = 0; i < funs.length; i++) {
       mkCostCentreFun(funs[i]);
     }
     return funs;
   } catch(e) {
-    throw e; // new Error("Could not make cost centre functions, did you allow natives syntax?");
+    throw new Error("Could not make cost centre functions, did you allow natives syntax?");
   }
+}
+
+function mkFrameFuns() {
+  var frames_src = Array.from({length: nFrames-1}, (v, k) =>
+    "function h$_prof_frame_" + (k+2) +
+    "(f) { return h$_prof_frame_" + (k+1) + "(f); }");
+  var frame_1_src = "function h$_prof_frame_1(f) { return f(); }";
+  var src = [ "(function() {"
+    , frames_src.join("\n")
+    , frame_1_src
+    , "  return h$_prof_frame_" + nFrames + ";"
+    , "})();"
+  ].join("\n");
+  return eval(src);
 }
 
 if(isProfiling()) {
   try {
-    binding = require('../build/Debug/ghcjs_profiling');
+    binding = require("../build/Debug/ghcjs_profiling");
     // binding = require('../build/Release/ghcjs-profiling');
   } catch(e) {
-    binding = require('../build/Release/ghcjs_profiling');
+    binding = require("../build/Release/ghcjs_profiling");
     // binding = require('../build/Debug/ghcjs-profiling');
   }
   if(!binding) {
@@ -90,38 +115,43 @@ if(isProfiling()) {
     var profFuns = mkCostCentreFuns();
     var ccsBuf = new Uint32Array(binding.get_ccs_buffer());
 
+
+
+    var frames = mkFrameFuns();
+
+
     module.exports =
       {  /** register a cost centre so that devtools can display its
              information */
-         registerCC: function(id, name, file, line, col) {
-            h$_prof_costCentres.push({ id: id
-                                     , name: name
-                                     , file: file
-                                     , line: line
-                                     , col: col
-                                     });
+        registerCC: function(id, name, file, line, col) {
+          h$_prof_costCentres.push({ id: id
+            , name: name
+            , file: file
+            , line: line
+            , col: col
+          });
 
-          }
+        }
         /** register a cost centre stack so that devtools can display its
             information */
         , registerCCS: function(id, ccArray) {
-            h$_prof_costCentreStacks.push({ id: id
-                                          , ccs: ccArray
-                                          });
-          }
+          h$_prof_costCentreStacks.push({ id: id
+            , ccs: ccArray
+          });
+        }
         /** set the current cost centre stack id. */
         , setCCS: function(n) { ccsBuf[0] = n; }
         , isProfiling: function() { return true; }
         /** run a function under cost centre profiling */
         , runCC: function(f) {
-          if(typeof f !== 'function')
+          if(typeof f !== "function")
             throw new Error("argument must be a function");
 
           // do our call through the three magic call-throughs
           return profFuns[2](function() {
             return profFuns[1](function() {
               return profFuns[0](function() {
-                return f();
+                return frames(f);
               });
             });
           });
@@ -131,9 +161,9 @@ if(isProfiling()) {
 } else {
   module.exports =
     { registerCC:  function() {}
-    , registerCCS: function() {}
-    , setCCS:      function() {}
-    , runCC:       function(f) { return f(); }
-    , isProfiling: function() { return false; }
+      , registerCCS: function() {}
+      , setCCS:      function() {}
+      , runCC:       function(f) { return f(); }
+      , isProfiling: function() { return false; }
     };
 }
