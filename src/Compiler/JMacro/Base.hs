@@ -95,9 +95,17 @@ instance Functor IdentSupply where
 
 takeOne :: State [Ident] Ident
 takeOne = do
+  xxs <- get
+  case xxs of
+    (x:xs) -> do
+      put xs
+      return x
+    _ -> error "takeOne: empty list"
+{-
   (x:xs) <- get
   put xs
   return x
+-}
 
 newIdentSupply :: Maybe Text -> [Ident]
 newIdentSupply Nothing     = newIdentSupply (Just "jmId")
@@ -490,9 +498,12 @@ withHygiene f x = jfromGADT $ case jtoGADT x of
     JMGId _ -> jtoGADT $ f x
     where
         inScope z = IS $ do
-            ([TxtI a], b) <- splitAt 1 `fmap` get
-            put b
-            return $ withHygiene_ a f z
+            ti <- get
+            case ti of
+              ((TxtI a):b) -> do
+                put b
+                return $ withHygiene_ a f z
+              _ -> error "withHygiene: empty list"
 
 withHygiene_ :: JMacro a => Text -> (a -> a) -> a -> a
 withHygiene_ un f x = jfromGADT $ case jtoGADT x of
@@ -519,19 +530,25 @@ scopify x = evalState (jfromGADT <$> go (jtoGADT x)) (newIdentSupply Nothing)
                                | "!!" `T.isPrefixOf` i = (DeclStat (TxtI (T.drop 2 i)):) <$> blocks xs
                                | "!" `T.isPrefixOf` i  = (DeclStat (TxtI $ T.tail i):) <$> blocks xs
                                | otherwise = do
-                                  (newI:st) <- get
-                                  put st
-                                  rest <- blocks xs
-                                  return $ [DeclStat newI `mappend` jsReplace_ [(TxtI i, newI)] (BlockStat rest)]
+                                  xx <- get
+                                  case xx of
+                                    (newI:st) -> do
+                                      put st
+                                      rest <- blocks xs
+                                      return $ [DeclStat newI `mappend` jsReplace_ [(TxtI i, newI)] (BlockStat rest)]
+                                    _ -> error "scopify: empty list"
                              blocks (x':xs) = (jfromGADT <$> go (jtoGADT x')) <:> blocks xs
                              (<:>) = liftM2 (:)
                    (JMGStat (TryStat s (TxtI i) s1 s2)) -> do
-                          (newI:st) <- get
-                          put st
-                          t <- jfromGADT <$> go (jtoGADT s)
-                          c <- jfromGADT <$> go (jtoGADT s1)
-                          f <- jfromGADT <$> go (jtoGADT s2)
-                          return . JMGStat . TryStat t newI (jsReplace_ [(TxtI i, newI)] c) $ f
+                          xx <- get
+                          case xx of
+                            (newI:st) -> do
+                              put st
+                              t <- jfromGADT <$> go (jtoGADT s)
+                              c <- jfromGADT <$> go (jtoGADT s1)
+                              f <- jfromGADT <$> go (jtoGADT s2)
+                              return . JMGStat . TryStat t newI (jsReplace_ [(TxtI i, newI)] c) $ f
+                            _ -> error "scopify: empty list"
                    (JMGExpr (ValExpr (JFunc is s))) -> do
                             st <- get
                             let (newIs,newSt) = splitAt (length is) st

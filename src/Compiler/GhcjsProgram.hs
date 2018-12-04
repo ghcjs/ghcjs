@@ -27,7 +27,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy.IO as TL
 
-import           Distribution.System (buildOS, OS(..))
+import           Distribution.System (buildOS, OS(..), buildPlatform)
 import           Distribution.Verbosity (deafening, intToVerbosity)
 import           Distribution.Simple.BuildPaths (exeExtension)
 import           Distribution.Simple.Utils (installExecutableFile, installDirectoryContents)
@@ -211,13 +211,13 @@ installExecutable dflags settings srcs = do
     case (srcs, outputFile dflags) of
         ([from], Just to) -> do
           let v = fromMaybe deafening . intToVerbosity $ verbosity dflags
-          nativeExists <- doesFileExist $ from <.> exeExtension
+          nativeExists <- doesFileExist $ from <.> exeExtension buildPlatform
           when nativeExists $ do
-            installExecutableFile v (from <.> exeExtension) (to <.> exeExtension)
+            installExecutableFile v (from <.> exeExtension buildPlatform) (to <.> exeExtension buildPlatform)
             let stripFlags = if buildOS == OSX then ["-x"] else []
             case gsStripProgram settings of
                 Just strip -> runProgramInvocation v . simpleProgramInvocation strip $
-                                stripFlags ++ [to <.> exeExtension]
+                                stripFlags ++ [to <.> exeExtension buildPlatform]
                 Nothing -> return ()
           jsExists <- doesDirectoryExist $ from <.> jsexeExtension
           when jsExists $ installDirectoryContents v (from <.> jsexeExtension) (to <.> jsexeExtension)

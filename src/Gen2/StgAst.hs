@@ -87,6 +87,7 @@ instance Show IdDetails where
 
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat
+deriving instance Show LitNumType
 deriving instance Show Literal
 deriving instance Show PrimOp
 deriving instance Show AltCon

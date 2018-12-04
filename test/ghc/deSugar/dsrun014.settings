@@ -1,3 +1,4 @@
+# GHC also swaps the order when compiling with optimization
+disabled: true
 disableSpiderMonkey: true
 disableJavaScriptCore: true
-

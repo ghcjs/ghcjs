@@ -1,13 +1,13 @@
-diff -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
---- upstream/pkg/base/base.cabal	2018-04-26 09:55:16.000000000 +0000
-+++ boot/pkg/base/base.cabal	2018-04-26 09:55:16.675026534 +0000
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
+--- upstream/pkg/base/base.cabal	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/base.cabal	2018-12-04 07:40:08.466663374 -0800
 @@ -1,4 +1,4 @@
 -cabal-version:  2.1
 +cabal-version:  2.2
  name:           base
- version:        4.11.1.0
+ version:        4.12.0.0
  -- NOTE: Don't forget to update ./changelog.md
-@@ -51,7 +51,7 @@
+@@ -52,7 +52,7 @@
  Flag integer-gmp
      Description: Use integer-gmp
      Manual: True
@@ -16,7 +16,7 @@ diff -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
  
  Library
      default-language: Haskell2010
-@@ -351,7 +351,7 @@
+@@ -357,7 +357,7 @@
          consUtils.h
  
      -- OS Specific
@@ -25,7 +25,7 @@ diff -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
          -- Windows requires some extra libraries for linking because the RTS
          -- is no longer re-exporting them.
          -- msvcrt: standard C library. The RTS will automatically include this,
-@@ -369,6 +369,7 @@
+@@ -375,6 +375,7 @@
          other-modules:
              System.CPUTime.Windows
      else
@@ -33,9 +33,9 @@ diff -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
          exposed-modules:
              GHC.Event
          other-modules:
-diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
---- upstream/pkg/base/GHC/Conc/IO.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Conc/IO.hs	2018-04-20 05:03:46.748039161 +0200
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
+--- upstream/pkg/base/GHC/Conc/IO.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Conc/IO.hs	2018-12-04 07:40:08.466663374 -0800
 @@ -64,19 +64,21 @@
  import GHC.Conc.Windows (asyncRead, asyncWrite, asyncDoProc, asyncReadBA,
                           asyncWriteBA, ConsoleEvent(..), win32ConsoleHandler,
@@ -117,7 +117,7 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
    | threaded  = Event.threadDelay time
  #endif
    | otherwise = IO $ \s ->
-@@ -195,7 +197,7 @@
+@@ -196,7 +198,7 @@
  registerDelay usecs
  #if defined(mingw32_HOST_OS)
    | threaded = Windows.registerDelay usecs
@@ -126,9 +126,9 @@ diff -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
    | threaded = Event.registerDelay usecs
  #endif
    | otherwise = errorWithoutStackTrace "registerDelay: requires -threaded"
-diff -Nru upstream/pkg/base/GHC/Conc/Windows.hs boot/pkg/base/GHC/Conc/Windows.hs
---- upstream/pkg/base/GHC/Conc/Windows.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Conc/Windows.hs	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc/Windows.hs boot/pkg/base/GHC/Conc/Windows.hs
+--- upstream/pkg/base/GHC/Conc/Windows.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Conc/Windows.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -19,6 +19,9 @@
  
  -- #not-home
@@ -139,15 +139,15 @@ diff -Nru upstream/pkg/base/GHC/Conc/Windows.hs boot/pkg/base/GHC/Conc/Windows.h
         ( ensureIOManagerIsRunning
  
         -- * Waiting
-@@ -335,3 +338,4 @@
+@@ -340,3 +343,4 @@
  foreign import WINDOWS_CCONV "WaitForSingleObject"
     c_WaitForSingleObject :: HANDLE -> DWORD -> IO DWORD
  
 +#endif
-diff -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
---- upstream/pkg/base/GHC/Conc.hs	2018-04-26 09:55:16.000000000 +0000
-+++ boot/pkg/base/GHC/Conc.hs	2018-04-27 04:46:13.499651376 +0000
-@@ -95,14 +95,14 @@
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
+--- upstream/pkg/base/GHC/Conc.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Conc.hs	2018-12-04 07:40:08.470663293 -0800
+@@ -93,14 +93,14 @@
          , asyncWriteBA
  #endif
  
@@ -164,7 +164,7 @@ diff -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
          , ConsoleEvent(..)
          , win32ConsoleHandler
          , toWin32ConsoleEvent
-@@ -116,6 +116,6 @@
+@@ -114,6 +114,6 @@
  import GHC.Conc.IO
  import GHC.Conc.Sync
  
@@ -172,9 +172,9 @@ diff -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
 +#if !defined(mingw32_HOST_OS) || defined(ghcjs_HOST_OS)
  import GHC.Conc.Signal
  #endif
-diff -Nru upstream/pkg/base/GHC/Event/Manager.hs boot/pkg/base/GHC/Event/Manager.hs
---- upstream/pkg/base/GHC/Event/Manager.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Event/Manager.hs	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/Manager.hs boot/pkg/base/GHC/Event/Manager.hs
+--- upstream/pkg/base/GHC/Event/Manager.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Event/Manager.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -19,6 +19,9 @@
  -- polling if available. Otherwise we use multi-shot polling.
  
@@ -185,16 +185,16 @@ diff -Nru upstream/pkg/base/GHC/Event/Manager.hs boot/pkg/base/GHC/Event/Manager
      ( -- * Types
        EventManager
  
-@@ -518,3 +521,6 @@
+@@ -522,3 +525,6 @@
  
  unless :: Monad m => Bool -> m () -> m ()
  unless p = when (not p)
 +
 +#endif
 +
-diff -Nru upstream/pkg/base/GHC/Event/Thread.hs boot/pkg/base/GHC/Event/Thread.hs
---- upstream/pkg/base/GHC/Event/Thread.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Event/Thread.hs	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/Thread.hs boot/pkg/base/GHC/Event/Thread.hs
+--- upstream/pkg/base/GHC/Event/Thread.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Event/Thread.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -1,7 +1,11 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE BangPatterns, NoImplicitPrelude #-}
@@ -214,9 +214,9 @@ diff -Nru upstream/pkg/base/GHC/Event/Thread.hs boot/pkg/base/GHC/Event/Thread.h
 +
 +#endif
 +
-diff -Nru upstream/pkg/base/GHC/Event/TimerManager.hs boot/pkg/base/GHC/Event/TimerManager.hs
---- upstream/pkg/base/GHC/Event/TimerManager.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Event/TimerManager.hs	2018-04-20 05:09:10.385066871 +0200
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/TimerManager.hs boot/pkg/base/GHC/Event/TimerManager.hs
+--- upstream/pkg/base/GHC/Event/TimerManager.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Event/TimerManager.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -8,6 +8,9 @@
    #-}
  
@@ -227,15 +227,15 @@ diff -Nru upstream/pkg/base/GHC/Event/TimerManager.hs boot/pkg/base/GHC/Event/Ti
      ( -- * Types
        TimerManager
  
-@@ -252,3 +255,5 @@
+@@ -266,3 +269,5 @@
                        -- minimum element didn't change.
                        t0 /= t1
                      _ -> True
 +
 +#endif
-diff -Nru upstream/pkg/base/GHC/Event.hs boot/pkg/base/GHC/Event.hs
---- upstream/pkg/base/GHC/Event.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Event.hs	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event.hs boot/pkg/base/GHC/Event.hs
+--- upstream/pkg/base/GHC/Event.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Event.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -1,5 +1,6 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE NoImplicitPrelude #-}
@@ -258,9 +258,9 @@ diff -Nru upstream/pkg/base/GHC/Event.hs boot/pkg/base/GHC/Event.hs
  import GHC.Event.Thread (getSystemEventManager, getSystemTimerManager)
  
 +#endif
-diff -Nru upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs
---- upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs
+--- upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -29,6 +29,7 @@
  
  import System.Posix.Internals
@@ -278,9 +278,9 @@ diff -Nru upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs boot/pkg/base/GHC/IO
 +mkCodePageEncoding :: String
 +mkCodePageEncoding = ""
 +#endif
-diff -Nru upstream/pkg/base/GHC/IO/Encoding.hs boot/pkg/base/GHC/IO/Encoding.hs
---- upstream/pkg/base/GHC/IO/Encoding.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/IO/Encoding.hs	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/Encoding.hs boot/pkg/base/GHC/IO/Encoding.hs
+--- upstream/pkg/base/GHC/IO/Encoding.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/IO/Encoding.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -141,8 +141,11 @@
  
  -- | @since 4.5.0.0
@@ -295,10 +295,10 @@ diff -Nru upstream/pkg/base/GHC/IO/Encoding.hs boot/pkg/base/GHC/IO/Encoding.hs
  -- It is rather important that we don't just call Iconv.mkIconvEncoding here
  -- because some iconvs (in particular GNU iconv) will brokenly UTF-8 encode
  -- lone surrogates without complaint.
-diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
---- upstream/pkg/base/GHC/IO/FD.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/IO/FD.hs	2018-04-20 05:08:33.136377573 +0200
-@@ -497,6 +497,10 @@
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
+--- upstream/pkg/base/GHC/IO/FD.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/IO/FD.hs	2018-12-04 07:40:08.470663293 -0800
+@@ -498,6 +498,10 @@
  
  readRawBufferPtr :: String -> FD -> Ptr Word8 -> Int -> CSize -> IO Int
  readRawBufferPtr loc !fd !buf !off !len
@@ -309,7 +309,7 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
    | isNonBlocking fd = unsafe_read -- unsafe is ok, it can't block
    | otherwise    = do r <- throwErrnoIfMinus1 loc
                                  (unsafe_fdReady (fdFD fd) 0 0 0)
-@@ -510,10 +514,19 @@
+@@ -511,10 +515,19 @@
      read        = if threaded then safe_read else unsafe_read
      unsafe_read = do_read (c_read (fdFD fd) (buf `plusPtr` off) len)
      safe_read   = do_read (c_safe_read (fdFD fd) (buf `plusPtr` off) len)
@@ -329,7 +329,7 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
    | isNonBlocking fd  = unsafe_read -- unsafe is ok, it can't block
    | otherwise    = do r <- unsafe_fdReady (fdFD fd) 0 0 0
                        if r /= 0 then safe_read
-@@ -527,9 +540,14 @@
+@@ -528,9 +541,14 @@
                         n    -> return (fromIntegral n)
     unsafe_read  = do_read (c_read (fdFD fd) (buf `plusPtr` off) len)
     safe_read    = do_read (c_safe_read (fdFD fd) (buf `plusPtr` off) len)
@@ -344,7 +344,7 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
    | isNonBlocking fd = unsafe_write -- unsafe is ok, it can't block
    | otherwise   = do r <- unsafe_fdReady (fdFD fd) 1 0 0
                       if r /= 0
-@@ -542,9 +560,17 @@
+@@ -543,9 +561,17 @@
      write         = if threaded then safe_write else unsafe_write
      unsafe_write  = do_write (c_write (fdFD fd) (buf `plusPtr` off) len)
      safe_write    = do_write (c_safe_write (fdFD fd) (buf `plusPtr` off) len)
@@ -362,7 +362,7 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
    | isNonBlocking fd = unsafe_write -- unsafe is ok, it can't block
    | otherwise   = do r <- unsafe_fdReady (fdFD fd) 1 0 0
                       if r /= 0 then write
-@@ -557,9 +583,14 @@
+@@ -558,9 +584,14 @@
      write         = if threaded then safe_write else unsafe_write
      unsafe_write  = do_write (c_write (fdFD fd) (buf `plusPtr` off) len)
      safe_write    = do_write (c_safe_write (fdFD fd) (buf `plusPtr` off) len)
@@ -376,8 +376,8 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
 +#endif
  
  foreign import ccall unsafe "fdReady"
-   unsafe_fdReady :: CInt -> CInt -> Int64 -> CInt -> IO CInt
-@@ -643,7 +674,7 @@
+   unsafe_fdReady :: CInt -> CBool -> Int64 -> CBool -> IO CInt
+@@ -658,7 +689,7 @@
  -- -----------------------------------------------------------------------------
  -- utils
  
@@ -386,9 +386,9 @@ diff -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
  throwErrnoIfMinus1RetryOnBlock  :: String -> IO CSsize -> IO CSsize -> IO CSsize
  throwErrnoIfMinus1RetryOnBlock loc f on_block  =
    do
-diff -Nru upstream/pkg/base/GHC/Stack/CCS.hsc boot/pkg/base/GHC/Stack/CCS.hsc
---- upstream/pkg/base/GHC/Stack/CCS.hsc	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Stack/CCS.hsc	2018-04-20 04:59:17.951884430 +0200
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Stack/CCS.hsc boot/pkg/base/GHC/Stack/CCS.hsc
+--- upstream/pkg/base/GHC/Stack/CCS.hsc	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Stack/CCS.hsc	2018-12-04 07:40:08.470663293 -0800
 @@ -15,7 +15,7 @@
  -- @since 4.5.0.0
  -----------------------------------------------------------------------------
@@ -429,17 +429,17 @@ diff -Nru upstream/pkg/base/GHC/Stack/CCS.hsc boot/pkg/base/GHC/Stack/CCS.hsc
  
  -- | Returns a @[String]@ representing the current call stack.  This
  -- can be useful for debugging.
-diff -Nru upstream/pkg/base/GHC/Stats.hsc boot/pkg/base/GHC/Stats.hsc
---- upstream/pkg/base/GHC/Stats.hsc	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Stats.hsc	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Stats.hsc boot/pkg/base/GHC/Stats.hsc
+--- upstream/pkg/base/GHC/Stats.hsc	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Stats.hsc	2018-12-04 07:40:08.470663293 -0800
 @@ -1,3 +1,4 @@
 +{-# LANGUAGE CPP #-}
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE NoImplicitPrelude #-}
  {-# LANGUAGE RecordWildCards #-}
-diff -Nru upstream/pkg/base/GHC/TopHandler.hs boot/pkg/base/GHC/TopHandler.hs
---- upstream/pkg/base/GHC/TopHandler.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/TopHandler.hs	2018-04-20 05:06:02.658515647 +0200
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/TopHandler.hs boot/pkg/base/GHC/TopHandler.hs
+--- upstream/pkg/base/GHC/TopHandler.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/TopHandler.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -94,7 +94,9 @@
        topHandler
  
@@ -469,9 +469,9 @@ diff -Nru upstream/pkg/base/GHC/TopHandler.hs boot/pkg/base/GHC/TopHandler.hs
    safeExit 252
  #else
    -- we must exit via the default action for SIGINT, so that the
-diff -Nru upstream/pkg/base/GHC/Windows.hs boot/pkg/base/GHC/Windows.hs
---- upstream/pkg/base/GHC/Windows.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/GHC/Windows.hs	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Windows.hs boot/pkg/base/GHC/Windows.hs
+--- upstream/pkg/base/GHC/Windows.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/GHC/Windows.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -21,6 +21,10 @@
  -----------------------------------------------------------------------------
  
@@ -489,9 +489,9 @@ diff -Nru upstream/pkg/base/GHC/Windows.hs boot/pkg/base/GHC/Windows.hs
      getLastError :: IO ErrCode
 +
 +#endif
-diff -Nru upstream/pkg/base/System/CPUTime.hsc boot/pkg/base/System/CPUTime.hsc
---- upstream/pkg/base/System/CPUTime.hsc	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/System/CPUTime.hsc	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/CPUTime.hsc boot/pkg/base/System/CPUTime.hsc
+--- upstream/pkg/base/System/CPUTime.hsc	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/System/CPUTime.hsc	2018-12-04 07:40:08.470663293 -0800
 @@ -1,5 +1,8 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE CPP, CApiFFI #-}
@@ -536,9 +536,9 @@ diff -Nru upstream/pkg/base/System/CPUTime.hsc boot/pkg/base/System/CPUTime.hsc
  getCPUTime = I.getCPUTime
 +
 +##endif
-diff -Nru upstream/pkg/base/System/Environment/ExecutablePath.hsc boot/pkg/base/System/Environment/ExecutablePath.hsc
---- upstream/pkg/base/System/Environment/ExecutablePath.hsc	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/System/Environment/ExecutablePath.hsc	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Environment/ExecutablePath.hsc boot/pkg/base/System/Environment/ExecutablePath.hsc
+--- upstream/pkg/base/System/Environment/ExecutablePath.hsc	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/System/Environment/ExecutablePath.hsc	2018-12-04 07:40:08.470663293 -0800
 @@ -18,6 +18,13 @@
  
  module System.Environment.ExecutablePath ( getExecutablePath ) where
@@ -553,16 +553,16 @@ diff -Nru upstream/pkg/base/System/Environment/ExecutablePath.hsc boot/pkg/base/
  -- The imports are purposely kept completely disjoint to prevent edits
  -- to one OS implementation from breaking another.
  
-@@ -248,3 +255,5 @@
+@@ -249,3 +256,5 @@
  --------------------------------------------------------------------------------
  
  #endif
 +
 +##endif
 \ No newline at end of file
-diff -Nru upstream/pkg/base/System/Posix/Internals.hs boot/pkg/base/System/Posix/Internals.hs
---- upstream/pkg/base/System/Posix/Internals.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/System/Posix/Internals.hs	2018-01-23 23:17:57.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Posix/Internals.hs boot/pkg/base/System/Posix/Internals.hs
+--- upstream/pkg/base/System/Posix/Internals.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/System/Posix/Internals.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -1,6 +1,9 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE CPP, NoImplicitPrelude, CApiFFI #-}
@@ -798,9 +798,9 @@ diff -Nru upstream/pkg/base/System/Posix/Internals.hs boot/pkg/base/System/Posix
  the OS.
  -}
 -
-diff -Nru upstream/pkg/base/System/Timeout.hs boot/pkg/base/System/Timeout.hs
---- upstream/pkg/base/System/Timeout.hs	2018-01-23 23:17:56.000000000 +0100
-+++ boot/pkg/base/System/Timeout.hs	2018-04-20 04:55:26.736703458 +0200
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Timeout.hs boot/pkg/base/System/Timeout.hs
+--- upstream/pkg/base/System/Timeout.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/base/System/Timeout.hs	2018-12-04 07:40:08.470663293 -0800
 @@ -18,7 +18,7 @@
  
  module System.Timeout ( timeout ) where

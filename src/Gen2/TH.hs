@@ -348,22 +348,23 @@ handleRunnerReq runner msg =
       let s = IM.size m in return (IM.insert s e m, s)
     handleOtherReq :: TH.Message -> TcM TH.Message
     handleOtherReq msg = case msg of
-      TH.NewName n               -> TH.NewName'                       <$> TH.qNewName n
-      TH.LookupName b n          -> TH.LookupName'                    <$> TH.qLookupName b n
-      TH.Reify n                 -> TH.Reify'                         <$> TH.qReify n
-      TH.ReifyInstances n ts     -> TH.ReifyInstances'                <$> TH.qReifyInstances n ts
-      TH.ReifyRoles n            -> TH.ReifyRoles'                    <$> TH.qReifyRoles n
-      TH.ReifyAnnotations nn     -> TH.ReifyAnnotations' . map B.pack <$> TH.qReifyAnnotations nn
-      TH.ReifyModule m           -> TH.ReifyModule'                   <$> TH.qReifyModule m
-      TH.ReifyFixity n           -> TH.ReifyFixity'                   <$> TH.qReifyFixity n
-      TH.ReifyConStrictness n    -> TH.ReifyConStrictness'            <$> TH.qReifyConStrictness n
-      TH.AddForeignFile lang src -> TH.qAddForeignFile lang src       >>  pure TH.AddForeignFile'
-      TH.AddDependentFile f      -> TH.qAddDependentFile f            >>  pure TH.AddDependentFile'
-      TH.AddTopDecls decs        -> TH.qAddTopDecls decs              >>  pure TH.AddTopDecls'
-      TH.AddCorePlugin name      -> TH.qAddCorePlugin name            >>  pure TH.AddCorePlugin'
-      TH.IsExtEnabled ext        -> TH.IsExtEnabled'                  <$> TH.qIsExtEnabled ext
-      TH.ExtsEnabled             -> TH.ExtsEnabled'                   <$> TH.qExtsEnabled
-      _                          -> term >> error "handleRunnerReq: unexpected request"
+      TH.NewName n                   -> TH.NewName'                       <$> TH.qNewName n
+      TH.LookupName b n              -> TH.LookupName'                    <$> TH.qLookupName b n
+      TH.Reify n                     -> TH.Reify'                         <$> TH.qReify n
+      TH.ReifyInstances n ts         -> TH.ReifyInstances'                <$> TH.qReifyInstances n ts
+      TH.ReifyRoles n                -> TH.ReifyRoles'                    <$> TH.qReifyRoles n
+      TH.ReifyAnnotations nn         -> TH.ReifyAnnotations' . map B.pack <$> TH.qReifyAnnotations nn
+      TH.ReifyModule m               -> TH.ReifyModule'                   <$> TH.qReifyModule m
+      TH.ReifyFixity n               -> TH.ReifyFixity'                   <$> TH.qReifyFixity n
+      TH.ReifyConStrictness n        -> TH.ReifyConStrictness'            <$> TH.qReifyConStrictness n
+      TH.AddForeignFilePath lang src -> TH.qAddForeignFilePath lang src   >>  pure TH.AddForeignFilePath'
+      TH.AddTempFile xs              -> TH.AddTempFile'                   <$> TH.qAddTempFile xs
+      TH.AddDependentFile f          -> TH.qAddDependentFile f            >>  pure TH.AddDependentFile'
+      TH.AddTopDecls decs            -> TH.qAddTopDecls decs              >>  pure TH.AddTopDecls'
+      TH.AddCorePlugin name          -> TH.qAddCorePlugin name            >>  pure TH.AddCorePlugin'
+      TH.IsExtEnabled ext            -> TH.IsExtEnabled'                  <$> TH.qIsExtEnabled ext
+      TH.ExtsEnabled                 -> TH.ExtsEnabled'                   <$> TH.qExtsEnabled
+      _                              -> term >> error "handleRunnerReq: unexpected request"
     term :: TcM ()
     term = liftIO $ terminateProcess (thrProcess runner)
 

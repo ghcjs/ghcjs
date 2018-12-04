@@ -119,6 +119,7 @@ genPrim _ _ ISllOp            [r] [x,y] = PrimInline [j| `r` = `x` << `y` |]
 genPrim _ _ ISraOp            [r] [x,y] = PrimInline [j| `r` = `x` >> `y` |]
 genPrim _ _ ISrlOp            [r] [x,y] = PrimInline [j| `r` = (`x` >>> `y`)|0; |]
 genPrim _ _ WordAddOp         [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0; |]
+{- new op in 8.6    , WordAddCOp -}
 genPrim _ _ WordAdd2Op      [h,l] [x,y] = PrimInline [j| `h` = h$wordAdd2(`x`,`y`);
                                                          `l` = `Ret1`;
                                                        |]
@@ -333,6 +334,22 @@ genPrim _ _ IndexByteArrayOp_Word64 [r1,r2] [a,i] =
   PrimInline [j| `r1` = `a`.i3[(`i`<<1)+1];
                  `r2` = `a`.i3[`i`<<1];
                |]
+{- new ops in 8.6
+   , IndexByteArrayOp_Word8AsChar
+   , IndexByteArrayOp_Word8AsWideChar
+   , IndexByteArrayOp_Word8AsAddr
+   , IndexByteArrayOp_Word8AsFloat
+   , IndexByteArrayOp_Word8AsDouble
+   , IndexByteArrayOp_Word8AsStablePtr
+   , IndexByteArrayOp_Word8AsInt16
+   , IndexByteArrayOp_Word8AsInt32
+   , IndexByteArrayOp_Word8AsInt64
+   , IndexByteArrayOp_Word8AsInt
+   , IndexByteArrayOp_Word8AsWord16
+   , IndexByteArrayOp_Word8AsWord32
+   , IndexByteArrayOp_Word8AsWord64
+   , IndexByteArrayOp_Word8AsWord
+ -}
 genPrim _ _ ReadByteArrayOp_Char [r] [a,i] =
   PrimInline [j| `r` = `a`.u8[`i`]; |]
 genPrim _ _ ReadByteArrayOp_WideChar [r] [a,i] =
@@ -374,6 +391,22 @@ genPrim _ _ ReadByteArrayOp_Word64 [r1,r2] [a,i] =
   PrimInline [j| `r1` = `a`.i3[(`i`<<1)+1];
                  `r2` = `a`.i3[`i`<<1];
                |]
+{- new ops in 8.6
+   , ReadByteArrayOp_Word8AsChar
+   , ReadByteArrayOp_Word8AsWideChar
+   , ReadByteArrayOp_Word8AsAddr
+   , ReadByteArrayOp_Word8AsFloat
+   , ReadByteArrayOp_Word8AsDouble
+   , ReadByteArrayOp_Word8AsStablePtr
+   , ReadByteArrayOp_Word8AsInt16
+   , ReadByteArrayOp_Word8AsInt32
+   , ReadByteArrayOp_Word8AsInt64
+   , ReadByteArrayOp_Word8AsInt
+   , ReadByteArrayOp_Word8AsWord16
+   , ReadByteArrayOp_Word8AsWord32
+   , ReadByteArrayOp_Word8AsWord64
+   , ReadByteArrayOp_Word8AsWord
+ -}
 genPrim _ _ WriteByteArrayOp_Char [] [a,i,e] = PrimInline [j| `a`.u8[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_WideChar [] [a,i,e] = PrimInline [j| `a`.i3[`i`] = `e`; |]
 genPrim _ _ WriteByteArrayOp_Int [] [a,i,e] = PrimInline [j| `a`.i3[`i`] = `e`; |]
@@ -399,6 +432,23 @@ genPrim _ _ WriteByteArrayOp_Word64 [] [a,i,e1,e2] =
   PrimInline [j| `a`.i3[(`i`<<1)+1] = `e1`;
                  `a`.i3[`i`<<1] = `e2`;
                |]
+{- implement new ops in 8.6
+                  , WriteByteArrayOp_Word8AsChar
+                  , WriteByteArrayOp_Word8AsWideChar
+                  , WriteByteArrayOp_Word8AsAddr
+                  , WriteByteArrayOp_Word8AsFloat
+                  , WriteByteArrayOp_Word8AsDouble
+                  , WriteByteArrayOp_Word8AsStablePtr
+                  , WriteByteArrayOp_Word8AsInt16
+                  , WriteByteArrayOp_Word8AsInt32
+                  , WriteByteArrayOp_Word8AsInt64
+                  , WriteByteArrayOp_Word8AsInt
+                  , WriteByteArrayOp_Word8AsWord16
+                  , WriteByteArrayOp_Word8AsWord32
+                  , WriteByteArrayOp_Word8AsWord64
+                  , WriteByteArrayOp_Word8AsWord
+ -}
+
 -- fixme we can do faster by copying 32 bit ints or doubles
 genPrim _ _ CopyByteArrayOp [] [a1,o1,a2,o2,n] =
   PrimInline [j| for(var i=`n` - 1; i >= 0; i--) {
@@ -576,12 +626,6 @@ genPrim _ _ AtomicallyOp [_r] [a] = PRPrimCall [j| return h$atomically(`a`); |]
 genPrim _ _ RetryOp [_r] [] = PRPrimCall [j| return h$stmRetry(); |]
 genPrim _ _ CatchRetryOp [_r] [a,b] = PRPrimCall [j| return h$stmCatchRetry(`a`,`b`); |]
 genPrim _ _ CatchSTMOp [_r] [a,h] = PRPrimCall [j| return h$catchStm(`a`,`h`); |]
-#if __GLASGOW_HASKELL__ >= 800
-genPrim _ _ Check [] [a] = PrimInline [j| h$stmCheck(`a`); |] -- fixme is this correct?
---   PRPrimCall [j| return h$stmCheck(`a`); |]
-#else
-genPrim _ _ Check [r] [a] = PrimInline [j| `r` = h$stmCheck(`a`); |] -- shouldn't be used anymore for GHC 8
-#endif
 genPrim _ _ NewTVarOp [tv] [v] = PrimInline [j| `tv` = h$newTVar(`v`); |]
 genPrim _ _ ReadTVarOp [r] [tv] = PrimInline [j| `r` = h$readTVar(`tv`); |]
 genPrim _ _ ReadTVarIOOp [r] [tv] = PrimInline [j| `r` = h$readTVarIO(`tv`); |]
@@ -751,7 +795,10 @@ genPrim d _ GetCCSOfOp [a, o] [obj]
 
 genPrim _ _ TraceEventOp [] [ed,eo] = PrimInline [j| h$traceEvent(`ed`,`eo`); |]
 genPrim _ _ TraceMarkerOp [] [ed,eo] = PrimInline [j| h$traceMarker(`ed`, `eo`); |]
-
+{- new ops in 8.6
+  , GetThreadAllocationCounter
+  , SetThreadAllocationCounter
+ -}
 genPrim _ _ CasArrayOp                 [s,o] [a,i,old,new] = PrimInline [j| var x = `a`[`i`]; if(x === `old`) { `o` = `new`; `a`[`i`] = `new`; `s` = 0; } else { `s` = 1; `o` = x; } |]
 genPrim _ _ NewSmallArrayOp            [a]   [n,e]         = PrimInline [j| `a` = new Array(`n`); for(var i=0;i<`n`;i++) { `a`[i] = `e`; }; `a`.m = 0; `a`.__ghcjsArray = true; |]
 genPrim _ _ SameSmallMutableArrayOp    [r]   [x,y]         = PrimInline [j| `r` = (`x` === `y`) ? 1 : 0; |]

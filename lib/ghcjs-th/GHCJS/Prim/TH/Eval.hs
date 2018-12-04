@@ -151,8 +151,8 @@ instance TH.Quasi GHCJSQ where
   qReifyConStrictness name = do
     ReifyConStrictness' ss <- sendRequestQ (ReifyConStrictness name)
     return ss
-  qAddForeignFile lang contents = do
-    AddForeignFile' <- sendRequestQ (AddForeignFile lang contents)
+  qAddForeignFilePath lang contents = do
+    AddForeignFilePath' <- sendRequestQ (AddForeignFilePath lang contents)
     return ()
   qIsExtEnabled ext = do
     IsExtEnabled' b <- sendRequestQ (IsExtEnabled ext)
@@ -165,6 +165,9 @@ instance TH.Quasi GHCJSQ where
   qAddDependentFile file = do
     AddDependentFile' <- sendRequestQ (AddDependentFile file)
     return ()
+  qAddTempFile xs = do
+    AddTempFile' path <- sendRequestQ (AddTempFile xs)
+    return path
   qAddTopDecls decls = do
     AddTopDecls' <- sendRequestQ (AddTopDecls decls)
     return ()

@@ -1,6 +1,6 @@
-diff -Nru upstream/pkg/directory/directory.cabal boot/pkg/directory/directory.cabal
---- upstream/pkg/directory/directory.cabal	2018-01-23 23:17:57.000000000 +0100
-+++ boot/pkg/directory/directory.cabal	2018-04-20 07:13:20.301735718 +0200
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/directory.cabal boot/pkg/directory/directory.cabal
+--- upstream/pkg/directory/directory.cabal	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/directory/directory.cabal	2018-12-04 07:40:08.970653083 -0800
 @@ -51,6 +51,7 @@
          System.Directory.Internal.Config
          System.Directory.Internal.Posix
@@ -10,99 +10,47 @@ diff -Nru upstream/pkg/directory/directory.cabal boot/pkg/directory/directory.ca
      include-dirs: .
  
 @@ -58,6 +59,8 @@
-         base     >= 4.5 && < 4.12,
-         time     >= 1.4 && < 1.9,
+         base     >= 4.5 && < 4.13,
+         time     >= 1.4 && < 1.10,
          filepath >= 1.3 && < 1.5
 +    if impl(ghcjs)
 +        build-depends: ghcjs-prim
      if os(windows)
-         build-depends: Win32 >= 2.2.2 && < 2.7
+         build-depends: Win32 >= 2.2.2 && < 2.9
      else
-diff -Nru upstream/pkg/directory/System/Directory/Internal/Common.hs boot/pkg/directory/System/Directory/Internal/Common.hs
---- upstream/pkg/directory/System/Directory/Internal/Common.hs	2018-01-23 23:17:57.000000000 +0100
-+++ boot/pkg/directory/System/Directory/Internal/Common.hs	2018-04-20 09:12:00.388948544 +0200
-@@ -1,13 +1,35 @@
- {-# LANGUAGE CPP #-}
-+#if defined(ghcjs_HOST_OS)
-+{-# LANGUAGE JavaScriptFFI #-}
-+#endif
- module System.Directory.Internal.Common where
- import Prelude ()
- import System.Directory.Internal.Prelude
- import System.FilePath ((</>), isPathSeparator, isRelative,
-                         pathSeparator, splitDrive, takeDrive)
--#ifdef mingw32_HOST_OS
-+#if defined(mingw32_HOST_OS)
- import qualified System.Win32 as Win32
--#else
-+#elif !defined(ghcjs_HOST_OS)
- import qualified System.Posix as Posix
-+#else
-+
-+import GHCJS.Prim
-+import Foreign.C.Error
-+
-+type JSObject = JSVal
-+type JSString = JSVal
-+type JSArray  = JSVal
-+
-+throwErrnoIfJSNull :: String -> IO JSVal -> IO JSVal
-+throwErrnoIfJSNull msg m = do
-+  r <- m
-+  if isNull r then throwErrno msg
-+              else return r
-+
-+foreign import javascript unsafe
-+  "h$directory_getCurrentDirectory()"
-+  js_getCurrentDirectory :: IO JSString
-+
- #endif
- 
- -- | Similar to 'try' but only catches a specify kind of 'IOError' as
-@@ -87,7 +109,10 @@
-   specializeErrorString
-     "Current working directory no longer exists"
-     isDoesNotExistError
--#ifdef mingw32_HOST_OS
-+#if defined(ghcjs_HOST_OS)
-+    (fromJSString `fmap` throwErrnoIfJSNull "getCurrentDirectory"
-+                                            js_getCurrentDirectory)
-+#elif defined(mingw32_HOST_OS)
-     Win32.getCurrentDirectory
- #else
-     Posix.getWorkingDirectory
-diff -Nru upstream/pkg/directory/System/Directory/Internal/Config.hs boot/pkg/directory/System/Directory/Internal/Config.hs
---- upstream/pkg/directory/System/Directory/Internal/Config.hs	2018-01-23 23:17:57.000000000 +0100
-+++ boot/pkg/directory/System/Directory/Internal/Config.hs	2018-04-20 09:02:47.546484425 +0200
-@@ -1,9 +1,24 @@
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal/Config.hs boot/pkg/directory/System/Directory/Internal/Config.hs
+--- upstream/pkg/directory/System/Directory/Internal/Config.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/directory/System/Directory/Internal/Config.hs	2018-12-04 07:40:08.978652919 -0800
+@@ -1,9 +1,25 @@
  {-# LANGUAGE CPP #-}
 +#if defined(ghcjs_HOST_OS)
 +{-# LANGUAGE JavaScriptFFI, GHCForeignImportPrim #-}
-+#else
- #include <HsDirectoryConfig.h>
 +#endif
  module System.Directory.Internal.Config where
- 
++
 +#if defined(ghcjs_HOST_OS)
 +import GHCJS.Prim
-+#endif
 +
- exeExtension :: String
-+#if defined(ghcjs_HOST_OS)
-+exeExtension = fromJSString js_exeExtension
 +foreign import javascript unsafe
 +  "h$directory_exeExtension()"
 +  js_exeExtension :: JSVal
++
++exeExtension :: String
++exeExtension = fromJSString js_exeExtension
++
 +#else
+ #include <HsDirectoryConfig.h>
+ 
+ exeExtension :: String
  exeExtension = EXE_EXTENSION
 +#endif
  -- We avoid using #const_str from hsc because it breaks cross-compilation
  -- builds, so we use this ugly workaround where we simply paste the C string
  -- literal directly in here.  This will probably break if the EXE_EXTENSION
-diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/directory/System/Directory/Internal/GHCJS.hs
---- upstream/pkg/directory/System/Directory/Internal/GHCJS.hs	1970-01-01 00:00:00.000000000 +0000
-+++ boot/pkg/directory/System/Directory/Internal/GHCJS.hs	2018-05-12 15:20:35.864275966 +0000
-@@ -0,0 +1,324 @@
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/directory/System/Directory/Internal/GHCJS.hs
+--- upstream/pkg/directory/System/Directory/Internal/GHCJS.hs	1969-12-31 16:00:00.000000000 -0800
++++ boot/pkg/directory/System/Directory/Internal/GHCJS.hs	2018-12-04 07:40:08.978652919 -0800
+@@ -0,0 +1,475 @@
 +{-# LANGUAGE CPP #-}
 +#if defined(ghcjs_HOST_OS)
 +{-# LANGUAGE ForeignFunctionInterface,
@@ -124,16 +72,68 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +  (POSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 +import Foreign.C.Error
 +import System.IO.Error
++import System.FilePath ((</>), isRelative, normalise, splitSearchPath)
 +
 +import GHCJS.Prim
 +
 +import System.Directory.Internal.Common
++import System.Directory.Internal.Config (exeExtension)
 +
++
++type JSObject = JSVal
++type JSString = JSVal
++type JSArray  = JSVal
++
++throwErrnoIfJSNull :: String -> IO JSVal -> IO JSVal
++throwErrnoIfJSNull msg m = do
++  r <- m
++  if isNull r then throwErrno msg
++              else return r
++
++foreign import javascript unsafe
++  "h$directory_getCurrentDirectory()"
++  js_getCurrentDirectory :: IO JSString
++
++exeExtensionInternal :: String
++exeExtensionInternal = exeExtension
 +
 +--------------------------------------------------------------
 +
 +-- the object is treated as immutable
 +newtype Metadata = Metadata JSObject
++
++copyFileWithMetadataInternal :: (Metadata -> FilePath -> IO ())
++                             -> (Metadata -> FilePath -> IO ())
++                             -> FilePath
++                             -> FilePath
++                             -> IO ()
++copyFileWithMetadataInternal copyPermissionsFromMetadata
++                             copyTimesFromMetadata
++                             src
++                             dst = do
++  st <- getFileMetadata src
++  js_copyFileContents src' dst'
++  tryCopyOwnerAndGroupFromMetadata st dst'
++  copyPermissionsFromMetadata st dst
++  copyTimesFromMetadata st dst
++    where
++      src' = toJSString src
++      dst' = toJSString dst
++
++copyOwnerFromMetadata :: Metadata -> JSString -> IO ()
++copyOwnerFromMetadata st dst = do
++  js_setOwnerAndGroup dst (js_getFileStatusOwner st) (-1)
++
++copyGroupFromMetadata :: Metadata -> JSString -> IO ()
++copyGroupFromMetadata st dst = do
++  js_setOwnerAndGroup dst (-1) (js_getFileStatusOwner st)
++
++tryCopyOwnerAndGroupFromMetadata :: Metadata -> JSString -> IO ()
++tryCopyOwnerAndGroupFromMetadata st dst = do
++  ignoreIOExceptions (copyOwnerFromMetadata st dst)
++  ignoreIOExceptions (copyGroupFromMetadata st dst)
++  --where
++  --  dst' = toJSString dst
 +
 +getSymbolicLinkMetadata :: FilePath -> IO Metadata
 +getSymbolicLinkMetadata path =
@@ -145,13 +145,19 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +    pure (Metadata mdata)
 +
 +getFileMetadata :: FilePath -> IO Metadata
-+getFileMetadata path =
-+  (`ioeSetFileName` path) `modifyIOError` do
++getFileMetadata path = getFileMetadata' (toJSString path)
++
++getFileMetadata' :: JSString -> IO Metadata
++getFileMetadata' path =
++  (`ioeSetFileName` (fromJSString path)) `modifyIOError` do
 +      cpath <- throwErrnoIfJSNull "getFileMetadata" $
-+        js_canonicalizePath (toJSString path)
++        js_canonicalizePath path
 +      mdata <- throwErrnoIfJSNull "getFileMetadata" $
 +        js_getFileStatus cpath
 +      pure (Metadata mdata)
++
++createSymbolicLink :: Bool -> FilePath -> FilePath -> IO ()
++createSymbolicLink _ = createSymbolicLinkInternal
 +
 +createSymbolicLinkInternal :: FilePath -> FilePath -> IO ()
 +createSymbolicLinkInternal target link =
@@ -164,10 +170,24 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +    js_readSymbolicLink (toJSString path)
 +  pure (fromJSString tgt)
 +
++prependCurrentDirectory :: FilePath -> IO FilePath
++prependCurrentDirectory = prependCurrentDirectoryWith getCurrentDirectoryInternal
++
++
++getCurrentDirectoryInternal :: IO FilePath
++getCurrentDirectoryInternal =
++  (fromJSString `fmap` throwErrnoIfJSNull "getCurrentDirectory"
++                                          js_getCurrentDirectory)
++
 +createDirectoryInternal :: FilePath -> IO ()
 +createDirectoryInternal path =
 +  throwErrnoIfMinus1_ "createDirectory" $
 +    js_createDirectory (toJSString path)
++
++-- fixme check if this does the right thing
++removePathInternal :: Bool -> FilePath -> IO ()
++removePathInternal True  = removeDirectoryInternal
++removePathInternal False = removeFileInternal
 +
 +renamePathInternal :: FilePath -> FilePath -> IO ()
 +renamePathInternal opath npath =
@@ -190,11 +210,38 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +    js_canonicalizePath (toJSString path)
 +  pure (fromJSString cpath)
 +
++canonicalizePathWith :: ((FilePath -> IO FilePath) -> FilePath -> IO FilePath)
++                     -> FilePath
++                     -> IO FilePath
++canonicalizePathWith attemptRealpath path = do
++  {-
++  XXX not sure how to do this
++  encoding <- getFileSystemEncoding
++  let realpath path' =
++        GHC.withCString encoding path' (`withRealpath` GHC.peekCString encoding)
++  -}
++  let realpath = pure
++  attemptRealpath realpath path
++
++
++canonicalizePathSimplify :: FilePath -> IO FilePath
++canonicalizePathSimplify = pure
++
++findExecutablesLazyInternal :: ([FilePath] -> String -> ListT IO FilePath)
++                            -> String
++                            -> ListT IO FilePath
++findExecutablesLazyInternal findExecutablesInDirectoriesLazy binary =
++  liftJoinListT $ do
++    path <- getPath
++    pure (findExecutablesInDirectoriesLazy path binary)
++
++{-
 +findExecutablesInternal :: FilePath -> IO [FilePath]
 +findExecutablesInternal binary = do
 +  arr <- throwErrnoIfJSNull "findExecutables" $
 +    js_findExecutables (toJSString binary)
 +  fmap (map fromJSString) (fromJSArray arr)
++-}
 +
 +getDirectoryContentsInternal :: FilePath -> IO [FilePath]
 +getDirectoryContentsInternal path = do
@@ -207,12 +254,47 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +  throwErrnoIfMinus1_ "setCurrentDirectory" $
 +    js_setCurrentDirectory (toJSString path)
 +
-+setFileTimesInternal :: FilePath -> (Maybe UTCTime, Maybe UTCTime) -> IO ()
-+setFileTimesInternal path (atime, mtime) =
++linkToDirectoryIsDirectory :: Bool
++linkToDirectoryIsDirectory = False
++
++getTemporaryDirectoryInternal :: IO FilePath
++getTemporaryDirectoryInternal =
++  fromJSString `fmap` throwErrnoIfJSNull "getTemporaryDirectory"
++                                         js_getTemporaryDirectory
++
++getUserDocumentsDirectoryInternal :: IO FilePath
++getUserDocumentsDirectoryInternal = do
++  modifyIOError (`ioeAddLocation` "getUserDocumentsDirectory") $ do
++    fromJSString `fmap` throwErrnoIfJSNull "getUserDocumentsDirectory"
++                                           js_getUserDocumentsDirectory
++
++getAppUserDataDirectoryInternal :: String -> IO FilePath
++getAppUserDataDirectoryInternal appName = do
++  modifyIOError (`ioeAddLocation` "getAppUserDataDirectory") $ do
++    fromJSString `fmap` throwErrnoIfJSNull "getAppUserDataDirectory"
++      (js_getAppUserDataDirectory (toJSString appName))
++
++getPath :: IO [FilePath]
++getPath = splitSearchPath . fromJSString <$> js_getPath
++
++getHomeDirectoryInternal :: IO FilePath
++getHomeDirectoryInternal = modifyIOError (`ioeAddLocation` "getHomeDirectory") $
++  fromJSString `fmap` throwErrnoIfJSNull "getHomeDirectory" js_getHomeDirectory
++
++getXdgDirectoryInternal :: IO FilePath -> XdgDirectory -> IO FilePath
++getXdgDirectoryInternal =
++  error "fixme: getXdgDirectory not implemented for GHCJS"
++
++getXdgDirectoryListInternal :: XdgDirectoryList -> IO [FilePath]
++getXdgDirectoryListInternal =
++  error "fixme: getXdgDirectoryList not implemented for GHCJS"
++
++setTimes :: FilePath -> (Maybe POSIXTime, Maybe POSIXTime) -> IO ()
++setTimes path (atime, mtime) =
 +  throwErrnoIfMinus1_ "setFileTimes" $
 +    js_setFileTimes (toJSString path) atime' set_atime mtime' set_mtime
 +  where
-+    f = maybe (0, False) ((,True) . realToFrac . utcTimeToPOSIXSeconds)
++    f = maybe (0, False) ((,True) . realToFrac)
 +    (atime', set_atime) = f atime
 +    (mtime', set_mtime) = f mtime
 +
@@ -310,7 +392,6 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +    modifyBit False b m = m .&. complement b
 +    modifyBit True  b m = m .|. b
 +
-+
 +foreign import javascript interruptible
 +  "h$directory_getPermissions($1,$c);"
 +  js_getPermissions :: JSString -> IO Int
@@ -347,21 +428,27 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +  "h$directory_canonicalizePath($1)"
 +  js_canonicalizePath :: JSString -> IO JSString
 +
++{-
 +foreign import javascript interruptible
 +  "h$directory_findExecutables($1,$c);"
 +  js_findExecutables :: JSString -> IO JSArray
++-}
 +
 +foreign import javascript interruptible
 +  "h$directory_getDirectoryContents($1,$c);"
 +  js_getDirectoryContents :: JSString -> IO JSArray
 +
 +foreign import javascript interruptible
-+  "h$directory_copyFileWithMetadata($1,$2,$c);"
-+  js_copyFileWithMetadata :: JSString -> JSString -> IO ()
++  "h$directory_copyFileContents($1,$2,$c);"
++  js_copyFileContents :: JSString -> JSString -> IO ()
 +
 +foreign import javascript unsafe
 +  "h$directory_setCurrentDirectory($1)"
 +  js_setCurrentDirectory :: JSString -> IO Int
++
++foreign import javascript unsafe
++  "h$directory_getPath()"
++  js_getPath :: IO JSString
 +
 +foreign import javascript unsafe
 +  "h$directory_getHomeDirectory()"
@@ -396,6 +483,14 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +  js_getFileStatusAccessTime :: Metadata -> Double
 +
 +foreign import javascript unsafe
++  "h$directory_getFileStatusGroup($1)"
++  js_getFileStatusGroup :: Metadata -> Int
++
++foreign import javascript unsafe
++  "h$directory_getFileStatusOwner($1)"
++  js_getFileStatusOwner :: Metadata -> Int
++
++foreign import javascript unsafe
 +  "h$directory_getFileStatusIsDirectory($1)"
 +  js_getFileStatusIsDirectory :: Metadata -> Bool
 +
@@ -420,6 +515,10 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +  js_setFileMode :: JSString -> Mode -> IO Int
 +
 +foreign import javascript interruptible
++  "h$directory_setOwnerAndGroup($1,$2,$3,$c);"
++  js_setOwnerAndGroup :: JSString -> Int -> Int -> IO ()
++
++foreign import javascript interruptible
 +  "h$directory_readSymbolicLink($1,$c);"
 +  js_readSymbolicLink :: JSString -> IO JSString
 +
@@ -427,341 +526,28 @@ diff -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/dir
 +  "h$directory_setFileTimes($1,$2,$3,$4,$5,$c);"
 +  js_setFileTimes :: JSString -> Double -> Bool -> Double -> Bool -> IO Int
 +#endif
-diff -Nru upstream/pkg/directory/System/Directory/Internal.hs boot/pkg/directory/System/Directory/Internal.hs
---- upstream/pkg/directory/System/Directory/Internal.hs	2018-01-23 23:17:57.000000000 +0100
-+++ boot/pkg/directory/System/Directory/Internal.hs	2018-04-20 07:35:29.718127750 +0200
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal.hs boot/pkg/directory/System/Directory/Internal.hs
+--- upstream/pkg/directory/System/Directory/Internal.hs	2018-12-04 07:40:08.000000000 -0800
++++ boot/pkg/directory/System/Directory/Internal.hs	2018-12-04 07:40:08.978652919 -0800
 @@ -13,7 +13,9 @@
  module System.Directory.Internal
    ( module System.Directory.Internal.Common
  
--#ifdef mingw32_HOST_OS
+-#if defined(mingw32_HOST_OS)
 +#if defined(ghcjs_HOST_OS)
 +  , module System.Directory.Internal.GHCJS
 +#elif defined(mingw32_HOST_OS)
    , module System.Directory.Internal.Windows
  #else
    , module System.Directory.Internal.Posix
-@@ -27,7 +29,9 @@
+@@ -23,7 +25,9 @@
  
  import System.Directory.Internal.Common
  
--#ifdef mingw32_HOST_OS
+-#if defined(mingw32_HOST_OS)
 +#if defined(ghcjs_HOST_OS)
 +import System.Directory.Internal.GHCJS
 +#elif defined(mingw32_HOST_OS)
  import System.Directory.Internal.Windows
  #else
  import System.Directory.Internal.Posix
-diff -Nru upstream/pkg/directory/System/Directory.hs boot/pkg/directory/System/Directory.hs
---- upstream/pkg/directory/System/Directory.hs	2018-01-23 23:17:57.000000000 +0100
-+++ boot/pkg/directory/System/Directory.hs	2018-04-20 10:06:31.540101805 +0200
-@@ -1,9 +1,17 @@
- {-# LANGUAGE CPP #-}
-+#if !defined(mingw32_HOST_OS) && !defined(ghcjs_HOST_OS)
-+#define posix_OS 1
-+#else
-+#undef posix_OS
-+#endif
- 
- #if !(MIN_VERSION_base(4,8,0))
- -- In base-4.8.0 the Foreign module became Safe
- {-# LANGUAGE Trustworthy #-}
- #endif
-+#if defined(ghcjs_HOST_OS)
-+{-# LANGUAGE ForeignFunctionInterface, JavaScriptFFI, UnliftedFFITypes, MagicHash #-}
-+#endif
- 
- -----------------------------------------------------------------------------
- -- |
-@@ -116,13 +124,17 @@
- import Data.Time (UTCTime)
- import Data.Time.Clock.POSIX (POSIXTime, utcTimeToPOSIXSeconds)
- import qualified System.Directory.Internal.Config as Cfg
--#ifdef mingw32_HOST_OS
-+#if defined(mingw32_HOST_OS)
- import qualified System.Win32 as Win32
--#else
-+#elif !defined(ghcjs_HOST_OS)
- import qualified GHC.Foreign as GHC
- import qualified System.Posix as Posix
-+#else
-+import GHCJS.Prim
-+import Data.Maybe (listToMaybe)
- #endif
- 
-+
- {- $intro
- A directory contains a series of entries, each of which is a named
- reference to a file system object (file, directory etc.).  Some
-@@ -302,7 +314,10 @@
- 
- createDirectory :: FilePath -> IO ()
- createDirectory path = do
--#ifdef mingw32_HOST_OS
-+#if defined(ghcjs_HOST_OS)
-+  (`ioeSetFileName` path) `modifyIOError` do
-+    (createDirectoryInternal path)
-+#elif defined(mingw32_HOST_OS)
-   (`ioeSetFileName` path) `modifyIOError` do
-     path' <- toExtendedLengthPath <$> prependCurrentDirectory path
-     Win32.createDirectory path' Nothing
-@@ -400,7 +415,9 @@
- 
- removeDirectory :: FilePath -> IO ()
- removeDirectory path =
--#ifdef mingw32_HOST_OS
-+#if defined(ghcjs_HOST_OS)
-+  removeDirectoryInternal path
-+#elif defined(mingw32_HOST_OS)
-   (`ioeSetFileName` path) `modifyIOError` do
-     path' <- toExtendedLengthPath <$> prependCurrentDirectory path
-     Win32.removeDirectory path'
-@@ -547,7 +564,9 @@
- 
- removeFile :: FilePath -> IO ()
- removeFile path =
--#ifdef mingw32_HOST_OS
-+#if defined(ghcjs_HOST_OS)
-+  removeFileInternal path
-+#elif defined(mingw32_HOST_OS)
-   (`ioeSetFileName` path) `modifyIOError` do
-     path' <- toExtendedLengthPath <$> prependCurrentDirectory path
-     Win32.deleteFile path'
-@@ -727,7 +746,7 @@
-            -> FilePath                  -- ^ New path
-            -> IO ()
- renamePath opath npath = (`ioeAddLocation` "renamePath") `modifyIOError` do
--#ifdef mingw32_HOST_OS
-+#if defined(mingw32_HOST_OS)
-    (`ioeSetFileName` opath) `modifyIOError` do
-      opath' <- toExtendedLengthPath <$> prependCurrentDirectory opath
-      npath' <- toExtendedLengthPath <$> prependCurrentDirectory npath
-@@ -736,6 +755,8 @@
- #  else
-      Win32.moveFileEx opath' npath' Win32.mOVEFILE_REPLACE_EXISTING
- #  endif
-+#elif defined(ghcjs_HOST_OS)
-+   renamePathInternal opath npath
- #else
-    Posix.rename opath npath
- #endif
-@@ -854,7 +875,9 @@
- copyFileWithMetadata src dst =
-   (`ioeAddLocation` "copyFileWithMetadata") `modifyIOError` doCopy
-   where
--#ifdef mingw32_HOST_OS
-+#if defined(ghcjs_HOST_OS)
-+    doCopy = js_copyFileWithMetadata (toJSString src) (toJSString dst)
-+#elif defined(mingw32_HOST_OS)
-     doCopy = (`ioeSetFileName` src) `modifyIOError` do
-       src' <- toExtendedLengthPath <$> prependCurrentDirectory src
-       dst' <- toExtendedLengthPath <$> prependCurrentDirectory dst
-@@ -866,7 +889,7 @@
-       copyMetadataFromStatus st dst
- #endif
- 
--#ifndef mingw32_HOST_OS
-+#ifdef posix_OS
- copyMetadataFromStatus :: Posix.FileStatus -> FilePath -> IO ()
- copyMetadataFromStatus st dst = do
-   tryCopyOwnerAndGroupFromStatus st dst
-@@ -874,26 +897,26 @@
-   copyFileTimesFromStatus st dst
- #endif
- 
--#ifndef mingw32_HOST_OS
-+#ifdef posix_OS
- tryCopyOwnerAndGroupFromStatus :: Posix.FileStatus -> FilePath -> IO ()
- tryCopyOwnerAndGroupFromStatus st dst = do
-   ignoreIOExceptions (copyOwnerFromStatus st dst)
-   ignoreIOExceptions (copyGroupFromStatus st dst)
- #endif
- 
--#ifndef mingw32_HOST_OS
-+#ifdef posix_OS
- copyOwnerFromStatus :: Posix.FileStatus -> FilePath -> IO ()
- copyOwnerFromStatus st dst = do
-   Posix.setOwnerAndGroup dst (Posix.fileOwner st) (-1)
- #endif
- 
--#ifndef mingw32_HOST_OS
-+#ifdef posix_OS
- copyGroupFromStatus :: Posix.FileStatus -> FilePath -> IO ()
- copyGroupFromStatus st dst = do
-   Posix.setOwnerAndGroup dst (-1) (Posix.fileGroup st)
- #endif
- 
--#ifndef mingw32_HOST_OS
-+#ifdef posix_OS
- copyFileTimesFromStatus :: Posix.FileStatus -> FilePath -> IO ()
- copyFileTimesFromStatus st dst = do
-   let atime = accessTimeFromMetadata st
-@@ -966,6 +989,10 @@
- --
- canonicalizePath :: FilePath -> IO FilePath
- canonicalizePath = \ path ->
-+#if defined(ghcjs_HOST_OS)
-+  -- fixme implement correct exception behaviour for GHCJS impl
-+  canonicalizePathInternal path
-+#else
-   modifyIOError ((`ioeAddLocation` "canonicalizePath") .
-                  (`ioeSetFileName` path)) $
-   -- normalise does more stuff, like upper-casing the drive letter
-@@ -1049,6 +1076,7 @@
-                   let mFallback' = Just (fromMaybe fallback mFallback)
-                   path' <- simplify (p </> target </> joinPath restSuffix)
-                   attemptRealpathWith (n - 1) mFallback' realpath path'
-+#endif
- 
- -- | Convert a path into an absolute path.  If the given path is relative, the
- -- current directory is prepended and then the combined result is
-@@ -1109,7 +1137,9 @@
- -- documentation of 'findFileWith'.
- findExecutable :: String -> IO (Maybe FilePath)
- findExecutable binary = do
--#if defined(mingw32_HOST_OS)
-+#if defined(ghcjs_HOST_OS)
-+    listToMaybe <$> findExecutables binary
-+#elif defined(mingw32_HOST_OS)
- #  if MIN_VERSION_Win32(2,6,0)
-     Win32.searchPath Nothing binary (Just exeExtension)
- #  else
-@@ -1134,7 +1164,9 @@
- -- @since 1.2.2.0
- findExecutables :: String -> IO [FilePath]
- findExecutables binary = do
--#if defined(mingw32_HOST_OS)
-+#if defined(ghcjs_HOST_OS)
-+    findExecutablesInternal binary
-+#elif defined(mingw32_HOST_OS)
-     file <- findExecutable binary
-     return $ maybeToList file
- #else
-@@ -1142,7 +1174,7 @@
-     findExecutablesInDirectories path binary
- #endif
- 
--#ifndef mingw32_HOST_OS
-+#ifdef posix_OS
- -- | Get the contents of the @PATH@ environment variable.
- getPath :: IO [FilePath]
- getPath = do
-@@ -1256,7 +1288,9 @@
- getDirectoryContents path =
-   modifyIOError ((`ioeSetFileName` path) .
-                  (`ioeAddLocation` "getDirectoryContents")) $ do
--#ifndef mingw32_HOST_OS
-+#if defined(ghcjs_HOST_OS)
-+    getDirectoryContentsInternal path
-+#elif !defined(mingw32_HOST_OS)
-     bracket
-       (Posix.openDirStream path)
-       Posix.closeDirStream
-@@ -1288,6 +1322,7 @@
-           else return (filename:acc)
-                  -- no need to reverse, ordering is undefined
- #endif /* mingw32 */
-+{-# NOINLINE getDirectoryContents #-}
- 
- -- | @'listDirectory' dir@ returns a list of /all/ entries in /dir/ without
- -- the special entries (@.@ and @..@).
-@@ -1360,7 +1395,9 @@
- --
- setCurrentDirectory :: FilePath -> IO ()
- setCurrentDirectory path = do
--#ifdef mingw32_HOST_OS
-+#if defined(ghcjs_HOST_OS)
-+  setCurrentDirectoryInternal path
-+#elif defined(mingw32_HOST_OS)
-   -- SetCurrentDirectory does not support long paths even with the \\?\ prefix
-   -- https://ghc.haskell.org/trac/ghc/ticket/13373#comment:6
-   Win32.setCurrentDirectory path
-@@ -1464,8 +1501,10 @@
-   -> IO ()
- createFileLink target link =
-   (`ioeAddLocation` "createFileLink") `modifyIOError` do
--#ifdef mingw32_HOST_OS
-+#if defined(mingw32_HOST_OS)
-     createSymbolicLink False target link
-+#elif defined(ghcjs_HOST_OS)
-+    createSymbolicLinkInternal target link
- #else
-     Posix.createSymbolicLink target link
- #endif
-@@ -1563,7 +1602,7 @@
- getSymbolicLinkTarget :: FilePath -> IO FilePath
- getSymbolicLinkTarget path =
-   (`ioeAddLocation` "getSymbolicLinkTarget") `modifyIOError` do
--#ifdef mingw32_HOST_OS
-+#if defined(mingw32_HOST_OS) || defined(ghcjs_HOST_OS)
-     readSymbolicLink path
- #else
-     Posix.readSymbolicLink path
-@@ -1685,7 +1724,10 @@
-     path' = normalise path              -- handle empty paths
- 
-     setTimes :: (Maybe POSIXTime, Maybe POSIXTime) -> IO ()
--#ifdef mingw32_HOST_OS
-+#if defined(ghcjs_HOST_OS)
-+    setTimes time =
-+      error "fixme: setFileTimes unimplemented for GHCJS"
-+#elif defined(mingw32_HOST_OS)
-     setTimes (atime', mtime') =
-       bracket (openFileHandle path' Win32.gENERIC_WRITE)
-               Win32.closeHandle $ \ handle ->
-@@ -1744,7 +1786,9 @@
- getHomeDirectory :: IO FilePath
- getHomeDirectory = modifyIOError (`ioeAddLocation` "getHomeDirectory") get
-   where
--#if defined(mingw32_HOST_OS)
-+#if defined(ghcjs_HOST_OS)
-+    get = fromJSString `fmap` throwErrnoIfJSNull "getHomeDirectory" js_getHomeDirectory
-+#elif defined(mingw32_HOST_OS)
-     get = getFolderPath Win32.cSIDL_PROFILE `catchIOError` \ _ ->
-           getFolderPath Win32.cSIDL_WINDOWS
-     getFolderPath what = Win32.sHGetFolderPath nullPtr what nullPtr 0
-@@ -1813,7 +1857,9 @@
-     XdgConfig -> get False "XDG_CONFIG_HOME" ".config"
-     XdgCache  -> get True  "XDG_CACHE_HOME"  ".cache"
-   where
--#if defined(mingw32_HOST_OS)
-+#if defined(ghcjs_HOST_OS)
-+    get _ _ _ = error "fixme: getXdgDirectory not implemented for GHCJS"
-+#elif defined(mingw32_HOST_OS)
-     get isLocal _ _ = Win32.sHGetFolderPath nullPtr which nullPtr 0
-       where which | isLocal   = win32_cSIDL_LOCAL_APPDATA
-                   | otherwise = Win32.cSIDL_APPDATA
-@@ -1867,7 +1913,10 @@
-                         -> IO FilePath
- getAppUserDataDirectory appName = do
-   modifyIOError (`ioeAddLocation` "getAppUserDataDirectory") $ do
--#if defined(mingw32_HOST_OS)
-+#if defined(ghcjs_HOST_OS)
-+    fromJSString `fmap` throwErrnoIfJSNull "getAppUserDataDirectory"
-+      (js_getAppUserDataDirectory (toJSString appName))
-+#elif defined(mingw32_HOST_OS)
-     s <- Win32.sHGetFolderPath nullPtr Win32.cSIDL_APPDATA nullPtr 0
-     return (s++'\\':appName)
- #else
-@@ -1898,7 +1947,9 @@
- getUserDocumentsDirectory :: IO FilePath
- getUserDocumentsDirectory = do
-   modifyIOError (`ioeAddLocation` "getUserDocumentsDirectory") $ do
--#if defined(mingw32_HOST_OS)
-+#if defined(ghcjs_HOST_OS)
-+    fromJSString `fmap` throwErrnoIfJSNull "getUserDocumentsDirectory" js_getUserDocumentsDirectory
-+#elif defined(mingw32_HOST_OS)
-     Win32.sHGetFolderPath nullPtr Win32.cSIDL_PERSONAL nullPtr 0
- #else
-     getEnv "HOME"
-@@ -1932,7 +1983,9 @@
- -}
- getTemporaryDirectory :: IO FilePath
- getTemporaryDirectory =
--#if defined(mingw32_HOST_OS)
-+#if defined(ghcjs_HOST_OS)
-+  fromJSString `fmap` throwErrnoIfJSNull "getTemporaryDirectory" js_getTemporaryDirectory
-+#elif defined(mingw32_HOST_OS)
-   Win32.getTemporaryDirectory
- #else
-   getEnv "TMPDIR" `catchIOError` \ err ->

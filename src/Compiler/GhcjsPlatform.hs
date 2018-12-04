@@ -38,7 +38,7 @@ setGhcjsPlatform set js_env js_objs basePath df
                               , sPlatformConstants = ghcjsPlatformConstants
 #if __GLASGOW_HASKELL__ >= 709
                               , sProgramName       = "ghcjs"
-                              , sProjectVersion    = Info.getFullCompilerVersion 
+                              , sProjectVersion    = Info.getFullCompilerVersion
 #endif
                               }
     ghcjsPlatform = (sTargetPlatform (settings df))
@@ -70,9 +70,13 @@ setDfOpts df = foldl' gopt_set (foldl' gopt_unset df unsetList) setList
 
 addPlatformDefines :: FilePath -> DynFlags -> DynFlags
 addPlatformDefines baseDir df = addCpp (("-I" ++ includeDir) : map ("-D"++) defs) $
-                                df { includePaths = includeDir : includePaths df }
+                                df { includePaths = newIncludePaths }
   where
+    ips        = includePaths df
     includeDir = baseDir ++ "/include"
+    newIncludePaths = ips { includePathsGlobal = includeDir
+                                               : includePathsGlobal ips
+                          }
     defs = [ "__GHCJS__=" ++ Info.getShortCompilerVersion ]
 
 addCpp :: [String] -> DynFlags -> DynFlags
@@ -80,5 +84,3 @@ addCpp cpp df = df { settings = settings1 }
   where
     settings0 = settings df
     settings1 = settings0 { sOpt_P = cpp ++ sOpt_P settings0 }
-
-

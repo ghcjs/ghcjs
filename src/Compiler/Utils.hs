@@ -45,6 +45,8 @@ import           Packages          (getPackageIncludePath, Version
 import           Config            (cProjectVersionInt)
 import           Panic             (throwGhcExceptionIO)
 import qualified SysTools
+import           FileCleanup ( newTempName, TempFileLifetime(..) )
+import           Panic
 
 import qualified Control.Exception as Ex
 import           Control.Monad
@@ -145,19 +147,23 @@ getEnvMay xs = fmap Just (getEnv xs)
 getEnvOpt :: MonadIO m => String -> m Bool
 getEnvOpt xs = liftIO (maybe False ((`notElem` ["0","no"]).map toLower) <$> getEnvMay xs)
 
-doCpp :: DynFlags -> Bool -> Bool -> FilePath -> FilePath -> IO ()
-doCpp dflags raw strip_comments input_fn output_fn = do
+doCpp :: DynFlags -> Bool -> FilePath -> FilePath -> IO ()
+doCpp dflags raw input_fn output_fn = do
     let hscpp_opts = picPOpts dflags
     let cmdline_include_paths = includePaths dflags
 
     pkg_include_dirs <- getPackageIncludePath dflags []
-    let include_paths = foldr (\ x xs -> "-I" : x : xs) []
-                          (cmdline_include_paths ++ pkg_include_dirs)
+    let include_paths_global = foldr (\ x xs -> ("-I" ++ x) : xs) []
+          (includePathsGlobal cmdline_include_paths ++ pkg_include_dirs)
+    let include_paths_quote = foldr (\ x xs -> ("-iquote" ++ x) : xs) []
+          (includePathsQuote cmdline_include_paths)
+    let include_paths = include_paths_quote ++ include_paths_global
 
     let verbFlags = getVerbFlags dflags
 
     let cpp_prog args | raw       = SysTools.runCpp dflags args
                       | otherwise = SysTools.runCc dflags (SysTools.Option "-E" : args)
+
 
     let target_defs =
           [ "-D" ++ HOST_OS     ++ "_BUILD_OS=1",
@@ -170,6 +176,19 @@ doCpp dflags raw strip_comments input_fn output_fn = do
     -- profiling related definitions
     let prof_defs =
           if buildingProf dflags then ["-DGHCJS_PROF"] else []
+
+    let sse_defs =
+          [ "-D__SSE__"      | isSseEnabled      dflags ] ++
+          [ "-D__SSE2__"     | isSse2Enabled     dflags ] ++
+          [ "-D__SSE4_2__"   | isSse4_2Enabled   dflags ]
+
+    let avx_defs =
+          [ "-D__AVX__"      | isAvxEnabled      dflags ] ++
+          [ "-D__AVX2__"     | isAvx2Enabled     dflags ] ++
+          [ "-D__AVX512CD__" | isAvx512cdEnabled dflags ] ++
+          [ "-D__AVX512ER__" | isAvx512erEnabled dflags ] ++
+          [ "-D__AVX512F__"  | isAvx512fEnabled  dflags ] ++
+          [ "-D__AVX512PF__" | isAvx512pfEnabled dflags ]
 
     backend_defs <- getBackendDefs dflags
 
@@ -196,23 +215,21 @@ doCpp dflags raw strip_comments input_fn output_fn = do
     cpp_prog       (   map SysTools.Option verbFlags
                     ++ map SysTools.Option include_paths
                     ++ map SysTools.Option hsSourceCppOpts
-                    ++ map SysTools.Option prof_defs
                     ++ map SysTools.Option target_defs
+                    ++ map SysTools.Option prof_defs
                     ++ map SysTools.Option backend_defs
                     ++ map SysTools.Option th_defs
                     ++ map SysTools.Option hscpp_opts
+                    ++ map SysTools.Option sse_defs
+                    ++ map SysTools.Option avx_defs
                     ++ mb_macro_include
-                    ++ [ SysTools.Option "-undef" ] -- undefine host system definitions
         -- Set the language mode to assembler-with-cpp when preprocessing. This
         -- alleviates some of the C99 macro rules relating to whitespace and the hash
         -- operator, which we tend to abuse. Clang in particular is not very happy
         -- about this.
                     ++ [ SysTools.Option     "-x"
                        , SysTools.Option     "assembler-with-cpp"
-                       ] ++
-        -- Do not strip comments since they contain directives for the closure compiler
-                       (if not strip_comments then [ SysTools.Option     "-C" ] else []) ++
-                       [ SysTools.Option     input_fn
+                       , SysTools.Option     input_fn
         -- We hackily use Option instead of FileOption here, so that the file
         -- name is not back-slashed on Windows.  cpp is capable of
         -- dealing with / in filenames, so it works fine.  Furthermore
@@ -229,16 +246,30 @@ getBackendDefs :: DynFlags -> IO [String]
 getBackendDefs dflags | hscTarget dflags == HscLlvm = do
     llvmVer <- SysTools.figureLlvmVersion dflags
     return $ case llvmVer of
-               Just n -> [ "-D__GLASGOW_HASKELL_LLVM__="++show n ]
+               Just n -> [ "-D__GLASGOW_HASKELL_LLVM__=" ++ format n ]
                _      -> []
+  where
+    format (major, minor)
+      | minor >= 100 = error "getBackendDefs: Unsupported minor version"
+      | otherwise = show $ (100 * major + minor :: Int) -- Contract is Int
 
 getBackendDefs _ =
     return []
 
-hsSourceCppOpts :: [String]
--- Default CPP defines in Haskell source
-hsSourceCppOpts =
-        [ "-D__GLASGOW_HASKELL__="++cProjectVersionInt ]
+-- | Find out path to @ghcversion.h@ file
+getGhcVersionPathName :: DynFlags -> IO FilePath
+getGhcVersionPathName dflags = do
+  candidates <- case ghcVersionFile dflags of
+    Just path -> return [path]
+    Nothing -> (map (</> "ghcversion.h")) <$>
+               (getPackageIncludePath dflags [toInstalledUnitId rtsUnitId])
+
+  found <- filterM doesFileExist candidates
+  case found of
+      []    -> throwGhcExceptionIO (InstallationError
+                                    ("ghcversion.h missing; tried: "
+                                      ++ intercalate ", " candidates))
+      (x:_) -> return x
 
 simpleSrcErr :: DynFlags -> SrcSpan -> String -> SourceError
 simpleSrcErr df span msg = mkSrcErr (unitBag errMsg)
@@ -262,21 +293,6 @@ substPatterns single double = unmatched
                 | otherwise            = a <> unmatched d
           where (a,b)  = T.breakOn "{{" l
                 (_c,d) = T.breakOn "}}" b
-
--- | Find out path to @ghcversion.h@ file
-getGhcVersionPathName :: DynFlags -> IO FilePath
-getGhcVersionPathName dflags = do
-  candidates <- case ghcVersionFile dflags of
-    Just path -> return [path]
-    Nothing -> (map (</> "ghcversion.h")) <$>
-               (getPackageIncludePath dflags [toInstalledUnitId rtsUnitId])
-
-  found <- filterM doesFileExist candidates
-  case found of
-      []    -> throwGhcExceptionIO (InstallationError
-                                    ("ghcversion.h missing; tried: "
-                                      ++ intercalate ", " candidates))
-      (x:_) -> return x
 
 -- ---------------------------------------------------------------------------
 -- Macros (cribbed from Cabal)

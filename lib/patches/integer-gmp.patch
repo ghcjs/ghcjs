@@ -1,16 +1,16 @@
-diff -Nru upstream/pkg/integer-gmp/integer-gmp.buildinfo.in boot/pkg/integer-gmp/integer-gmp.buildinfo.in
---- upstream/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-01-23 23:17:59.000000000 +0100
-+++ boot/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-01-23 23:17:59.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gmp.buildinfo.in boot/pkg/integer-gmp/integer-gmp.buildinfo.in
+--- upstream/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-12-04 07:40:09.238647611 -0800
 @@ -2,4 +2,4 @@
  extra-lib-dirs: @GMP_LIB_DIRS@
  extra-libraries: @GMP_LIBS@
  frameworks: @GMP_FRAMEWORK@
 -install-includes: HsIntegerGmp.h ghc-gmp.h
 +install-includes: HsIntegerGmp.h
-diff -Nru upstream/pkg/integer-gmp/integer-gmp.cabal boot/pkg/integer-gmp/integer-gmp.cabal
---- upstream/pkg/integer-gmp/integer-gmp.cabal	2018-01-23 23:17:59.000000000 +0100
-+++ boot/pkg/integer-gmp/integer-gmp.cabal	2018-01-23 23:17:59.000000000 +0100
-@@ -55,6 +55,9 @@
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gmp.cabal boot/pkg/integer-gmp/integer-gmp.cabal
+--- upstream/pkg/integer-gmp/integer-gmp.cabal	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/integer-gmp/integer-gmp.cabal	2018-12-04 07:40:09.238647611 -0800
+@@ -67,6 +67,9 @@
    c-sources:
      cbits/wrappers.c
  
@@ -20,10 +20,10 @@ diff -Nru upstream/pkg/integer-gmp/integer-gmp.cabal boot/pkg/integer-gmp/intege
    exposed-modules:
      GHC.Integer
      GHC.Integer.Logarithms
-diff -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits/ghcjsbn.js
---- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1970-01-01 01:00:00.000000000 +0100
-+++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2018-01-22 18:25:10.000000000 +0100
-@@ -0,0 +1,2008 @@
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits/ghcjsbn.js
+--- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1969-12-31 16:00:00.000000000 -0800
++++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2018-12-04 10:00:26.498107130 -0800
+@@ -0,0 +1,2013 @@
 +/*
 +   GHCJS bignum library for integer-gmp package
 +
@@ -1859,6 +1859,11 @@ diff -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits
 +  ASSERTVALID_W(r, "index_b result");
 +}
 +
++// Bool -> BigNat -> Double
++function h$ghcjsbn_toDouble_b(nonNeg, b) {
++  throw new Error("toDouble_b");
++}
++
 +function h$ghcjsbn_byteArrayToBigNat(ba, len) {
 +  throw new Error("h$ghcjsbn_byteArrayToBigNat not yet implemented");
 +}
@@ -2032,9 +2037,9 @@ diff -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits
 +  ASSERTVALID_D(r, "encodeDouble_s result");
 +  return r;
 +}
-diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-01-23 23:17:59.000000000 +0100
-+++ boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-01-23 23:18:01.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs
+--- upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-12-04 07:40:09.238647611 -0800
 @@ -1,4 +1,5 @@
  {-# LANGUAGE BangPatterns #-}
 +
@@ -2154,9 +2159,9 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs boot/pkg/int
  
  -- | Compute next prime greater than @/n/@ probalistically.
  --
-diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-01-23 23:17:59.000000000 +0100
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-01-23 23:18:01.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-12-04 07:40:09.238647611 -0800
 @@ -2,6 +2,11 @@
  {-# LANGUAGE MagicHash #-}
  {-# LANGUAGE UnboxedTuples #-}
@@ -2208,9 +2213,9 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs boot/
                          0## -> test (i -# 1#)
                          _   -> 2#
 +#endif
-diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-01-23 23:17:59.000000000 +0100
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-01-23 23:18:01.000000000 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-12-04 07:40:09.238647611 -0800
 @@ -4,6 +4,9 @@
  {-# LANGUAGE UnliftedFFITypes #-}
  {-# LANGUAGE CPP #-}
@@ -2270,9 +2275,9 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs boot/pkg/intege
  
  -- | Compute base-2 log of 'Word#'
  --
-diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/src/GHC/Integer/Type.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-01-23 23:17:59.000000000 +0100
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-04-19 19:50:14.477443038 +0200
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/src/GHC/Integer/Type.hs
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-12-04 07:40:09.238647611 -0800
 @@ -9,6 +9,9 @@
  {-# LANGUAGE RebindableSyntax #-}
  {-# LANGUAGE NegativeLiterals #-}
@@ -3044,7 +3049,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  gcdExtSBigNat x y = case runS go of (g,s) -> (# g, s #)
    where
      go = do
-@@ -1405,6 +1689,7 @@
+@@ -1407,6 +1691,7 @@
      yn# = ssizeofSBigNat# y
  
      gn0# = minI# (absI# xn#) (absI# yn#)
@@ -3052,7 +3057,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  
  ----------------------------------------------------------------------------
  -- modular exponentiation
-@@ -1484,6 +1769,17 @@
+@@ -1486,6 +1771,17 @@
  
  -- internal non-exported helper
  powModSBigNat :: SBigNat -> SBigNat -> BigNat -> BigNat
@@ -3070,7 +3075,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  powModSBigNat b e m@(BN# m#) = runS $ do
      r@(MBN# r#) <- newBigNat# mn#
      I# rn_# <- liftIO (integer_gmp_powm# r# b# bn# e# en# m# mn#)
-@@ -1502,9 +1798,20 @@
+@@ -1504,9 +1800,20 @@
    integer_gmp_powm# :: MutableByteArray# RealWorld
                         -> ByteArray# -> GmpSize# -> ByteArray# -> GmpSize#
                         -> ByteArray# -> GmpSize# -> IO GmpSize
@@ -3092,7 +3097,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  powModSBigNatWord b e m# = integer_gmp_powm1# b# bn# e# en# m#
    where
      !(BN# b#) = absSBigNat b
-@@ -1515,9 +1822,13 @@
+@@ -1517,9 +1824,13 @@
  foreign import ccall unsafe "integer_gmp_powm1"
    integer_gmp_powm1# :: ByteArray# -> GmpSize# -> ByteArray# -> GmpSize#
                          -> GmpLimb# -> GmpLimb#
@@ -3106,7 +3111,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  powModSecSBigNat b e m@(BN# m#) = runS $ do
      r@(MBN# r#) <- newBigNat# mn#
      I# rn_# <- liftIO (integer_gmp_powm_sec# r# b# bn# e# en# m# mn#)
-@@ -1536,7 +1847,7 @@
+@@ -1538,7 +1849,7 @@
    integer_gmp_powm_sec# :: MutableByteArray# RealWorld
                             -> ByteArray# -> GmpSize# -> ByteArray# -> GmpSize#
                             -> ByteArray# -> GmpSize# -> IO GmpSize
@@ -3115,7 +3120,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  
  -- | \"@'recipModInteger' /x/ /m/@\" computes the inverse of @/x/@ modulo @/m/@. If
  -- the inverse exists, the return value @/y/@ will satisfy @0 < /y/ <
-@@ -1557,7 +1868,12 @@
+@@ -1559,7 +1870,12 @@
  --
  -- @since 1.0.0.0
  recipModBigNat :: BigNat -> BigNat -> BigNat
@@ -3128,7 +3133,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  
  -- | Version of 'recipModInteger' operating on 'Word#'s
  --
-@@ -1567,6 +1883,11 @@
+@@ -1569,6 +1885,11 @@
  
  -- internal non-exported helper
  recipModSBigNat :: SBigNat -> BigNat -> BigNat
@@ -3140,7 +3145,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  recipModSBigNat x m@(BN# m#) = runS $ do
      r@(MBN# r#) <- newBigNat# mn#
      I# rn_# <- liftIO (integer_gmp_invert# r# x# xn# m# mn#)
-@@ -1583,6 +1904,7 @@
+@@ -1585,6 +1906,7 @@
    integer_gmp_invert# :: MutableByteArray# RealWorld
                           -> ByteArray# -> GmpSize#
                           -> ByteArray# -> GmpSize# -> IO GmpSize
@@ -3148,7 +3153,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  
  ----------------------------------------------------------------------------
  -- Conversions to/from floating point
-@@ -1604,11 +1926,19 @@
+@@ -1606,11 +1928,19 @@
  
  encodeDoubleInteger :: Integer -> Int# -> Double#
  encodeDoubleInteger (S# m#) 0# = int2Double# m#
@@ -3168,7 +3173,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  {-# CONSTANT_FOLDED encodeDoubleInteger #-}
  
  -- double integer_gmp_mpn_get_d (const mp_limb_t sp[], const mp_size_t sn)
-@@ -1617,10 +1947,16 @@
+@@ -1619,10 +1949,16 @@
  
  doubleFromInteger :: Integer -> Double#
  doubleFromInteger (S# m#) = int2Double# m#
@@ -3185,7 +3190,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  {-# CONSTANT_FOLDED doubleFromInteger #-}
  
  -- TODO: Not sure if it's worth to write 'Float' optimized versions here
-@@ -1633,8 +1969,12 @@
+@@ -1635,8 +1971,12 @@
  ----------------------------------------------------------------------------
  -- FFI ccall imports
  
@@ -3198,7 +3203,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  
  foreign import ccall unsafe "integer_gmp_mpn_gcd_1"
    c_mpn_gcd_1# :: ByteArray# -> GmpSize# -> GmpLimb# -> GmpLimb#
-@@ -1761,12 +2101,18 @@
+@@ -1763,12 +2103,18 @@
  
  ----------------------------------------------------------------------------
  -- BigNat-wrapped ByteArray#-primops
@@ -3218,7 +3223,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  data MutBigNat s = MBN# !(MutableByteArray# s)
  
  getSizeofMutBigNat# :: MutBigNat s -> State# s -> (# State# s, GmpSize# #)
-@@ -1782,12 +2128,19 @@
+@@ -1784,12 +2130,19 @@
  
  writeBigNat# :: MutBigNat s -> GmpSize# -> GmpLimb# -> State# s -> State# s
  writeBigNat# (MBN# mba#) = writeWordArray# mba#
@@ -3238,7 +3243,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  unsafeFreezeBigNat# :: MutBigNat s -> S s BigNat
  unsafeFreezeBigNat# (MBN# mba#) s = case unsafeFreezeByteArray# mba# s of
                                        (# s', ba# #) -> (# s', BN# ba# #)
-@@ -1884,7 +2237,7 @@
+@@ -1886,7 +2239,7 @@
      go i0# s = case readWordArray# mba (i0# -# 1#) s of
          (# s', 0## #) -> go (i0# -# 1#) s'
          (# s', _  #) -> (# s', i0# #)
@@ -3247,7 +3252,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  -- | Construct 'BigNat' from existing 'ByteArray#' containing /n/
  -- 'GmpLimb's in least-significant-first order.
  --
-@@ -1894,6 +2247,10 @@
+@@ -1896,6 +2249,10 @@
  -- Note: size parameter (times @sizeof(GmpLimb)@) must be less or
  -- equal to its 'sizeofByteArray#'.
  byteArrayToBigNat# :: ByteArray# -> GmpSize# -> BigNat
@@ -3258,7 +3263,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  byteArrayToBigNat# ba# n0#
    | isTrue# (n#  ==# 0#)    = zeroBigNat
    | isTrue# (baszr# ==# 0#) -- i.e. ba# is multiple of limb-size
-@@ -1908,6 +2265,7 @@
+@@ -1910,6 +2267,7 @@
      !(# baszq#, baszr# #) = quotRemInt# (sizeofByteArray# ba#) GMP_LIMB_BYTES#
  
      n#  = fmssl (BN# ba#) (n0# -# 1#)
@@ -3266,7 +3271,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  
  -- | Read 'Integer' (without sign) from memory location at @/addr/@ in
  -- base-256 representation.
-@@ -1925,6 +2283,11 @@
+@@ -1927,6 +2285,11 @@
  -- | Version of 'importIntegerFromAddr' constructing a 'BigNat'
  importBigNatFromAddr :: Addr# -> Word# -> Int# -> IO BigNat
  importBigNatFromAddr _ 0## _ = IO (\s -> (# s, zeroBigNat #))
@@ -3278,7 +3283,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  importBigNatFromAddr addr len0 1# = IO $ do -- MSBF
      W# ofs <- liftIO (c_scan_nzbyte_addr addr 0## len0)
      let len = len0 `minusWord#` ofs
-@@ -1954,6 +2317,7 @@
+@@ -1956,6 +2319,7 @@
  foreign import ccall unsafe "integer_gmp_mpn_import"
      c_mpn_import_addr :: MutableByteArray# RealWorld -> Addr# -> Word# -> Word#
                        -> Int# -> IO ()
@@ -3286,7 +3291,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  
  -- | Read 'Integer' (without sign) from byte-array in base-256 representation.
  --
-@@ -1978,6 +2342,11 @@
+@@ -1980,6 +2344,11 @@
  -- | Version of 'importIntegerFromByteArray' constructing a 'BigNat'
  importBigNatFromByteArray :: ByteArray# -> Word# -> Word# -> Int# -> BigNat
  importBigNatFromByteArray _  _    0##  _  = zeroBigNat
@@ -3298,7 +3303,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  importBigNatFromByteArray ba ofs0 len0 1# = runS $ do -- MSBF
      W# ofs <- liftIO (c_scan_nzbyte_bytearray ba ofs0 len0)
      let len = (len0 `plusWord#` ofs0) `minusWord#` ofs
-@@ -2007,6 +2376,7 @@
+@@ -2009,6 +2378,7 @@
  foreign import ccall unsafe "integer_gmp_mpn_import"
      c_mpn_import_bytearray :: MutableByteArray# RealWorld -> ByteArray# -> Word#
                             -> Word# -> Int# -> IO ()
@@ -3306,7 +3311,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  
  -- | Test whether all internal invariants are satisfied by 'BigNat' value
  --
-@@ -2015,6 +2385,10 @@
+@@ -2017,6 +2387,10 @@
  -- This operation is mostly useful for test-suites and/or code which
  -- constructs 'Integer' values directly.
  isValidBigNat# :: BigNat -> Int#
@@ -3317,7 +3322,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  isValidBigNat# (BN# ba#)
    = (szq# ># 0#) `andI#` (szr# ==# 0#) `andI#` isNorm#
    where
-@@ -2025,11 +2399,16 @@
+@@ -2027,11 +2401,16 @@
      sz# = sizeofByteArray# ba#
  
      !(# szq#, szr# #) = quotRemInt# sz# GMP_LIMB_BYTES#
@@ -3334,7 +3339,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  nextPrimeBigNat bn@(BN# ba#) = runS $ do
      mbn@(MBN# mba#) <- newBigNat# n#
      (W# c#) <- liftIO (nextPrime# mba# ba# n#)
-@@ -2042,7 +2421,7 @@
+@@ -2044,7 +2423,7 @@
  foreign import ccall unsafe "integer_gmp_next_prime"
    nextPrime# :: MutableByteArray# RealWorld -> ByteArray# -> GmpSize#
                  -> IO GmpLimb
@@ -3343,7 +3348,7 @@ diff -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/
  ----------------------------------------------------------------------------
  -- monadic combinators for low-level state threading
  
-@@ -2097,10 +2476,12 @@
+@@ -2099,10 +2478,12 @@
  absSBigNat (NegBN bn) = bn
  absSBigNat (PosBN bn) = bn
  

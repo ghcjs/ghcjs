@@ -697,9 +697,11 @@ prepareBaseBundle testDir ghcjs extraArgs = shellyE . silently . sub . withTmpDi
   cd tmp
   run_ ghcjs $ ["-generate-base", "TestLinkBase", "-o", "base", "TestLinkMain.hs"] ++ extraArgs
   cd "base.jsexe"
-  [symbs, js, lib, rts] <- mapM readBinary
+  xs <- mapM readBinary
     ["out.base.symbs", "out.base.js", "lib.base.js", "rts.js"]
-  return (symbs, rts <> lib <> js)
+  case xs of
+    [symbs, js, lib, rts] -> return (symbs, rts <> lib <> js)
+    _ -> error "prepareBaseBundle: unexpected result"
 
 getEnvMay :: String -> IO (Maybe String)
 getEnvMay xs = fmap Just (getEnv xs)

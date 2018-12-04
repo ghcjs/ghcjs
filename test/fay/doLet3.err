@@ -1,2 +1,1 @@
-doLet3.hs:16:7-19: Irrefutable pattern failed for pattern [e :: Int]
-
+doLet3.hs:16:7-19: Non-exhaustive patterns in [e :: Int]

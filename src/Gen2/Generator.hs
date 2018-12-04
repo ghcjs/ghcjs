@@ -244,7 +244,7 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
         glbl <- use gsGlobal
         staticInit <-
           initStaticPtrs (collectStaticInfo [l | StgTopLifted l <- ss])
-        (st', [], bs) <- serializeLinkableUnit m st [] [] []
+        (st', _, bs) <- serializeLinkableUnit m st [] [] []
                          ( O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
                          $ mconcat (reverse glbl) <> staticInit) [] []
@@ -267,16 +267,19 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
                     -> Int
                     -> G (Object.SymbolTable, Maybe LinkableUnit)
       generateBlock st (StgTopStringLit bnd str) n = do
-        [b1@(TxtI b1t),b2@(TxtI b2t)] <- genIdsI bnd
-        -- [e1,e2] <- genLit (MachStr str)
-        emitStatic b1t (StaticUnboxed (StaticUnboxedString str)) Nothing
-        emitStatic b2t (StaticUnboxed (StaticUnboxedStringOffset str)) Nothing
-        extraTl   <- use (gsGroup . ggsToplevelStats)
-        si        <- use (gsGroup . ggsStatic)
-        let stat = mempty -- mconcat (reverse extraTl) <> b1 ||= e1 <> b2 ||= e2
-        (st', _ss, bs) <- serializeLinkableUnit m st [bnd] [] si
-                          (jsSaturate (Just $ modulePrefix m n) stat) [] []
-        pure (st', Just $ LinkableUnit bs [bnd] [] [] [] False [])
+        bids <- genIdsI bnd
+        case bids of
+          [b1@(TxtI b1t),b2@(TxtI b2t)] -> do
+            -- [e1,e2] <- genLit (MachStr str)
+            emitStatic b1t (StaticUnboxed (StaticUnboxedString str)) Nothing
+            emitStatic b2t (StaticUnboxed (StaticUnboxedStringOffset str)) Nothing
+            extraTl   <- use (gsGroup . ggsToplevelStats)
+            si        <- use (gsGroup . ggsStatic)
+            let stat = mempty -- mconcat (reverse extraTl) <> b1 ||= e1 <> b2 ||= e2
+            (st', _ss, bs) <- serializeLinkableUnit m st [bnd] [] si
+                              (jsSaturate (Just $ modulePrefix m n) stat) [] []
+            pure (st', Just $ LinkableUnit bs [bnd] [] [] [] False [])
+          _ -> panic "generateBlock: invalid size"
       generateBlock st (StgTopLifted decl) n =
         trace' ("generateBlock:\n" ++ showIndent decl) $
        do
@@ -311,7 +314,7 @@ initStaticPtrs ptrs = mconcat <$> mapM initStatic ptrs
     initStatic p = do
       i <- jsId (sspId p)
       let Fingerprint w1 w2 = sspFingerprint p
-      fpa <- concat <$> mapM (genLit . MachWord64 . fromIntegral) [w1,w2]
+      fpa <- concat <$> mapM (genLit . mkMachWord64 . fromIntegral) [w1,w2]
       let sptInsert = ApplExpr (ValExpr (JVar (TxtI "h$hs_spt_insert")))
                                (fpa ++ [i])
       return [j| h$initStatic.push(function() {
@@ -333,8 +336,8 @@ collectStaticInfo pgm = eltsUFM (collect collectStaticPtr emptyUFM pgm)
     collectDecl f !m (StgRec bs)     = foldl' (\m (b,e) -> f m b e) m bs
 
     collectStaticPtr !m b
-      (StgRhsCon _cc con [ StgLitArg (MachWord64 w1)
-                         , StgLitArg (MachWord64 w2)
+      (StgRhsCon _cc con [ StgLitArg (LitNumber _ w1 _)
+                         , StgLitArg (LitNumber _ w2 _)
                          , StgVarArg info
                          , StgVarArg tgt
                          ] )
@@ -571,7 +574,7 @@ genToplevelRhs :: Id
 genToplevelRhs i rhs@(StgRhsClosure cc _bi _ upd args body)
   -- foreign exports
   | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _)) _)
-     [StgLitArg (MachInt _is_js_conv), StgLitArg (MachStr _js_name), StgVarArg _tgt] _) <- body,
+     [StgLitArg _ {- (MachInt _is_js_conv) -}, StgLitArg (MachStr _js_name), StgVarArg _tgt] _) <- body,
      t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
 -- general cases:
 genToplevelRhs i (StgRhsCon cc con args) = do
@@ -873,9 +876,12 @@ genApp top i a
                 return (a, ExprInline Nothing)
     | [vt] <- idVt i, isUnboxable vt && n == 0 && i `elementOfUniqSet` (top ^. ctxEval) = do
                 let [c] =  concatMap snd $ top ^. ctxTarget
-                [i'] <- genIds i
-                return ([j| `c` = (typeof `i'` === 'object') ? `i'`.d1 : `i'`; |]
-                       ,ExprInline Nothing)
+                is <- genIds i
+                case is of
+                  [i'] ->
+                    return ([j| `c` = (typeof `i'` === 'object') ? `i'`.d1 : `i'`; |]
+                           ,ExprInline Nothing)
+                  _ -> panic "genApp: invalid size"
     | n == 0 && (i `elementOfUniqSet` (top ^. ctxEval) || isStrictId i) = do
                 a <- assignAllCh1 ("genApp:" ++ show i ++ " " ++ show (idFunRepArity i, idVt i))
                                  (top ^. ctxTarget) .
@@ -890,12 +896,15 @@ genApp top i a
                            _   -> mempty
                 return (a <> ww, ExprInline Nothing)
     | DataConWrapId dc <- idDetails i, isNewTyCon (dataConTyCon dc) = do
-                [ai] <- concatMapM genArg a
-                let [t] = concatMap snd (top ^. ctxTarget)
-                    [StgVarArg a'] = a
-                if isStrictId a' || a' `elementOfUniqSet` (top ^. ctxEval)
-                  then return ([j| `t` = `ai`; |], ExprInline Nothing)
-                  else return ([j| return h$e(`ai`); |], ExprCont)
+                as <- concatMapM genArg a
+                case as of
+                  [ai] -> do
+                    let [t] = concatMap snd (top ^. ctxTarget)
+                        [StgVarArg a'] = a
+                    if isStrictId a' || a' `elementOfUniqSet` (top ^. ctxEval)
+                      then return ([j| `t` = `ai`; |], ExprInline Nothing)
+                      else return ([j| return h$e(`ai`); |], ExprCont)
+                  _ -> panic "genApp: invalid size"
     | idFunRepArity i == 0 && n == 0 && not (might_be_a_function (idType i)) = do
              ii <- enterId
              return ([j| return h$e(`ii`) |], ExprCont)
@@ -972,11 +981,13 @@ genBind ctx bndr =
            let sel_tag | the_offset == 2 = if total_size == 2 then "2a"
                                                               else "2b"
                        | otherwise       = show the_offset
-           [tgt] <- genIdsI b
-           [the_fvj] <- genIds the_fv
-           return $ Just
-             (tgt ||= ApplExpr (ValExpr (JVar (TxtI ("h$c_sel_" <> T.pack sel_tag))))
+           tgts <- genIdsI b
+           the_fvjs <- genIds the_fv
+           case (tgts, the_fvjs) of
+             ([tgt], [the_fvj]) -> return $ Just
+               (tgt ||= ApplExpr (ValExpr (JVar (TxtI ("h$c_sel_" <> T.pack sel_tag))))
                               [the_fvj])
+             _ -> panic "genBind.assign: invalid size"
      assign b (StgRhsClosure _ccs _bi _free _upd [] expr)
        | snd (isInlineExpr (ctx ^. ctxEval) expr) = do
            d   <- declIds b
@@ -1162,7 +1173,7 @@ genUpdFrame u i
 -- allocate local closures
 allocCls :: Maybe JStat -> [(Id, StgRhs)] -> C
 allocCls dynMiddle xs = do
-   (stat, dyn) <- splitEithers <$> mapM toCl xs
+   (stat, dyn) <- partitionEithers <$> mapM toCl xs
    cs <- use gsSettings
    return (mconcat stat) <> allocDynAll cs True dynMiddle dyn
   where
@@ -1492,13 +1503,16 @@ genAlts0 top e (AlgAlt _tc) _ [alt] = do
 genAlts0 top e (AlgAlt _tc) _ alts@[(DataAlt dc,_,_),_]
   | isBoolTy (dataConType dc) = do
       i <- jsId e
-      (r, [(_,s1,_), (_,s2,_)]) <- normalizeBranches top <$>
+      nbs <- normalizeBranches top <$>
           mapM (isolateSlots . mkAlgBranch top e) alts
-      let s = if   dataConTag dc == 2
-              then [j| if(`i`) { `s1` } else { `s2` } |]
-              else [j| if(`i`) { `s2` } else { `s1` } |]
-      setSlots []
-      return (s, r)
+      case nbs of
+        (r, [(_,s1,_), (_,s2,_)]) -> do
+          let s = if   dataConTag dc == 2
+                  then [j| if(`i`) { `s1` } else { `s2` } |]
+                  else [j| if(`i`) { `s2` } else { `s1` } |]
+          setSlots []
+          return (s, r)
+        _ -> error "genAlts: invalid branches for Bool"
 -- fixme, add all alts
 genAlts0 top e (AlgAlt _tc) _ alts = do
       ei <- jsId e
@@ -1585,9 +1599,12 @@ mkAlgBranch :: ExprCtx  -- ^ toplevel id for the result
 mkAlgBranch top d (DataAlt dc,[b],expr)
   | isUnboxableCon dc = do
       idd      <- jsId d
-      [fld]    <- genIdsI b
-      (ej, er) <- genExpr top expr
-      return (Nothing, decl fld <> [j| `fld` = `idd` |] <> ej, er)
+      fldx <- genIdsI b
+      case fldx of
+        [fld] -> do
+          (ej, er) <- genExpr top expr
+          return (Nothing, decl fld <> [j| `fld` = `idd` |] <> ej, er)
+        _ -> panic "mkAlgBranch: invalid size"
 mkAlgBranch top d (a, bs, expr) = do
   cc       <- caseCond a
   idd      <- jsId d
@@ -1815,12 +1832,12 @@ genLit (MachStr  str)    =
       emitStatic strOffT (StaticUnboxed (StaticUnboxedStringOffset str)) Nothing
       return [ ValExpr (JVar strLit), ValExpr (JVar strOff) ]
 genLit MachNullAddr      = return [ [je| null |], [je| 0 |] ]
-genLit (MachInt i)       = return [ [je| `intLit i` |] ]
-genLit (MachInt64 i)     = return [ [je| `intLit (shiftR i 32)` |]
+genLit (LitNumber LitNumInt i _)       = return [ [je| `intLit i` |] ]
+genLit (LitNumber LitNumInt64 i _)     = return [ [je| `intLit (shiftR i 32)` |]
                                   , [je| `toSigned i` |]
                                   ]
-genLit (MachWord w)      = return [ [je| `toSigned w` |] ]
-genLit (MachWord64 w)    = return [ [je| `toSigned (shiftR w 32)` |]
+genLit (LitNumber LitNumWord w _)      = return [ [je| `toSigned w` |] ]
+genLit (LitNumber LitNumWord64 w _)    = return [ [je| `toSigned (shiftR w 32)` |]
                                   , [je| `toSigned w` |]
                                   ]
 genLit (MachFloat r)     = return [ [je| `r2f r` |] ]
@@ -1828,7 +1845,7 @@ genLit (MachDouble r)    = return [ [je| `r2d r` |] ]
 genLit (MachLabel name _size fod)
   | fod == IsFunction = return [ [je| h$mkFunctionPtr(`TxtI . T.pack $ "h$" ++ unpackFS name`) |], [je| 0 |] ]
   | otherwise         = return [ iex (TxtI . T.pack $ "h$" ++ unpackFS name), [je| 0 |] ]
-genLit (LitInteger _i _id) = panic "genLit: LitInteger" -- removed by CorePrep
+genLit l = panic $ "genLit: " ++ show l -- unhandled numeric literal" -- removed by CorePrep
 
 -- | generate a literal for the static init tables
 genStaticLit :: Literal -> G [StaticLit]
@@ -1838,12 +1855,12 @@ genStaticLit (MachStr  str)       =
                          Right t -> return [ StringLit t, IntLit 0 ]
                          Left _  -> return [ BinLit str, IntLit 0]
 genStaticLit MachNullAddr         = return [ NullLit, IntLit 0 ]
-genStaticLit (MachInt i)          = return [ IntLit (fromIntegral i) ]
-genStaticLit (MachInt64 i)        = return [ IntLit (i `shiftR` 32)
+genStaticLit (LitNumber LitNumInt i _)          = return [ IntLit (fromIntegral i) ]
+genStaticLit (LitNumber LitNumInt64 i _)        = return [ IntLit (i `shiftR` 32)
                                            , IntLit (toSigned i)
                                            ]
-genStaticLit (MachWord w)         = return [ IntLit (toSigned w) ]
-genStaticLit (MachWord64 w)       = return [ IntLit (toSigned (w `shiftR` 32))
+genStaticLit (LitNumber LitNumWord w _)         = return [ IntLit (toSigned w) ]
+genStaticLit (LitNumber LitNumWord64 w _)       = return [ IntLit (toSigned (w `shiftR` 32))
                                            , IntLit (toSigned w)
                                            ]
 genStaticLit (MachFloat r)        = return [ DoubleLit . SaneDouble . r2f $ r ]
@@ -2166,13 +2183,15 @@ parseFFIPattern' callback javascriptCc pat t ret args
          return $ traceCall cs as <> mconcat stats <> ApplStat f' (concat as++[cb])
       | (ts@(_:_)) <- tgt = do
          (stats, as) <- unzip <$> mapM (genFFIArg javascriptCc) args
-         (statR, (t:ts')) <- return (mempty, ts)
-         cs <- use gsSettings
-         return $ traceCall cs as
-                <> mconcat stats
-                <> [j| `t` = `ApplExpr f' (concat as)`; |]
-                <> copyResult ts'
-                <> statR
+         case ts of
+           (t:ts') -> do
+             cs <- use gsSettings
+             return $ traceCall cs as
+                    <> mconcat stats
+                    <> [j| `t` = `ApplExpr f' (concat as)`; |]
+                    <> copyResult ts'
+                    <> mempty
+           _ -> error "mkApply: empty list"
       | otherwise = do
          (stats, as) <- unzip <$> mapM (genFFIArg javascriptCc) args
          cs <- use gsSettings

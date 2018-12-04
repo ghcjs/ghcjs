@@ -1,5 +1,5 @@
 name:           template-haskell-ghcjs
-version:        2.13.0.0
+version:        2.14.0.0
 -- NOTE: Don't forget to update ./changelog.md
 license:        BSD3
 license-file:   LICENSE
@@ -51,8 +51,8 @@ Library
         Language.Haskell.TH.Lib.Map
 
     build-depends:
-        base        >= 4.9 && < 4.12,
-        ghc-boot-th == 8.4.*,
+        base        >= 4.9 && < 4.13,
+        ghc-boot-th == 8.6.*,
         pretty      == 1.1.*
 
     ghc-options: -Wall

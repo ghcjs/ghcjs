@@ -116,7 +116,7 @@ tryReadShimFile dflags file = do
                  }
           dflags1 = dflags { settings = s1 }
       outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
-      Utils.doCpp dflags1 True False file outfile
+      Utils.doCpp dflags1 True file outfile
       B.readFile outfile
 
 -- suppress line numbers and enable extended syntax
@@ -146,7 +146,7 @@ readShimsArchive dflags archive = do
     infile  <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
     outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
     BL.writeFile infile b
-    Utils.doCpp dflags1 True False infile outfile
+    Utils.doCpp dflags1 True infile outfile
     B.readFile outfile
   return (mconcat srcs')
 

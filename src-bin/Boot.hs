@@ -475,7 +475,7 @@ prepareLibDir = subBuild $ do
   sub $ cd (ghcLib </> "rts") >> cp_r "." rtsLib
   sub $ cd ("data" </> "include") >> installPlatformIncludes inc incNative
   mapM_ (\file -> cp (ghcLib </> file) (ghcjsLib </> file))
-        ["settings", "platformConstants", "llvm-targets"]
+        ["settings", "platformConstants", "llvm-passes", "llvm-targets"]
   let unlitDest    = ghcjsLib </> "bin" </> exe "unlit"
       ghcjsRunDest = ghcjsLib </> exe "ghcjs-run"
   ghcjsRunSrc <- view (bePrograms . bpGhcjsRun . pgmLoc . to fromJust)

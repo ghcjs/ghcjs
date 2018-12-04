@@ -19,19 +19,19 @@ cTargetPlatformString = TargetPlatform_NAME
 cProjectName          :: String
 cProjectName          = "The Glorious Glasgow Haskell Compilation System"
 cProjectGitCommitId   :: String
-cProjectGitCommitId   = "0000000000000000000000000000000000000000"
+cProjectGitCommitId   = "9448fdce111137bf96e4313b6e23fa45264c0443"
 cProjectVersion       :: String
-cProjectVersion       = "8.4.2.20180420"
+cProjectVersion       = "8.6.2"
 cProjectVersionInt    :: String
-cProjectVersionInt    = "804"
+cProjectVersionInt    = "806"
 cProjectPatchLevel    :: String
-cProjectPatchLevel    = "220180420"
+cProjectPatchLevel    = "2"
 cProjectPatchLevel1   :: String
 cProjectPatchLevel1   = "2"
 cProjectPatchLevel2   :: String
-cProjectPatchLevel2   = "20180420"
+cProjectPatchLevel2   = ""
 cBooterVersion        :: String
-cBooterVersion        = "8.4.1.20180414"
+cBooterVersion        = "8.6.1"
 cStage                :: String
 cStage                = show (STAGE :: Int)
 cIntegerLibrary       :: String

@@ -292,7 +292,8 @@ mkdir -p "boot/pkg"
 
 # copy packages by source distribution
 for PKG in base array binary bytestring containers deepseq directory \
-           filepath ghc-boot ghc-boot-th ghci integer-gmp integer-simple \
+           filepath ghc-boot ghc-heap ghc-compact \
+           ghc-boot-th ghci integer-gmp integer-simple \
            parallel pretty primitive process random stm template-haskell \
            mtl parsec text time transformers unix vector Win32; do
   copy_patch_boot_package_sdist "$PKG" ""

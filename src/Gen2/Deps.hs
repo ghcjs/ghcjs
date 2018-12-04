@@ -4,6 +4,7 @@ module Gen2.Deps where
 import           Id
 import           StgSyn
 import           VarSet
+import           Data.List.NonEmpty (toList)
 
 type LiveVars = DVarSet
 
@@ -46,7 +47,7 @@ stgExprLive _ (StgConApp _dc args _tys) =
 stgExprLive _ (StgOpApp _op args _ty) =
   mconcat (map stgArgLive args)
 stgExprLive _ (StgLam bs e) =
-  delDVarSetList (stgExprLive True e) bs
+  delDVarSetList (stgExprLive True e) (toList bs)
 stgExprLive includeLHS (StgCase e b _at alts)
   | includeLHS = el `unionDVarSet` delDVarSet al b
   | otherwise  = delDVarSet al b

@@ -44,6 +44,8 @@ packages:
     - ./pkg/ghc
     - ./pkg/ghc-boot
     - ./pkg/ghc-boot-th
+    - ./pkg/ghc-compact
+    - ./pkg/ghc-heap
     - ./pkg/ghci
     - ./pkg/pretty
     - ./pkg/template-haskell

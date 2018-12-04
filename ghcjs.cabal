@@ -1,5 +1,5 @@
 Name:           ghcjs
-Version:        8.4.0.1
+Version:        8.6.0.1
 Synopsis:       Haskell to JavaScript compiler
 Description:    Haskell to JavaScript compiler based on GHC
 Category:       compiler, web
@@ -89,7 +89,6 @@ Library
                      Gen2.Base,
                      Gen2.Cache,
                      Gen2.DynamicLinking,
-                     Gen2.GHC.PrelRules,
                      Gen2.GHC.Digraph,
                      Gen2.GHC.DsForeign,
                      Compiler.Compat,
@@ -113,8 +112,8 @@ Library
     autogen-modules: Paths_ghcjs
 
     build-depends: base           >= 4        && < 5,
-                   Cabal          >= 2,
-                   ghc-api-ghcjs  >= 8.3     && < 8.5,
+                   Cabal          >= 2.4,
+                   ghc-api-ghcjs  >= 8.5     && < 8.7,
                    ghcjs-th,
                    ghc-boot,
                    ghci-ghcjs,
@@ -129,11 +128,11 @@ Library
                    syb            >= 0.6      && < 0.8,
                    bytestring     >= 0.10     && < 0.11,
                    attoparsec     >= 0.12     && < 0.14,
-                   aeson          >= 1.2      && < 1.4,
+                   aeson          >= 1.4      && < 1.5,
                    text           >= 1.2      && < 1.3,
                    wl-pprint-text >= 1.1      && < 1.3,
-                   lens           >= 4.15     && < 4.17,
-                   yaml           >= 0.8      && < 0.9,
+                   lens           >= 4.15     && < 4.18,
+                   yaml           >= 0.10     && < 0.11,
                    time,
                    transformers,
                    split          >= 0.2      && < 0.3,
@@ -141,6 +140,7 @@ Library
                    vector         >= 0.12     && < 0.13,
                    data-default   >= 0.7      && < 0.8,
                    array          >= 0.4      && < 0.6,
+                   -- experimental binary 0.9 and 0.10 ?
                    binary         >= 0.7      && < 0.9,
                    unordered-containers >= 0.2 && < 0.3,
                    parallel       >= 3.2      && < 3.3,
@@ -266,9 +266,9 @@ Executable ghcjs-boot
                       system-fileio        >= 0.3    && < 0.4,
                       optparse-applicative >= 0.11   && < 0.15,
                       tar                  >= 0.5    && < 0.6,
-                      yaml                 >= 0.8    && < 0.9,
+                      yaml                 >= 0.10   && < 0.11,
                       process              >= 1.2,
-                      time                 >= 1.4    && < 1.9,
+                      time                 >= 1.8    && < 1.10,
                       unix-compat          >= 0.5    && < 0.6,
                       executable-path      >= 0      && < 0.1
 
@@ -345,7 +345,7 @@ test-suite test
                       unordered-containers,
                       shelly               >= 1.5 &&  < 1.9,
                       data-default         >= 0.7 &&  < 0.8,
-                      yaml                 >= 0.8 &&  < 0.9,
+                      yaml                 >= 0.10 && < 0.11,
                       optparse-applicative,
                       directory,
                       http-types           >= 0.11 &&  < 0.12,
@@ -360,7 +360,7 @@ test-suite test
 
 Custom-Setup
   Setup-Depends:      base,
-                      Cabal >= 2.1 && < 2.3,
+                      Cabal >= 2.3 && < 2.5,
                       containers,
                       filepath,
                       directory,

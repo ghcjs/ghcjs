@@ -425,9 +425,12 @@ renameVar i@(TxtI t)
 
 newIdent :: State CompactorState Ident
 newIdent = do
-  (y:ys) <- use identSupply
-  identSupply .= ys
-  return y
+  yys <- use identSupply
+  case yys of
+    (y:ys) -> do
+      identSupply .= ys
+      return y
+    _ -> error "newIdent: empty list"
 
 -- | rename a compactor info entry according to the compactor state (no new renamings are added)
 renameClosureInfo :: CompactorState

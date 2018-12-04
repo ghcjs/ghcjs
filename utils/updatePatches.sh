@@ -28,7 +28,7 @@ update_patch() {
   cd "$TARGET/lib/boot/pkg/$PKG"
   clean_package
   cd "$TARGET/lib"
-  diff -Nru "upstream/pkg/$PKG" "boot/pkg/$PKG" > "$PATCHDIR/$PKG.patch"
+  diff -X "../utils/updatePatches.excludes" -Nru "upstream/pkg/$PKG" "boot/pkg/$PKG" > "$PATCHDIR/$PKG.patch"
   )
 }
 

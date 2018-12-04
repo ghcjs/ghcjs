@@ -1,0 +1,9 @@
+*.rej
+*.orig
+appveyor.yml
+changelog.md
+Generate.hs
+GNUmakefile
+config.mk.in
+HsTimeConfig.h
+

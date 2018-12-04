@@ -95,9 +95,12 @@ withVar s = withIdent (\i -> decl i <> s (ValExpr . JVar $ i))
 
 newIdent :: State [Ident] Ident
 newIdent = do
-  (x:xs) <- get
-  put xs
-  return x
+  xxs <- get
+  case xxs of
+    (x:xs) -> do
+      put xs
+      return x
+    _ -> error "newIdent: empty list"
 
 iex :: Ident -> JExpr
 iex i = (ValExpr . JVar) i

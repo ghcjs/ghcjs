@@ -1,7 +1,7 @@
-diff -Nru upstream/pkg/process/process.cabal boot/pkg/process/process.cabal
---- upstream/pkg/process/process.cabal	2018-01-09 08:27:53.000000000 +0000
-+++ boot/pkg/process/process.cabal	2018-01-09 08:27:53.854488634 +0000
-@@ -79,6 +79,9 @@
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/process.cabal boot/pkg/process/process.cabal
+--- upstream/pkg/process/process.cabal	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/process/process.cabal	2018-12-04 07:40:09.458643118 -0800
+@@ -80,6 +80,9 @@
                     filepath  >= 1.2 && < 1.5,
                     deepseq   >= 1.1 && < 1.5
  
@@ -11,9 +11,9 @@ diff -Nru upstream/pkg/process/process.cabal boot/pkg/process/process.cabal
  test-suite test
    default-language: Haskell2010
    hs-source-dirs: test
-diff -Nru upstream/pkg/process/System/Process/Common.hs boot/pkg/process/System/Process/Common.hs
---- upstream/pkg/process/System/Process/Common.hs	2018-01-09 08:27:53.000000000 +0000
-+++ boot/pkg/process/System/Process/Common.hs	2018-01-09 08:27:53.854488634 +0000
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process/Common.hs boot/pkg/process/System/Process/Common.hs
+--- upstream/pkg/process/System/Process/Common.hs	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/process/System/Process/Common.hs	2018-12-04 07:40:09.458643118 -0800
 @@ -55,6 +55,9 @@
  import System.Posix.Types
  #endif
@@ -33,9 +33,9 @@ diff -Nru upstream/pkg/process/System/Process/Common.hs boot/pkg/process/System/
  data CreateProcess = CreateProcess{
    cmdspec      :: CmdSpec,                 -- ^ Executable & arguments, or shell command.  If 'cwd' is 'Nothing', relative paths are resolved with respect to the current working directory.  If 'cwd' is provided, it is implementation-dependent whether relative paths are resolved with respect to 'cwd' or the current working directory, so absolute paths should be used to ensure portability.
    cwd          :: Maybe FilePath,          -- ^ Optional path to the working directory for the new process
-diff -Nru upstream/pkg/process/System/Process/Internals.hs boot/pkg/process/System/Process/Internals.hs
---- upstream/pkg/process/System/Process/Internals.hs	2018-01-09 08:27:53.000000000 +0000
-+++ boot/pkg/process/System/Process/Internals.hs	2018-01-09 08:27:53.854488634 +0000
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process/Internals.hs boot/pkg/process/System/Process/Internals.hs
+--- upstream/pkg/process/System/Process/Internals.hs	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/process/System/Process/Internals.hs	2018-12-04 07:40:09.458643118 -0800
 @@ -3,6 +3,10 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE InterruptibleFFI #-}
@@ -275,9 +275,9 @@ diff -Nru upstream/pkg/process/System/Process/Internals.hs boot/pkg/process/Syst
  -- ----------------------------------------------------------------------------
  -- Deprecated / compat
  
-diff -Nru upstream/pkg/process/System/Process.hs boot/pkg/process/System/Process.hs
---- upstream/pkg/process/System/Process.hs	2018-01-09 08:27:53.000000000 +0000
-+++ boot/pkg/process/System/Process.hs	2018-01-09 08:27:53.854488634 +0000
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process.hs boot/pkg/process/System/Process.hs
+--- upstream/pkg/process/System/Process.hs	2018-12-04 07:40:09.000000000 -0800
++++ boot/pkg/process/System/Process.hs	2018-12-04 07:40:09.458643118 -0800
 @@ -6,6 +6,10 @@
  #endif
  {-# LANGUAGE InterruptibleFFI #-}
@@ -289,7 +289,7 @@ diff -Nru upstream/pkg/process/System/Process.hs boot/pkg/process/System/Process
  -----------------------------------------------------------------------------
  -- |
  -- Module      :  System.Process
-@@ -718,6 +722,22 @@
+@@ -765,6 +769,22 @@
  -- ----------------------------------------------------------------------------
  -- Interface to C bits
  
@@ -312,7 +312,7 @@ diff -Nru upstream/pkg/process/System/Process.hs boot/pkg/process/System/Process
  foreign import ccall unsafe "terminateProcess"
    c_terminateProcess
          :: PHANDLE
-@@ -735,6 +755,7 @@
+@@ -782,6 +802,7 @@
          -> Ptr CInt
          -> IO CInt
  

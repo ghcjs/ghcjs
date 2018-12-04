@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies     #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Main where
 
@@ -15,4 +16,3 @@ f _ = 2
 
 main :: IO ()
 main = print (f (3 :: Int))
-

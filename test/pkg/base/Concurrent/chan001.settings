@@ -1,4 +1,5 @@
+# test uses an obsolete API
+disabled: true
 disableSpiderMonkey: true
 disableJavaScriptCore: true
 disableTravis: true
-

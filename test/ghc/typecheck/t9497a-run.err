@@ -5,4 +5,14 @@ t9497a-run.hs:2:8: error:
       In an equation for ‘main’: main = _main
     • Relevant bindings include
         main :: IO () (bound at t9497a-run.hs:2:1)
+      Valid hole fits include
+        main :: IO () (bound at t9497a-run.hs:2:1)
+        readLn :: forall a. Read a => IO a
+          with readLn @()
+          (imported from ‘Prelude’ at t9497a-run.hs:1:1
+           (and originally defined in ‘System.IO’))
+        mempty :: forall a. Monoid a => a
+          with mempty @(IO ())
+          (imported from ‘Prelude’ at t9497a-run.hs:1:1
+           (and originally defined in ‘GHC.Base’))
 (deferred type error)

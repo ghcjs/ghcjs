@@ -4,12 +4,13 @@
 base:
   GHC.Conc.Sync:          reportError
   Control.Exception.Base: nonTermination
-  GHC.Exception:          SomeException
+  GHC.Exception.Type:     SomeException
   GHC.TopHandler:
     - runMainIO
     - topHandler
   GHC.Base:
     - $fMonadIO
+  GHC.Maybe:
     - Nothing
     - Just
   GHC.Ptr:
@@ -46,4 +47,3 @@ ghcjs-prim:
     - ignoreException
     - setCurrentThreadResultException
     - setCurrentThreadResultValue
-

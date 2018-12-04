@@ -113,16 +113,18 @@ ghcjsDsForeigns fos = do
   where
    do_ldecl (L loc decl) = putSrcSpanDs loc (do_decl decl)
 
-   do_decl (ForeignImport id _ co spec) = do
+   do_decl (ForeignImport { fd_name = id, fd_i_ext = co, fd_fi = spec }) = do
       traceIf (text "fi start" <+> ppr id)
-      (bs, h, c) <- ghcjsDsFImport (unLoc id) co spec
+      let id' = unLoc id
+      (bs, h, c) <- ghcjsDsFImport id' co spec
       traceIf (text "fi end" <+> ppr id)
       return (h, c, [], bs)
 
-   do_decl (ForeignExport (L _ id) _ co
-                          (CExport (L _ (CExportStatic _ ext_nm cconv)) _)) = do
+   do_decl (ForeignExport { fd_name = L _ id, fd_e_ext = co
+                          , fd_fe = CExport (L _ (CExportStatic _ ext_nm cconv)) _ }) = do
       (h, c, _, _) <- ghcjsDsFExport id co ext_nm cconv False
       return (h, c, [id], [])
+   do_decl (XForeignDecl _) = panic "dsForeigns'"
 
 -- fixme let this return new bindings?
 ghcjsDsFExport :: Id                 -- Either the exported Id,
@@ -837,10 +839,10 @@ ghcjsNativeDsForeigns fos = do
       inclGhcjs = text "#include \"ghcjs.h\""
 
       convertForeignDecl :: DynFlags -> LForeignDecl GhcTc -> LForeignDecl GhcTc
-      convertForeignDecl dflags (L l (ForeignImport n t c (CImport (L lc JavaScriptCallConv) _safety mheader _spec txt))) =
-        (L l (ForeignImport n t c (CImport (noLoc CCallConv) (noLoc PlaySafe) mheader (convertSpec dflags n) txt)))
-      convertForeignDecl _dflags (L l (ForeignExport n t c (CExport (L _ (CExportStatic srcTxt lbl JavaScriptCallConv)) txt))) =
-        (L l (ForeignExport n t c (CExport (noLoc (CExportStatic srcTxt lbl CCallConv)) txt)))
+      convertForeignDecl dflags (L l (ForeignImport c n t (CImport (L lc JavaScriptCallConv) _safety mheader _spec txt))) =
+        (L l (ForeignImport c n t (CImport (noLoc CCallConv) (noLoc PlaySafe) mheader (convertSpec dflags n) txt)))
+      convertForeignDecl _dflags (L l (ForeignExport c n t (CExport (L _ (CExportStatic srcTxt lbl JavaScriptCallConv)) txt))) =
+        (L l (ForeignExport c n t (CExport (noLoc (CExportStatic srcTxt lbl CCallConv)) txt)))
       convertForeignDecl _ x = x
 
       -- convertSpec :: DynFlags -> Located GhcTc -> CImportSpec
@@ -851,7 +853,7 @@ ghcjsNativeDsForeigns fos = do
         "__ghcjs_stub_" ++ zEncodeString (showSDocOneLine dflags (ppr $ idName i))
 
       importStub :: DynFlags -> LForeignDecl GhcTc -> Maybe SDoc
-      importStub dflags (L _l (ForeignImport n _t c (CImport (L _ JavaScriptCallConv) (L _ safety) _mheader spec _txt))) =
+      importStub dflags (L _l (ForeignImport c n _t (CImport (L _ JavaScriptCallConv) (L _ safety) _mheader spec _txt))) =
         Just (mkImportStub dflags (unLoc n) c safety spec)
       importStub _ _ = Nothing
 
@@ -958,25 +960,31 @@ foreignDeclCtxt fo
 
 ghcjsTcFImport :: LForeignDecl GhcRn
                -> TcM (Id, LForeignDecl GhcTc, Bag GlobalRdrElt)
-ghcjsTcFImport (L dloc fo@(ForeignImport (L nloc nm) hs_ty _ imp_decl))
+ghcjsTcFImport (L dloc fo@(ForeignImport { fd_name = L nloc nm, fd_sig_ty = hs_ty
+                                    , fd_fi = imp_decl }))
   = setSrcSpan dloc $ addErrCtxt (foreignDeclCtxt fo)  $
     do { sig_ty <- tcHsSigType (ForSigCtxt nm) hs_ty
        ; (norm_co, norm_sig_ty, gres) <- normaliseFfiType sig_ty
        ; let
            -- Drop the foralls before inspecting the
            -- structure of the foreign type.
-             (_, t_ty)         = tcSplitForAllTys norm_sig_ty
-             (arg_tys, res_ty) = tcSplitFunTys t_ty
+             (bndrs, res_ty)   = tcSplitPiTys norm_sig_ty
+             arg_tys           = mapMaybe binderRelevantType_maybe bndrs
              id                = mkLocalId nm sig_ty
                  -- Use a LocalId to obey the invariant that locally-defined
                  -- things are LocalIds.  However, it does not need zonking,
                  -- (so TcHsSyn.zonkForeignExports ignores it).
-       ; imp_decl' <- ghcjsTcCheckFIType {- sig_ty -} arg_tys res_ty imp_decl
+
+       ; imp_decl' <- ghcjsTcCheckFIType arg_tys res_ty imp_decl
           -- Can't use sig_ty here because sig_ty :: Type and
           -- we need HsType Id hence the undefined
-       ; let fi_decl = ForeignImport (L nloc id) undefined (mkSymCo norm_co) imp_decl'
+       ; let fi_decl = ForeignImport { fd_name = L nloc id
+                                     , fd_sig_ty = undefined
+                                     , fd_i_ext = mkSymCo norm_co
+                                     , fd_fi = imp_decl' }
        ; return (id, L dloc fi_decl, gres) }
 ghcjsTcFImport d = pprPanic "ghcjsTcFImport" (ppr d)
+
 
 ghcjsTcCheckFIType :: [Type] -> Type -> ForeignImport -> TcM ForeignImport
 ghcjsTcCheckFIType {- sig_ty -} arg_tys res_ty (CImport lcconv@(L _ cconv) lsafety@(L _ safety) mh (CFunction target) src)
@@ -1038,18 +1046,10 @@ isGhcjsFFIImportResultTy' dflags ty
       (text $ "JavaScript FFI result type must be a valid CCall FFI result type or JSVal: " ++ showPpr dflags ty)
 
 haveUnliftedFFITypes :: DynFlags -> Bool
-#if __GLASGOW_HASKELL__ >= 711
 haveUnliftedFFITypes dflags = xopt UnliftedFFITypes dflags
-#else
-haveUnliftedFFITypes dflags = xopt Opt_UnliftedFFITypes dflags
-#endif
 
 haveGHCForeignImportPrim :: DynFlags -> Bool
-#if __GLASGOW_HASKELL__ >= 711
 haveGHCForeignImportPrim dflags = xopt GHCForeignImportPrim dflags
-#else
-haveGHCForeignImportPrim dflags = xopt Opt_GHCForeignImportPrim dflags
-#endif
 
 isGhcjsFFITy :: DynFlags -> Type -> Bool
 isGhcjsFFITy = checkNamedTy jsFfiTys
@@ -1127,8 +1127,8 @@ ghcjsTcForeignExports decls
        return (b `consBag` binds, L loc f : fs, gres1 `unionBags` gres2)
 
 ghcjsTcFExport :: ForeignDecl GhcRn
-               -> TcM (LHsBind GhcTc, ForeignDecl GhcTc, Bag GlobalRdrElt)
-ghcjsTcFExport fo@(ForeignExport (L loc nm) hs_ty _ spec)
+          -> TcM (LHsBind GhcTc, ForeignDecl GhcTc, Bag GlobalRdrElt)
+ghcjsTcFExport fo@(ForeignExport { fd_name = L loc nm, fd_sig_ty = hs_ty, fd_fe = spec })
   = addErrCtxt (foreignDeclCtxt fo) $ do
 
     sig_ty <- tcHsSigType (ForSigCtxt nm) hs_ty
@@ -1148,7 +1148,13 @@ ghcjsTcFExport fo@(ForeignExport (L loc nm) hs_ty _ spec)
     -- is *stable* (i.e. the compiler won't change it later),
     -- because this name will be referred to by the C code stub.
     id  <- mkStableIdFromName nm sig_ty loc mkForeignExportOcc
-    return (mkVarBind id rhs, ForeignExport (L loc id) undefined norm_co spec', gres)
+    return ( mkVarBind id rhs
+           , ForeignExport { fd_name = L loc id
+                           , fd_sig_ty = undefined
+                           , fd_e_ext = norm_co, fd_fe = spec' }
+           , gres)
+ghcjsTcFExport d = pprPanic "ghcjsTcFExport" (ppr d)
+
 
 ghcjsTcCheckFEType :: Type -> ForeignExport -> TcM ForeignExport
 ghcjsTcCheckFEType sig_ty (CExport (L l (CExportStatic esrc str cconv)) src) = do

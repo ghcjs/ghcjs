@@ -12,13 +12,15 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Main where
-import Control.Applicative (Applicative(..))
+
+import Data.Kind
 import Control.Monad (Monad(..), join, ap, liftM)
 import Data.Monoid (Monoid(..))
+import Data.Semigroup (Semigroup(..))
 
 -- First we define the type class Monoidy:
 
-class Monoidy (to :: k0 -> k1 -> *) (m :: k1)  where
+class Monoidy (to :: k0 -> k1 -> Type) (m :: k1)  where
   type MComp to m :: k1 -> k1 -> k0
   type MId   to m :: k0
   munit :: MId to m `to` m
@@ -82,7 +84,7 @@ test1 = do { print (mjoin (munit (), Sum 2))
 
 -- We can even provide a special binary operator for the appropriate monoids as follows:
 
-(<+>) :: (Monoidy (→) m, MId (→) m ~ (), MComp (→) m ~ (,)) 
+(<+>) :: (Monoidy (→) m, MId (→) m ~ (), MComp (→) m ~ (,))
        ⇒ m → m → m
 (<+>) = curry mjoin
 
@@ -92,10 +94,13 @@ test2 = print (Sum 1 <+> Sum 2 <+> Sum 4)  -- Sum 7
 -- rather cumbersome in actual use. So, we can give traditional Monad and
 -- Monoid instances for instances of Monoidy:
 
-instance (MId (→) m ~ (), MComp (→) m ~ (,), Monoidy (→) m) 
+instance (MId (→) m ~ (), MComp (→) m ~ (,), Monoidy (→) m)
+       ⇒ Semigroup m where
+  (<>) = curry mjoin
+
+instance (MId (→) m ~ (), MComp (→) m ~ (,), Monoidy (→) m)
        ⇒ Monoid m where
   mempty = munit ()
-  mappend = curry mjoin
 
 instance Applicative Wrapper where
   pure  = return
@@ -108,7 +113,7 @@ instance Monad Wrapper where
 -- And so the following works:
 
 test3
- = do { print (mappend mempty (Sum 2))  
+ = do { print (mappend mempty (Sum 2))
              -- Sum 2
       ; print (mappend (Product 2) (Product 3))
              -- Product 6

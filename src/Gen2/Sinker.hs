@@ -69,10 +69,9 @@ alwaysSinkable (StgNonRec b rhs)
 alwaysSinkable _ = []
 
 isSmallSinkableLit :: Literal -> Bool
-isSmallSinkableLit (MachChar c) = ord c < 100000
-isSmallSinkableLit (MachInt i)  = i > -100000 && i < 100000
-isSmallSinkableLit (MachWord i) = i < 100000
-isSmallSinkableLit _            = False
+isSmallSinkableLit (MachChar c)      = ord c < 100000
+isSmallSinkableLit (LitNumber _ i _) = i > -100000 && i < 100000
+isSmallSinkableLit _                 = False
 
 
 {- |

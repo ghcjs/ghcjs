@@ -61,8 +61,9 @@ data Message
   | ReifyModule         TH.Module
   | ReifyFixity         TH.Name
   | ReifyConStrictness  TH.Name
-  | AddForeignFile      TH.ForeignSrcLang String
+  | AddForeignFilePath  TH.ForeignSrcLang String
   | AddDependentFile    FilePath
+  | AddTempFile         String
   | AddTopDecls         [TH.Dec]
   | AddCorePlugin       String
   | IsExtEnabled        TH.Extension
@@ -78,8 +79,9 @@ data Message
   | ReifyModule'        TH.ModuleInfo
   | ReifyFixity'        (Maybe TH.Fixity)
   | ReifyConStrictness' [TH.DecidedStrictness]
-  | AddForeignFile'
+  | AddForeignFilePath'
   | AddDependentFile'
+  | AddTempFile'        FilePath
   | AddTopDecls'
   | AddCorePlugin'
   | IsExtEnabled'       Bool

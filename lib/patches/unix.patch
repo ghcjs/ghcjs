@@ -1,6 +1,6 @@
-diff -Nru upstream/pkg/unix/System/Posix/Files/Common.hsc boot/pkg/unix/System/Posix/Files/Common.hsc
---- upstream/pkg/unix/System/Posix/Files/Common.hsc	2018-01-09 08:27:54.000000000 +0000
-+++ boot/pkg/unix/System/Posix/Files/Common.hsc	2018-01-09 08:27:55.082366723 +0000
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Files/Common.hsc boot/pkg/unix/System/Posix/Files/Common.hsc
+--- upstream/pkg/unix/System/Posix/Files/Common.hsc	2018-12-04 07:40:10.000000000 -0800
++++ boot/pkg/unix/System/Posix/Files/Common.hsc	2018-12-04 07:40:10.106629885 -0800
 @@ -520,7 +520,7 @@
  -- Note: calls @ftruncate@.
  setFdSize :: Fd -> FileOffset -> IO ()
@@ -10,9 +10,9 @@ diff -Nru upstream/pkg/unix/System/Posix/Files/Common.hsc boot/pkg/unix/System/P
  
  -- -----------------------------------------------------------------------------
  -- pathconf()/fpathconf() support
-diff -Nru upstream/pkg/unix/System/Posix/IO/Common.hsc boot/pkg/unix/System/Posix/IO/Common.hsc
---- upstream/pkg/unix/System/Posix/IO/Common.hsc	2018-01-09 08:27:54.000000000 +0000
-+++ boot/pkg/unix/System/Posix/IO/Common.hsc	2018-01-09 08:27:55.082366723 +0000
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/IO/Common.hsc boot/pkg/unix/System/Posix/IO/Common.hsc
+--- upstream/pkg/unix/System/Posix/IO/Common.hsc	2018-12-04 07:40:10.000000000 -0800
++++ boot/pkg/unix/System/Posix/IO/Common.hsc	2018-12-04 07:40:10.110629805 -0800
 @@ -281,7 +281,7 @@
  -- | May throw an exception if this is an invalid descriptor.
  fdSeek :: Fd -> SeekMode -> FileOffset -> IO FileOffset
@@ -22,9 +22,9 @@ diff -Nru upstream/pkg/unix/System/Posix/IO/Common.hsc boot/pkg/unix/System/Posi
  
  -- -----------------------------------------------------------------------------
  -- Locking
-diff -Nru upstream/pkg/unix/System/Posix/Process/Internals.hs boot/pkg/unix/System/Posix/Process/Internals.hs
---- upstream/pkg/unix/System/Posix/Process/Internals.hs	2018-01-09 08:27:54.000000000 +0000
-+++ boot/pkg/unix/System/Posix/Process/Internals.hs	2018-01-09 08:27:55.082366723 +0000
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Process/Internals.hs boot/pkg/unix/System/Posix/Process/Internals.hs
+--- upstream/pkg/unix/System/Posix/Process/Internals.hs	2018-12-04 07:40:10.000000000 -0800
++++ boot/pkg/unix/System/Posix/Process/Internals.hs	2018-12-04 07:40:10.110629805 -0800
 @@ -1,5 +1,6 @@
  {-# LANGUAGE CApiFFI #-}
  {-# LANGUAGE Trustworthy #-}
@@ -45,9 +45,9 @@ diff -Nru upstream/pkg/unix/System/Posix/Process/Internals.hs boot/pkg/unix/Syst
  
  -- | The exit status of a process
  data ProcessStatus
-diff -Nru upstream/pkg/unix/System/Posix/Signals.hsc boot/pkg/unix/System/Posix/Signals.hsc
---- upstream/pkg/unix/System/Posix/Signals.hsc	2018-02-15 22:32:06.000000000 +0000
-+++ boot/pkg/unix/System/Posix/Signals.hsc	2018-04-16 09:28:51.487622220 +0000
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Signals.hsc boot/pkg/unix/System/Posix/Signals.hsc
+--- upstream/pkg/unix/System/Posix/Signals.hsc	2018-12-04 07:40:10.000000000 -0800
++++ boot/pkg/unix/System/Posix/Signals.hsc	2018-12-04 07:40:10.110629805 -0800
 @@ -349,11 +349,10 @@
                 -> Maybe SignalSet       -- ^ other signals to block
                 -> IO Handler            -- ^ old handler

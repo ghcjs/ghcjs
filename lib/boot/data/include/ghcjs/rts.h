@@ -53,9 +53,9 @@
 
 // SomeException
 #ifdef GHCJS_PROF
-#define MK_SOMEEXCEPTION(dict,except) (h$c2(h$baseZCGHCziExceptionziSomeException_con_e,(dict),(except),h$CCS_SYSTEM))
+#define MK_SOMEEXCEPTION(dict,except) (h$c2(h$baseZCGHCziExceptionziTypeziSomeException_con_e,(dict),(except),h$CCS_SYSTEM))
 #else
-#define MK_SOMEEXCEPTION(dict,except) (h$c2(h$baseZCGHCziExceptionziSomeException_con_e,(dict),(except)))
+#define MK_SOMEEXCEPTION(dict,except) (h$c2(h$baseZCGHCziExceptionziTypeziSomeException_con_e,(dict),(except)))
 #endif
 
 // GHC.Ptr.Ptr
