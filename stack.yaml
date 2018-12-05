@@ -4,7 +4,7 @@
 # $ ./utils/makePackages.sh
 #
 
-resolver: nightly-2018-05-14
+resolver: nightly-2018-12-05
 packages:
   - .
   - ./lib/ghc-api-ghcjs

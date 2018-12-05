@@ -13,7 +13,7 @@ installed under the name `ghc-api-ghcjs`
 #### getting and preparing the source tree
 
 ```
-$ git clone --branch ghc-8.4 https://github.com/ghcjs/ghcjs.git
+$ git clone --branch ghc-8.6 https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init --recursive
 $ ./utils/makePackages.sh
@@ -109,8 +109,8 @@ Example:
 
 ```
 #!/bin/sh
-topdir="/home/luite/.ghcjs/x86_64-linux-8.4.0.1-8.4.2/ghcjs"
-executablename="/home/luite/haskell/ghcjs-8.4/ghcjs/.cabal-sandbox/libexec/x86_64-linux-ghc-8.4.2/ghcjs-8.4.0.1/ghcjs"
+topdir="/home/luite/.ghcjs/x86_64-linux-8.6.0.1-8.6.2/ghcjs"
+executablename="/home/luite/haskell/ghcjs-8.6/ghcjs/.cabal-sandbox/libexec/x86_64-linux-ghc-8.6.2/ghcjs-8.6.0.1/ghcjs"
 exec "$executablename" -B"$topdir" ${1+"$@"}
 ```
 
