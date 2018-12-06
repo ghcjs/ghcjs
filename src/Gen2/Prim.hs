@@ -169,6 +169,18 @@ genPrim _ _ PopCnt16Op        [r] [x]   =
 genPrim _ _ PopCnt32Op        [r] [x]   = PrimInline [j| `r` = h$popCnt32(`x`); |]
 genPrim _ _ PopCnt64Op        [r] [x1,x2] = PrimInline [j| `r` = h$popCnt64(`x1`,`x2`); |]
 genPrim d t PopCntOp          [r] [x]   = genPrim d t PopCnt32Op [r] [x]
+{-
+Pdep8Op
+Pdep16Op
+Pdep32Op
+Pdep64Op
+PdepOp
+Pext8Op
+Pext16Op
+Pext32Op
+Pext64Op
+PextOp
+-}
 
 genPrim _ _ BSwap16Op         [r] [x]   = PrimInline [j| `r` = ((`x` & 0xFF) << 8) | ((`x` & 0xFF00) >> 8); |] -- ab -> ba
 genPrim _ _ BSwap32Op         [r] [x]   = PrimInline [j| `r` = (`x` << 24) | ((`x` & 0xFF00) << 8)
@@ -721,9 +733,7 @@ genPrim _ _ CompactSize [s] [c] =
 
 genPrim _ _ ReallyUnsafePtrEqualityOp [r] [p1,p2] = PrimInline [j| `r` = `p1`===`p2`?1:0; |]
 genPrim _ _ ParOp [r] [_a] = PrimInline [j| `r` = 0; |]
-{-
-SparkOp
--}
+genPrim _ _ SparkOp [r] [a] = PrimInline [j| `r` = `a`; |]
 genPrim _ _ SeqOp [_r] [e] = PRPrimCall [j| return h$e(`e`); |]
 {-
 GetSparkOp
