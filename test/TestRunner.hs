@@ -98,6 +98,8 @@ showParseError (UnexpectedError xs _) = "unexpected: " ++ xs
 
 setupTests :: FilePath -> IO ()
 setupTests tmpDir = do
+  hSetBuffering stdout LineBuffering
+  hSetBuffering stderr LineBuffering
   args <- getArgs
   (testArgs, leftoverArgs) <-
     -- case runP (runParser AllowOpts optParser args) (prefs idm) of
