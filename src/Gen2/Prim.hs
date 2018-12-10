@@ -126,7 +126,7 @@ genPrim _ _ WordAdd2Op      [h,l] [x,y] = PrimInline [j| `h` = h$wordAdd2(`x`,`y
 genPrim _ _ WordSubOp         [r] [x,y] = PrimInline [j| `r` = (`x` - `y`)|0 |]
 genPrim _ _ WordSubCOp        [r,c] [x,y] =
   PrimInline [j| `r` = (`x` - `y`)|0;
-                 `c` = ((`y` >>> 0) < (`x` >>> 0)) ? 1 : 0;
+                 `c` = ((`y` >>> 0) > (`x` >>> 0)) ? 1 : 0;
                |]
 genPrim _ _ WordMulOp         [r] [x,y] =
   PrimInline [j| `r` = h$mulWord32(`x`,`y`); |]
