@@ -119,7 +119,10 @@ genPrim _ _ ISllOp            [r] [x,y] = PrimInline [j| `r` = `x` << `y` |]
 genPrim _ _ ISraOp            [r] [x,y] = PrimInline [j| `r` = `x` >> `y` |]
 genPrim _ _ ISrlOp            [r] [x,y] = PrimInline [j| `r` = (`x` >>> `y`)|0; |]
 genPrim _ _ WordAddOp         [r] [x,y] = PrimInline [j| `r` = (`x` + `y`)|0; |]
-{- new op in 8.6    , WordAddCOp -}
+genPrim _ _ WordAddCOp      [r,c] [x,y] = PrimInline [j| var t = (`x`>>>0) + (`y`>>>0);
+                                                         `r` = t|0;
+                                                         `c` = t>4294967295?1:0;
+                                                       |]
 genPrim _ _ WordAdd2Op      [h,l] [x,y] = PrimInline [j| `h` = h$wordAdd2(`x`,`y`);
                                                          `l` = `Ret1`;
                                                        |]
