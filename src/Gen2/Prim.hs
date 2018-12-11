@@ -169,19 +169,18 @@ genPrim _ _ PopCnt16Op        [r] [x]   =
 genPrim _ _ PopCnt32Op        [r] [x]   = PrimInline [j| `r` = h$popCnt32(`x`); |]
 genPrim _ _ PopCnt64Op        [r] [x1,x2] = PrimInline [j| `r` = h$popCnt64(`x1`,`x2`); |]
 genPrim d t PopCntOp          [r] [x]   = genPrim d t PopCnt32Op [r] [x]
-{-
-Pdep8Op
-Pdep16Op
-Pdep32Op
-Pdep64Op
-PdepOp
-Pext8Op
-Pext16Op
-Pext32Op
-Pext64Op
-PextOp
--}
-
+genPrim _ _ Pdep8Op           [r] [s,m] = PrimInline [j| `r` = h$pdep8(`s`, `m`); |]
+genPrim _ _ Pdep16Op          [r] [s,m] = PrimInline [j| `r` = h$pdep16(`s`, `m`); |]
+genPrim _ _ Pdep32Op          [r] [s,m] = PrimInline [j| `r` = h$pdep32(`s`, `m`); |]
+genPrim _ _ Pdep64Op          [ra,rb] [sa,sb,ma,mb] = PrimInline
+  [j| `ra` = h$pdep64(`sa`,`sb`,`ma`,`mb`); `rb` = `Ret1`; |]
+genPrim d t PdepOp            rs xs = genPrim d t Pdep32Op rs xs
+genPrim _ _ Pext8Op           [r] [s,m] = PrimInline [j| `r` = h$pext8(`s`, `m`); |]
+genPrim _ _ Pext16Op          [r] [s,m] = PrimInline [j| `r` = h$pext16(`s`, `m`); |]
+genPrim _ _ Pext32Op          [r] [s,m] = PrimInline [j| `r` = h$pext32(`s`, `m`); |]
+genPrim _ _ Pext64Op          [ra,rb] [sa,sb,ma,mb] = PrimInline
+  [j| `ra` = h$pext64(`sa`,`sb`,`ma`,`mb`); `rb` = `Ret1`; |]
+genPrim d t PextOp            rs xs     = genPrim d t Pext32Op rs xs
 genPrim _ _ BSwap16Op         [r] [x]   = PrimInline [j| `r` = ((`x` & 0xFF) << 8) | ((`x` & 0xFF00) >> 8); |] -- ab -> ba
 genPrim _ _ BSwap32Op         [r] [x]   = PrimInline [j| `r` = (`x` << 24) | ((`x` & 0xFF00) << 8)
                                                              | ((`x` & 0xFF0000) >> 8) | (`x` >>> 24);
