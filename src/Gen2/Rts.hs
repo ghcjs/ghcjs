@@ -400,6 +400,13 @@ fun h$catch_e {
 }
 `ClosureInfo "h$catch_e" (CIRegs 0 [PtrV]) "exception handler" (CILayoutFixed 2 [PtrV,IntV]) CIStackFrame noStatic`;
 
+fun h$dataToTag_e {
+  `R1` = (`R1`===true)?1:((typeof `R1` === 'object')?(`R1`.f.a-1):0);
+  `adjSpN' 1`;
+  return `Stack`[`Sp`];
+}
+`ClosureInfo "h$dataToTag_e" (CIRegs 0 [PtrV]) "data to tag" (CILayoutFixed 0 []) CIStackFrame noStatic`;
+
 
 // function application to one argument
 fun h$ap1_e {

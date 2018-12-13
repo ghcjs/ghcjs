@@ -30,6 +30,8 @@ module Gen2.Prim where
 
 import           DynFlags
 import           PrimOp
+import           CoreSyn
+import           DataCon
 import           TcType hiding (Check)
 import           Type
 import           TyCon
@@ -65,6 +67,7 @@ isInlinePrimOp p = p `S.notMember` notInlinePrims
       , YieldOp
       , CompactAdd, CompactAddWithSharing
       , SeqOp
+      , DataToTagOp
       ]
 
 
@@ -770,15 +773,10 @@ PrefetchValueOp1
 -- false/true: bool
 -- number: tag 0 (single constructor primitive data)
 -- object: haskell heap object
-genPrim _ t DataToTagOp [r] [d]
-  | isBoolTy t        = PrimInline [j| `r` = `d`?1:0; |]
-  | Just (tc, _) <- splitTyConApp_maybe t, isProductTyCon tc
-                      = PrimInline [j| `r` = 0; |]
-  | isAlgType t && not (isUnliftedType t)
-                      = PrimInline [j| `r` = `d`.f.a-1; |]
-  | otherwise         =
-      PrimInline [j| `r` = (`d`===true)?1:((typeof `d` === 'object')?(`d`.f.a-1):0) |]
-
+genPrim _ t DataToTagOp [_r] [d] = PRPrimCall
+  [j| `Stack`[++`Sp`] = h$dataToTag_e;
+      return h$e(`d`);
+    |]
 genPrim _ t TagToEnumOp [r] [tag]
   | isBoolTy t = PrimInline [j| `r` = `tag`?true:false;  |]
   | otherwise  = PrimInline [j| `r` = h$tagToEnum(`tag`) |]
