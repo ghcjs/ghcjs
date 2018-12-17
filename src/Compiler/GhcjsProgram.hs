@@ -135,8 +135,11 @@ optParser = GhcjsSettings
             <*> (maybe NoBase BaseFile <$> optStr ( long "use-base" ))
             <*> optStr ( long "link-js-lib" )
             <*> optStr ( long "js-lib-outputdir" )
-            <*> (maybe [] (:[]) <$> optStr ( long "js-lib-src" )) -- fixme!
+            <*> strings ( long "js-lib-src" )
             <*> switch ( long "dedupe" )
+
+strings :: Mod OptionFields String -> Parser [String]
+strings = many <$> option str
 
 optStr :: Mod OptionFields String -> Parser (Maybe String)
 optStr = optional . option str
