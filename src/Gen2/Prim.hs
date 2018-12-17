@@ -285,7 +285,7 @@ genPrim _ _ CopyArrayOp         [] [a,o1,ma,o2,n] =
 genPrim _ _ ResizeMutableByteArrayOp_Char [r] [a,n] =
   PrimInline [j| `r` = h$resizeMutableByteArray(`a`, `n`); |]
 genPrim _ _ ShrinkMutableByteArrayOp_Char [] [a,n] =
-  PrimInline [j| h$ShrinkMutableByteArray(`a`, `n`); |]
+  PrimInline [j| h$shrinkMutableByteArray(`a`, `n`); |]
 genPrim _ _ CompareByteArraysOp [r] [a1,o1,a2,o2,n] =
   PrimInline [j| `r` = h$compareByteArrays(`a1`,`o1`,`a2`,`o2`,`n`); |]
 genPrim d t CopyMutableArrayOp  [] [a1,o1,a2,o2,n] =
