@@ -1,0 +1,3 @@
+# this appears to test something with undefined behaviour
+# unsafe right shift with same number of bits as the type
+disabled: true

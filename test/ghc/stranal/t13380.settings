@@ -1,0 +1,3 @@
+# this test is also broken on GHC
+disabled: true
+disableUnopt: true

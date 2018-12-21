@@ -1,5 +1,5 @@
 # this file describes the test group locations with their name
-# 
+#
 # every group (directory) is scanned for Haskell (.hs or .lhs)
 # files that start with a lower case letter (Uppercase means
 # that it's a module used by some test).
@@ -40,3 +40,4 @@ requiredPackages:
   - vector
   - stm
   - parsec
+  - async

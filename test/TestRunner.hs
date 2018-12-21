@@ -450,7 +450,7 @@ runhaskellResult :: TestOpts
 runhaskellResult testOpts settings file = do
     let args = tsArguments settings
     r <- runProcess (testsuiteLocation testOpts </> directory file) (runhaskellProgram testOpts)
-             ([ "-w", encodeString $ filename file] ++ args) ""
+             (["-w", encodeString $ filename file] ++ args) ""
     return r
 
 extraJsFiles :: FilePath -> IO [String]

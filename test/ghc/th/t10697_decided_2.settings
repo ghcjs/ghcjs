@@ -1,0 +1,2 @@
+disableOpt: true
+compArguments: ["-XStrictData"]

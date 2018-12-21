@@ -1,0 +1,3 @@
+# ghc package not yet available for ghcjs
+disabled: true
+

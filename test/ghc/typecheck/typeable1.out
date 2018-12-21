@@ -1,0 +1,3 @@
+(ComposeK * * Maybe Maybe,Int)
+(ComposeK * * Maybe,Maybe)
+(ComposeK * *,Maybe)

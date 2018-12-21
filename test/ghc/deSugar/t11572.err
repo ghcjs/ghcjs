@@ -1,0 +1,4 @@
+Prelude.undefined
+CallStack (from HasCallStack):
+  error, called at ./GHC/Err.hs:78:14 in base:GHC.Err
+  undefined, called at t11572.hs:6:18 in main:Main
