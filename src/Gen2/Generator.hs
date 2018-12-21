@@ -46,6 +46,7 @@ import           TysPrim
 import           Name
 import           GHC
 import           Id
+import           HscTypes
 
 import           Control.Applicative
 import           Control.DeepSeq
@@ -160,15 +161,16 @@ generate :: GhcjsSettings
          -> DynFlags
          -> Module
          -> [StgTopBinding] -- StgPgm
+         -> [SptEntry]
          -> CollectedCCs
          -> ByteString -- ^ binary data for the .js_o object file
-generate settings df m s cccs =
+generate settings df m s spt_entries cccs =
   let (uf, s') = sinkPgm m s
   in trace' ("generate\n" ++ intercalate "\n\n" (map showIndent s)) $
 
      flip evalState (initState df m uf) $ do
         ifProfiling' $ initCostCentres cccs
-        (st, lus) <- genUnits df m s'
+        (st, lus) <- genUnits df m s' spt_entries
         -- (exported symbol names, javascript statements) for each linkable unit
         p <- forM lus $ \u ->
            mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
@@ -218,8 +220,9 @@ genUnits :: HasDebugCallStack
          => DynFlags
          -> Module
          -> [StgTopBinding] -- StgPgm
+         -> [SptEntry]
          -> G (Object.SymbolTable, [LinkableUnit]) -- ^ the final symbol table and the linkable units
-genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
+genUnits dflags m ss spt_entries = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
     where
       -- ss' = [l | StgTopLifted l <- ss]
 
@@ -243,7 +246,7 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
       generateGlobalBlock (st, lus) = do
         glbl <- use gsGlobal
         staticInit <-
-          initStaticPtrs (collectStaticInfo [l | StgTopLifted l <- ss])
+          initStaticPtrs spt_entries
         (st', _, bs) <- serializeLinkableUnit m st [] [] []
                          ( O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
@@ -301,19 +304,11 @@ genUnits dflags m ss = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
         return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq`
           (st', Just $ LinkableUnit bs topDeps [] allDeps (S.toList extraDeps) required fRefs)
 
-data SomeStaticPtr = SomeStaticPtr
-  { sspId          :: Id
-  , sspInfo        :: Id
-  , sspTarget      :: Id
-  , sspFingerprint :: Fingerprint
-  }
-
-initStaticPtrs :: [SomeStaticPtr] -> C
+initStaticPtrs :: [SptEntry] -> C
 initStaticPtrs ptrs = mconcat <$> mapM initStatic ptrs
   where
-    initStatic p = do
-      i <- jsId (sspId p)
-      let Fingerprint w1 w2 = sspFingerprint p
+    initStatic (SptEntry sp_id (Fingerprint w1 w2)) = do
+      i <- jsId sp_id
       fpa <- concat <$> mapM (genLit . mkMachWord64 . fromIntegral) [w1,w2]
       let sptInsert = ApplExpr (ValExpr (JVar (TxtI "h$hs_spt_insert")))
                                (fpa ++ [i])
@@ -321,30 +316,6 @@ initStaticPtrs ptrs = mconcat <$> mapM initStatic ptrs
                    `sptInsert`;
                  })
                |]
-
-collectStaticInfo :: HasDebugCallStack => StgPgm -> [SomeStaticPtr]
-collectStaticInfo pgm = eltsUFM (collect collectStaticPtr emptyUFM pgm)
-  where
-    collect :: (UniqFM a -> Id -> StgRhs -> UniqFM a)
-            -> UniqFM a -> StgPgm -> UniqFM a
-    collect f !m [] = m
-    collect f !m (d:ds) = collect f (collectDecl f m d) ds
-
-    collectDecl :: (UniqFM a -> Id -> StgRhs -> UniqFM a)
-                -> UniqFM a -> StgBinding -> UniqFM a
-    collectDecl f !m (StgNonRec b e) = f m b e
-    collectDecl f !m (StgRec bs)     = foldl' (\m (b,e) -> f m b e) m bs
-
-    collectStaticPtr !m b
-      (StgRhsCon _cc con [ StgLitArg (LitNumber _ w1 _)
-                         , StgLitArg (LitNumber _ w2 _)
-                         , StgVarArg info
-                         , StgVarArg tgt
-                         ] )
-      | getUnique con == staticPtrDataConKey
-      = let fp = Fingerprint (fromIntegral w1) (fromIntegral w2)
-        in  addToUFM m b (SomeStaticPtr b info tgt fp)
-    collectStaticPtr !m _ _ = m
 
 hasExport :: StgBinding -> Bool
 hasExport bnd =
@@ -1652,8 +1623,10 @@ loadParams from args = do
     loadConVarsIfUsed fr cs = mconcat $ zipWith f cs [(1::Int)..]
       where f (x,u) n = loadIfUsed (SelExpr fr (dataFields ! n)) x u
 
+
 genPrimOp :: ExprCtx -> PrimOp -> [StgArg] -> Type -> G (JStat, ExprResult)
 genPrimOp top op args t = do
+
   as <- concatMapM genArg args
   df <- use gsDynFlags
   -- fixme: should we preserve/check the primreps?

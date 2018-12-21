@@ -53,6 +53,11 @@ data UseBase = NoBase             -- ^ don't use incremental linking
              | BaseFile  FilePath -- ^ load base from file
              | BaseState Base     -- ^ use this base
 
+instance Show UseBase where
+  show NoBase         = "NoBase"
+  show (BaseFile {})  = "BaseFile"
+  show (BaseState {}) = "BaseState"
+
 instance Monoid UseBase where
   mempty             = NoBase
 
@@ -77,7 +82,7 @@ data GhcjsSettings =
                 , gsJsLibOutputDir     :: Maybe FilePath
                 , gsJsLibSrcs          :: [FilePath]
                 , gsDedupe             :: Bool
-                }
+                } deriving Show
 
 usingBase :: GhcjsSettings -> Bool
 usingBase s | NoBase <- gsUseBase s = False

@@ -115,6 +115,10 @@ deriving instance Show Role
 instance Show (GenStgArg Var) where
   show a@(StgVarArg occ) = "StgVarArg " ++ show occ ++ " :: " ++ show (stgArgType a)
   show (StgLitArg l)   = "StgLitArg " ++ show l
+deriving instance Show UnfoldingGuidance
+deriving instance Show UnfoldingSource
+deriving instance Show Unfolding
+
 
 s :: a -> Set a
 s = S.singleton

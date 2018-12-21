@@ -244,4 +244,4 @@ ghcjsCompileModule settings jsEnv env core mod = do
       stg' <- stg2stg dflags stg
       let cost_centre_info =
             (S.toList local_ccs ++ caf_ccs, caf_cc_stacks)
-      return $ variantRender gen2Variant settings dflags mod' stg' cost_centre_info
+      return $ variantRender gen2Variant settings dflags mod' stg' (cg_spt_entries core) cost_centre_info

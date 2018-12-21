@@ -769,10 +769,6 @@ PrefetchAddrOp1
 PrefetchValueOp1
 
 -}
--- data may be the following:
--- false/true: bool
--- number: tag 0 (single constructor primitive data)
--- object: haskell heap object
 genPrim _ t DataToTagOp [_r] [d] = PRPrimCall
   [j| `Stack`[++`Sp`] = h$dataToTag_e;
       return h$e(`d`);

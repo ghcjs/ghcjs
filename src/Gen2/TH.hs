@@ -43,6 +43,7 @@ import           SimplStg
 import           GHC.Serialized
 import           Convert
 import           Bag
+import           StaticPtrTable
 
 import           Control.Concurrent
 import qualified Control.Exception              as E
@@ -206,13 +207,17 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
       prep_expr     <- corePrepExpr dflags hsc_env ds_expr
       n             <- modifyMVar (thSplice js_env)
                                   (\n -> let n' = n+1 in pure (n',n'))
+      let th_mod   = mod n
+          th_binds0 = [bind n u prep_expr]
+      (spt_entries, th_binds1) <- sptCreateStaticBinds hsc_env th_mod th_binds0
       let (stg_pgm0, cost_centre_info) =
-            coreToStg dflags (mod n) [bind n u prep_expr]
+            coreToStg dflags th_mod th_binds1
       stg_pgm1 <- stg2stg dflags stg_pgm0
       return (Gen2.generate js_settings
                             dflags
                             (mod n)
                             stg_pgm1
+                            spt_entries
                             cost_centre_info
              , symb n)
   where
