@@ -10,14 +10,14 @@ addons:
             - hvr-ghc
         packages:
             - build-essential
-            - cabal-install-2.2
-            - ghc-8.4.2
+            - cabal-install-2.4
+            - ghc-8.6.3
             - alex-3.1.7
             - happy-1.19.5
 
 before_install:
-    - nvm install 8
-    - export PATH=$PWD/.cabal-sandbox/bin:$HOME/.cabal/bin:/opt/ghc/8.4.2/bin:/opt/cabal/2.2/bin:/opt/alex/3.1.7/bin:/opt/happy/1.19.5/bin:$PATH
+    - nvm install 10
+    - export PATH=$PWD/.cabal-sandbox/bin:$HOME/.cabal/bin:/opt/ghc/8.6.3/bin:/opt/cabal/2.4/bin:/opt/alex/3.1.7/bin:/opt/happy/1.19.5/bin:$PATH
     - export
 
 install:
