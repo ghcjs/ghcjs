@@ -1,24 +1,7 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/filepath.cabal boot/pkg/filepath/filepath.cabal
---- upstream/pkg/filepath/filepath.cabal	2018-12-04 07:31:26.000000000 -0800
+--- upstream/pkg/filepath/filepath.cabal	2018-12-21 20:02:04.000000000 -0800
 +++ boot/pkg/filepath/filepath.cabal	2018-12-04 07:40:09.022652022 -0800
-@@ -1,6 +1,6 @@
- cabal-version:  >= 1.18
- name:           filepath
--version:        1.4.2
-+version:        1.4.2.1
- -- NOTE: Don't forget to update ./changelog.md
- license:        BSD3
- license-file:   LICENSE
-@@ -12,7 +12,7 @@
- category:       System
- build-type:     Simple
- synopsis:       Library for manipulating FilePaths in a cross platform way.
--tested-with:    GHC==8.2.2, GHC==8.0.2, GHC==7.10.3, GHC==7.8.4, GHC==7.6.3, GHC==7.4.2
-+tested-with:    GHC==8.4.3, GHC==8.2.2, GHC==8.0.2, GHC==7.10.3, GHC==7.8.4, GHC==7.6.3, GHC==7.4.2
- description:
-     This package provides functionality for manipulating @FilePath@ values, and is shipped with both <https://www.haskell.org/ghc/ GHC> and the <https://www.haskell.org/platform/ Haskell Platform>. It provides three modules:
-     .
-@@ -47,8 +47,12 @@
+@@ -47,6 +47,10 @@
          System.FilePath.Posix
          System.FilePath.Windows
  
@@ -27,25 +10,13 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/filepath.caba
 +            System.FilePath.Current
 +
      build-depends:
--        base >= 4 && < 4.12
-+        base >= 4 && < 4.13
- 
-     ghc-options: -Wall
+         base >= 4 && < 4.13
  
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/prologue.txt boot/pkg/filepath/prologue.txt
 --- upstream/pkg/filepath/prologue.txt	1969-12-31 16:00:00.000000000 -0800
 +++ boot/pkg/filepath/prologue.txt	2018-12-04 07:40:09.022652022 -0800
 @@ -0,0 +1 @@
 +Library for manipulating FilePath's in a cross platform way.
-diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/README.md boot/pkg/filepath/README.md
---- upstream/pkg/filepath/README.md	2018-12-04 07:31:26.000000000 -0800
-+++ boot/pkg/filepath/README.md	2018-12-04 07:40:09.022652022 -0800
-@@ -1,4 +1,4 @@
--# FilePath [![Hackage version](https://img.shields.io/hackage/v/filepath.svg?label=Hackage)](https://hackage.haskell.org/package/filepath) [![Linux Build Status](https://img.shields.io/travis/haskell/filepath.svg?label=Linux%20build)](https://travis-ci.org/haskell/filepath) [![Windows Build Status](https://img.shields.io/appveyor/ci/ndmitchell/filepath.svg?label=Windows%20build)](https://ci.appveyor.com/project/ndmitchell/filepath)
-+# FilePath [![Hackage version](https://img.shields.io/hackage/v/filepath.svg?label=Hackage)](https://hackage.haskell.org/package/filepath) [![Linux Build Status](https://img.shields.io/travis/haskell/filepath/master.svg?label=Linux%20build)](https://travis-ci.org/haskell/filepath) [![Windows Build Status](https://img.shields.io/appveyor/ci/ndmitchell/filepath/master.svg?label=Windows%20build)](https://ci.appveyor.com/project/ndmitchell/filepath)
- 
- The `filepath` package provides functionality for manipulating `FilePath` values, and is shipped with both [GHC](https://www.haskell.org/ghc/) and the [Haskell Platform](https://www.haskell.org/platform/). It provides three modules:
- 
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/System/FilePath/Current.hs boot/pkg/filepath/System/FilePath/Current.hs
 --- upstream/pkg/filepath/System/FilePath/Current.hs	1969-12-31 16:00:00.000000000 -0800
 +++ boot/pkg/filepath/System/FilePath/Current.hs	2018-12-04 07:40:09.022652022 -0800
@@ -55,7 +26,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/System/FilePa
 +#define IS_CURRENT      1
 +#include "Internal.hs"
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/System/FilePath/Internal.hs boot/pkg/filepath/System/FilePath/Internal.hs
---- upstream/pkg/filepath/System/FilePath/Internal.hs	2018-12-04 07:31:26.000000000 -0800
+--- upstream/pkg/filepath/System/FilePath/Internal.hs	2018-12-21 20:02:04.000000000 -0800
 +++ boot/pkg/filepath/System/FilePath/Internal.hs	2018-12-04 07:40:09.022652022 -0800
 @@ -1,4 +1,6 @@
 -#if __GLASGOW_HASKELL__ >= 704
