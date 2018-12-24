@@ -1,0 +1,3 @@
+# this test times out due to a huge amount of time being spent in the parser
+# upstream issue
+disabled: true
