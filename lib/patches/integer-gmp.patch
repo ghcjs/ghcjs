@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gmp.buildinfo.in boot/pkg/integer-gmp/integer-gmp.buildinfo.in
---- upstream/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-12-04 07:40:09.000000000 -0800
-+++ boot/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-12-04 07:40:09.238647611 -0800
+--- upstream/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-12-24 07:45:51.000000000 +0100
++++ boot/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-12-24 07:45:51.676965858 +0100
 @@ -2,4 +2,4 @@
  extra-lib-dirs: @GMP_LIB_DIRS@
  extra-libraries: @GMP_LIBS@
@@ -8,8 +8,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gm
 -install-includes: HsIntegerGmp.h ghc-gmp.h
 +install-includes: HsIntegerGmp.h
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gmp.cabal boot/pkg/integer-gmp/integer-gmp.cabal
---- upstream/pkg/integer-gmp/integer-gmp.cabal	2018-12-04 07:40:09.000000000 -0800
-+++ boot/pkg/integer-gmp/integer-gmp.cabal	2018-12-04 07:40:09.238647611 -0800
+--- upstream/pkg/integer-gmp/integer-gmp.cabal	2018-12-24 07:45:51.000000000 +0100
++++ boot/pkg/integer-gmp/integer-gmp.cabal	2018-12-24 07:45:51.676965858 +0100
 @@ -67,6 +67,9 @@
    c-sources:
      cbits/wrappers.c
@@ -21,9 +21,9 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gm
      GHC.Integer
      GHC.Integer.Logarithms
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits/ghcjsbn.js
---- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1969-12-31 16:00:00.000000000 -0800
-+++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2018-12-04 10:00:26.498107130 -0800
-@@ -0,0 +1,2013 @@
+--- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1970-01-01 01:00:00.000000000 +0100
++++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2018-12-24 12:41:33.852115499 +0100
+@@ -0,0 +1,2017 @@
 +/*
 +   GHCJS bignum library for integer-gmp package
 +
@@ -36,7 +36,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +#include <ghcjs/rts.h>
 +
 +// #define GHCJSBN_TRACE_INTEGER 1
-+#define GHCJSBN_ASSERT_INTEGER 1
++// #define GHCJSBN_ASSERT_INTEGER 1
 +
 +// bits per limb
 +#define GHCJSBN_BITS 28
@@ -1087,7 +1087,11 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +}
 +
 +function h$ghcjsbn_shr_neg_b(b, s) {
-+  throw new Error ("shr_neg_b not implemented");
++  if(s === 0) return b;
++  if(h$ghcjsbn_cmp_bb(b, h$ghcjsbn_zero_b) === GHCJSBN_EQ) return b;
++  var t = h$ghcjsbn_sub_bw(b, 1);
++  t = h$ghcjsbn_shr_b(t, s);
++  return h$ghcjsbn_add_bw(t, 1);
 +}
 +
 +// b << s :: BigNat -> Int -> BigNat
@@ -2038,8 +2042,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +  return r;
 +}
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-12-04 07:40:09.000000000 -0800
-+++ boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-12-04 07:40:09.238647611 -0800
+--- upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-12-24 07:45:51.000000000 +0100
++++ boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-12-24 07:45:51.676965858 +0100
 @@ -1,4 +1,5 @@
  {-# LANGUAGE BangPatterns #-}
 +
@@ -2160,8 +2164,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  -- | Compute next prime greater than @/n/@ probalistically.
  --
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-12-04 07:40:09.000000000 -0800
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-12-04 07:40:09.238647611 -0800
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-12-24 07:45:51.000000000 +0100
++++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-12-24 07:45:51.676965858 +0100
 @@ -2,6 +2,11 @@
  {-# LANGUAGE MagicHash #-}
  {-# LANGUAGE UnboxedTuples #-}
@@ -2214,8 +2218,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
                          _   -> 2#
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-12-04 07:40:09.000000000 -0800
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-12-04 07:40:09.238647611 -0800
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-12-24 07:45:51.000000000 +0100
++++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-12-24 07:45:51.676965858 +0100
 @@ -4,6 +4,9 @@
  {-# LANGUAGE UnliftedFFITypes #-}
  {-# LANGUAGE CPP #-}
@@ -2276,8 +2280,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  -- | Compute base-2 log of 'Word#'
  --
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/src/GHC/Integer/Type.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-12-04 07:40:09.000000000 -0800
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-12-04 07:40:09.238647611 -0800
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-12-24 07:45:51.000000000 +0100
++++ boot/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-12-24 07:45:51.676965858 +0100
 @@ -9,6 +9,9 @@
  {-# LANGUAGE RebindableSyntax #-}
  {-# LANGUAGE NegativeLiterals #-}
