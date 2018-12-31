@@ -588,16 +588,18 @@ data CgSettings = CgSettings
   , csInlineAlloc     :: Bool
   , csTraceRts        :: Bool
   , csAssertRts       :: Bool
+  , csDebugAlloc      :: Bool
   , csTraceForeign    :: Bool
   , csProf            :: Bool
   }
 
 instance Default CgSettings where
-  def = CgSettings False False False False False False False False False
+  def = CgSettings False False False False False False False False False False
 
 dfCgSettings :: DynFlags -> CgSettings
 dfCgSettings df = def { csTraceRts  = "-DGHCJS_TRACE_RTS"  `elem` opt_P df
                       , csAssertRts = "-DGHCJS_ASSERT_RTS" `elem` opt_P df
+                      , csDebugAlloc = "-DGHCJS_DEBUG_ALLOC" `elem` opt_P df
                       , csProf      = WayProf `elem` ways df
                                       -- FIXME: this part is inlined from Settings.hs to avoid circular imports
                       }

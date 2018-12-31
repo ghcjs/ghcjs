@@ -64,12 +64,16 @@ closureConstructors s =
     declClsConstr i as fs = TxtI i ||= jfun (addCCArg as)
             [j| `checkC`;
                 var x = `addCCField $ zip ["f", "d1", "d2", "m"] fs`;
+                `notifyAlloc x`;
                 `traceAlloc x`;
                 return x;
               |]
 
     traceAlloc x | csTraceRts s = [j| h$traceAlloc(`x`); |]
                  | otherwise    = mempty
+
+    notifyAlloc x | csDebugAlloc s = [j| h$debugAlloc_notifyAlloc(`x`); |]
+                  | otherwise      = mempty
 
     -- only JSVal can typically contain undefined or null
     -- although it's possible (and legal) to make other Haskell types
@@ -111,6 +115,7 @@ closureConstructors s =
                            [j| `checkC`;
                                var x = `addCCField [("f", jsv "f"), ("d1", jsv "x1"),
                                                    ("d2", toJExpr obj), ("m", ji 0)]`;
+                               `notifyAlloc x`;
                                `traceAlloc x`;
                                return x;
                              |]
