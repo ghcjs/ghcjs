@@ -303,7 +303,10 @@ done
 copy_patch_boot_package_sdist "Cabal" "Cabal/"
 
 # packages for which source distribution does not work
-copy_patch_boot_package_list "ghc-prim" "changelog.md cbits/ GHC/ ghc-prim.cabal LICENSE Setup.hs tests/"
+# CAUTION: Do not use trailing "/" on the directory names. The BSD version of
+# "cp" will copy only the contents of the directories in that case and not the
+# directories themselves.
+copy_patch_boot_package_list "ghc-prim" "changelog.md cbits GHC ghc-prim.cabal LICENSE Setup.hs tests/"
 
 # GHCJS packages
 (
