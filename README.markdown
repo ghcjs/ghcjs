@@ -67,7 +67,7 @@ GHCJS can be installed with GHC 7.10.2 or later.
 Get `ghcjs` from Github and install it:
 
     $ git clone https://github.com/ghcjs/ghcjs.git
-    $ cabal install ./ghcjs
+    $ cabal install ./ghcjs.cabal
 
 #### Build the Base Libraries
 
