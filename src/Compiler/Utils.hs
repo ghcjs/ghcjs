@@ -223,6 +223,10 @@ doCpp dflags raw input_fn output_fn = do
                     ++ map SysTools.Option sse_defs
                     ++ map SysTools.Option avx_defs
                     ++ mb_macro_include
+        -- Preserve comments, as these are imortant for closure compiler, and the
+        -- preprocessor can mistake slashes in regular expressions for the start of
+        -- a comment
+                    ++ [ SysTools.Option     "-CC" ]
         -- Set the language mode to assembler-with-cpp when preprocessing. This
         -- alleviates some of the C99 macro rules relating to whitespace and the hash
         -- operator, which we tend to abuse. Clang in particular is not very happy
