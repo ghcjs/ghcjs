@@ -74,6 +74,7 @@
 // use the old-fashioned Node API
 #include <node.h>
 #include <stdio.h>
+#include <string.h>
 
 using namespace v8;
 
