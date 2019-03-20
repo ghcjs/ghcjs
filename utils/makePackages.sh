@@ -75,6 +75,14 @@ gnuln() {
     fi
 }
 
+gnucp() {
+    if hash gcp 2>/dev/null; then
+        gcp "$@"
+    else
+        cp "$@"
+    fi
+}
+
 # apply overrides
 apply_overrides() {
   echo "apply_overrides: $1"
@@ -92,7 +100,7 @@ apply_overrides() {
       if [ $LINK -ne 0 ]; then
         gnuln -rs "$PKGINPUT/$1/$i" "$TARGET/$1/$i"
       else
-        cp "$PKGINPUT/$1/$i" "$TARGET/$1/$i"
+        gnucp "$PKGINPUT/$1/$i" "$TARGET/$1/$i"
       fi
     fi
  done
@@ -110,7 +118,7 @@ copy_file() {
     rm -f "$FILE"
     gnuln -rs "$SRCPATH/$FILE" "$FILE"
   else
-    cp "$SRCPATH/$FILE" "."
+    gnucp "$SRCPATH/$FILE" "."
   fi
 }
 
@@ -125,7 +133,7 @@ copy_dir() {
     rm -f "$DIR"
     gnuln -rs "$SRCPATH/$DIR" "$DIR"
   else
-    cp -r "$SRCPATH/$DIR" "."
+    gnucp -r "$SRCPATH/$DIR" "."
   fi
 }
 
@@ -195,7 +203,7 @@ copy_patch_boot_package_list() {
     for FILE in $LIST; do
       # echo "copying file: $PKGSRC/$FILE"
       # echo "   $PWD"
-      cp -a "$PKGSRC/$FILE" "."
+      gnucp -a "$PKGSRC/$FILE" "."
     done
   )
 
@@ -245,7 +253,7 @@ then
 mkdir -p inplace/bin
 cd utils/genprimopcode
 cabal build --builddir=dist
-cp dist/build/genprimopcode/genprimopcode ../../inplace/bin
+gnucp dist/build/genprimopcode/genprimopcode ../../inplace/bin
 )
 fi
 
@@ -262,11 +270,11 @@ do
         if [ -f "$GHCSRC/$CACHED" ]
         then
           # exists: update cached version
-          cp "$GHCSRC/$CACHED" "$CACHED"
+          gnucp "$GHCSRC/$CACHED" "$CACHED"
         else
           # does not exist: copy cached version into GHC tree
           mkdir -p "$GHCSRC/${CACHED%/*}"
-          cp "$CACHED" "$GHCSRC/$CACHED"
+          gnucp "$CACHED" "$GHCSRC/$CACHED"
         fi
     fi
 done
@@ -391,7 +399,7 @@ done
 
 mkdir -p "autogen"
 
-cp "$GHCSRC/compiler/stage2/build/Config.hs" "autogen/Config.hs"
+gnucp "$GHCSRC/compiler/stage2/build/Config.hs" "autogen/Config.hs"
 
 # copy includes
 mkdir -p "includes"
@@ -530,7 +538,7 @@ $GENPRIM --primop-vector-tycons      < "$WORKDIR/primops.txt" > primop-vector-ty
 # boot/pkg/ghc-prim
 $GENPRIM --make-haskell-source < "$WORKDIR/primops.txt" > "$TARGET/boot/data/Prim.hs"
 $GENPRIM --make-haskell-wrappers < "$WORKDIR/primops.txt" > "$TARGET/boot/data/PrimopWrappers.hs"
-cp "$WORKDIR/primops.txt" "$TARGET/boot/data/primops.txt"
+gnucp "$WORKDIR/primops.txt" "$TARGET/boot/data/primops.txt"
 
 ) # ghc-api-ghcjs/includes
 ) # ghc-api-ghcjs
