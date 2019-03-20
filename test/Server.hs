@@ -46,7 +46,10 @@ import           Text.Read
 startServer :: FilePath -> IO Int
 startServer path = do
   s <- socket AF_INET Stream defaultProtocol
-  bind s (SockAddrInet aNY_PORT iNADDR_ANY)
+  addr:_ <- getAddrInfo (Just $ defaultHints { addrSocketType = Stream, addrFlags = [AI_PASSIVE] })
+                        (Just "0.0.0.0")
+                        Nothing
+  bind s (addrAddress addr)
   listen s 4
   forkIO $
     Warp.runSettingsSocket Warp.defaultSettings s
