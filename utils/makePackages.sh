@@ -388,7 +388,7 @@ cd "compiler"
 for DIR in backpack basicTypes cbits cmm codeGen coreSyn deSugar ghci hsSyn \
            iface llvmGen main nativeGen parser prelude profiling rename \
            simplCore simplStg specialise stgSyn stranal typecheck types \
-           utils ; do
+           utils; do
   copy_dir "$GHCSRC/compiler" "$DIR"
 done
 
