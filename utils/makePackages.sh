@@ -159,6 +159,9 @@ copy_patch_boot_package_sdist() {
   # collect the files of the upstream package by making a source distribution
   (
   cd "$PKGSRC"
+  if [ -f ./configure.ac ]; then
+      autoreconf -i
+  fi
   rm -f "dist-install/$PKG-*.tar.gz"
   cabal sdist --builddir=dist-install
   )
@@ -242,6 +245,7 @@ if [ ! -f ./libraries/time/lib/include/HsTimeConfig.h ]; then
     echo "configuring time package"
 (
 cd libraries/time
+autoreconf -i
 ./configure
 )
 fi
@@ -384,7 +388,7 @@ cd "compiler"
 for DIR in backpack basicTypes cbits cmm codeGen coreSyn deSugar ghci hsSyn \
            iface llvmGen main nativeGen parser prelude profiling rename \
            simplCore simplStg specialise stgSyn stranal typecheck types \
-           utils vectorise; do
+           utils ; do
   copy_dir "$GHCSRC/compiler" "$DIR"
 done
 
@@ -410,7 +414,7 @@ for DIR in rts stg; do
   copy_dir "$GHCSRC/includes" "$DIR"
 done
 
-for FILE in Cmm.h CodeGen.Platform.hs ghcautoconf.h ghcconfig.h ghcplatform.h \
+for FILE in Cmm.h CodeGen.Platform.hs ghcconfig.h ghcplatform.h \
             HsFFI.h MachDeps.h RtsAPI.h Rts.h Stg.h; do
   copy_file "$GHCSRC/includes" "$FILE"
 done
@@ -498,7 +502,7 @@ for FILE in LICENSE Setup.hs CHANGES.md; do
   copy_file "$GHCSRC/utils/haddock/haddock-library" "$FILE"
 done
 
-for DIR in src test fixtures vendor; do
+for DIR in src test fixtures; do
   copy_dir "$GHCSRC/utils/haddock/haddock-library" "$DIR"
 done
 )
