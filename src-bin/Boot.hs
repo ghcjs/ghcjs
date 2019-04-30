@@ -552,21 +552,21 @@ exe :: FilePath -> FilePath
 exe = bool isWindows (<.>"exe") id
 
 -- fixme this part will fail to compile
-#ifdef WINDOWS
-  -- compile the resources we need for the runner to prevent Windows from
-  -- trying to detect programs that require elevated privileges
-  ghcjsTop <- view (beLocations . blGhcjsTopDir)
-  let windres = Program "windres"
-                        "windres"
-                        Nothing
-                        (Just $ ghcjsTop </>
-                                  ".." </>
-                                  "mingw" </>
-                                  "bin" </>
-                                  "windres.exe")
-                        []
-  subTop $ run_ windres ["runner.rc", "-o", "runner-resources.o"]
-#endif
+-- #ifdef WINDOWS
+--   -- compile the resources we need for the runner to prevent Windows from
+--   -- trying to detect programs that require elevated privileges
+--   ghcjsTop <- view (beLocations . blGhcjsTopDir)
+--   let windres = Program "windres"
+--                         "windres"
+--                         Nothing
+--                         (Just $ ghcjsTop </>
+--                                   ".." </>
+--                                   "mingw" </>
+--                                   "bin" </>
+--                                   "windres.exe")
+--                         []
+--   subTop $ run_ windres ["runner.rc", "-o", "runner-resources.o"]
+-- #endif
 
 buildDocIndex :: B ()
 buildDocIndex = subTop' "doc" $ do
