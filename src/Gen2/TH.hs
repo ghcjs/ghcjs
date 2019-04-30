@@ -44,6 +44,12 @@ import           GHC.Serialized
 import           Convert
 import           Bag
 import           StaticPtrTable
+import           Finder
+import           Avail
+import           ConLike
+import           StgSyn
+import           CostCentre
+import           NameEnv
 
 import           Control.Concurrent
 import qualified Control.Exception              as E
@@ -253,6 +259,37 @@ getThRunner js_env hsc_env dflags m = do
         return (insertActiveRunner m' r runners', (r, fin))
   fin >> return r
 
+{-
+  generate the "virtual" linked object for a hs-boot file
+ -}
+bootObject :: GhcjsSettings
+           -> DynFlags
+           -> Module
+           -> ModDetails
+           -> LinkedObj
+bootObject js_settings dflags m details =
+  let mn      = moduleName m
+      stg_pgm = mapMaybe mk_decl (md_exports details)
+      mk_decl (Avail n)
+        | Just ty_thing <- lookupNameEnv (md_types details) n
+        = mk_decl_ty n ty_thing
+      mk_decl _ = Nothing
+
+      mk_decl_ty n (AnId i)                    = mk_decl_id n i
+      mk_decl_ty n (AConLike (RealDataCon dc)) = Nothing
+      mk_decl_ty _ _                           = Nothing
+      mk_decl_id n i = Just
+        (StgTopLifted (
+         (StgNonRec i (StgRhsClosure dontCareCCS
+                                   noBinderInfo
+                                   []
+                                   ReEntrant
+                                   []
+                                    (StgApp i [])))))
+  in ObjLoaded
+       (moduleNameString mn ++ " [boot]")
+       (Gen2.generate js_settings dflags m stg_pgm [] emptyCollectedCCs)
+
 linkTh :: GhcjsEnv
        -> GhcjsSettings        -- settings (contains the base state)
        -> [FilePath]           -- extra js files
@@ -267,8 +304,23 @@ linkTh env settings js_files dflags pkgs hpt code = do
       pkgs' | isJust code = L.nub $ pkgs ++ th_deps_pkgs
             | otherwise   = th_deps_pkgs
       is_root   = const True
-      linkables = map (expectJust "link".hm_linkable) home_mod_infos
+      linkables = concatMap mk_linkable home_mod_infos
+      mk_linkable :: HomeModInfo -> [LinkedObj]
+      mk_linkable hm = maybe (generate_linkable hm)
+                             convert_linkable
+                             (hm_linkable hm)
+
+      convert_linkable :: Linkable -> [LinkedObj]
+      convert_linkable = map ObjFile . getOfiles
+
+      generate_linkable :: HomeModInfo -> [LinkedObj]
+      generate_linkable hm = [bootObject settings
+                                         dflags
+                                         (mi_module $ hm_iface hm)
+                                         (hm_details hm)]
+
       getOfiles (LM _ _ us) = map nameOfObject (filter isObject us)
+
       link      = Gen2.link' dflags'
                              env
                              settings
@@ -283,12 +335,10 @@ linkTh env settings js_files dflags pkgs hpt code = do
                          , thisInstalledUnitId = thrunnerPackage -- thisPackage = thrunnerPackage
                          }
       obj_files = maybe []
-                        (\b -> ObjLoaded "<Template Haskell>" b :
-                               map ObjFile (concatMap getOfiles linkables))
+                        (\b -> ObjLoaded "<Template Haskell>" b : linkables)
                         code
       packageLibPaths :: InstalledUnitId -> [FilePath]
       packageLibPaths pkg = maybe [] libraryDirs (lookupInstalledPackage dflags pkg)
-      -- deps  = map (\pkg -> (pkg, packageLibPaths pkg)) pkgs'
       cache_key = T.pack $
         (show . L.nub . L.sort . map Gen2.funPackage . S.toList $ th_deps) ++
         show (ways dflags') ++
