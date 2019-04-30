@@ -92,7 +92,13 @@ import           Gen2.Printer             (pretty)
 import           Gen2.Rts                 (rtsText, rtsDeclsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
-
+#ifdef mingw32_HOST_OS
+import           Data.Char                (chr)
+import qualified FileCleanup
+import           Numeric                  (showOct)
+import qualified SysTools
+#endif
+  
 type LinkableUnit = (Package, Module, Int) -- ^ module and the index of the block in the object file
 type Module       = Text
 
@@ -344,7 +350,7 @@ writeRunner settings dflags out = when (gsBuildRunner settings) $ do
   src   <- B.readFile (cd </> out </> "all" <.> "js")
   node  <- B.readFile (topDir dflags </> "node")
   templ <- T.readFile (topDir dflags </> "runner.c-tmpl")
-  runnerSrc <- SysTools.newTempName dflags "c"
+  runnerSrc <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "c"
   -- FIXME: this does not take the node extra arguments into account
   T.writeFile runnerSrc $
     substPatterns [] [ ("js",     bsLit src)
