@@ -159,9 +159,6 @@ copy_patch_boot_package_sdist() {
   # collect the files of the upstream package by making a source distribution
   (
   cd "$PKGSRC"
-  if [ -f ./configure.ac ]; then
-      autoreconf -i
-  fi
   rm -f "dist-install/$PKG-*.tar.gz"
   cabal sdist --builddir=dist-install
   )
@@ -245,7 +242,6 @@ if [ ! -f ./libraries/time/lib/include/HsTimeConfig.h ]; then
     echo "configuring time package"
 (
 cd libraries/time
-autoreconf -i
 ./configure
 )
 fi
