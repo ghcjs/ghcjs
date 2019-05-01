@@ -130,7 +130,7 @@ copy_dir() {
   # echo "  $SRCPATH"
   # echo "  $DIR"
   if [ $LINK -ne 0 ]; then
-    rm -f "$DIR"
+    rm -rf "$DIR"
     gnuln -rs "$SRCPATH/$DIR" "$DIR"
   else
     gnucp -r "$SRCPATH/$DIR" "."
