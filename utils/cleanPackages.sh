@@ -20,20 +20,20 @@ TARGET="$GHCJSROOT/lib"
 cd "$TARGET"
 
 # customized ghcjs dependencies
-rm -f ghc-api-ghcjs
-rm -f ghci-ghcjs
-rm -f haddock-api-ghcjs
-rm -f haddock-library-ghcjs
-rm -f template-haskell-ghcjs
+rm -rf ghc-api-ghcjs
+rm -rf ghci-ghcjs
+rm -rf haddock-api-ghcjs
+rm -rf haddock-library-ghcjs
+rm -rf template-haskell-ghcjs
 
 # boot packages
-rm -f boot/pkg
-rm -f boot/ghcjs-node.tar
+rm -rf boot/pkg
+rm -rf boot/ghcjs-node.tar
 
 # generated from primops.txt for boot/pkg/ghc-prim
-rm -f boot/data/primops.txt
-rm -f boot/data/primops.txt.pp
-rm -f boot/data/Prim.hs
-rm -f boot/data/PrimopWrappers.hs
+rm -rf boot/data/primops.txt
+rm -rf boot/data/primops.txt.pp
+rm -rf boot/data/Prim.hs
+rm -rf boot/data/PrimopWrappers.hs
 
 )
