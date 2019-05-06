@@ -463,7 +463,7 @@ runit verbosity cli nonopts = do
                         multi_instance
                         expand_env_vars False force
     ["update", filename] ->
-        registerPackage filename verbosity cli
+       registerPackage filename verbosity cli
                         multi_instance
                         expand_env_vars True force
     "unregister" : pkgarg_strs@(_:_) -> do
@@ -622,7 +622,14 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
   let err_msg = "missing --global-package-db option, location of global package database unknown\n"
   global_conf <-
      case [ f | FlagGlobalConfig f <- my_flags ] of
-        [] -> die err_msg
+        [] -> do mb_dir <- getLibDir
+                 case mb_dir of
+                   Nothing  -> die err_msg
+                   Just dir -> do
+                     r <- lookForPackageDBIn dir
+                     case r of
+                       Nothing -> die ("Can't find package database in " ++ dir)
+                       Just path -> return path
         fs -> return (last fs)
 
   -- The value of the $topdir variable used in some package descriptions
