@@ -285,7 +285,7 @@ main = do
       cleanCache
       prepareLibDir
       let base = e ^. beLocations . blGhcjsLibDir
-      setenv "CFLAGS" $ "-I" <> msysPath (toTextI (base </> "include"))
+      setenv "CFLAGS" $ "-I" <> toTextI (base </> "include")
       installFakes
       installStage1
       removeFakes
@@ -348,8 +348,8 @@ msysPath p
   | isWindows =
       let backToForward '\\' = '/'
           backToForward x    = x
-          isRel = "." `T.isPrefixOf` p -- fixme
-      in bool isRel "" "/" <> T.map backToForward (T.filter (/=':') p)
+          withoutSlash = "." `T.isPrefixOf` p || "\\" `T.isPrefixOf` p
+      in bool withoutSlash "" "/" <> T.map backToForward (T.filter (/=':') p)
   | otherwise = p
 
 optParser' :: ParserInfo BootSettings
@@ -442,7 +442,9 @@ initPackageDB = do
       rm_f (dir </> "package.conf")
       initDB "--user" (dir </> "package.conf.d")
     initDB dbName db = do
-      rm_rf db >> mkdir_p db
+      rm_rf db
+      -- ghcjs-pkg init throws error in windows if dir already exists
+      when (not isWindows) (mkdir_p db)
       ghcjs_pkg_ ["init", toTextI db] `catchAny_` return ()
       ghcjs_pkg_ ["recache", dbName]
 
@@ -1009,15 +1011,15 @@ configureBootLocations :: BootSettings
                        -> BootPrograms
                        -> IO BootLocations
 configureBootLocations bs pgms = do
-  ghcLibDir    <- fromText . msysPath . T.strip <$> run' bs (pgms ^. bpGhc)
+  ghcLibDir    <- fromText . T.strip <$> run' bs (pgms ^. bpGhc)
                     ["--print-libdir"]
-  ghcjsLibDir  <- fromText . msysPath . T.strip <$> run' bs (pgms ^. bpGhcjs)
+  ghcjsLibDir  <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs)
                     ["--ghcjs-booting-print", "--print-libdir"]
-  ghcjsTopDir  <- fromText . msysPath . T.strip <$> run' bs (pgms ^. bpGhcjs)
+  ghcjsTopDir  <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs)
                     ["--ghcjs-booting-print", "--print-topdir"]
-  globalDB     <- fromText . msysPath . T.strip <$> run' bs (pgms ^. bpGhcjs)
+  globalDB     <- fromText . T.strip <$> run' bs (pgms ^. bpGhcjs)
                     ["--ghcjs-booting-print", "--print-global-db"]
-  userDBT      <- msysPath . T.strip <$> run' bs (pgms ^. bpGhcjs)
+  userDBT      <- T.strip <$> run' bs (pgms ^. bpGhcjs)
                     ["--ghcjs-booting-print", "--print-user-db-dir"]
   when (T.null (toTextI ghcjsLibDir)) $
     failWith ("Could not determine GHCJS library installation path.\n" <>
