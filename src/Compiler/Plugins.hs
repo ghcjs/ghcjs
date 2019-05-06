@@ -99,6 +99,25 @@ getValueSafely orig_dflags js_env hsc_env val_name expected_type = do
   where
     dflags = hsc_dflags hsc_env
 
+eqPluginType :: Type -> Type -> Bool
+eqPluginType expected_type ty =
+   expected_type `eqType` ty || isGhcjsPlugin ty
+
+{-
+  TODO: this check should really verify whether the UnitId is the same as the
+        ghc-api-ghcjs that ghcjs was built with. Can we get that info
+        from Cabal / CPP?
+ -}
+isGhcjsPlugin :: Type -> Bool
+isGhcjsPlugin ty
+  | Just tc <- tyConAppTyCon_maybe ty
+  , Just m  <- nameModule_maybe (getName tc)
+  = moduleNameString (moduleName m) == "Plugins" &&
+    "ghc-api-ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m) &&
+    occNameString (nameOccName (getName tc)) == "Plugin"
+  | otherwise = False
+
+
 getHValueSafely :: DynFlags -> GhcjsEnv
                 -> HscEnv -> Name -> Type -> IO (Maybe HValue)
 getHValueSafely orig_dflags js_env hsc_env orig_name expected_type = do
@@ -131,7 +150,7 @@ getHValueSafely orig_dflags js_env hsc_env orig_name expected_type = do
     Just (AnId id) -> do
         -- Check the value type in the interface against the type recovered from the type constructor
         -- before finally casting the value to the type we assume corresponds to that constructor
-        if expected_type `eqType` idType id
+        if expected_type `eqPluginType` idType id
           then do
             -- Link in the module that contains the value, if it has such a module
             case nameModule_maybe val_name of
@@ -146,15 +165,18 @@ getHValueSafely orig_dflags js_env hsc_env orig_name expected_type = do
 
 remapName :: HscEnv -> HscEnv -> Name -> IO Name
 remapName src_env tgt_env val_name
-  | Just m <- nameModule_maybe val_name =
-    case remapUnit sdf tdf (moduleName m) (moduleUnitId m) of
+  | Just m <- nameModule_maybe val_name = do
+    let mn = moduleName m
+        mu = moduleUnitId m
+    case remapUnit sdf tdf mn mu of
       Nothing         ->
         throwCmdLineErrorS (hsc_dflags tgt_env) $ missingTyThingErrorGHC val_name
-      Just tgt_unitid ->
+      Just tgt_unitid -> do
         let new_m = mkModule tgt_unitid (moduleName m)
-        in  pure $ mkExternalName (nameUnique val_name) new_m
+        pure $ mkExternalName (nameUnique val_name) new_m
                                   (nameOccName val_name) (nameSrcSpan val_name)
-  | otherwise = pure val_name
+  | otherwise = do
+      throwCmdLineErrorS (hsc_dflags tgt_env) $ missingTyThingErrorGHC val_name
   where
     sdf = hsc_dflags src_env
     tdf = hsc_dflags tgt_env
@@ -169,15 +191,26 @@ remapUnit src_dflags tgt_dflags module_name unit
   | Just _ <- lookupPackage tgt_dflags unit = Just unit
   -- if we're building the package, then we don't have a PackageConfig for it
   | unit == thisPackage tgt_dflags
-  , tgt_config:_    <- searchPackageId tgt_dflags (SourcePackageId . mkFastString . unitToPkg . unitIdString $ unit)
+  , tgt_config:_    <- searchPackageId tgt_dflags
+            (SourcePackageId . mkFastString . unitToPkg . unitIdString $ unit)
   , Just m <- lookup module_name (instantiatedWith tgt_config) =
     Just (moduleUnitId m)
   -- otherwise look up package with same package id (e.g. foo-0.1)
+  -- TODO: If we have multiple matches we just pick the first one here.
+  --       We could (should?) do better picking the one with the best
+  --       version match (including dependencies), or we should work towards
+  --       having the build tool always pass in the exact plugins-package-id
   | Just src_config <- lookupPackage src_dflags unit
-  , tgt_config:_    <- searchPackageId tgt_dflags (sourcePackageId src_config)
-  , Just m <- lookup module_name (instantiatedWith tgt_config)
+  = listToMaybe (mapMaybe (moduleInstantiated module_name) $
+                searchPackageId tgt_dflags (sourcePackageId src_config))
+  | otherwise = Nothing
+
+moduleInstantiated :: ModuleName -> PackageConfig -> Maybe UnitId
+moduleInstantiated module_name config
+  | Just m <- lookup module_name (instantiatedWith config)
   = Just (moduleUnitId m)
-    -- Just (unitId tgt_config)
+  | Just e <- lookup module_name (exposedModules config)
+  = Just $ maybe (DefiniteUnitId (DefUnitId $ unitId config)) moduleUnitId e
   | otherwise = Nothing
 
 initPluginsEnv :: DynFlags -> Maybe HscEnv -> IO (Maybe HscEnv, HscEnv)
@@ -190,60 +223,28 @@ initPluginsEnv orig_dflags _ = do
       dflags0 = orig_dflags { settings = ghcSettings }
       dflags1 = gopt_unset dflags0 Opt_HideAllPackages
       dflags2 = updateWays $
-         dflags1 { packageFlags  = [] -- filterPackageFlags (packageFlags dflags1)
-                 -- , extraPkgConfs = filterPackageConfs . extraPkgConfs dflags1
-                 , packageDBFlags = filterPackageDBFlags . packageDBFlags $ dflags1
-                 , ways          = filter (/= WayCustom "js") (ways dflags1)
-                 , hiSuf         = removeJsPrefix (hiSuf dflags1)
-                 , dynHiSuf      = removeJsPrefix (dynHiSuf dflags1)
+         dflags1 { packageFlags   = []
+                 , packageDBFlags = hostPackageDBFlags . packageDBFlags $ dflags1
+                 , ways           = filter (/= WayCustom "js") (ways dflags1)
+                 , hiSuf          = removeJsPrefix (hiSuf dflags1)
+                 , dynHiSuf       = removeJsPrefix (dynHiSuf dflags1)
                  }
   dflags3 <- initDynFlags dflags2
   (dflags, units) <- initPackages dflags3
   env <- newHscEnv dflags
   pure (Just env, env)
 
-{-
-Ignore package flags for now and. Perhaps we will need to restore this at
-some point for module renaming.
-
-filterPackageFlags :: [PackageFlag] -> [PackageFlag]
-filterPackageFlags = map fixPkg
-  where
-    fixPkg (ExposePackage xs (UnitIdArg uid) mr)
-      = let pkg = unitToPkg uid
-            xs' = "-package " ++ pkg
-        in  ExposePackage xs' (PackageArg pkg) mr
-    fixPkg x = x
--}
+hostPackageDBFlags :: [PackageDBFlag] -> [PackageDBFlag]
+hostPackageDBFlags = mapMaybe f
+  where f (PackageDB (HostPkgConfFile file)) =
+            Just (PackageDB $ PkgConfFile file)
+        f (PackageDB (PkgConfFile {})) = Nothing
+        f x = Just x
 
 unitToPkg :: String -> String
 unitToPkg xs
   | ('-':ys) <- dropWhile (/='-') (reverse xs) = reverse ys
   | otherwise                                  = xs
-
-filterPackageDBFlags :: [PackageDBFlag] -> [PackageDBFlag]
-filterPackageDBFlags = mapMaybe f
-  where
-    f (PackageDB pcr) = PackageDB <$> filterPackageConfs pcr
-    f x               = Just x
-
-
-filterPackageConfs :: PkgConfRef -> Maybe PkgConfRef -- [PkgConfRef] -> [PkgConfRef]
-filterPackageConfs = fixPkgConf -- mapMaybe fixPkgConf
-  where
-    dtu '.' = '_'
-    dtu x   = x
-    ghcjsConf = "-ghcjs-" ++ Info.getCompilerVersion ++
-                "-ghc" ++ map dtu Info.getGhcCompilerVersion ++
-                "-packages.conf.d"
-    ghcConf   = "-ghc-" ++ Info.getGhcCompilerVersion ++
-                "-packages.conf.d"
-    fixPkgConf (PkgConfFile file)
-      | ghcjsConf `isSuffixOf` file = Just (PkgConfFile $
-          (reverse . drop (length ghcjsConf) . reverse $ file) ++ ghcConf)
-      | "package.conf.inplace" `isSuffixOf` file = Nothing
-    fixPkgConf x = Just x
-
 
 wrongTyThingError :: Name -> TyThing -> SDoc
 wrongTyThingError name got_thing = hsep [text "The name", ppr name, ptext (sLit "is not that of a value but rather a"), pprTyThingCategory got_thing]

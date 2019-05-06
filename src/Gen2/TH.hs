@@ -416,7 +416,22 @@ handleRunnerReq runner msg =
       TH.AddTempFile xs              -> TH.AddTempFile'                   <$> TH.qAddTempFile xs
       TH.AddDependentFile f          -> TH.qAddDependentFile f            >>  pure TH.AddDependentFile'
       TH.AddTopDecls decs            -> TH.qAddTopDecls decs              >>  pure TH.AddTopDecls'
-      TH.AddCorePlugin name          -> TH.qAddCorePlugin name            >>  pure TH.AddCorePlugin'
+      TH.AddCorePlugin plugin        -> do
+        hsc_env <- env_top <$> getEnv
+        r <- liftIO $ findHomeModule hsc_env (mkModuleName plugin)
+        let err = hang
+              (text "addCorePlugin: invalid plugin module "
+                 <+> text (show plugin)
+              )
+              2
+              (text "Plugins in the current package can't be specified.")
+        case r of
+          Found {} -> addErr err
+          FoundMultiple {} -> addErr err
+          _ -> return ()
+        th_coreplugins_var <- tcg_th_coreplugins <$> getGblEnv
+        updTcRef th_coreplugins_var (plugin:)
+        pure TH.AddCorePlugin'
       TH.IsExtEnabled ext            -> TH.IsExtEnabled'                  <$> TH.qIsExtEnabled ext
       TH.ExtsEnabled                 -> TH.ExtsEnabled'                   <$> TH.qExtsEnabled
       _                              -> term >> error "handleRunnerReq: unexpected request"
