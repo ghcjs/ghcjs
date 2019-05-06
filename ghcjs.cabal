@@ -59,6 +59,15 @@ flag runtime-assertions
   default:     False
   manual:      True
 
+-- build against the template haskell package from the host GHC
+--  (which must be built with the GHCJS patches)
+flag use-host-template-haskell
+  description: build against template-haskell package from the host GHC
+               instead of template-haskell-ghcjs
+  default:     False
+  manual:      True
+
+
 Library
     if os(Windows)
       cpp-options: -DWINDOWS
@@ -111,12 +120,16 @@ Library
     other-modules: Paths_ghcjs
     autogen-modules: Paths_ghcjs
 
+    if(flag(use-host-template-haskell))
+        build-depends: ghci
+    else
+        build-depends: template-haskell-ghcjs, ghci-ghcjs
+
     build-depends: base           >= 4        && < 5,
                    Cabal          >= 2.4,
-                   ghc-api-ghcjs  >= 8.5     && < 8.7,
+                   ghc-api-ghcjs,
                    ghcjs-th,
                    ghc-boot,
-                   ghci-ghcjs,
                    directory,
                    filepath,
                    containers,
@@ -124,7 +137,6 @@ Library
                    mtl,
                    ghc-paths,
                    template-haskell,
-                   template-haskell-ghcjs,
                    syb            >= 0.6      && < 0.8,
                    bytestring     >= 0.10     && < 0.11,
                    attoparsec     >= 0.12     && < 0.14,
@@ -186,16 +198,18 @@ Executable haddock-ghcjs
     Default-Language: Haskell2010
     hs-source-dirs: src-bin, src-bin/haddock
     other-modules: ResponseFile
+
+    Build-Depends: ghc-api-ghcjs,
+                   haddock-api-ghcjs
+
     Build-Depends:  base                >= 4    &&  < 5,
                     process,
-                    ghc-api-ghcjs,
                     transformers,
                     transformers-compat,
                     containers,
                     directory,
                     filepath,
-                    ghcjs,
-                    haddock-api-ghcjs >= 2.15
+                    ghcjs
     GHC-Options:    -Wall
 
 Executable hsc2hs-ghcjs
