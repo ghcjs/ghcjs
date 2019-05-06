@@ -71,6 +71,7 @@ import qualified Data.Text.IO                    as T
 import           Data.Time.Clock
 import           Data.Traversable
 import qualified Data.Vector                     as V
+import qualified Data.Version                    as Version
 import           Data.Yaml                       ((.:))
 import qualified Data.Yaml                       as Yaml
 import           Filesystem
@@ -102,6 +103,7 @@ import           Shelly                          ((<.>), fromText)
 import qualified Shelly                          as Sh
 
 import           Text.Read                       (readEither, readMaybe)
+import           Text.ParserCombinators.ReadP    (readP_to_S)
 
 --
 import           Compiler.GhcjsProgram           (printVersion)
@@ -861,7 +863,8 @@ cabalStage1 pkgs = sub $ do
   let configureOpts = []
   globalFlags <- cabalGlobalFlags
   flags <- cabalInstallFlags (length pkgs == 1)
-  let args = globalFlags ++ ("install" : pkgs) ++
+  cmd <- cabalInstallCommand
+  let args = globalFlags ++ (cmd : pkgs) ++
              [ "--allow-boot-library-installs"
              ] ++ map ("--configure-option="<>) configureOpts ++ flags
   checkInstallPlan pkgs args
@@ -874,10 +877,19 @@ cabalInstall [] = do
 cabalInstall pkgs = do
   globalFlags <- cabalGlobalFlags
   flags <- cabalInstallFlags (length pkgs == 1)
+  cmd <- cabalInstallCommand
   setenv "GHCJS_BOOTING" "1"
-  let args = globalFlags ++ "install" : pkgs ++ flags
+  let args = globalFlags ++ cmd : pkgs ++ flags
   checkInstallPlan pkgs args
   cabal_ args
+
+cabalInstallCommand :: B Text
+cabalInstallCommand = do
+  cabalVer <- view (bePrograms . bpCabal . pgmVersion)
+  case filter (null . snd) $
+       readP_to_S Version.parseVersion (maybe "" T.unpack cabalVer) of
+    [(ver,_)] | ver >= Version.makeVersion [2,5] -> pure "v1-install"
+    _                                            -> pure "install"
 
 -- check that Cabal is only going to install the packages we specified
 -- uses somewhat fragile parsing of --dry-run output, find a better way
