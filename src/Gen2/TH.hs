@@ -74,10 +74,15 @@ import qualified Data.Text.Lazy.Encoding        as TL
 
 import qualified GHCJS.Prim.TH.Types            as TH
 
+#if defined(MIN_VERSION_template_haskell_ghcjs)
 import qualified "template-haskell-ghcjs" Language.Haskell.TH            as TH
 import           "template-haskell-ghcjs" Language.Haskell.TH.Syntax     (Quasi)
 import qualified "template-haskell-ghcjs" Language.Haskell.TH.Syntax     as TH
-
+#else
+import qualified "template-haskell"       Language.Haskell.TH            as TH
+import           "template-haskell"       Language.Haskell.TH.Syntax     (Quasi)
+import qualified "template-haskell"       Language.Haskell.TH.Syntax     as TH
+#endif
 
 import           System.Process
   (terminateProcess, waitForProcess)
