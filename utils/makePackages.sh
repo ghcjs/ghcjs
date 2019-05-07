@@ -384,7 +384,7 @@ cd "compiler"
 for DIR in backpack basicTypes cbits cmm codeGen coreSyn deSugar ghci hsSyn \
            iface llvmGen main nativeGen parser prelude profiling rename \
            simplCore simplStg specialise stgSyn stranal typecheck types \
-           utils vectorise; do
+           utils; do
   copy_dir "$GHCSRC/compiler" "$DIR"
 done
 
@@ -396,10 +396,6 @@ done
 for FILE in LICENSE; do
   copy_file "$GHCSRC" "$FILE"
 done
-
-mkdir -p "autogen"
-
-gnucp "$GHCSRC/compiler/stage2/build/Config.hs" "autogen/Config.hs"
 
 # copy includes
 mkdir -p "includes"

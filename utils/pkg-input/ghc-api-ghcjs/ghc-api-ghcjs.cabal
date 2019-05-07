@@ -27,6 +27,8 @@ extra-source-files:
     compiler/utils/md5.h
     includes/CodeGen.Platform.hs
     autogen/Config.hs
+    autogen/864/Config.hs
+    autogen/863/Config.hs
     includes/GHCConstantsHaskellExports.hs
     includes/GHCConstantsHaskellType.hs
     includes/GHCConstantsHaskellWrappers.hs
@@ -170,8 +172,13 @@ Library
         compiler/ghci/keepCAFsForGHCi.c
         compiler/cbits/genSym.c
 
-    hs-source-dirs:
-        autogen
+    if(impl(ghc==8.6.3))
+      hs-source-dirs: autogen/863
+    else
+      if(impl(ghc==8.6.4))
+        hs-source-dirs: autogen/864
+      else
+        hs-source-dirs: autogen
 
     include-dirs:
         includes
