@@ -14,6 +14,13 @@ while [ -h "$SOURCE" ]; do
 done
 SOURCEDIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
+CABALVER=$(cabal --numeric-version)
+if [[ ${CABALVER:0:2} != "1." && ${CABALVER:0:2} != "2." ]]; then
+  CMDPREFIX="v1-"
+else
+  CMDPREFIX=""
+fi
+
 (
 cd "$SOURCEDIR/.."
 
@@ -23,12 +30,12 @@ if [ ! -d "lib/ghc-api-ghcjs" ]; then
   exit 1
 fi
 
-cabal sandbox init
-cabal sandbox add-source lib/ghc-api-ghcjs
-cabal sandbox add-source lib/haddock-api-ghcjs
-cabal sandbox add-source lib/haddock-library-ghcjs
-cabal sandbox add-source lib/ghci-ghcjs
-cabal sandbox add-source lib/template-haskell-ghcjs
-cabal sandbox add-source lib/ghcjs-th
+cabal "${CMDPREFIX}sandbox" init
+cabal "${CMDPREFIX}sandbox" add-source lib/ghc-api-ghcjs
+cabal "${CMDPREFIX}sandbox" add-source lib/haddock-api-ghcjs
+cabal "${CMDPREFIX}sandbox" add-source lib/haddock-library-ghcjs
+cabal "${CMDPREFIX}sandbox" add-source lib/ghci-ghcjs
+cabal "${CMDPREFIX}sandbox" add-source lib/template-haskell-ghcjs
+cabal "${CMDPREFIX}sandbox" add-source lib/ghcjs-th
 
 )

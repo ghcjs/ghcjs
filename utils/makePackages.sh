@@ -64,6 +64,13 @@ GHCSRC="$GHCJSROOT/ghc"
 
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/$(basename $0).XXXXXXXXXXXX")
 
+CABALVER=$(cabal --numeric-version)
+if [[ ${CABALVER:0:2} != "1." && ${CABALVER:0:2} != "2." ]]; then
+  CMDPREFIX="v1-"
+else
+  CMDPREFIX=""
+fi
+
 # we need ln to support the -r option.
 # the BSD ln program on macOS doesn't support it
 # try the `gln` program first
@@ -90,6 +97,7 @@ apply_overrides() {
   for i in *; do
     if [ -d "$i" ];then
       echo "dir: $i"
+      mkdir -p "$TARGET/$1/$i"
       apply_overrides "$1/$i"
     elif [ -f "$i" ]; then
       echo "override: $1/$i"
@@ -160,7 +168,7 @@ copy_patch_boot_package_sdist() {
   (
   cd "$PKGSRC"
   rm -f "dist-install/$PKG-*.tar.gz"
-  cabal sdist --builddir=dist-install
+  cabal "${CMDPREFIX}sdist" --builddir=dist-install
   )
   # unpack the source distribution
   for SRCDISTTMP in $PKGSRC/dist-install/$PKG-*.tar.gz; do
