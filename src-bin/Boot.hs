@@ -1002,10 +1002,12 @@ filesize file = do
 initBootEnv :: BootSettings -> IO BootEnv
 initBootEnv bs = do
   BootConfigFile stgs pgms1 <- readBootConfigFile bs
-  pgms2 <- configureBootPrograms bs pgms1
+  pgms2 <- configureBootPrograms bs (addCmdToNpm pgms1)
   locs  <- configureBootLocations bs pgms2
   return (BootEnv bs locs pgms2 stgs)
 
+  where addCmdToNpm = bool isWindows (bpNpm . pgmSearch <>~ ".cmd") id
+  
 -- | configure the locations
 configureBootLocations :: BootSettings
                        -> BootPrograms
