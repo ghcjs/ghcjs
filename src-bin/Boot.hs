@@ -494,9 +494,11 @@ prepareLibDir = subBuild $ do
   subTop $ do
     writefile "empty.c" ""
     ghc_ ["-c", "empty.c"]
-  when isWindows $
+  when isWindows $ do
     cp (ghcLib </> "bin" </> exe "touchy")
        (ghcjsLib </> "bin" </> exe "touchy")
+    cp_r (ghcLib </> "inplace" </> "mingw")
+         (ghcjsLib </> "..")
   writefile (ghcjsLib </> "ghc_libdir") (toTextI ghcLib)
   msg info "RTS prepared"
 
