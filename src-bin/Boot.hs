@@ -497,6 +497,7 @@ prepareLibDir = subBuild $ do
   when isWindows $ do
     cp (ghcLib </> "bin" </> exe "touchy")
        (ghcjsLib </> "bin" </> exe "touchy")
+    rm_rf (ghcjsLib </> ".." </> "mingw")
     cp_r (ghcLib </> ".." </> "mingw")
          (ghcjsLib </> "..")
   writefile (ghcjsLib </> "ghc_libdir") (toTextI ghcLib)
@@ -844,9 +845,11 @@ ghc_pkg      = runE  bpGhcPkg
 ghcjs_pkg    = runE  bpGhcjsPkg
 ghcjs_pkg_   = runE_ bpGhcjsPkg
 haddock_     = runE_ bpHaddock
-cabal        = runE  bpCabal
-cabal_       = runE_ bpCabal
+cabal  args  = runE  bpCabal ( cabalArgs args )
+cabal_ args  = runE_ bpCabal ( cabalArgs args )
 npm_         = runE_ bpNpm
+
+cabalArgs args = args ++ bool isWindows ["-fghcjs_windows"] []
 
 runE  g a = view (bePrograms . g) >>= flip run  a
 runE_ g a = view (bePrograms . g) >>= flip run_ a
