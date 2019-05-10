@@ -497,7 +497,7 @@ prepareLibDir = subBuild $ do
   when isWindows $ do
     cp (ghcLib </> "bin" </> exe "touchy")
        (ghcjsLib </> "bin" </> exe "touchy")
-    cp_r (ghcLib </> "inplace" </> "mingw")
+    cp_r (ghcLib </> ".." </> "mingw")
          (ghcjsLib </> "..")
   writefile (ghcjsLib </> "ghc_libdir") (toTextI ghcLib)
   msg info "RTS prepared"
@@ -1309,12 +1309,15 @@ bootConfigFile bs = do
          pure (BL.toStrict $ getBootYaml entries)
        else B.readFile (toStringI $ sourceDir </> "boot" <.> "yaml")
   where
+    bootYamlFP = "boot" FP.</> "boot.yaml"
     getBootYaml (Tar.Next e es)
-      | Tar.entryPath e == "boot/boot.yaml"
+      | Tar.entryPath e == bootYamlFP
       , Tar.NormalFile contents _size <- Tar.entryContent e = contents
       | otherwise = getBootYaml es
-    getBootYaml Tar.Done     = error "boot/boot.yaml file not found in archive"
-    getBootYaml (Tar.Fail e) = error $ "error reading boot archive: " ++ show e
+    getBootYaml Tar.Done     =
+      error $ show bootYamlFP ++ " file not found in archive"
+    getBootYaml (Tar.Fail e) =
+      error $ "error reading boot archive: " ++ show e
 
 bootSourceDir :: BootSettings -> IO FilePath
 bootSourceDir bs
