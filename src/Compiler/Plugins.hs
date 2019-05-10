@@ -101,7 +101,7 @@ getValueSafely orig_dflags js_env hsc_env val_name expected_type = do
 
 eqPluginType :: Type -> Type -> Bool
 eqPluginType expected_type ty =
-   expected_type `eqType` ty || isGhcjsPlugin ty
+   {- expected_type `eqType` ty || -} isGhcjsPlugin ty
 
 {-
   TODO: this check should really verify whether the UnitId is the same as the
@@ -124,10 +124,21 @@ getHValueSafely orig_dflags js_env hsc_env orig_name expected_type = do
   -- initialize the GHC package environment
   plugins_env <- modifyMVar (pluginState js_env) (initPluginsEnv orig_dflags)
 
+  val_names <- remapName hsc_env plugins_env orig_name
+  let loadName [] = pure Nothing
+      loadName (x:xs) = do
+        loaded <- tryLoadThing plugins_env expected_type x
+        case loaded of
+          Nothing -> loadName xs
+          Just thing -> pure (Just thing)
+  -- putStrLn ("plugins: found " ++ show (length val_names) ++ " names")
+  loadName val_names
+
+tryLoadThing :: HscEnv -> Type -> Name -> IO (Maybe HValue)
+tryLoadThing plugins_env expected_type val_name0 = do
+  -- putStrLn ("plugins: trying to load: " ++ show val_name0)
   let dflags = hsc_dflags plugins_env
       doc    = text "contains a name used in an invocation of getHValueSafely"
-  val_name0 <- remapName hsc_env plugins_env orig_name
-
   -- We now have an intermediate name that has the correct unit id for the GHC
   -- package, but it still has the GHCJS unique. Here we load the interface
   -- file and then find the the actual GHC name in the module exports.
@@ -146,10 +157,11 @@ getHValueSafely orig_dflags js_env hsc_env orig_name expected_type = do
   -- Now look up the names for the value and type constructor in the type environment
   mb_val_thing <- lookupTypeHscEnv plugins_env val_name
   case mb_val_thing of
-    Nothing -> throwCmdLineErrorS dflags (missingTyThingErrorGHC val_name)
+    Nothing -> pure Nothing -- throwCmdLineErrorS dflags (missingTyThingErrorGHC val_name)
     Just (AnId id) -> do
         -- Check the value type in the interface against the type recovered from the type constructor
         -- before finally casting the value to the type we assume corresponds to that constructor
+        -- putStrLn ("plugins: loaded, types: " ++ show (expected_type, idType id))
         if expected_type `eqPluginType` idType id
           then do
             -- Link in the module that contains the value, if it has such a module
@@ -161,20 +173,25 @@ getHValueSafely orig_dflags js_env hsc_env orig_name expected_type = do
             hval <- getHValue plugins_env val_name >>= wormhole dflags
             return (Just hval)
           else return Nothing
-    Just val_thing -> throwCmdLineErrorS dflags (wrongTyThingError val_name val_thing)
+    Just val_thing -> pure Nothing -- throwCmdLineErrorS dflags (wrongTyThingError val_name val_thing)
 
-remapName :: HscEnv -> HscEnv -> Name -> IO Name
+remapName :: HscEnv -> HscEnv -> Name -> IO [Name]
 remapName src_env tgt_env val_name
   | Just m <- nameModule_maybe val_name = do
     let mn = moduleName m
         mu = moduleUnitId m
-    case remapUnit sdf tdf mn mu of
+        rus = remapUnit sdf tdf mn mu
+        mk_new tgt_unitid =
+          let new_m = mkModule tgt_unitid (moduleName m)
+          in  mkExternalName (nameUnique val_name) new_m
+                             (nameOccName val_name) (nameSrcSpan val_name)
+    pure $ map mk_new rus
+  {-
       Nothing         ->
         throwCmdLineErrorS (hsc_dflags tgt_env) $ missingTyThingErrorGHC val_name
       Just tgt_unitid -> do
-        let new_m = mkModule tgt_unitid (moduleName m)
-        pure $ mkExternalName (nameUnique val_name) new_m
-                                  (nameOccName val_name) (nameSrcSpan val_name)
+        let
+        pure $ -}
   | otherwise = do
       throwCmdLineErrorS (hsc_dflags tgt_env) $ missingTyThingErrorGHC val_name
   where
@@ -185,25 +202,25 @@ remapUnit :: DynFlags
           -> DynFlags
           -> ModuleName
           -> UnitId
-          -> Maybe UnitId
+          -> [UnitId]
 remapUnit src_dflags tgt_dflags module_name unit
   -- first try package with same unit id if possible
-  | Just _ <- lookupPackage tgt_dflags unit = Just unit
+  | Just _ <- lookupPackage tgt_dflags unit = [unit]
   -- if we're building the package, then we don't have a PackageConfig for it
   | unit == thisPackage tgt_dflags
   , tgt_config:_    <- searchPackageId tgt_dflags
             (SourcePackageId . mkFastString . unitToPkg . unitIdString $ unit)
   , Just m <- lookup module_name (instantiatedWith tgt_config) =
-    Just (moduleUnitId m)
+    [moduleUnitId m]
   -- otherwise look up package with same package id (e.g. foo-0.1)
   -- TODO: If we have multiple matches we just pick the first one here.
   --       We could (should?) do better picking the one with the best
   --       version match (including dependencies), or we should work towards
   --       having the build tool always pass in the exact plugins-package-id
   | Just src_config <- lookupPackage src_dflags unit
-  = listToMaybe (mapMaybe (moduleInstantiated module_name) $
-                searchPackageId tgt_dflags (sourcePackageId src_config))
-  | otherwise = Nothing
+  = mapMaybe (moduleInstantiated module_name) $
+                searchPackageId tgt_dflags (sourcePackageId src_config)
+  | otherwise = []
 
 moduleInstantiated :: ModuleName -> PackageConfig -> Maybe UnitId
 moduleInstantiated module_name config
