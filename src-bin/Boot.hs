@@ -517,7 +517,7 @@ prepareNodeJs = do
     npmProgram <- view (bePrograms . bpNpm)
     subTop (mkdir_p "ghcjs-node")
     liftIO $ unpackTar False
-                       True
+                       (not isWindows)
                        (toStringI $ ghcjsLib)
                        (toStringI $ buildDir </> "ghcjs-node.tar")
     subTop' "ghcjs-node" $ npm_ ["rebuild"]
