@@ -32,7 +32,7 @@ import           GHC.Exts
 import           GHCJS.Prim.TH.Serialized
 import           GHCi.TH.Binary
 
-#ifdef __GHCJS__
+#if defined(__GHCJS__) || !defined(MIN_VERSION_template_haskell_ghcjs)
 import qualified Language.Haskell.TH        as TH
 import qualified Language.Haskell.TH.Syntax as TH
 #else

@@ -1,5 +1,5 @@
 Name: ghc-api-ghcjs
-Version: 8.6.2
+Version: 8.6.5
 License: BSD3
 License-File: LICENSE
 Author: The GHC Team
@@ -27,6 +27,8 @@ extra-source-files:
     compiler/utils/md5.h
     includes/CodeGen.Platform.hs
     autogen/Config.hs
+    autogen/864/Config.hs
+    autogen/863/Config.hs
     includes/GHCConstantsHaskellExports.hs
     includes/GHCConstantsHaskellType.hs
     includes/GHCConstantsHaskellWrappers.hs
@@ -38,7 +40,7 @@ extra-source-files:
 
 Flag debug
     Description: Build with additional assertions.
-    Default: False 
+    Default: False
     Manual: True
 
 Flag ghci
@@ -66,9 +68,25 @@ Flag terminfo
     Default: True
     Manual: True
 
+-- build against the template haskell package from the host GHC
+--  (which must be built with the GHCJS patches)
+flag use-host-template-haskell
+  description: build against template-haskell package from the host GHC
+               instead of template-haskell-ghcjs
+  default:     False
+  manual:      True
+
+
 Library
     Default-Language: Haskell2010
     Exposed: False
+
+    if(flag(use-host-template-haskell))
+        Build-Depends: template-haskell == 2.14.*,
+                       ghci == 8.6.*
+    else
+        Build-Depends: template-haskell-ghcjs == 2.14.*,
+                       ghci-ghcjs == 8.6.*
 
     Build-Depends: base       >= 4.9 && < 5,
                    deepseq    >= 1.4 && < 1.5,
@@ -80,13 +98,11 @@ Library
                    containers >= 0.5 && < 0.7,
                    array      >= 0.1 && < 0.6,
                    filepath   >= 1   && < 1.5,
-                   template-haskell-ghcjs == 2.14.*,
                    hpc        == 0.6.*,
                    transformers == 0.5.*,
                    ghc-boot   == 8.6.*,
                    ghc-boot-th == 8.6.*,
-                   ghc-heap   == 8.6.*,
-                   ghci-ghcjs == 8.6.*
+                   ghc-heap   == 8.6.*
 
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.7
@@ -156,8 +172,13 @@ Library
         compiler/ghci/keepCAFsForGHCi.c
         compiler/cbits/genSym.c
 
-    hs-source-dirs:
-        autogen
+    if(impl(ghc==8.6.3))
+      hs-source-dirs: autogen/863
+    else
+      if(impl(ghc==8.6.4))
+        hs-source-dirs: autogen/864
+      else
+        hs-source-dirs: autogen
 
     include-dirs:
         includes

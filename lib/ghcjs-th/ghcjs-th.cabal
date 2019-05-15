@@ -8,6 +8,17 @@ maintainer:          stegeman@gmail.com
 build-type:          Simple
 cabal-version:       >=1.10
 
+
+-- build against the template haskell package from the host GHC
+--  (which must be built with the GHCJS patches)
+flag use-host-template-haskell
+  description: build against template-haskell package from the host GHC
+               instead of template-haskell-ghcjs
+  default:     False
+  manual:      True
+
+
+
 library
   exposed-modules: GHCJS.Prim.TH.Eval
                    GHCJS.Prim.TH.Serialized
@@ -18,7 +29,7 @@ library
                        binary,
                        bytestring,
                        containers
-  if impl(ghcjs)
+  if impl(ghcjs) || flag(use-host-template-haskell)
     build-depends:     template-haskell >= 2.12 && < 2.15,
                        ghci
   else
