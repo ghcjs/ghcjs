@@ -851,7 +851,7 @@ cabal  args  = runE  bpCabal ( cabalArgs args )
 cabal_ args  = runE_ bpCabal ( cabalArgs args )
 npm_         = runE_ bpNpm
 
-cabalArgs args = args ++ bool isWindows ["-fghcjs_windows"] []
+cabalArgs args = args ++ bool isWindows ["-fghcjs-windows"] []
 
 runE  g a = view (bePrograms . g) >>= flip run  a
 runE_ g a = view (bePrograms . g) >>= flip run_ a
