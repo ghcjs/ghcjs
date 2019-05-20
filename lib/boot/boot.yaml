@@ -54,8 +54,7 @@ packages:
     - ./pkg/time
     - ./pkg/text
     - ./pkg/mtl
-    - IfUnix:    ./pkg/unix
-    - IfWindows: ./pkg/Win32
+    - ./pkg/unix
 
 programs:
 
