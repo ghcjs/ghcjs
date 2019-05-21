@@ -4,7 +4,7 @@
 # $ ./utils/makePackages.sh
 #
 
-resolver: nightly-2018-12-05
+resolver: lts-13.22
 packages:
   - .
   - ./lib/ghc-api-ghcjs
@@ -13,3 +13,5 @@ packages:
   - ./lib/haddock-api-ghcjs
   - ./lib/haddock-library-ghcjs
   - ./lib/template-haskell-ghcjs
+extra-deps:
+  - yaml-0.10.4.0
