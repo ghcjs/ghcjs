@@ -502,6 +502,7 @@ prepareLibDir = subBuild $ do
     rm_rf (ghcjsLib </> ".." </> "mingw")
     cp_r (ghcLib </> ".." </> "mingw")
          (ghcjsLib </> "..")
+    compileRunnerResources
   writefile (ghcjsLib </> "ghc_libdir") (toTextI ghcLib)
   msg info "RTS prepared"
 
@@ -557,22 +558,22 @@ installPlatformIncludes inc incNative = do
 exe :: FilePath -> FilePath
 exe = bool isWindows (<.>"exe") id
 
--- fixme this part will fail to compile
--- #ifdef WINDOWS
---   -- compile the resources we need for the runner to prevent Windows from
---   -- trying to detect programs that require elevated privileges
---   ghcjsTop <- view (beLocations . blGhcjsTopDir)
---   let windres = Program "windres"
---                         "windres"
---                         Nothing
---                         (Just $ ghcjsTop </>
---                                   ".." </>
---                                   "mingw" </>
---                                   "bin" </>
---                                   "windres.exe")
---                         []
---   subTop $ run_ windres ["runner.rc", "-o", "runner-resources.o"]
--- #endif
+compileRunnerResources :: B()
+compileRunnerResources = do
+  -- compile the resources we need for the runner to prevent Windows from
+  -- trying to detect programs that require elevated privileges
+  ghcjsTop <- view (beLocations . blGhcjsTopDir)
+  let windres = Program "windres"
+                        "windres"
+                        Nothing
+                        (Just $ ghcjsTop </>
+                                  ".." </>
+                                  "mingw" </>
+                                  "bin" </>
+                                  "windres.exe")
+                        []
+  subTop $ run_ windres ["runner.rc", "-o", "runner-resources.o"]
+
 
 buildDocIndex :: B ()
 buildDocIndex = subTop' "doc" $ do
