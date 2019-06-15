@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gmp.buildinfo.in boot/pkg/integer-gmp/integer-gmp.buildinfo.in
---- upstream/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-12-24 07:45:51.000000000 +0100
-+++ boot/pkg/integer-gmp/integer-gmp.buildinfo.in	2018-12-24 07:45:51.676965858 +0100
+--- upstream/pkg/integer-gmp/integer-gmp.buildinfo.in	2019-05-07 22:52:34.000000000 -0700
++++ boot/pkg/integer-gmp/integer-gmp.buildinfo.in	2019-05-07 22:52:34.932871418 -0700
 @@ -2,4 +2,4 @@
  extra-lib-dirs: @GMP_LIB_DIRS@
  extra-libraries: @GMP_LIBS@
@@ -8,8 +8,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gm
 -install-includes: HsIntegerGmp.h ghc-gmp.h
 +install-includes: HsIntegerGmp.h
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gmp.cabal boot/pkg/integer-gmp/integer-gmp.cabal
---- upstream/pkg/integer-gmp/integer-gmp.cabal	2018-12-24 07:45:51.000000000 +0100
-+++ boot/pkg/integer-gmp/integer-gmp.cabal	2018-12-24 07:45:51.676965858 +0100
+--- upstream/pkg/integer-gmp/integer-gmp.cabal	2019-05-07 22:52:34.000000000 -0700
++++ boot/pkg/integer-gmp/integer-gmp.cabal	2019-05-07 22:52:34.932871418 -0700
 @@ -67,6 +67,9 @@
    c-sources:
      cbits/wrappers.c
@@ -21,9 +21,9 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gm
      GHC.Integer
      GHC.Integer.Logarithms
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits/ghcjsbn.js
---- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1970-01-01 01:00:00.000000000 +0100
-+++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2018-12-24 12:41:33.852115499 +0100
-@@ -0,0 +1,2017 @@
+--- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1969-12-31 16:00:00.000000000 -0800
++++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2019-05-21 19:22:30.770493520 -0700
+@@ -0,0 +1,2125 @@
 +/*
 +   GHCJS bignum library for integer-gmp package
 +
@@ -236,11 +236,66 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +  throw new Error("isPrime_s");
 +}
 +
-+// BigNat -> Int -> Bool
++
 +// fixme: seed
-+function h$ghcjsbn_isPrime_b(b, rounds) {
-+  ASSERTVALID_B(b, "isPrime");
-+  throw new Error("isPrime_b");
++function h$ghcjsbn_random_b(min, max) {
++  if(h$ghcjsbn_cmp_bb(min, max) >= 0) {
++    return min;
++  }
++  var range = h$ghcjsbn_sub_bb(max, min);
++  var size = 4 + Math.ceil(h$ghcjsbn_nbits_b(range) / 16);
++  var r = h$ghcjsbn_zero_b;
++  for(var i=0;i<size;i++) {
++    var rnd = Math.floor(Math.random()*65536);
++    r = h$ghcjsbn_or_bb(h$ghcsbn_shl_b(r, 16), h$ghcjsbn_mkBigNat_w(rnd));
++  }
++  return h$ghcjsbn_add_bb(h$ghcjsbn_rem_bb(r, range), min);
++}
++
++function h$ghcjsbn_testPrime_b(n, rounds) {
++  var r = 0, d = n;
++  var nm1 = h$ghcjsbn_sub_bw(n,1);
++  var two = h$ghcjsbn_mkBigNat_w(2);
++  while(h$ghcjsbn_testBit_b(d, 0)) {
++    d = h$ghcjsbn_shr_b(d, 1);
++    r++;
++  }
++  for(var round = 0; round < rounds; round++) {
++    var a = h$ghcjsbn_random_b(two, nm1);
++    var x = h$ghcjsbn_modPow_bbb(a, d, n);
++    if(h$ghcjsbn_eq_bw(x,1) || h$ghcjsbn_eq_bb(x,nm1)) continue;
++    var found = false;
++    for(var rr=0;rr<r;rr++) {
++      x = h$ghcjsbn_modPow_bbb(x, two, n);
++      if(h$ghcjsbn_eq_bb(x, nm1)) {
++        found = true;
++        break;
++      }
++    }
++    if(!found) return 0;
++  }
++  return 1;
++}
++
++function h$ghcjsbn_testPrime_w(w, rounds) {
++  return h$ghcjsbn_testPrime_b(h$ghcjsbn_mkBigNat_w(w), rounds);
++}
++
++function h$integer_gmp_next_prime1(w) {
++  var r = h$ghcjsbn_nextPrime_b(h$ghcjsbn_mkBigNat_w(w));
++  return h$ghcjsbn_toWord_b(r);
++}
++
++function h$ghcjsbn_nextPrime_b(bn) {
++  var rounds = 64;
++  if(h$ghcjsbn_eq_bw(bn, 2)) {
++    return h$ghcjsbn_mkBigNat_w(3);
++  }
++  var i = bn;
++  do {
++    i = h$ghcjsbn_add_bw(i, 2);
++  } while(!h$ghcjsbn_testPrime_b(i, rounds));
++  return i;
 +}
 +
 +// BigNat -> BigNat -> Bool
@@ -931,21 +986,36 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +}
 +
 +// (b ^ s1) % s2 :: BigNat -> BigNat -> BigNat -> BigNat
-+function h$ghcjsbn_modPow_bbb(b, s1, s2) {
-+  throw new Error("modPow_bbb");
++function h$ghcjsbn_modPow_bbb(b, e, m) {
++  var r = h$ghcjsbn_one_b, b = h$ghcjsbn_rem_bb(b, m);
++  while(!h$ghcjsbn_eq_bw(e, 0)) {
++    if(h$ghcjsbn_testBit_b(e, 0)) {
++      r = h$ghcjsbn_rem_bb(h$ghcjsbn_mul_bb(r, b), m);
++    }
++    e = h$ghcjsbn_shr_b(e, 1);
++    b = h$ghcjsbn_rem_bb(h$ghcjsbn_mul_bb(b, b), m);
++  }
++  return r;
 +}
 +
 +// (b ^ s1) % s2 :: BigNat -> Int -> Int -> Int
-+function h$ghcjsbn_modPow_bss(b, s1, s2) {
-+  throw new Error("modPow_bss");
++function h$ghcjsbn_modPow_bss(b, e, m) {
++  return h$ghcjsbn_modPow_sss(h$ghcjsbn_rem_bw(b, m), e, m);
 +}
-+
 +// (s1 ^ s2) % s3 :: Int -> Int -> Int -> Int
-+function h$ghcjsbn_modPow_sss(s1, s2, s3) {
-+  throw new Error("modPow_sss");
++function h$ghcjsbn_modPow_sss(b, e, m) {
++  return h$integer_gmp_powm_word(b, e, m);
 +}
 +
-+
++function h$integer_gmp_powm_word(b, e, m) {
++  var r = 1, b = b % m;
++  while(e !== 0) {
++    if(e % 2 === 1) r = (r * b) % m;
++    e = e >>> 1;
++    b = (b * b) % m;
++  }
++  return r;
++}
 +
 +// r = gcd(b1,b2) BigNat -> BigNat -> BigNat
 +function h$ghcjsbn_gcd_bb(b1, b2) {
@@ -1303,9 +1373,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +  if(limb >= b[0]) {
 +    return false;
 +  } else {
-+    var d   = b[limb];
 +    var bit = n - (GHCJSBN_BITS * limb);
-+    return (b[limb] & (1 << bit)) !== 0;
++    return (b[limb+1] & (1 << bit)) !== 0;
 +  }
 +}
 +
@@ -1772,9 +1841,9 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +  } */
 +#endif
 +  if(IS_INTEGER_S(i)) {
-+    return h$ghcjsbn_nbits_s(INTEGER_S_DATA(i));
++    return h$ghcjsbn_nbits_s(INTEGER_S_DATA(i))-1;
 +  } else {
-+    return h$ghcjsbn_nbits_b(INTEGER_J_DATA(i));
++    return h$ghcjsbn_nbits_b(INTEGER_J_DATA(i))-1;
 +  }
 +}
 +
@@ -1869,17 +1938,39 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +}
 +
 +function h$ghcjsbn_byteArrayToBigNat(ba, len) {
-+  throw new Error("h$ghcjsbn_byteArrayToBigNat not yet implemented");
++  return h$ghcjsbn_importBigNatFromByteArray(ba, 0, len, 0);
 +}
 +
 +function h$ghcjsbn_importBigNatFromAddr(a_d, a_o, len, msbf) {
-+  throw new Error("h$ghcjsbn_importBigNatFromAddr not yet implemented");
++  var r = h$ghcjsbn_zero_b;
++  for(var i=0;i<len;i++) {
++    var off = msbf ? i : (len-i-1);
++    var val = a_d.u8[off];
++    var r = h$ghcjsbn_or_bb(h$ghcjsbn_shl_b(r, 8), h$ghcjsbn_mkBigNat_w(val));
++  }
++  return r;
 +}
 +
 +function h$ghcjsbn_importBigNatFromByteArray(ba, ofs, len, msbf) {
-+  throw new Error("h$ghcjsbn_importBigNatFromByteArray not yet implemented");
++  return h$ghcjsbn_importBigNatFromAddr(ba, ofs, len, msbf);
 +}
 +
++// ByteArray# -> Addr# -> Int# -> IO Word
++function h$ghcjsbn_exportToAddr_b(bn, a_d, a_o, msbf) {
++  var bytes = h$ghcjsbn_sizeInBase_b(bn, 256);
++  for(var i=0;i<bytes;i++) {
++    var b = h$ghcjsbn_toWord_b(bn) & 255;
++    var off = msbf ? bytes-i-1 : i;
++    bn = h$ghcjsbn_shr_b(bn, 8);
++    a_d.u8[a_o+off] = b;
++  }
++  return bytes;
++}
++
++// Word# -> Addr# -> Int# -> IO Word
++function h$ghcjsbn_exportToAddr_w(w, a_d, a_o, msbf) {
++  return h$ghcjsbn_exportToAddr_b(h$ghcjsbn_mkBigNat_w(w), a_d, a_o, msbf);
++}
 +
 +//////////////////////////////////////////////////////////////////////////////
 +// fixme move to primop places later
@@ -2041,9 +2132,26 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +  ASSERTVALID_D(r, "encodeDouble_s result");
 +  return r;
 +}
++
++function h$ghcjsbn_sizeInBase_b(bn, base) {
++  if(h$ghcjsbn_eq_bb(bn, h$ghcjsbn_zero_b)) return 1;
++  var bits = h$ghcjsbn_nbits_b(bn);
++  var r;
++  if(h$popCnt32(base) === 1) {
++    // exact result for powers of two
++    var factor = Math.round(Math.log(base)/Math.log(2));
++    r = Math.ceil(bits/factor);
++  } else {
++    r = Math.ceil(bits*Math.log(2)/Math.log(base));
++  }
++  return r;
++}
++function h$integer_gmp_mpn_sizeinbase1(w, base) {
++  return h$ghcjsbn_sizeInBase_b(h$ghcjsbn_mkBigNat_w(w), base);
++}
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-12-24 07:45:51.000000000 +0100
-+++ boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2018-12-24 07:45:51.676965858 +0100
+--- upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2019-05-07 22:52:34.000000000 -0700
++++ boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2019-05-16 00:44:56.321199818 -0700
 @@ -1,4 +1,5 @@
  {-# LANGUAGE BangPatterns #-}
 +
@@ -2056,7 +2164,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  sizeInBaseBigNat :: BigNat -> Int# -> Word#
 +#ifdef ghcjs_HOST_OS
 +sizeInBaseBigNat (BN# ba#) = js_sizeInBaseBigNat ba#
-+foreign import javascript unsafe "h$ghcjsbn_sizeInBase_b($1)" js_sizeInBaseBigNat :: ByteArray# -> Int# -> Word#
++foreign import javascript unsafe "h$ghcjsbn_sizeInBase_b($1,$2)" js_sizeInBaseBigNat :: ByteArray# -> Int# -> Word#
 +#else
  sizeInBaseBigNat bn@(BN# ba#) = c_mpn_sizeinbase# ba# (sizeofBigNat# bn)
  
@@ -2086,7 +2194,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  exportWordToAddr :: Word -> Addr# -> Int# -> IO Word
 +#ifdef ghcjs_HOST_OS
 +exportWordToAddr (W# w#) addr# e# = js_exportWordToAddr w# addr# e#
-+foreign import javascript unsafe "h$ghcjsb_exportToAddr_w($1,$2_1,$2_2,$3)" js_exportWordToAddr :: Word# -> Addr# -> Int# -> IO Word
++foreign import javascript unsafe "h$ghcjsbn_exportToAddr_w($1,$2_1,$2_2,$3)" js_exportWordToAddr :: Word# -> Addr# -> Int# -> IO Word
 +#else
  exportWordToAddr (W# w#) addr
    = c_mpn_export1ToAddr# w# addr 0# -- TODO: we don't calling GMP for that
@@ -2104,7 +2212,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
                                 -> Int# -> IO Word
 +#ifdef ghcjs_HOST_OS
 +exportBigNatToMutableByteArray (BN# ba#) mba# off# msbf# = js_exportBigNatToMutableByteArray ba# mba# off# msbf#
-+foreign import javascript unsafe "h$ghcjs_exportToMutableByteArray_b($1,$2,$3,$4)" js_exportBigNatToMutableByteArray :: ByteArray# -> MutableByteArray# RealWorld -> Word# -> Int# -> IO Word
++foreign import javascript unsafe "h$ghcjsbn_exportToMutableByteArray_b($1,$2,$3,$4)" js_exportBigNatToMutableByteArray :: ByteArray# -> MutableByteArray# RealWorld -> Word# -> Int# -> IO Word
 +#else
  exportBigNatToMutableByteArray bn@(BN# ba#)
    = c_mpn_exportToMutableByteArray# ba# (sizeofBigNat# bn)
@@ -2122,7 +2230,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
                               -> Int# -> IO Word
 +#ifdef ghcjs_HOST_OS
 +exportWordToMutableByteArray (W# w#) mba# off# msbf# = js_exportWordToMutableByteArray w# mba# off# msbf#
-+foreign import javascript unsafe "h$ghcjs_exportToMutableByteArray_w($1,$2,$3,$4)" js_exportWordToMutableByteArray :: Word# -> MutableByteArray# RealWorld -> Word# -> Int# -> IO Word
++foreign import javascript unsafe "h$ghcjsbn_exportToMutableByteArray_w($1,$2,$3,$4)" js_exportWordToMutableByteArray :: Word# -> MutableByteArray# RealWorld -> Word# -> Int# -> IO Word
 +#else
  exportWordToMutableByteArray (W# w#) = c_mpn_export1ToMutableByteArray# w#
  
@@ -2140,7 +2248,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  testPrimeBigNat :: BigNat -> Int# -> Int#
 +#ifdef ghcjs_HOST_OS
 +testPrimeBigNat (BN# ba#) r# = js_testPrimeBigNat ba# r#
-+foreign import javascript unsafe "h$ghcjbn_testPrime_b($1,$2)" js_testPrimeBigNat :: ByteArray# -> Int# -> Int#
++foreign import javascript unsafe "h$ghcjsbn_testPrime_b($1,$2)" js_testPrimeBigNat :: ByteArray# -> Int# -> Int#
 +#else
  testPrimeBigNat bn@(BN# ba#) = c_integer_gmp_test_prime# ba# (sizeofBigNat# bn)
  
@@ -2164,8 +2272,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  -- | Compute next prime greater than @/n/@ probalistically.
  --
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-12-24 07:45:51.000000000 +0100
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2018-12-24 07:45:51.676965858 +0100
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2019-05-07 22:52:34.000000000 -0700
++++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2019-05-07 22:52:34.932871418 -0700
 @@ -2,6 +2,11 @@
  {-# LANGUAGE MagicHash #-}
  {-# LANGUAGE UnboxedTuples #-}
@@ -2218,8 +2326,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
                          _   -> 2#
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-12-24 07:45:51.000000000 +0100
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2018-12-24 07:45:51.676965858 +0100
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2019-05-07 22:52:34.000000000 -0700
++++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2019-05-07 22:52:34.932871418 -0700
 @@ -4,6 +4,9 @@
  {-# LANGUAGE UnliftedFFITypes #-}
  {-# LANGUAGE CPP #-}
@@ -2280,8 +2388,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  -- | Compute base-2 log of 'Word#'
  --
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/src/GHC/Integer/Type.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-12-24 07:45:51.000000000 +0100
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Type.hs	2018-12-24 07:45:51.676965858 +0100
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs	2019-05-07 22:52:34.000000000 -0700
++++ boot/pkg/integer-gmp/src/GHC/Integer/Type.hs	2019-05-07 22:52:34.936866610 -0700
 @@ -9,6 +9,9 @@
  {-# LANGUAGE RebindableSyntax #-}
  {-# LANGUAGE NegativeLiterals #-}
