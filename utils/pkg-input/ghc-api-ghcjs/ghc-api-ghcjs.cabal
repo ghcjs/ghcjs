@@ -81,7 +81,7 @@ Library
     Default-Language: Haskell2010
     Exposed: False
 
-    if(flag(use-host-template-haskell))
+    if(flag(use-host-template-haskell) || impl(ghcjs))
         Build-Depends: template-haskell == 2.14.*,
                        ghci == 8.6.*
     else
