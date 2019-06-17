@@ -362,7 +362,7 @@ test-suite test
                       yaml                 >= 0.10 && < 0.11,
                       optparse-applicative,
                       directory,
-                      http-types           >= 0.11 &&  < 0.12,
+                      http-types           >= 0.11 &&  < 0.13,
                       warp                 >= 3.0  &&  < 3.3,
                       wai                  >= 3.0  &&  < 3.3,
                       wai-extra            >= 3.0  &&  < 3.1,

@@ -254,13 +254,14 @@ cd libraries/time
 )
 fi
 
+
 # genprimopcode tool
 if [ ! -f ./inplace/bin/genprimopcode ]
 then
 (
 mkdir -p inplace/bin
 cd utils/genprimopcode
-cabal build --builddir=dist
+cabal ${CMDPREFIX}build --builddir=dist
 gnucp dist/build/genprimopcode/genprimopcode ../../inplace/bin
 )
 fi

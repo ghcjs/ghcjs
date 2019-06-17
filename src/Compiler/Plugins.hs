@@ -108,12 +108,14 @@ eqPluginType expected_type ty =
         ghc-api-ghcjs that ghcjs was built with. Can we get that info
         from Cabal / CPP?
  -}
+
 isGhcjsPlugin :: Type -> Bool
 isGhcjsPlugin ty
   | Just tc <- tyConAppTyCon_maybe ty
   , Just m  <- nameModule_maybe (getName tc)
   = moduleNameString (moduleName m) == "Plugins" &&
-    "ghc-api-ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m) &&
+    ("ghc-api-ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m) ||
+     "ghc-p-ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m)) &&
     occNameString (nameOccName (getName tc)) == "Plugin"
   | otherwise = False
 
