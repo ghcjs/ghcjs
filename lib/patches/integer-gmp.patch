@@ -1007,6 +1007,30 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +  return h$integer_gmp_powm_word(b, e, m);
 +}
 +
++function h$ghcjsbn_modular_inverse(a, n) {
++    var t = h$ghcjsbn_zero_b, newt = h$ghcjsbn_one_b;
++    var r = n, newr = a;
++    while(!h$ghcjsbn_cmp_bw(newr, 0)) {
++      var quotient = h$ghcjsbn_div_bb(r, newr);
++      // fixme this goes wrong because it can go below 0
++      var tmp = newt;
++      newt = h$ghcjsbn_sub_bb(t, h$ghcjsbn_mul_bb(quotient, newt));
++      t = tmp;
++      tmp = newr;
++      newr = h$ghcjsbn_sub_bb(r, h$ghcjsbn_mul_bb(quotient, newr));
++      r = tmp;
++    }
++    if(h$ghcjsbn_cmp_bw(r, 1) > 0) return a; // fixme signal not invertible
++    // if t < 0 then t := t + n
++    return t;
++}
++
++function h$ghcjsbn_powModSBigNat(bpos, base, epos, exp, m) {
++  var newBase = bpos ? base : h$ghcjsbn_sub_bb(m, base);
++  var newExp = epos ? exp : h$ghcjsbn_modular_inverse(exp, m);
++  return h$ghcjsbn_modPow_bbb(newBase, newExp, m);
++}
++
 +function h$integer_gmp_powm_word(b, e, m) {
 +  var r = 1, b = b % m;
 +  while(e !== 0) {
