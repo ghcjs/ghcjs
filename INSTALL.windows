@@ -8,7 +8,7 @@ Get the latest MSYS2 installer http://sourceforge.net/p/msys2/wiki/MSYS2%20insta
 
 After installation, open the `MingW-w64 Win64 Shell` program (or the 32 bit version for 32 bit Windows/GHC) and install dependencies using the package manager:
 
-    $ pacman -Sy git tar binutils autoconf make libtool automake python2 p7zip patch gcc
+    $ pacman -Sy git tar binutils autoconf make libtool automake python3 p7zip patch gcc
 
 If you get strange crashes or warnings, close the MingW-w64 shell and run `c:\msys64\autorebase.bat`, then retry. See the [MSYS2 Wiki](http://sourceforge.net/p/msys2/wiki/MSYS2%20installation/) for more information.
 
@@ -27,6 +27,12 @@ The last line should point to the gcc bundled with GHC, not the one from MSYS2 (
     /c/Users/Username/AppData/Roaming/cabal/bin/alex
     $ which happy
     /c/Users/Username/AppData/Roaming/cabal/bin/happy
+
+You will need to download GHC mingw toolchain tarballs too. To do it you can run from ghc submodule:
+
+    $ ./mk/get-win32-tarballs.sh download <arch>
+
+where <arch> is one of i386, x86_64,all or mirror (which includes sources)
 
 You're good to go now, everything is ready to install GHCJS! Just make sure you do the installation in the `MingW-w64 Win64 Shell` and not the Command Prompt.
 

@@ -343,7 +343,7 @@ test-suite test
     build-depends:    base                 >= 4 && < 5,
                       process,
                       network,
-                      aeson,
+                      aeson                >= 1.4 && < 1.4.3.0,
                       test-framework       >= 0.8,
                       test-framework-hunit >= 0.3,
                       HUnit                >= 1.6 && < 1.7,

@@ -147,6 +147,7 @@ copyWrapperW :: Verbosity
 copyWrapperW v env descr installDirs exe
   | exeScope exe /= ExecutablePrivate = pure ()
   | otherwise = do
+  createDirectoryIfMissing False b
   installExecutableFile v srcExe destExe
   installExecutableFile v srcExe destExeVer -- always make a versioned copy
   requiresOptions <- doesFileExist srcOptions
@@ -154,26 +155,24 @@ copyWrapperW v env descr installDirs exe
     optionsExists <- doesFileExist destOptions
     when (not optionsExists) $ do
       options <- replacePlaceholders env <$> readFile srcOptions
-      createDirectoryIfMissing False b
       withTempFile b "ghcjs-options-XXXXXX.tmp" $ \tmp h -> do
         hPutStr h options
         hClose h
         installOrdinaryFile v tmp destOptions
     where
       e            = unUnqualComponentName . exeName $ exe
-      e'           = dropExtensions e
+      eWithExt     = if ".exe" `isSuffixOf` e then e else e <.> "exe"
       b            = bindir installDirs
       -- example: libexec\ghcjs.exe
-      srcExe       = libexecdir installDirs </> e
+      srcExe       = libexecdir installDirs </> eWithExt
       -- example: bin\ghcjs.exe
       --    (copy of srcExe)
-      destExe      = b </> e
+      destExe      = b </> eWithExt
       -- example: bin\ghcjs-8.2.0.1-8.2.2.exe
       --    (copy of srcExe)
-      destExeVer   = b </> e' ++ "-" ++ verSuff env <.> "exe"
+      destExeVer   = b </> (dropExtensions e) ++ "-" ++ verSuff env <.> "exe"
       -- example: lib\ghcjs.exe.options
-      srcOptions   = datadir installDirs </> "bin" </>
-                        e' <.> "exe" <.> "options"
+      srcOptions   = datadir installDirs </> "bin" </> eWithExt <.> "options"
       -- example: bin\ghcjs-8.2.0.1-8.2.2.exe.options
       --    (created, existing files not overwritten)
       destOptions  = destExeVer <.> "options"

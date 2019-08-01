@@ -185,7 +185,11 @@ runJsProgram (Just topDir) args
       hSetBuffering stdin NoBuffering
       hSetBuffering stdout NoBuffering
       hSetBuffering stderr NoBuffering
-      node <- T.strip <$> T.readFile (topDir </> "node")
+      let nodeRef = topDir </> "node"
+      existNodeRef <- doesFileExist nodeRef
+      node <- if existNodeRef
+                then T.strip <$> T.readFile nodeRef
+                else return $ T.pack "node"
       ph <- runProcess (T.unpack node) (script:scriptArgs) Nothing Nothing Nothing Nothing Nothing
       exitWith =<< waitForProcess ph
   | otherwise = error "usage: ghcjs --run [script] [arguments]"

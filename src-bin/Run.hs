@@ -20,7 +20,10 @@ main = do
   cd   <- getCurrentDirectory
   let jsExe  = dropExeExtension path <.> "jsexe"
       script = jsExe </> "all" <.> "js"
-  node <- trim <$> readFile (jsExe </> "node")
+      nodeRef = jsExe </> "node"
+  existNodeRef <- doesFileExist nodeRef
+  node <- if existNodeRef then trim <$> readFile (jsExe </> "node")
+                          else return $ "node"
   ph <- runProcess node (script:args) (Just cd) Nothing Nothing Nothing Nothing
   exitWith =<< waitForProcess ph
 

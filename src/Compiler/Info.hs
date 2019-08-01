@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings #-}
+{-# LANGUAGE CPP, ScopedTypeVariables, OverloadedStrings, LambdaCase #-}
 module Compiler.Info where
 
 import qualified Control.Exception as E
@@ -22,6 +22,8 @@ import           Control.Monad
 import           Data.Char
 import           Data.Maybe
 import qualified Data.Text as T
+
+import           Panic
 
 import           System.Directory (doesFileExist)
 import           System.Environment

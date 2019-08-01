@@ -345,15 +345,14 @@ instance Yaml.FromJSON BootConfigFile where
 
 
 -- convert C:\x\y to /c/x/y (only on Windows)
-msysPath :: FilePath -> Text
+msysPath :: Text -> Text
 msysPath p
   | isWindows =
-      let p' = toTextI p
-          backToForward '\\' = '/'
+      let backToForward '\\' = '/'
           backToForward x    = x
-          isRel = "." `T.isPrefixOf` p' -- fixme
-      in bool isRel "" "/" <> T.map backToForward (T.filter (/=':') p')
-  | otherwise = toTextI p
+          withoutSlash = "." `T.isPrefixOf` p || "\\" `T.isPrefixOf` p
+      in bool withoutSlash "" "/" <> T.map backToForward (T.filter (/=':') p)
+  | otherwise = p
 
 optParser' :: ParserInfo BootSettings
 optParser' =
@@ -445,7 +444,9 @@ initPackageDB = do
       rm_f (dir </> "package.conf")
       initDB "--user" (dir </> "package.conf.d")
     initDB dbName db = do
-      rm_rf db >> mkdir_p db
+      rm_rf db
+      -- ghcjs-pkg init throws error in windows if dir already exists
+      when (not isWindows) (mkdir_p db)
       ghcjs_pkg_ ["init", toTextI db] `catchAny_` return ()
       ghcjs_pkg_ ["recache", dbName]
 
@@ -495,9 +496,13 @@ prepareLibDir = subBuild $ do
   subTop $ do
     writefile "empty.c" ""
     ghc_ ["-c", "empty.c"]
-  when isWindows $
+  when isWindows $ do
     cp (ghcLib </> "bin" </> exe "touchy")
        (ghcjsLib </> "bin" </> exe "touchy")
+    rm_rf (ghcjsLib </> ".." </> "mingw")
+    cp_r (ghcLib </> ".." </> "mingw")
+         (ghcjsLib </> "..")
+    compileRunnerResources
   writefile (ghcjsLib </> "ghc_libdir") (toTextI ghcLib)
   msg info "RTS prepared"
 
@@ -515,7 +520,7 @@ prepareNodeJs = do
     npmProgram <- view (bePrograms . bpNpm)
     subTop (mkdir_p "ghcjs-node")
     liftIO $ unpackTar False
-                       True
+                       (not isWindows)
                        (toStringI $ ghcjsLib)
                        (toStringI $ buildDir </> "ghcjs-node.tar")
     subTop' "ghcjs-node" $ npm_ ["rebuild"]
@@ -553,8 +558,8 @@ installPlatformIncludes inc incNative = do
 exe :: FilePath -> FilePath
 exe = bool isWindows (<.>"exe") id
 
--- fixme this part will fail to compile
-#ifdef WINDOWS
+compileRunnerResources :: B()
+compileRunnerResources = do
   -- compile the resources we need for the runner to prevent Windows from
   -- trying to detect programs that require elevated privileges
   ghcjsTop <- view (beLocations . blGhcjsTopDir)
@@ -568,7 +573,7 @@ exe = bool isWindows (<.>"exe") id
                                   "windres.exe")
                         []
   subTop $ run_ windres ["runner.rc", "-o", "runner-resources.o"]
-#endif
+
 
 buildDocIndex :: B ()
 buildDocIndex = subTop' "doc" $ do
@@ -1013,10 +1018,12 @@ filesize file = do
 initBootEnv :: BootSettings -> IO BootEnv
 initBootEnv bs = do
   BootConfigFile stgs pgms1 <- readBootConfigFile bs
-  pgms2 <- configureBootPrograms bs pgms1
+  pgms2 <- configureBootPrograms bs (addCmdToNpm pgms1)
   locs  <- configureBootLocations bs pgms2
   return (BootEnv bs locs pgms2 stgs)
 
+  where addCmdToNpm = bool isWindows (bpNpm . pgmSearch <>~ ".cmd") id
+  
 -- | configure the locations
 configureBootLocations :: BootSettings
                        -> BootPrograms
@@ -1316,12 +1323,15 @@ bootConfigFile bs = do
          pure (BL.toStrict $ getBootYaml entries)
        else B.readFile (toStringI $ sourceDir </> "boot" <.> "yaml")
   where
+    bootYamlFP = "boot" FP.</> "boot.yaml"
     getBootYaml (Tar.Next e es)
-      | Tar.entryPath e == "boot/boot.yaml"
+      | Tar.entryPath e == bootYamlFP
       , Tar.NormalFile contents _size <- Tar.entryContent e = contents
       | otherwise = getBootYaml es
-    getBootYaml Tar.Done     = error "boot/boot.yaml file not found in archive"
-    getBootYaml (Tar.Fail e) = error $ "error reading boot archive: " ++ show e
+    getBootYaml Tar.Done     =
+      error $ show bootYamlFP ++ " file not found in archive"
+    getBootYaml (Tar.Fail e) =
+      error $ "error reading boot archive: " ++ show e
 
 bootSourceDir :: BootSettings -> IO FilePath
 bootSourceDir bs
