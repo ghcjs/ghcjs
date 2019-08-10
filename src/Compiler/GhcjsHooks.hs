@@ -183,7 +183,8 @@ runGhcjsPhase _ _ (RealPhase ph) input _dflags
                 `catchIOError` \_ -> return ()
     return (RealPhase next, output)
   where
-    skipPhases = [ (CmmCpp, Cmm)
+    skipPhases = [ (HCc, As False)
+                 , (CmmCpp, Cmm)
                  , (Cmm, As False)
                  , (Cmm, As True)
                  , (As False, StopLn)
