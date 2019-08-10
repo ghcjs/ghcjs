@@ -28,6 +28,8 @@ import           System.Environment
 import           System.FilePath ((<.>), dropExtension)
 
 import           Compiler.Utils
+
+import           Panic
 #endif
 
 import qualified Paths_ghcjs
@@ -163,8 +165,9 @@ getFullArguments = do
              , exe' ++ "-" ++ getCompilerVersion <.> "exe" <.> "options"
              ]
       addArgs [] = return []
-      addArgs (o:os) =
-        doesFileExist o >>= \case
+      addArgs (o:os) = do
+        e <- doesFileExist o
+        case e of
           True  -> getOptionArgs o
           False -> addArgs os
   exists <- doesFileExist (exe)

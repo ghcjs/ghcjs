@@ -503,7 +503,7 @@ for FILE in LICENSE Setup.hs CHANGES.md; do
   copy_file "$GHCSRC/utils/haddock/haddock-library" "$FILE"
 done
 
-for DIR in src test fixtures vendor; do
+for DIR in src test fixtures; do
   copy_dir "$GHCSRC/utils/haddock/haddock-library" "$DIR"
 done
 )
