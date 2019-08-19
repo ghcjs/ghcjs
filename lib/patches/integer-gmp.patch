@@ -22,8 +22,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gm
      GHC.Integer.Logarithms
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits/ghcjsbn.js
 --- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1970-01-01 01:00:00.000000000 +0100
-+++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2019-07-31 01:47:50.000000000 +0200
-@@ -0,0 +1,2149 @@
++++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2019-08-19 09:29:36.000000000 +0200
+@@ -0,0 +1,2142 @@
 +/*
 +   GHCJS bignum library for integer-gmp package
 +
@@ -1707,14 +1707,6 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +error "no mkInteger implementation for specified GHCJSBN_BITS"
 +#endif
 +
-+// BigNat -> Int -> Int
-+function h$ghcjsbn_indexBigNat(b, i) {
-+  ASSERTVALID_B(b, "indexBigNat");
-+  ASSERTVALID_S(i, "indexBigNat");
-+  var bl = b[0];
-+  return i >= bl ? 0 : b[i+1];
-+}
-+
 +// BigNat -> Word -> Int (Ordering)
 +function h$ghcjsbn_cmp_bw(b, w) {
 +  ASSERTVALID_B(b, "cmp_bw");
@@ -1943,18 +1935,19 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +  return Math.ceil((bl * GHCJSBN_BITS) / 32);
 +}
 +
++#if GHCJSBN_BITS == 28
 +// extract a word from a BigNat
 +function h$ghcjsbn_index_b(b, w) {
-+  if(GHCJSBN_BITS === 28) {
-+    var limb = (32 * w / 28)|0;
-+    var l    = b[0];
-+    var l1   = limb < l ? b[limb+1] : 0;
-+    var l2   = (limb+1) < l ? b[limb+2] : 0;
-+    var ws   = 4 * (w % 7);
-+    return (l1 >>> ws) | (l2 << 24 - ws);
-+  }
-+  throw new Error("ghcjsbn_index_b not implemented for current number of bits per limb");
++  var limb = (32 * w / 28)|0;
++  var l    = b[0];
++  var l1   = limb < l ? b[limb+1] : 0;
++  var l2   = (limb+1) < l ? b[limb+2] : 0;
++  var ws   = 4 * (w % 7);
++  return (l1 >>> ws) | (l2 << 28 - ws);
 +}
++#else
++#error "ghcjsbn_index_b not implemented for current number of bits per limb";
++#endif
 +
 +// Bool -> BigNat -> Double
 +function h$ghcjsbn_toDouble_b(nonNeg, b) {
@@ -2295,21 +2288,6 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  
  -- | Compute next prime greater than @/n/@ probalistically.
  --
-diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2019-06-15 23:41:11.000000000 +0200
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms/Internals.hs	2019-07-31 01:50:46.000000000 +0200
-@@ -2,6 +2,11 @@
- {-# LANGUAGE MagicHash #-}
- {-# LANGUAGE UnboxedTuples #-}
- {-# LANGUAGE CPP #-}
-+#ifdef ghcjs_HOST_OS
-+{-# LANGUAGE JavaScriptFFI #-}
-+{-# LANGUAGE UnliftedFFITypes #-}
-+{-# LANGUAGE GHCForeignImportPrim #-}
-+#endif
- 
- {-# OPTIONS_HADDOCK hide #-}
- 
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs
 --- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2019-06-15 23:41:11.000000000 +0200
 +++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2019-06-15 23:41:11.000000000 +0200
