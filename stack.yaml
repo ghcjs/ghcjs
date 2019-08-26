@@ -4,7 +4,10 @@
 # $ ./utils/makePackages.sh
 #
 
-resolver: nightly-2018-12-05
+resolver: lts-14.2 
+extra-deps:
+  - haskell-src-exts-1.20.3@sha256:eb9a0a02e422f64e793fe077e445e930bc365b7f7ce92ce6983475c72f8b3785,4467
+  - happy-1.19.9@sha256:f8c774230735a390c287b2980cfcd2703d24d8dde85a01ea721b7b4b4c82944f,4667
 packages:
   - .
   - ./lib/ghc-api-ghcjs
