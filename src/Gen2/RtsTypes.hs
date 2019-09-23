@@ -1,6 +1,4 @@
 {-# LANGUAGE CPP,
-             QuasiQuotes,
-             TemplateHaskell,
              TypeSynonymInstances,
              FlexibleInstances,
              TupleSections,
@@ -22,14 +20,12 @@ import           ForeignCall (Safety(..), CCallConv(..))
 import           FastString
 
 import qualified Control.Exception as Ex
-import           Control.Lens
+import           Control.Lens hiding ((#), (||=))
 import           Control.Monad.State.Strict
 
 import           Data.Array   (Array, (!), listArray)
-import           Data.Bits
-import           Data.Char    (toLower)
+import qualified Data.Bits as Bits
 import           Data.Default
-import           Data.Ix
 import qualified Data.List    as L
 import qualified Data.Map     as M
 import           Data.Maybe   (fromMaybe, isJust)
@@ -41,82 +37,29 @@ import qualified Data.Text    as T
 import           Compiler.Compat
 import           Compiler.JMacro
 import           Compiler.Utils
+import           Compiler.JMacro.Combinators
+import           Compiler.JMacro.Symbols
 
 import           Gen2.ClosureInfo
 import           Gen2.Utils
+import Prelude
 
-traceRts :: ToJExpr a => CgSettings -> a -> JStat
-traceRts s e = jStatIf (csTraceRts s) [j| h$log(`e`); |]
+traceRts :: CgSettings -> JExpr -> JStat
+traceRts s ex = jStatIf (csTraceRts s) (appS "h$log" [ex])
 
 assertRts :: ToJExpr a => CgSettings -> JExpr -> a -> JStat
-assertRts s e m = jStatIf (csAssertRts s) [j| if(!`e`) { throw `m`; } |]
+assertRts s ex m = jStatIf (csAssertRts s)
+  (ifS' (UOpExpr NotOp ex) (appS "throw" [e m]))
 
 jStatIf :: Bool -> JStat -> JStat
 jStatIf True s = s
 jStatIf _    _ = mempty
 
 clName :: JExpr -> JExpr
-clName c = [je| `c`.n |]
+clName c = c .^ "n"
 
 clTypeName :: JExpr -> JExpr
-clTypeName c = [je| h$closureTypeName(`c`.t) |]
-
-infixr 1 |+
-infixr 1 |-
-infixl 3 |.
-infixl 2 |!
-infixl 2 |!!
-
--- a + b
-(|+) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
-(|+) e1 e2 = [je| `e1` + `e2` |]
-
--- a - b
-(|-) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
-(|-) e1 e2 = [je| `e1` - `e2` |]
-
--- a & b
-(|&) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
-(|&) e1 e2 = [je| `e1` & `e2` |]
-
--- a.b
-(|.) :: ToJExpr a => a -> Text -> JExpr
-(|.) e i = SelExpr (toJExpr e) (TxtI i)
-
--- a[b]
-(|!) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
-(|!) e i = [je| `e`[`i`] |]
-
--- a[b] with b int
-(|!!) :: ToJExpr a => a -> Int -> JExpr
-(|!!) = (|!)
-
--- a(b1,b2,...)
-(|^) :: ToJExpr a => a -> [JExpr] -> JExpr
-(|^) a bs = ApplExpr (toJExpr a) bs
-
-(|^^) :: Text -> [JExpr] -> JExpr
-(|^^) a bs = ApplExpr (jsv a) bs
-
-(|||) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
-(|||) a b = [je| `a` || `b` |]
-
-(|&&) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
-(|&&) a b = [je| `a` && `b` |]
-
-(|===) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
-(|===) a b = [je| `a` === `b` |]
-
-(|!==) :: (ToJExpr a, ToJExpr b) => a -> b -> JExpr
-(|!==) a b = [je| `a` !== `b` |]
-
-infix 7 |=
-(|=) :: ToJExpr a => Ident -> a -> JStat
-(|=) i b = AssignStat (toJExpr i) (toJExpr b)
-
-infix 7 ||=
-(||=) :: ToJExpr a => Ident -> a -> JStat
-(||=) i b = decl i <> i |= b
+clTypeName c = app "h$closureTypeName" [c .^ "t"]
 
 showPpr' :: Outputable a => a -> G String
 showPpr' a = do
@@ -128,69 +71,6 @@ showSDoc' a = do
   df <- _gsDynFlags <$> get
   return (showSDoc df a)
 
--- fixme this is getting out of hand...
-data StgReg = R1  | R2  | R3  | R4  | R5  | R6  | R7  | R8
-            | R9  | R10 | R11 | R12 | R13 | R14 | R15 | R16
-            | R17 | R18 | R19 | R20 | R21 | R22 | R23 | R24
-            | R25 | R26 | R27 | R28 | R29 | R30 | R31 | R32
-            | R33 | R34 | R35 | R36 | R37 | R38 | R39 | R40
-            | R41 | R42 | R43 | R44 | R45 | R46 | R47 | R48
-            | R49 | R50 | R51 | R52 | R53 | R54 | R55 | R56
-            | R57 | R58 | R59 | R60 | R61 | R62 | R63 | R64
-            | R65 | R66 | R67 | R68 | R69 | R70 | R71 | R72
-            | R73 | R74 | R75 | R76 | R77 | R78 | R79 | R80
-            | R81 | R82 | R83 | R84 | R85 | R86 | R87 | R88
-            | R89 | R90 | R91 | R92 | R93 | R94 | R95 | R96
-            | R97  | R98  | R99  | R100 | R101 | R102 | R103 | R104
-            | R105 | R106 | R107 | R108 | R109 | R110 | R111 | R112
-            | R113 | R114 | R115 | R116 | R117 | R118 | R119 | R120
-            | R121 | R122 | R123 | R124 | R125 | R126 | R127 | R128
-  deriving (Eq, Ord, Show, Enum, Bounded, Ix)
-
--- | return registers
---   extra results from foreign calls can be stored here (first result is returned)
-data StgRet = Ret1 | Ret2 | Ret3 | Ret4 | Ret5 | Ret6 | Ret7 | Ret8 | Ret9 | Ret10
-  deriving (Eq, Ord, Show, Enum, Bounded, Ix)
-
-instance ToJExpr StgReg where
-  toJExpr = (registers!)
-
--- only the registers that have a single ident
-registersI :: Array StgReg Ident
-registersI = listArray (minBound, R32) (map (ri.(registers!)) $ enumFromTo R1 R32)
-  where
-    ri (ValExpr (JVar i)) = i
-    ri _                  = error "registersI: not an ident"
-
-registers :: Array StgReg JExpr
-registers = listArray (minBound, maxBound) (map regN (enumFrom R1))
-  where
-    regN r
-      | fromEnum r < 32 = ValExpr . JVar . TxtI . T.pack . ("h$"++) . map toLower . show $ r
-      | otherwise       = [je| h$regs[`fromEnum r-32`] |]
-
-instance ToJExpr StgRet where
-  toJExpr r = ValExpr (JVar (rets!r))
-
-rets :: Array StgRet Ident
-rets = listArray (minBound, maxBound) (map retN (enumFrom Ret1))
-  where
-    retN = TxtI . T.pack . ("h$"++) . map toLower . show
-
-regName :: StgReg -> String
-regName = map toLower . show
-
-regNum :: StgReg -> Int
-regNum r = fromEnum r + 1
-
-numReg :: Int -> StgReg
-numReg r = toEnum (r - 1)
-
-minReg :: Int
-minReg = regNum minBound
-
-maxReg :: Int
-maxReg = regNum maxBound
 
 data IdType = IdPlain | IdEntry | IdConEntry deriving (Enum, Eq, Ord, Show)
 data IdKey = IdKey !Int !Int !IdType deriving (Eq, Ord)
@@ -228,7 +108,6 @@ data GenGroupState = GenGroupState
   , _ggsExtraDeps     :: Set OtherSymb  -- ^ extra dependencies for the linkable unit that contains this group
   , _ggsGlobalIdCache :: GlobalIdCache
   , _ggsForeignRefs   :: [ForeignRef]
---  , _ggsGlobalRefs    :: [[Id]]
   }
 
 instance Default GenGroupState where
@@ -241,8 +120,72 @@ data StackSlot = SlotId !Id !Int
                | SlotUnknown
   deriving (Eq, Ord, Show)
 
-makeLenses ''GenGroupState
-makeLenses ''GenState
+ggsClosureInfo :: Lens' GenGroupState [ClosureInfo]
+ggsClosureInfo f ggs = fmap (\x -> ggs { _ggsClosureInfo = x }) (f $ _ggsClosureInfo ggs)
+{-# INLINE ggsClosureInfo #-}
+
+ggsExtraDeps :: Lens' GenGroupState (Set OtherSymb)
+ggsExtraDeps f ggs = fmap (\x -> ggs { _ggsExtraDeps = x }) (f $ _ggsExtraDeps ggs)
+{-# INLINE ggsExtraDeps #-}
+
+ggsForeignRefs :: Lens' GenGroupState [ForeignRef]
+ggsForeignRefs f ggs = fmap (\x -> ggs { _ggsForeignRefs = x }) (f $ _ggsForeignRefs ggs)
+{-# INLINE ggsForeignRefs #-}
+
+ggsGlobalIdCache :: Lens' GenGroupState GlobalIdCache
+ggsGlobalIdCache f ggs = fmap (\x -> ggs { _ggsGlobalIdCache = x }) (f $ _ggsGlobalIdCache ggs)
+{-# INLINE ggsGlobalIdCache #-}
+
+ggsStack :: Lens' GenGroupState [StackSlot]
+ggsStack f ggs = fmap (\x -> ggs { _ggsStack = x }) (f $ _ggsStack ggs)
+{-# INLINE ggsStack #-}
+
+ggsStackDepth :: Lens' GenGroupState Int
+ggsStackDepth f ggs = fmap (\x -> ggs { _ggsStackDepth = x }) (f $ _ggsStackDepth ggs)
+{-# INLINE ggsStackDepth #-}
+
+ggsStatic :: Lens' GenGroupState [StaticInfo]
+ggsStatic f ggs = fmap (\x -> ggs { _ggsStatic = x }) (f $ _ggsStatic ggs)
+{-# INLINE ggsStatic #-}
+
+ggsToplevelStats :: Lens' GenGroupState [JStat]
+ggsToplevelStats f ggs = fmap (\x -> ggs { _ggsToplevelStats = x }) (f $ _ggsToplevelStats ggs)
+{-# INLINE ggsToplevelStats #-}
+
+gsDynFlags :: Lens' GenState DynFlags
+gsDynFlags f gs = fmap (\x -> gs { _gsDynFlags = x }) (f $ _gsDynFlags gs)
+{-# INLINE gsDynFlags #-}
+
+gsGlobal :: Lens' GenState [JStat]
+gsGlobal f gs = fmap (\x -> gs { _gsGlobal = x }) (f $ _gsGlobal gs)
+{-# INLINE gsGlobal #-}
+
+gsGroup :: Lens' GenState GenGroupState
+gsGroup f gs = fmap (\x -> gs { _gsGroup = x }) (f $ _gsGroup gs)
+{-# INLINE gsGroup #-}
+
+gsId :: Lens' GenState Int
+gsId f gs = fmap (\x -> gs { _gsId = x }) (f $ _gsId gs)
+{-# INLINE gsId #-}
+
+gsIdents :: Lens' GenState IdCache
+gsIdents f gs = fmap (\x -> gs { _gsIdents = x }) (f $ _gsIdents gs)
+{-# INLINE gsIdents #-}
+
+gsModule :: Lens' GenState Module
+gsModule f gs = fmap (\x -> gs { _gsModule = x }) (f $ _gsModule gs)
+{-# INLINE gsModule #-}
+
+gsSettings :: Lens' GenState CgSettings
+gsSettings f gs = fmap (\x -> gs { _gsSettings = x }) (f $ _gsSettings gs)
+
+{-# INLINE gsSettings #-}
+
+gsUnfloated :: Lens' GenState (UniqFM StgExpr)
+gsUnfloated f gs = fmap (\x -> gs { _gsUnfloated = x }) (f $ _gsUnfloated gs)
+{-# INLINE gsUnfloated #-}
+
+---
 
 assertRtsStat :: C -> C
 assertRtsStat stat = do
@@ -360,29 +303,21 @@ instance Semigroup C where
 instance Monoid C where
   mempty  = return mempty
 
-data Special = Stack
-             | Sp
-     deriving (Show, Eq)
-
-instance ToJExpr Special where
-  toJExpr Stack  = [je| h$stack |]
-  toJExpr Sp     = [je| h$sp    |]
-
 adjSp' :: Int -> JStat
 adjSp' 0 = mempty
-adjSp' e = [j| `Sp` = `Sp` + `e`; |]
+adjSp' n = sp |= sp + e n
 
 adjSpN' :: Int -> JStat
 adjSpN' 0 = mempty
-adjSpN' e = [j| `Sp` = `Sp`  - `e`; |]
+adjSpN' n = sp |= sp - e n
 
 adjSp :: Int -> C
 adjSp 0 = return mempty
-adjSp e = stackDepth += e >> return [j| `Sp` = `Sp` + `e`; |]
+adjSp n = stackDepth += n >> return (adjSp' n)
 
 adjSpN :: Int -> C
 adjSpN 0 = return mempty
-adjSpN e = stackDepth -= e >> return [j| `Sp` = `Sp`  - `e`; |]
+adjSpN n = stackDepth -= n >> return (adjSpN' n)
 
 pushN :: Array Int Ident
 pushN = listArray (1,32) $ map (TxtI . T.pack . ("h$p"++) . show) [(1::Int)..32]
@@ -427,12 +362,12 @@ pushOptimized xs = do
      | otherwise = inlinePush
     l   = length xs
     sig :: Integer
-    sig = L.foldl1' (.|.) $ zipWith (\(_e,b) i -> if not b then bit i else 0) xs [0..]
+    sig = L.foldl1' (Bits..|.) $ zipWith (\(_e,b) i -> if not b then Bits.bit i else 0) xs [0..]
     inlinePush = adjSp' l <> mconcat (zipWith pushSlot [1..] xs)
-    pushSlot i (e,False) = [j| `Stack`[`offset i`] = `e` |]
-    pushSlot _ _         = mempty
-    offset i | i == l    = [je| `Sp` |]
-             | otherwise = [je| `Sp` - `l-i` |]
+    pushSlot i (ex, False) = stack .! offset i |= ex
+    pushSlot _ _           = mempty
+    offset i | i == l    = sp
+             | otherwise = sp - e (l - i)
 
 push :: [JExpr] -> C
 push xs = do
@@ -446,9 +381,9 @@ push' cs xs
    | csInlinePush cs || l > 32 || l < 2 = adjSp' l <> mconcat items
    | otherwise                          = ApplStat (toJExpr $ pushN ! l) xs
   where
-    items = zipWith (\i e -> [j| `Stack`[`offset i`] = `e`; |]) [(1::Int)..] xs
-    offset i | i == l    = [je| `Sp` |]
-             | otherwise = [je| `Sp` - `l-i` |]
+    items = zipWith (\i e -> (AssignStat ((IdxExpr (toJExpr Stack)) (toJExpr (offset i)))) (toJExpr e)  {-[j| `Stack`[`offset i`] = `e`; |]-}) [(1::Int)..] xs
+    offset i | i == l    = sp
+             | otherwise = sp - e (l - i)
     l = length xs
 
 popUnknown :: [JExpr] -> C
@@ -485,9 +420,11 @@ loadSkip = loadSkipFrom (toJExpr Sp)
 loadSkipFrom :: JExpr -> Int -> [JExpr] -> JStat
 loadSkipFrom fr n xs = mconcat items
     where
-      items = reverse $ zipWith (\i e -> [j| `e` = `Stack`[`offset (i+n)`]; |]) [(0::Int)..] (reverse xs)
-      offset 0 = [je| `fr` |]
-      offset n = [je| `fr` - `n` |]
+      items = reverse $ zipWith (\i ex -> ex |= stack .! e (offset (i+n)))
+                                [(0::Int)..]
+                                (reverse xs)
+      offset 0 = e fr
+      offset n = e fr - e n
 
 
 -- declare and pop
@@ -509,10 +446,8 @@ loadSkipIFrom fr n xs = mconcat items
     where
       items = reverse $ zipWith f [(0::Int)..] (reverse xs)
       offset 0 = fr
-      offset n = [je| `fr` - `n` |]
-      f i e = [j| `decl e`;
-                  `e` = `Stack`[`offset (i+n)`];
-                |]
+      offset n = fr - e n
+      f i ex = ex ||= stack .! e (offset (i+n))
 
 popn :: Int -> C
 popn n = addUnknownSlots n >> adjSpN n
@@ -520,63 +455,87 @@ popn n = addUnknownSlots n >> adjSpN n
 -- below: c argument is closure entry, p argument is (heap) pointer to entry
 
 closureType :: JExpr -> JExpr
-closureType c = [je| `c`.f.t |]
+closureType = entryClosureType . entry
+  -- error "closureType" -- [je| `c`.f.t |]
+{-
+entryFun :: JExpr -> JExpr
+entryFun c = SelExpr c (TxtI "f")
+-}
+entryClosureType :: JExpr -> JExpr
+entryClosureType f = f .^ "t"
+  -- [je| `f`.t |]
 
 isThunk :: JExpr -> JExpr
-isThunk c = [je| `c`.f.t === `Thunk` |]
+isThunk c = closureType c .===. e Thunk
 
 isThunk' :: JExpr -> JExpr
-isThunk' f = [je| `f`.t === `Thunk` |]
+isThunk' f = entryClosureType f .===. e Thunk
+  -- [je| `f`.t === `Thunk` |]
 
 isBlackhole :: JExpr -> JExpr
-isBlackhole c = [je| `c`.f.t === `Blackhole` |]
+isBlackhole c = closureType c .===. e Blackhole
+
+  -- [je| `c`.f.t === `Blackhole` |]
 
 isFun :: JExpr -> JExpr
-isFun c = [je| `c`.f.t === `Fun` |]
+isFun c = closureType c .===. e Fun
+
+  -- [je| `c`.f.t === `Fun` |]
 
 isFun' :: JExpr -> JExpr
-isFun' f = [je| `f`.t === `Fun` |]
+isFun' f = entryClosureType f .===. e Fun
+  -- [je| `f`.t === `Fun` |]
 
 isPap :: JExpr -> JExpr
-isPap c = [je| `c`.f.t === `Pap` |]
+isPap c = closureType c .===. e Pap
+  -- [je| `c`.f.t === `Pap` |]
 
 isPap' :: JExpr -> JExpr
-isPap' f = [je| `f`.t === `Pap` |]
+isPap' f = entryClosureType f .===. e Pap
+  -- [je| `f`.t === `Pap` |]
 
 isCon :: JExpr -> JExpr
-isCon c = [je| `c`.f.t === `Con` |]
+isCon c = closureType c .===. e Con
+  -- [je| `c`.f.t === `Con` |]
 
 isCon' :: JExpr -> JExpr
-isCon' f = [je| `f`.t === `Con` |]
+isCon' f = entryClosureType f .===. e Con
+  -- [je| `f`.t === `Con` |]
 
 conTag :: JExpr -> JExpr
-conTag c = [je| `c`.f.a |]
+conTag = conTag' . entry -- entryFun [je| `c`.f.a |]
 
 conTag' :: JExpr -> JExpr
-conTag' f = [je| `f`.a |]
+conTag' f = f .^ "a"
 
 entry :: JExpr -> JExpr
-entry p = [je| `p`.f |]
+entry p = p .^ "f" -- SelExpr p (TxtI "f")
+  -- entryFun p -- [je| `p`.f |]
 
 -- number of  arguments (arity & 0xff = arguments, arity >> 8 = number of registers)
 funArity :: JExpr -> JExpr
-funArity c = [je| `c`.f.a |]
+funArity = funArity' . entry -- [je| `c`.f.a |]
 
 -- function arity with raw reference to the entry
 funArity' :: JExpr -> JExpr
-funArity' f = [je| `f`.a |]
+funArity' f = f .^ "a"
 
 -- arity of a partial application
 papArity :: JExpr -> JExpr
-papArity cp = [je| `cp`.d2.d1 |]
+papArity cp = cp .^ "d2" .^ "d1"
+  -- [je| `cp`.d2.d1 |]
 
 funOrPapArity :: JExpr       -- ^ heap object
               -> Maybe JExpr -- ^ reference to entry, if you have one already (saves a c.f lookup twice)
               -> JExpr       -- ^ arity tag (tag >> 8 = registers, tag & 0xff = arguments)
 funOrPapArity c Nothing =
-  [je| `isFun c` ? `funArity c` : `papArity c` |]
+  ((IfExpr (toJExpr (isFun c))) (toJExpr (funArity c)))
+  (toJExpr (papArity c))
+  -- [je| `isFun c` ? `funArity c` : `papArity c` |]
 funOrPapArity c (Just f) =
-  [je| `isFun' f` ? `funArity' f` : `papArity c` |]
+  ((IfExpr (toJExpr (isFun' f))) (toJExpr (funArity' f)))
+  (toJExpr (papArity c))
+  -- [je| `isFun' f` ? `funArity' f` : `papArity c` |]
 
 {-
   Most stack frames have a static size, stored in f.size, but there
@@ -592,17 +551,13 @@ stackFrameSize :: JExpr -- ^ assign frame size to this
                -> JExpr -- ^ stack frame header function
                -> JStat -- ^ size of the frame, including header
 stackFrameSize tgt f =
-  [j| if(`f` === h$ap_gen) { // h$ap_gen is special
-        `tgt` = (`Stack`[`Sp`-1] >> 8) + 2;
-      } else {
-        var tag = `f`.size;
-        if(tag < 0) { // dynamic size
-          `tgt` = `Stack`[`Sp`-1];
-        } else {
-          `tgt` = (tag & 0xff) + 1;
-        }
-      }
-    |]
+  ifS (f .===. var "h$ap_gen") -- h$ap_gen is special
+      (tgt |= (stack .! (sp - 1) .>>. 8) + 2)
+      (jVar (\tag -> tag |= f .^ "size" #
+        ifS (tag .<. 0)
+            (tgt |= stack .! (sp - 1))
+            (tgt |= (tag .&. 0xff) + 1)
+        ))
 
 -- some utilities do do something with a range of regs
 -- start or end possibly supplied as javascript expr
@@ -619,8 +574,8 @@ withRegsS start min end fallthrough f =
   SwitchStat start (map mkCase [regNum min..end]) mempty
     where
       brk | fallthrough = mempty
-          | otherwise   = [j| break; |]
-      mkCase n = (toJExpr n, [j| `f (numReg n)`; `brk`; |])
+          | otherwise   = BreakStat Nothing
+      mkCase n = (e n, f (numReg n) # f (numReg n) # brk)
 
 -- end from js expr, from high to low
 withRegsRE :: Int -> JExpr -> StgReg -> Bool -> (StgReg -> JStat) -> JStat
@@ -628,8 +583,8 @@ withRegsRE start end max fallthrough f =
   SwitchStat end (reverse $ map mkCase [numReg start..max]) mempty
     where
       brk | fallthrough = mempty
-          | otherwise   = [j| break; |]
-      mkCase n = (toJExpr (regNum n), [j| `f n`; `brk` |])
+          | otherwise   = BreakStat Nothing
+      mkCase n = (toJExpr (regNum n), f n # brk)
 
 -- | the global linkable unit of a module exports this symbol, depend on it to include that unit
 --   (used for cost centres)

@@ -27,10 +27,8 @@
 
     GHC Package Environment:
 
-       - The file `ghc_libdir` in the GHCJS library directory contains the full
-         path of a GHC library directory. The GHC version must be the same as
-         the one that GHCJS was compiled with. This location is used for the
-         global package db.
+       - GHCJS uses the library directory from the GHC that it was built
+         with for the global package database
 
        - If the user package db is visible, GHCJS will use GHC's user package
          db for plugins.
@@ -71,20 +69,21 @@ import Linker
 import DynamicLoading hiding (getValueSafely, getHValueSafely)
 import GHCi.RemoteTypes
 import qualified SysTools
-import System.FilePath
 import Compiler.Settings
 import Data.Char (isSpace)
 import Data.List
 import Data.Maybe
+import Prelude
 
 import Control.Concurrent.MVar
-
-import qualified Compiler.Info as Info
 
 import LoadIface
 import RdrName
 import SrcLoc
 import TcRnMonad
+
+-- we need the library directory of the GHC that built GHCJS
+import qualified GHC.Paths
 
 getValueSafely :: DynFlags -> GhcjsEnv
                -> HscEnv -> Name -> Type -> IO (Maybe a)
@@ -94,13 +93,12 @@ getValueSafely orig_dflags js_env hsc_env val_name expected_type = do
     Nothing   -> return Nothing
     Just hval -> do
       value <- lessUnsafeCoerce dflags "getValueSafely" hval
-      -- let value = unsafeCoerce hval
       return (Just value)
   where
     dflags = hsc_dflags hsc_env
 
 eqPluginType :: Type -> Type -> Bool
-eqPluginType expected_type ty =
+eqPluginType _expected_type ty =
    {- expected_type `eqType` ty || -} isGhcjsPlugin ty
 
 {-
@@ -114,8 +112,9 @@ isGhcjsPlugin ty
   | Just tc <- tyConAppTyCon_maybe ty
   , Just m  <- nameModule_maybe (getName tc)
   = moduleNameString (moduleName m) == "Plugins" &&
-    ("ghc-api-ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m) ||
-     "ghc-p-ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m)) &&
+    ({-"ghc-api-ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m) ||
+     "ghc-p-ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m) ||-}
+     "ghcjs-" `isPrefixOf` unitIdString (moduleUnitId m)) &&
     occNameString (nameOccName (getName tc)) == "Plugin"
   | otherwise = False
 
@@ -160,10 +159,9 @@ tryLoadThing plugins_env expected_type val_name0 = do
   mb_val_thing <- lookupTypeHscEnv plugins_env val_name
   case mb_val_thing of
     Nothing -> pure Nothing -- throwCmdLineErrorS dflags (missingTyThingErrorGHC val_name)
-    Just (AnId id) -> do
+    Just (AnId id) ->
         -- Check the value type in the interface against the type recovered from the type constructor
         -- before finally casting the value to the type we assume corresponds to that constructor
-        -- putStrLn ("plugins: loaded, types: " ++ show (expected_type, idType id))
         if expected_type `eqPluginType` idType id
           then do
             -- Link in the module that contains the value, if it has such a module
@@ -174,8 +172,9 @@ tryLoadThing plugins_env expected_type val_name0 = do
             -- Find the value that we just linked in and cast it given that we have proved its type
             hval <- getHValue plugins_env val_name >>= wormhole dflags
             return (Just hval)
-          else return Nothing
-    Just val_thing -> pure Nothing -- throwCmdLineErrorS dflags (wrongTyThingError val_name val_thing)
+          else
+            return Nothing
+    Just _val_thing -> pure Nothing -- throwCmdLineErrorS dflags (wrongTyThingError val_name val_thing)
 
 remapName :: HscEnv -> HscEnv -> Name -> IO [Name]
 remapName src_env tgt_env val_name
@@ -188,13 +187,7 @@ remapName src_env tgt_env val_name
           in  mkExternalName (nameUnique val_name) new_m
                              (nameOccName val_name) (nameSrcSpan val_name)
     pure $ map mk_new rus
-  {-
-      Nothing         ->
-        throwCmdLineErrorS (hsc_dflags tgt_env) $ missingTyThingErrorGHC val_name
-      Just tgt_unitid -> do
-        let
-        pure $ -}
-  | otherwise = do
+  | otherwise =
       throwCmdLineErrorS (hsc_dflags tgt_env) $ missingTyThingErrorGHC val_name
   where
     sdf = hsc_dflags src_env
@@ -236,8 +229,7 @@ initPluginsEnv :: DynFlags -> Maybe HscEnv -> IO (Maybe HscEnv, HscEnv)
 initPluginsEnv _ (Just env) = pure (Just env, env)
 initPluginsEnv orig_dflags _ = do
   let trim = let f = reverse . dropWhile isSpace in f . f
-  ghcTopDir   <- readFile (topDir orig_dflags </> "ghc_libdir")
-  ghcSettings <- SysTools.initSysTools (Just $ trim ghcTopDir)
+  ghcSettings <- SysTools.initSysTools (Just $ trim GHC.Paths.libdir)
   let removeJsPrefix xs = fromMaybe xs (stripPrefix "js_" xs)
       dflags0 = orig_dflags { settings = ghcSettings }
       dflags1 = gopt_unset dflags0 Opt_HideAllPackages
@@ -249,7 +241,7 @@ initPluginsEnv orig_dflags _ = do
                  , dynHiSuf       = removeJsPrefix (dynHiSuf dflags1)
                  }
   dflags3 <- initDynFlags dflags2
-  (dflags, units) <- initPackages dflags3
+  (dflags, _units) <- initPackages dflags3
   env <- newHscEnv dflags
   pure (Just env, env)
 
@@ -257,7 +249,7 @@ hostPackageDBFlags :: [PackageDBFlag] -> [PackageDBFlag]
 hostPackageDBFlags = mapMaybe f
   where f (PackageDB (HostPkgConfFile file)) =
             Just (PackageDB $ PkgConfFile file)
-        f (PackageDB (PkgConfFile {})) = Nothing
+        f (PackageDB PkgConfFile {}) = Nothing
         f x = Just x
 
 unitToPkg :: String -> String

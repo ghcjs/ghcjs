@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, FlexibleContexts, TypeSynonymInstances, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, BangPatterns, DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, FlexibleContexts, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, DeriveGeneric #-}
 
 -----------------------------------------------------------------------------
 {- |
@@ -30,8 +30,8 @@ module Compiler.JMacro.Base (
   -- * Literals
   jsv,
   -- * Occasionally helpful combinators
-  jLam, jVar, jVarTy, jFor, jForIn, jForEachIn, jTryCatchFinally,
-  expr2stat, ToStat(..), nullStat,
+  jLam, jVar, jFor, jForIn, jForEachIn, jTryCatchFinally,
+  expr2stat, expr2ident, ToStat(..), nullStat,
   -- * Hash combinators
   jhEmpty, jhSingle, jhAdd, jhFromList,
   -- * Utility
@@ -80,7 +80,7 @@ x $$$ y = align (nest 2 $ x $+$ y)
 
 newtype IdentSupply a = IS {runIdentSupply :: State [Ident] a} deriving Typeable
 
-instance NFData (IdentSupply a) where rnf (IS{}) = ()
+instance NFData (IdentSupply a) where rnf IS{} = ()
 
 inIdentSupply :: (State [Ident] a -> State [Ident] b) -> IdentSupply a -> IdentSupply b
 inIdentSupply f x = IS $ f (runIdentSupply x)
@@ -149,14 +149,18 @@ instance NFData JStat
 type JsLabel = Text
 
 
-instance Semigroup JStat where (<>) = mappend
+instance Semigroup JStat where
+     (BlockStat []) <> x              = x
+     x <> (BlockStat [])              = x
+     (BlockStat xs) <> (BlockStat ys) = BlockStat $ xs ++ ys
+     (BlockStat xs) <> ys = BlockStat $ xs ++ [ys]
+     xs <> (BlockStat ys) = BlockStat $ xs : ys
+     xs <> ys = BlockStat [xs,ys]
 
 instance Monoid JStat where
     mempty = BlockStat []
-    mappend (BlockStat xs) (BlockStat ys) = BlockStat $ xs ++ ys
-    mappend (BlockStat xs) ys = BlockStat $ xs ++ [ys]
-    mappend xs (BlockStat ys) = BlockStat $ xs : ys
-    mappend xs ys = BlockStat [xs,ys]
+    mappend = (<>)
+
 
 
 -- TODO: annotate expressions with type
@@ -552,7 +556,7 @@ scopify x = evalState (jfromGADT <$> go (jtoGADT x)) (newIdentSupply Nothing)
                    (JMGExpr (ValExpr (JFunc is s))) -> do
                             st <- get
                             let (newIs,newSt) = splitAt (length is) st
-                            put (newSt)
+                            put newSt
                             rest <- jfromGADT <$> go (jtoGADT s)
                             return . JMGExpr . ValExpr $ JFunc newIs $ (jsReplace_ $ zip is newIs) rest
                    _ -> composOpM go v
@@ -642,7 +646,7 @@ defRenderJsS r (UOpStat op x)
         | isPre op && isAlphaOp op = text (uOpText op) <+> optParens r x
         | isPre op = text (uOpText op) <> optParens r x
         | otherwise = optParens r x <> text (uOpText op)
-defRenderJsS _ (AntiStat{}) = error "defRenderJsS: AntiStat"
+defRenderJsS _ AntiStat{} = error "defRenderJsS: AntiStat"
 defRenderJsS r (BlockStat xs) = jsToDocR r (flattenBlocks xs)
 
 flattenBlocks :: [JStat] -> [JStat]
@@ -666,7 +670,7 @@ defRenderJsE r (UOpExpr op x)
         | isPre op = text (uOpText op) <> optParens r x
         | otherwise = optParens r x <> text (uOpText op)
 defRenderJsE r (ApplExpr je xs) = jsToDocR r je <> (parens . fillSep . punctuate comma $ map (jsToDocR r) xs)
-defRenderJsE _ (AntiExpr{}) = error "defRenderJsE: AntiExpr" -- text . TL.fromChunks $ ["`(", s, ")`"]
+defRenderJsE _ AntiExpr{} = error "defRenderJsE: AntiExpr" -- text . TL.fromChunks $ ["`(", s, ")`"]
 
 defRenderJsE r (UnsatExpr e) = jsToDocR r $ sat_ e
 
@@ -759,7 +763,7 @@ instance (ToJExpr a, ToJExpr b, ToJExpr c, ToJExpr d, ToJExpr e) => ToJExpr (a,b
     toJExpr (a,b,c,d,e) = ValExpr . JList $ [toJExpr a, toJExpr b, toJExpr c, toJExpr d, toJExpr e]
 instance (ToJExpr a, ToJExpr b, ToJExpr c, ToJExpr d, ToJExpr e, ToJExpr f) => ToJExpr (a,b,c,d,e,f) where
     toJExpr (a,b,c,d,e,f) = ValExpr . JList $ [toJExpr a, toJExpr b, toJExpr c, toJExpr d, toJExpr e, toJExpr f]
-
+{-
 instance Num JExpr where
     fromInteger = ValExpr . JInt . fromIntegral
     x + y = InfixExpr AddOp x y
@@ -767,7 +771,7 @@ instance Num JExpr where
     x * y = InfixExpr MulOp x y
     abs x = ApplExpr (jsv "Math.abs") [x]
     signum x = IfExpr (InfixExpr GtOp x 0) 1 (IfExpr (InfixExpr EqOp x 0) 0 (-1))
-
+-}
 {--------------------------------------------------------------------
   Block Sugar
 --------------------------------------------------------------------}
@@ -807,7 +811,7 @@ jVar :: ToSat a => a -> JStat
 jVar f = UnsatBlock . IS $ do
            (block, is) <- runIdentSupply $ toSat_ f []
            let addDecls (BlockStat ss) =
-                  BlockStat $ map (\x -> DeclStat x) is ++ ss
+                  BlockStat $ map DeclStat is ++ ss
                addDecls x = x
            return $ addDecls block
 
@@ -816,6 +820,7 @@ jVar f = UnsatBlock . IS $ do
 -- of the enclosed expression. The result is a block statement.
 -- Usage:
 -- @jVar $ \ x y -> {JExpr involving x and y}@
+{-
 jVarTy :: ToSat a => a -> {- Maybe JLocalType -> -} JStat
 jVarTy f {- t -} = UnsatBlock . IS $ do
            (block, is) <- runIdentSupply $ toSat_ f []
@@ -823,7 +828,7 @@ jVarTy f {- t -} = UnsatBlock . IS $ do
                   BlockStat $ map (\x -> DeclStat x {- t -}) is ++ ss
                addDecls x = x
            return $ addDecls block
-
+-}
 
 -- | Create a for in statement.
 -- Usage:
@@ -870,6 +875,10 @@ jhFromList = JHash . M.fromList
 
 nullStat :: JStat
 nullStat = BlockStat []
+
+expr2ident :: JExpr -> Ident
+expr2ident (ValExpr (JVar i)) = i
+expr2ident e                  = error ("expr2ident: expected (ValExpr (JVar _)), got: " ++ show e)
 
 -- Aeson instance
 instance ToJExpr Value where

@@ -21,6 +21,7 @@ import qualified Compiler.Info          as Ghcjs
 import qualified Compiler.Settings      as Ghcjs
 import qualified Compiler.Utils         as Ghcjs
 import           Data.IORef
+import Prelude
 
 -- The official GHC API
 import qualified GHC
@@ -108,6 +109,7 @@ main = do
 
    Ghcjs.ghcjsErrorHandler defaultFatalMessager defaultFlushOut $ do
     -- 1. extract the -B flag from the args
+    argv0 <- Ghcjs.getWrappedArgs
     (argv0, booting, booting_stage1) <- Ghcjs.getWrappedArgs
 
     let (minusB_args, argv1) = partition ("-B" `isPrefixOf`) argv0
@@ -143,7 +145,6 @@ main = do
                    ShowOptions isInteractive -> showOptions isInteractive
 
         Right postStartupMode -> do
-            when (not booting) (Ghcjs.checkIsBooted mbMinusB)
 
             -- start our GHC session
             GHC.runGhc mbMinusB $ do

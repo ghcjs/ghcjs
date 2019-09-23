@@ -23,6 +23,7 @@ import qualified Gen2.Shim           as Gen2
 import qualified Gen2.Object         as Gen2
 import qualified Gen2.Cache          as Gen2
 import qualified Gen2.Rts            as Gen2
+import Prelude
 
 import           HsExtension
 import           CoreToStg
@@ -76,11 +77,9 @@ import qualified GHCJS.Prim.TH.Types            as TH
 
 #if defined(MIN_VERSION_template_haskell_ghcjs)
 import qualified "template-haskell-ghcjs" Language.Haskell.TH            as TH
-import           "template-haskell-ghcjs" Language.Haskell.TH.Syntax     (Quasi)
 import qualified "template-haskell-ghcjs" Language.Haskell.TH.Syntax     as TH
 #else
 import qualified "template-haskell"       Language.Haskell.TH            as TH
-import           "template-haskell"       Language.Haskell.TH.Syntax     (Quasi)
 import qualified "template-haskell"       Language.Haskell.TH.Syntax     as TH
 #endif
 
@@ -165,7 +164,7 @@ ghcjsRunMeta' :: GhcjsEnv
               -> (SrcSpan -> ByteString -> TcM hs_syn)
               -> LHsExpr GhcTc
               -> TcM hs_syn
-ghcjsRunMeta' js_env js_settings desc tht show_code ppr_code cvt expr = do
+ghcjsRunMeta' js_env js_settings _descr tht _show_code _ppr_code cvt expr = do
   traceTc "About to run" (ppr expr)
   recordThSpliceUse -- seems to be the best place to do this,
                     -- we catch all kinds of splices and annotations.
@@ -180,8 +179,7 @@ ghcjsRunMeta' js_env js_settings desc tht show_code ppr_code cvt expr = do
   gbl_env  <- getGblEnv
   r        <- getThRunner js_env hsc_env dflags (tcg_mod gbl_env)
   base     <- liftIO $ takeMVar (thrBase r)
-  let m        = tcg_mod gbl_env
-      pkgs     = L.nub $
+  let pkgs     = L.nub $
                  (S.toList . imp_dep_pkgs . tcg_imports $ gbl_env) ++
                  concatMap (map fst . dep_pkgs .  mi_deps . hm_iface)
                            (eltsUDFM $ hsc_HPT hsc_env)
@@ -280,10 +278,10 @@ bootObject js_settings dflags m details =
         = mk_decl_ty n ty_thing
       mk_decl _ = Nothing
 
-      mk_decl_ty n (AnId i)                    = mk_decl_id n i
-      mk_decl_ty n (AConLike (RealDataCon dc)) = Nothing
-      mk_decl_ty _ _                           = Nothing
-      mk_decl_id n i = Just
+      mk_decl_ty n (AnId i)                     = mk_decl_id n i
+      mk_decl_ty _ (AConLike (RealDataCon _dc)) = Nothing
+      mk_decl_ty _ _                            = Nothing
+      mk_decl_id _ i = Just
         (StgTopLifted (
          (StgNonRec i (StgRhsClosure dontCareCCS
                                    noBinderInfo
@@ -354,7 +352,7 @@ linkTh env settings js_files dflags pkgs hpt code = do
             Just c  -> return (runGet get $ BL.fromStrict c)
             Nothing -> do
               lr <- link
-              Gen2.putCached dflags'
+              _ <- Gen2.putCached dflags'
                              "template-haskell"
                              cache_key
                              [topDir dflags </> "ghcjs_boot.completed"]
@@ -477,9 +475,9 @@ finishTHModule dflags js_env m runner = do
     else modifyMVar_ ( thRunners js_env ) ( pure . consIdleRunner runner )
 
 finishTHp :: GhcjsEnv -> Bool -> String -> THRunner -> IO Int
-finishTHp js_env endProcess m runner = do
+finishTHp _js_env endProcess _m runner = do
   let ph = thrProcess runner
-  readMVar (thrBase runner)
+  _ <- readMVar (thrBase runner)
   mu <- finishRunner endProcess runner
   when endProcess $
     maybe (void $ terminateProcess ph)
@@ -540,7 +538,7 @@ startTHRunnerProcess dflags js_env hsc_env = do
   mv  <- newMVar (Gen2.linkBase lr)
   emv <- newMVar []
   eev <- newMVar IM.empty
-  forkIO $ catchIOError (forever $ hGetChar out >>= putChar) (\_ -> return ())
+  _ <- forkIO $ catchIOError (forever $ hGetChar out >>= putChar) (\_ -> return ())
   let r = THRunner pid inp err mv emv eev
   sendToRunnerRaw r 0 (BL.toStrict $ rtsd <> fr <> rts <> fa <> aa <> Gen2.linkOut lr)
   return r

@@ -15,7 +15,7 @@ import Prelude hiding ((<>))
 import Control.Monad
 
 import Data.Maybe
-import Data.List (unzip4)
+import Data.List (unzip4, stripPrefix)
 
 import Hooks
 import DynFlags
@@ -74,8 +74,6 @@ import CmmUtils
 import Compiler.Compat
 
 import GHC.LanguageExtensions
-
-import Data.List (stripPrefix)
 
 type Binding = (Id, CoreExpr)
 

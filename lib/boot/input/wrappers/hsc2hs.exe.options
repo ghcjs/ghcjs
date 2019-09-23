@@ -1,0 +1,4 @@
+{libexecdir}\hsc2hs.exe
+--template={topdir}/include/template-hsc.h
+-I{topdir}/include/
+--cflag=-fno-stack-protector

@@ -5,6 +5,7 @@ import           Id
 import           StgSyn
 import           VarSet
 import           Data.List.NonEmpty (toList)
+import Prelude
 
 type LiveVars = DVarSet
 

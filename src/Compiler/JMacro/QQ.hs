@@ -1,14 +1,10 @@
 {-# LANGUAGE FlexibleInstances,
              UndecidableInstances,
              TypeFamilies,
-             TemplateHaskell,
-             QuasiQuotes,
              RankNTypes,
              GADTs,
              OverloadedStrings,
-             PatternGuards,
-             ScopedTypeVariables,
-             PackageImports
+             ScopedTypeVariables
   #-}
 
 -----------------------------------------------------------------------------
@@ -23,28 +19,19 @@ Simple EDSL for lightweight (untyped) programmatic generation of Javascript.
 -}
 -----------------------------------------------------------------------------
 
-module Compiler.JMacro.QQ (jmacro, jmacroE, parseJM, parseJME, expr2ident) where
+module Compiler.JMacro.QQ (parseJM, parseJME) where
 
 import Prelude hiding ((<*), tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
 import Control.Arrow (first)
-import Control.Lens ((^..))
-import Control.Lens.Plated (rewriteOn)
-import Data.Data.Lens (template)
 import Control.Monad.State.Strict
-import Data.Char (digitToInt, toLower, isUpper, isAlpha)
+import Data.Char (digitToInt, toLower, isAlpha)
 import Data.List (isPrefixOf, sort)
-import Data.Generics (extQ, Data)
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Map as M
 import qualified Data.Text as T
 
-import qualified "template-haskell" Language.Haskell.TH as TH
-import "template-haskell" Language.Haskell.TH (mkName, appE)
-import "template-haskell" Language.Haskell.TH.Quote
-
 import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Expr
-import Text.ParserCombinators.Parsec.Error
 import qualified Text.ParserCombinators.Parsec.Token as P
 import Text.ParserCombinators.Parsec.Language (javaStyle)
 
@@ -55,181 +42,6 @@ import Compiler.JMacro.ParseTH
 
 import System.IO.Unsafe
 import Numeric (readHex)
-
-{--------------------------------------------------------------------
-  QuasiQuotation
---------------------------------------------------------------------}
-
--- | QuasiQuoter for a block of JMacro statements.
-jmacro :: QuasiQuoter
-jmacro = QuasiQuoter { quoteExp  = quoteJMExp
-                     , quotePat  = quoteJMPat
-                     , quoteDec  = error "jmacro: quoteDec"
-                     , quoteType = error "jmacro: quoteType"
-                     }
-
--- | QuasiQuoter for a JMacro expression.
-jmacroE :: QuasiQuoter
-jmacroE = QuasiQuoter { quoteExp = quoteJMExpE
-                      , quotePat = quoteJMPatE
-                      , quoteDec  = error "jmacroE: quoteDec"
-                      , quoteType = error "jmacroE: quoteType"
-                      }
-
-quoteJMPat :: String -> TH.PatQ
-quoteJMPat s = case parseJM s of
-               Right x -> dataToPatQ (const Nothing) x
-               Left err -> fail (show err)
-
-quoteJMExp :: String -> TH.ExpQ
-quoteJMExp s = case parseJM s of
-               Right x -> jm2th x
-               Left err -> do
-                   (line,_) <- TH.loc_start <$> TH.location
-                   let pos = errorPos err
-                   let newPos = setSourceLine pos $ line + sourceLine pos - 1
-                   fail (show $ setErrorPos newPos err)
-
-quoteJMPatE :: String -> TH.PatQ
-quoteJMPatE s = case parseJME s of
-               Right x -> dataToPatQ (const Nothing) x
-               Left err -> fail (show err)
-
-quoteJMExpE :: String -> TH.ExpQ
-quoteJMExpE s = case parseJME s of
-               Right x -> jm2th x
-               Left err -> do
-                   (line,_) <- TH.loc_start <$> TH.location
-                   let pos = errorPos err
-                   let newPos = setSourceLine pos $ line + sourceLine pos - 1
-                   fail (show $ setErrorPos newPos err)
-
-
--- | Traverse a syntax tree, replace an identifier by an
--- antiquotation of a free variable.
--- Don't replace identifiers on the right hand side of selector
--- expressions.
-antiIdent :: JMacro a => String -> a -> a
-antiIdent s e = jfromGADT $ go (jtoGADT e)
-    where go :: forall a. JMGadt a -> JMGadt a
-          go (JMGStat (ForInStat b (TxtI s') e' st))
-             | s == T.unpack s' = JMGStat (ForInStat b (TxtI ("jmId_anti_" <> s'))
-                                              (antiIdent s e') (antiIdent s st))
-          go (JMGExpr (ValExpr (JVar (TxtI s'))))
-             | s == T.unpack s' = JMGExpr (AntiExpr . T.pack . fixIdent $ s)
-          go (JMGExpr (SelExpr x i)) =
-              JMGExpr (SelExpr (antiIdent s x) i)
-          go x = composOp go x
-
-antiIdents :: JMacro a => [String] -> a -> a
-antiIdents ss x = foldr antiIdent x ss
-
-fixIdent :: String -> String
-fixIdent css@(c:_)
-    | isUpper c = '_' : escapeDollar css
-    | otherwise = escapeDollar css
-  where
-    escapeDollar = map (\x -> if x =='$' then 'ǆ' else x)
-fixIdent _ = "_"
-
-
-jm2th :: Data a => a -> TH.ExpQ
-jm2th v = removeUnused <$> go v
-       where
-          go :: Data a => a -> TH.ExpQ
-          go = dataToExpQ (const Nothing
-                      `extQ` handleStat
-                      `extQ` handleExpr
-                      `extQ` handleVal
-                      `extQ` handleStr
-                      `extQ` handleText
-                     )
-
-          handleStat :: JStat -> Maybe TH.ExpQ
-          handleStat (BlockStat ss) = Just $ [|BlockStat|] `appE` TH.listE (blocks ss)
-              where blocks :: [JStat] -> [TH.ExpQ]
-                    blocks [] = []
-                    blocks (DeclStat (TxtI i):xs) = case T.unpack i of
-                     ('!':'!':_) -> go (DeclStat (TxtI (T.drop 2 i))) : blocks xs
-                     ('!':i') ->
-                        [appE (TH.lamE [jmacroLam', TH.varP . mkName . fixIdent $ i'] $
-                                 [|BlockStat|] `appE`
-                                   (TH.listE . (ds:) . blocks $ xs))
-                                       [|TxtI (T.pack i') |]]
-                          where ds = [|DeclStat (TxtI (T.pack i'))|]
-
-                     i' ->
-                        [ ([|jVarTy|]
-                           `appE` (TH.lamE [jmacroLam', TH.varP . mkName . fixIdent $ i'] $
-                                     [|BlockStat|] `TH.appE`
-                                       (TH.listE $ blocks $ map (antiIdent i') xs)))
-                        ]
-
-                    blocks (x:xs) = go x : blocks xs
-
-
-          handleStat (ForInStat b (TxtI i) e s) | Just i' <- T.stripPrefix "jmId_anti_" i =
-                     Just $ [|ForInStat b|]
-                              `appE` ([|expr2ident|] `TH.appE` TH.varE (mkName . fixIdent . T.unpack $ i'))
-                              `appE` go e
-                              `appE` go s
-
-          handleStat (TryStat s (TxtI i) s1 s2)
-              | s1 == BlockStat [] = Nothing
-              | otherwise =
-                 let i' = T.unpack i
-                 in Just $ [|jTryCatchFinally|]
-                             `appE` go s
-                             `appE` TH.lamE [jmacroLam', TH.varP $ mkName i'] (go $ antiIdent i' s1)
-                             `appE` go s2
-
-          handleStat (AntiStat s) = case parseHSExp (T.unpack s) of
-                                      Right ans -> Just $ [|toStat|] `appE` return ans
-                                      Left err -> Just $ fail err
-
-          handleStat _ = Nothing
-
-          handleExpr :: JExpr -> Maybe TH.ExpQ
-          handleExpr (AntiExpr s) = case parseHSExp (T.unpack s) of
-                                      Right ans -> Just $ [|toJExpr|] `appE` return ans
-                                      Left err -> Just $ fail err
-          handleExpr (ValExpr (JFunc is' s)) = Just $
-              [|jLam|] `appE` TH.lamE (jmacroLam' : map (TH.varP . mkName . fixIdent) is)
-                                      (go $ antiIdents is s)
-            where is = map (\(TxtI i) -> T.unpack i) is'
-
-          handleExpr _ = Nothing
-
-          handleVal :: JVal -> Maybe TH.ExpQ
-          handleVal (JHash m) = Just $ [|jhFromList|] `appE` go (M.toList m)
-          handleVal (JDouble (SaneDouble d))
-            | isNegativeZero d      = Just [| JDouble (SaneDouble (negate 0)) |]
-            | isInfinite d && d < 0 = Just [| JDouble (SaneDouble (-1/0))     |]
-            | isInfinite d          = Just [| JDouble (SaneDouble (1/0))      |]
-            | isNaN d               = Just [| JDouble (SaneDouble (0/0))      |]
-            | otherwise             = Just $ [| JDouble . SaneDouble |] `appE`
-                                             TH.litE (TH.RationalL $ toRational d)
-          handleVal _ = Nothing
-
-          handleStr :: String -> Maybe TH.ExpQ
-          handleStr x = Just $ TH.litE $ TH.StringL x
-
-          handleText :: T.Text -> Maybe TH.ExpQ
-          handleText x = let x' = T.unpack x in Just [|T.pack x'|]
-
-          jmacroLam' = return jmacroLam
-          jmacroLam = TH.VarP (mkName "__jmacroLam")
-
-          removeUnused :: TH.Exp -> TH.Exp
-          removeUnused = rewriteOn template rewriteLam
-
-          rewriteLam e | TH.LamE (p:ps) le <- e, p == jmacroLam =
-                             Just $ TH.LamE (map (\p' -> if isUsed p' le then p' else TH.WildP) ps) le
-                       | otherwise = Nothing
-
-          -- this could be made more precise by only looking in VarE and stopping wherever the name is bound again
-          isUsed (TH.VarP n) e = n `elem` (e ^.. template)
-          isUsed _           _ = True
 
 {--------------------------------------------------------------------
   Parsing
@@ -328,11 +140,11 @@ identdecl = do
 cleanIdent :: Ident -> Ident
 cleanIdent (TxtI x) | "!" `T.isPrefixOf` x = TxtI (T.tail x)
 cleanIdent x = x
-
+{-
 expr2ident :: JExpr -> Ident
 expr2ident (ValExpr (JVar i)) = i
 expr2ident e                  = error ("expr2ident: expected (ValExpr (JVar _)), got: " ++ show e)
-
+-}
 -- Handle varident decls for type annotations?
 -- Patterns
 data PatternTree = PTAs Ident PatternTree
@@ -352,7 +164,7 @@ patternBinding = do
   let go path (PTAs asIdent pt) = [DeclStat asIdent, AssignStat (ValExpr (JVar (cleanIdent asIdent))) path] ++ go path pt
       go path (PTVar i)
           | i == (TxtI "_") = []
-          | otherwise = [DeclStat i, AssignStat (ValExpr (JVar (cleanIdent i))) (path)]
+          | otherwise = [DeclStat i, AssignStat (ValExpr (JVar (cleanIdent i))) path]
       go path (PTList pts) = concatMap (uncurry go) $ zip (map addIntToPath [0..]) pts
            where addIntToPath i = IdxExpr path (ValExpr $ JInt i)
       go path (PTObj xs)   = concatMap (uncurry go) $ map (first fixPath) xs
@@ -463,7 +275,7 @@ statement = declStat
       switchStat = do
         reserved "switch"
         e <- parens $ expr
-        (l,d) <- braces (liftM2 (,) (many caseStat) (option ([]) dfltStat))
+        (l,d) <- braces (liftM2 (,) (many caseStat) (option [] dfltStat))
         return $ [SwitchStat e l (l2s d)]
 
       caseStat =
@@ -507,8 +319,7 @@ statement = declStat
 
       simpleForStat = do
         (before,after,p) <- parens threeStat
-        b <- statement
-        return $ jFor' before after p b
+        jFor' before after p <$> statement
           where threeStat =
                     liftM3 (,,) (option [] statement <* optional semi)
                                 (optionMaybe expr <* semi)
@@ -533,7 +344,7 @@ statement = declStat
                                                <|> rop "^=" (Just BXorOp)
                                                <|> rop "|=" (Just BOrOp)
                                               )
-          let gofail  = fail ("Invalid assignment.")
+          let gofail  = fail "Invalid assignment."
               badList = ["this", "true", "false", "undefined", "null"]
           case e1 of
             ValExpr (JVar (TxtI s)) -> if s `elem` badList then gofail else return ()

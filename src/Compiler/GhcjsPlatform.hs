@@ -10,6 +10,7 @@ module Compiler.GhcjsPlatform
     , setNativePlatform
     , setDfOpts
     ) where
+import Prelude
 
 import           DynFlags
 import           Platform

@@ -33,3 +33,5 @@ cabal.sandbox.config
 /lib/cache/build
 .stack-work/
 .cabal-sandbox/
+/tmp/
+

@@ -1,5 +1,3 @@
-{-# LANGUAGE TupleSections, CPP #-}
-
 module Gen2.Sinker (sinkPgm) where
 
 import UniqSet
@@ -11,6 +9,7 @@ import Name
 import Module
 import Literal
 import Gen2.GHC.Digraph
+import Prelude
 
 import Control.Lens
 
@@ -153,8 +152,8 @@ topSortDecls :: Module -> [StgBinding] -> [StgBinding]
 topSortDecls _m binds = rest ++ nr'
   where
     (nr, rest) = partition isNonRec binds
-    isNonRec (StgNonRec {}) = True
-    isNonRec _              = False
+    isNonRec StgNonRec{} = True
+    isNonRec _           = False
     vs   = map getV nr
     keys = mkUniqSet (map snd vs)
     getV e@(StgNonRec b _) = (e, b)

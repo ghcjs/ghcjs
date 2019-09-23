@@ -1,10 +1,7 @@
-{-# LANGUAGE CPP,
-             DefaultSignatures,
-             OverloadedStrings,
+{-# LANGUAGE OverloadedStrings,
              TupleSections,
-             LambdaCase,
-             DeriveGeneric,
-             TemplateHaskell
+             DeriveGeneric
+             
   #-}
 {- |
   GHCJS linker, collects dependencies from
@@ -24,8 +21,8 @@ import           Module ( InstalledUnitId
                         , mkModuleName, wiredInUnitIds
                         , moduleNameString
                         , primUnitId )
-import           PackageConfig (sourcePackageId, unitId)
-import           Outputable (ppr, showSDoc)
+import           PackageConfig ({-sourcePackageId, -}unitId)
+-- import           Outputable (ppr, showSDoc)
 import qualified Packages
 
 import           Control.Concurrent.MVar
@@ -33,12 +30,12 @@ import           Control.DeepSeq
 import           Control.Exception        (evaluate)
 import           Control.Monad
 import           Control.Parallel.Strategies
+import Prelude
 
 import           Data.Array
 import qualified Data.Aeson               as Aeson
 import           Data.Binary
 import qualified Data.ByteString          as B
-import qualified Data.ByteString.Char8    as BC
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Function            (on)
 import qualified Data.HashMap.Strict      as HM
@@ -50,7 +47,7 @@ import           Data.List
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe
-import           Data.Monoid
+-- import           Data.Monoid
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
 import           Data.Text                (Text)
@@ -73,8 +70,8 @@ import           System.FilePath
   (splitPath, (<.>), (</>), dropExtension)
 
 import           System.Directory
-  ( createDirectoryIfMissing, doesDirectoryExist, canonicalizePath
-  , doesFileExist, getDirectoryContents, getCurrentDirectory, copyFile )
+  ( createDirectoryIfMissing, canonicalizePath
+  , doesFileExist, getCurrentDirectory, copyFile)
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
 import           Compiler.Compat
@@ -93,12 +90,7 @@ import           Gen2.Rts                 (rtsText, rtsDeclsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
 
-#ifdef mingw32_HOST_OS
-import qualified SysTools
-import FileCleanup
-import Data.Char
-import Numeric
-#endif
+import qualified Compiler.Platform as Platform
 
 type LinkableUnit = (Package, Module, Int) -- ^ module and the index of the block in the object file
 type Module       = Text
@@ -144,16 +136,16 @@ link dflags env settings out include pkgs objFiles jsFiles isRootFun extraStatic
                 | otherwise = "js"
       createDirectoryIfMissing False out
       BL.writeFile (out </> "out" <.> jsExt) lo
-      when (not $ gsOnlyOut settings) $ do
+      unless (gsOnlyOut settings) $ do
         let frefsFile   = if genBase then "out.base.frefs" else "out.frefs"
             jsonFrefs  = Aeson.encode lfrefs
         BL.writeFile (out </> frefsFile <.> "json") jsonFrefs
         BL.writeFile (out </> frefsFile <.> "js")
                      ("h$checkForeignRefs(" <> jsonFrefs <> ");")
-        when (not $ gsNoStats settings) $ do
+        unless (gsNoStats settings) $ do
           let statsFile = if genBase then "out.base.stats" else "out.stats"
           TL.writeFile (out </> statsFile) (linkerStats lmetasize lstats)
-        when (not $ gsNoRts settings) $ do
+        unless (gsNoRts settings) $ do
           withRts <- mapM (tryReadShimFile dflags) llW
           BL.writeFile (out </> "rts.js")
             (TLE.encodeUtf8 rtsDeclsText <>
@@ -187,10 +179,10 @@ link' :: DynFlags
       -> (Fun -> Bool)              -- ^ functions from the objects to use as roots (include all their deps)
       -> Set Fun                    -- ^ extra symbols to link in
       -> IO LinkResult
-link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
+link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraStaticDeps = do
       (objDepsMap, objRequiredUnits) <- loadObjDeps objFiles
       let rootSelector | Just baseMod <- gsGenBase settings =
-                           \(Fun p m s) -> m == T.pack baseMod
+                           \(Fun _p m _s) -> m == T.pack baseMod
                        | otherwise = isRootFun
           roots = S.fromList . filter rootSelector $
             concatMap (M.keys . depsHaskellExported . fst) (M.elems objDepsMap)
@@ -205,15 +197,15 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
         BaseFile file -> Compactor.loadBase file
         BaseState b   -> return b
       (rdPkgs, rds) <- rtsDeps dflags
-      c   <- newMVar M.empty
+      -- c   <- newMVar M.empty
       let rtsPkgs     =  map stringToInstalledUnitId
                              ["@rts", "@rts_" ++ buildTag dflags]
           pkgs' :: [InstalledUnitId]
           pkgs'       = nub (rtsPkgs ++ rdPkgs ++ reverse objPkgs ++ reverse pkgs)
           pkgs''      = filter (not . (isAlreadyLinked base)) pkgs'
-          pkgLibPaths = mkPkgLibPaths pkgs'
-          getPkgLibPaths :: InstalledUnitId -> ([FilePath],[String])
-          getPkgLibPaths k = fromMaybe ([],[]) (lookup k pkgLibPaths)
+          -- pkgLibPaths = mkPkgLibPaths pkgs'
+          -- getPkgLibPaths :: InstalledUnitId -> ([FilePath],[String])
+          -- getPkgLibPaths k = fromMaybe ([],[]) (lookup k pkgLibPaths)
       (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps env =<<
           getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs')
       pkgArchs <- getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs'')
@@ -322,13 +314,13 @@ combineFiles :: DynFlags -> FilePath -> IO ()
 combineFiles df fp = do
   files   <- mapM (B.readFile.(fp</>)) ["rts.js", "lib.js", "out.js"]
   runMain <- B.readFile (getLibDir df </> "runmain.js")
-  B.writeFile (fp</>"all.js") (mconcat (files ++ [runMain]))
+  writeBinaryFile (fp</>"all.js") (mconcat (files ++ [runMain]))
 
 -- | write the index.html file that loads the program if it does not exit
 writeHtml :: DynFlags -> FilePath -> IO ()
 writeHtml df out = do
   e <- doesFileExist htmlFile
-  when (not e) $
+  unless e $
     B.readFile (getLibDir df </>"template.html") >>= B.writeFile htmlFile
   where
     htmlFile = out </> "index.html"
@@ -337,7 +329,7 @@ writeHtml df out = do
 writeRunMain :: DynFlags -> FilePath -> IO ()
 writeRunMain df out = do
   e <- doesFileExist runMainFile
-  when (not e) $
+  unless e $
     B.readFile (getLibDir df </> "runmain.js") >>= B.writeFile runMainFile
   where
     runMainFile = out </> "runmain.js"
@@ -346,49 +338,27 @@ writeRunner :: GhcjsSettings -> DynFlags -> FilePath -> IO ()
 writeRunner settings dflags out = when (gsBuildRunner settings) $ do
   cd    <- getCurrentDirectory
   let runner = cd </> addExeExtension (dropExtension out)
+      srcFile = out </> "all" <.> "js"
   nodeSettings <- readNodeSettings dflags
-#ifdef mingw32_HOST_OS
-  src   <- B.readFile (cd </> out </> "all" <.> "js")
-  node  <- B.readFile (topDir dflags </> "node")
-  templ <- T.readFile (topDir dflags </> "runner.c-tmpl")
-  runnerSrc <- newTempName dflags TFL_CurrentModule "c"
-  -- FIXME: this does not take the node extra arguments into account
-  T.writeFile runnerSrc $
-    substPatterns [] [ ("js",     bsLit src)
-                     , ("jsSize", T.pack (show $ B.length src))
-                     , ("node",   bsLit (BC.pack $ nodeProgram nodeSettings))
-                     ] templ
-  SysTools.runCc dflags [ Option "-o"
-                        , FileOption "" runner
-                        , FileOption "" runnerSrc
-			, FileOption "" (topDir dflags </> "runner-resources.o")
-                        ]
-    where
-      bsLit b = T.pack $ '"' : concatMap escapeChar (B.unpack b) ++ "\""
-      escapeChar  9 = "\\t"
-      escapeChar 10 = "\\n"
-      escapeChar 13 = "\\r"
-      escapeChar 34 = "\\\""
-      escapeChar 63 = "\\?"
-      escapeChar 92 = "\\\\"
-      escapeChar x
-        | x >= 32 && x <= 127 = chr (fromIntegral x) : []
-        | otherwise           = '\\' : escapeOctal x
-      escapeOctal x =
-        let x' = showOct x []
-        in  replicate (3-length x') '0' ++ x'
-#else
-  src <- B.readFile (cd </> out </> "all" <.> "js")
-  let pgm = TE.encodeUtf8 (T.pack $ nodeProgram nodeSettings)
-  B.writeFile runner ("#!" <> pgm <> "\n" <> src)
-  Cabal.setFileExecutable runner
-#endif
+  if Platform.isWindows
+  then do
+    copyFile (topDir dflags </> "bin" </> "wrapper" <.> "exe")
+             runner
+    T.writeFile (runner <.> "options") $ T.unlines
+                [ T.pack (nodeProgram nodeSettings)
+                , T.pack ("{{EXEPATH}}" </> out </> "all" <.> "js")
+                ]
+  else do
+    src <- readBinaryFile (cd </> srcFile)
+    let pgm = TE.encodeUtf8 (T.pack $ nodeProgram nodeSettings)
+    B.writeFile runner ("#!" <> pgm <> "\n" <> src)
+    Cabal.setFileExecutable runner
 
 -- | write the manifest.webapp file that for firefox os
 writeWebAppManifest :: DynFlags -> FilePath -> IO ()
 writeWebAppManifest df out = do
   e <- doesFileExist manifestFile
-  when (not e) $
+  unless e $
     B.readFile (getLibDir df </> "manifest.webapp") >>= B.writeFile manifestFile
   where
     manifestFile = out </> "manifest.webapp"
@@ -439,7 +409,7 @@ getDeps lookup base fun startlu = go' S.empty (S.fromList startlu) (S.toList fun
         let key = (funPackage f, funModule f)
         in  case M.lookup key lookup of
               Nothing -> error ("getDeps.go': object file not loaded for:  " ++ show key)
-              Just (Deps p m _r e b) ->
+              Just (Deps _p _m _r e _b) ->
                  let lun :: Int
                      lun = fromMaybe (error $ "exported function not found: " ++ show f)
                                      (M.lookup f e)
@@ -464,7 +434,7 @@ collectDeps :: DynFlags
             -> IO ( Set LinkableUnit
                   , [(Package, Module, JStat, [ClosureInfo], [StaticInfo], [ForeignRef])]
                   )
-collectDeps dflags lookup packages base roots units = do
+collectDeps _dflags lookup packages base roots units = do
   allDeps <- getDeps (fmap fst lookup) base roots units
   -- read ghc-prim first, since we depend on that for static initialization
   let packages' = uncurry (++) $ partition (==(toInstalledUnitId primUnitId)) (nub packages)
@@ -472,8 +442,8 @@ collectDeps dflags lookup packages base roots units = do
       unitsByModule = M.fromListWith IS.union $
                       map (\(p,m,n) -> ((p,m),IS.singleton n)) (S.toList allDeps)
       lookupByPkg :: Map Package [(Deps, DepsLocation)]
-      lookupByPkg = M.fromListWith (++) (map (\((p,m),v) -> (p,[v])) (M.toList lookup))
-  code <- fmap (catMaybes . concat) . forM packages' $ \pkg -> do
+      lookupByPkg = M.fromListWith (++) (map (\((p,_m),v) -> (p,[v])) (M.toList lookup))
+  code <- fmap (catMaybes . concat) . forM packages' $ \pkg ->
     mapM (uncurry $ extractDeps unitsByModule)
          (fromMaybe [] $ M.lookup (mkPackage pkg) lookupByPkg)
   return (allDeps, code)
@@ -570,7 +540,7 @@ readSystemDeps :: DynFlags
                -> FilePath
                -> IO ([InstalledUnitId], Set Fun)
 readSystemDeps dflags depsName requiredFor file = do
-  b  <- B.readFile (getLibDir dflags </> file)
+  b  <- readBinaryFile (getLibDir dflags </> file)
   wi <- readSystemWiredIn dflags
   case Yaml.decodeEither b of
     Left err -> panic $ "could not read " ++ depsName ++
@@ -578,10 +548,10 @@ readSystemDeps dflags depsName requiredFor file = do
     Right sdeps ->
       let (StaticDeps unresolved, pkgs, funs) = staticDeps dflags wi sdeps
       in  case unresolved of
-            xs@((p,_,_):_) -> do
+            ((p,_,_):_) ->
                   panic $ "Package `" ++ T.unpack p ++ "' is required for " ++
                           requiredFor ++ ", but was not found"
-            _ -> do
+            _ ->
               -- putStrLn "system dependencies:"
               -- print (map installedUnitIdString pkgs, funs)
               return (pkgs, funs)
@@ -592,7 +562,7 @@ readSystemWiredIn :: DynFlags -> IO [(Text, InstalledUnitId)]
 readSystemWiredIn dflags = do
   b <- B.readFile filename
   case Yaml.decodeEither b of
-     Left err -> error $ "could not read wired-in package keys from " ++ filename
+     Left _err -> error $ "could not read wired-in package keys from " ++ filename
      Right m  -> return . M.toList
                         . M.union ghcWiredIn -- GHC wired-in package keys override those in the file
                         . fmap stringToInstalledUnitId $ m
@@ -679,9 +649,9 @@ loadArchiveDeps' :: [FilePath]
                        , [LinkableUnit]
                        )
 loadArchiveDeps' archives = do
-  archDeps <- forM archives $ \file -> do
+  archDeps <- forM archives $ \file ->
     -- putStrLn $ "reading archive: " ++ file
-    Ar.withAllObjects file $ \modulename h _len -> do
+    Ar.withAllObjects file $ \modulename h _len ->
         -- putStrLn ("reading module: " ++ moduleNameString modulename)
         (,ArchiveFile file) <$>
           hReadDeps (file ++ ':':moduleNameString modulename) h

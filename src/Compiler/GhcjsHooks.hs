@@ -7,6 +7,8 @@
   #-}
 module Compiler.GhcjsHooks where
 
+import Prelude
+
 import           CorePrep             (corePrepPgm)
 import           CoreToStg            (coreToStg)
 import           DriverPipeline
@@ -210,7 +212,7 @@ ghcjsWriteModule :: GhcjsSettings
 ghcjsWriteModule settings jsEnv env core mod output = do
     b <- ghcjsCompileModule settings jsEnv env core mod
     createDirectoryIfMissing True (takeDirectory output)
-    B.writeFile output b
+    Utils.writeBinaryFile output b
     return output
 
 ghcjsCompileModule :: GhcjsSettings

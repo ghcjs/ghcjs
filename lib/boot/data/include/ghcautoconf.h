@@ -1,7 +1,3 @@
-#ifndef ghcjs_HOST_OS
-#include "../include_native/ghcautoconf.h"
-#else
-
 #ifndef __GHCAUTOCONF_H__
 #define __GHCAUTOCONF_H__
 /* mk/config.h.  Generated from config.h.in by configure.  */
@@ -35,7 +31,7 @@
 #define ALIGNMENT_INT8_T 1
 
 /* The alignment of a `long'. */
-#define ALIGNMENT_LONG 8
+#define ALIGNMENT_LONG 4 
 
 /* The alignment of a `long long'. */
 #define ALIGNMENT_LONG_LONG 8
@@ -62,7 +58,7 @@
 #define ALIGNMENT_UNSIGNED_INT 4
 
 /* The alignment of a `unsigned long'. */
-#define ALIGNMENT_UNSIGNED_LONG 8
+#define ALIGNMENT_UNSIGNED_LONG 4 
 
 /* The alignment of a `unsigned long long'. */
 #define ALIGNMENT_UNSIGNED_LONG_LONG 8
@@ -71,7 +67,7 @@
 #define ALIGNMENT_UNSIGNED_SHORT 2
 
 /* The alignment of a `void *'. */
-#define ALIGNMENT_VOID_P 8
+#define ALIGNMENT_VOID_P 4 
 
 /* Define to 1 if __thread is supported */
 #define CC_SUPPORTS_TLS 1
@@ -101,9 +97,6 @@
 /* Define to 1 if you have the <bfd.h> header file. */
 /* #undef HAVE_BFD_H */
 
-/* Does GCC support __atomic primitives? */
-/* #undef HAVE_C11_ATOMICS */
-
 /* Define to 1 if you have the `clock_gettime' function. */
 #define HAVE_CLOCK_GETTIME 1
 
@@ -119,15 +112,15 @@
 
 /* Define to 1 if you have the declaration of `MADV_DONTNEED', and to 0 if you
    don't. */
-#define HAVE_DECL_MADV_DONTNEED 1
+/* #undef HAVE_DECL_MADV_DONTNEED */
 
 /* Define to 1 if you have the declaration of `MADV_FREE', and to 0 if you
    don't. */
-#define HAVE_DECL_MADV_FREE 0
+/* #undef HAVE_DECL_MADV_FREE */
 
 /* Define to 1 if you have the declaration of `MAP_NORESERVE', and to 0 if you
    don't. */
-#define HAVE_DECL_MAP_NORESERVE 1
+/* #undef HAVE_DECL_MAP_NORESERVE */
 
 /* Define to 1 if you have the <dirent.h> header file. */
 #define HAVE_DIRENT_H 1
@@ -139,7 +132,7 @@
 #define HAVE_ERRNO_H 1
 
 /* Define to 1 if you have the `eventfd' function. */
-#define HAVE_EVENTFD 1
+/* #undef HAVE_EVENTFD */
 
 /* Define to 1 if you have the <fcntl.h> header file. */
 #define HAVE_FCNTL_H 1
@@ -190,7 +183,7 @@
 #define HAVE_LIBPTHREAD 1
 
 /* Define to 1 if you have the `rt' library (-lrt). */
-#define HAVE_LIBRT 1
+/* #undef HAVE_LIBRT */
 
 /* Define to 1 if you have the <limits.h> header file. */
 #define HAVE_LIMITS_H 1
@@ -223,7 +216,7 @@
 #define HAVE_PTHREAD_H 1
 
 /* Define to 1 if you have the glibc version of pthread_setname_np */
-#define HAVE_PTHREAD_SETNAME_NP 1
+/* #undef HAVE_PTHREAD_SETNAME_NP */
 
 /* Define to 1 if you have the <pwd.h> header file. */
 #define HAVE_PWD_H 1
@@ -232,7 +225,7 @@
 #define HAVE_SCHED_H 1
 
 /* Define to 1 if you have the `sched_setaffinity' function. */
-#define HAVE_SCHED_SETAFFINITY 1
+/* #undef HAVE_SCHED_SETAFFINITY */
 
 /* Define to 1 if you have the `setitimer' function. */
 #define HAVE_SETITIMER 1
@@ -259,7 +252,7 @@
 #define HAVE_STRING_H 1
 
 /* Define to 1 if Apple-style dead-stripping is supported. */
-/* #undef HAVE_SUBSECTIONS_VIA_SYMBOLS */
+#define HAVE_SUBSECTIONS_VIA_SYMBOLS 1
 
 /* Define to 1 if you have the `sysconf' function. */
 #define HAVE_SYSCONF 1
@@ -268,7 +261,7 @@
 /* #undef HAVE_SYS_CPUSET_H */
 
 /* Define to 1 if you have the <sys/eventfd.h> header file. */
-#define HAVE_SYS_EVENTFD_H 1
+/* #undef HAVE_SYS_EVENTFD_H */
 
 /* Define to 1 if you have the <sys/mman.h> header file. */
 #define HAVE_SYS_MMAN_H 1
@@ -289,7 +282,7 @@
 #define HAVE_SYS_TIMEB_H 1
 
 /* Define to 1 if you have the <sys/timerfd.h> header file. */
-#define HAVE_SYS_TIMERFD_H 1
+/* #undef HAVE_SYS_TIMERFD_H */
 
 /* Define to 1 if you have the <sys/timers.h> header file. */
 /* #undef HAVE_SYS_TIMERS_H */
@@ -313,7 +306,7 @@
 #define HAVE_TERMIOS_H 1
 
 /* Define to 1 if you have the `timer_settime' function. */
-#define HAVE_TIMER_SETTIME 1
+/* #undef HAVE_TIMER_SETTIME */
 
 /* Define to 1 if you have the `times' function. */
 #define HAVE_TIMES 1
@@ -350,10 +343,10 @@
 
 /* Define to 1 if C symbols have a leading underscore added by the compiler.
    */
-/* #undef LEADING_UNDERSCORE */
+#define LEADING_UNDERSCORE 1
 
 /* Define 1 if we need to link code using pthreads with -lpthread */
-#define NEED_PTHREAD_LIB 1
+#define NEED_PTHREAD_LIB 0
 
 /* Define to the address where bug reports for this package should be sent. */
 /* #undef PACKAGE_BUGREPORT */
@@ -401,7 +394,7 @@
 #define SIZEOF_INT8_T 1
 
 /* The size of `long', as computed by sizeof. */
-#define SIZEOF_LONG 4
+#define SIZEOF_LONG 4 
 
 /* The size of `long long', as computed by sizeof. */
 #define SIZEOF_LONG_LONG 8
@@ -428,7 +421,7 @@
 #define SIZEOF_UNSIGNED_INT 4
 
 /* The size of `unsigned long', as computed by sizeof. */
-#define SIZEOF_UNSIGNED_LONG 4
+#define SIZEOF_UNSIGNED_LONG 4 
 
 /* The size of `unsigned long long', as computed by sizeof. */
 #define SIZEOF_UNSIGNED_LONG_LONG 8
@@ -437,7 +430,7 @@
 #define SIZEOF_UNSIGNED_SHORT 2
 
 /* The size of `void *', as computed by sizeof. */
-#define SIZEOF_VOID_P 4
+#define SIZEOF_VOID_P 4 
 
 /* If using the C implementation of alloca, define if you know the
    direction of stack growth for your system; otherwise it will be
@@ -482,7 +475,7 @@
 
 
 /* Define to 1 if we can use timer_create(CLOCK_REALTIME,...) */
-#define USE_TIMER_CREATE 1
+/* #undef USE_TIMER_CREATE */
 
 /* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
    significant byte first (like Motorola and SPARC, unlike Intel). */
@@ -530,7 +523,7 @@
 /* #undef pid_t */
 
 /* The supported LLVM version number */
-#define sUPPORTED_LLVM_VERSION (5,0)
+#define sUPPORTED_LLVM_VERSION (6,0)
 
 /* Define to `unsigned int' if <sys/types.h> does not define. */
 /* #undef size_t */
@@ -538,7 +531,9 @@
 /* Define as `fork' if `vfork' does not work. */
 /* #undef vfork */
 
-#define TABLES_NEXT_TO_CODE 1
-#endif /* __GHCAUTOCONF_H__ */
+/* #undef TABLES_NEXT_TO_CODE */ 
 
-#endif
+#define llvm_CC_FLAVOR 1
+
+#define clang_CC_FLAVOR 1
+#endif /* __GHCAUTOCONF_H__ */

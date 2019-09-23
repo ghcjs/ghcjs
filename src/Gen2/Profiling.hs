@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, QuasiQuotes #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Gen2.Profiling
   ( module CostCentre
@@ -26,15 +26,18 @@ import           Encoding
 import           Module
 import           Outputable           hiding ((<>))
 
-import           Control.Lens
+import           Control.Lens (use)
 
 import qualified Data.Text            as T
 
 import           Compiler.JMacro
+import           Compiler.JMacro.Combinators
+import           Compiler.JMacro.Symbols
 
 import           Gen2.ClosureInfo
 import           Gen2.RtsTypes
 import           Gen2.Utils
+import Prelude
 
 --------------------------------------------------------------------------------
 -- Initialization
@@ -52,20 +55,17 @@ emitCostCentreDecl cc = do
         label  = costCentreUserName cc
         modl   = Module.moduleNameString $ moduleName $ cc_mod cc
         loc    = showPpr dflags (costCentreSrcSpan cc)
-        js     =
-          decl ccsLbl <>
-          [j| `ccsLbl` = new h$CC(`label`, `modl`, `loc`, `is_caf`); |]
+        js     = ccsLbl ||= UOpExpr NewOp (app "h$CC" [e label, e modl, e loc, e is_caf])
+
     emitGlobal js
 
 emitCostCentreStackDecl :: CostCentreStack -> G ()
-emitCostCentreStackDecl ccs = do
+emitCostCentreStackDecl ccs =
     case maybeSingletonCCS ccs of
       Just cc -> do
         ccsLbl <- singletonCCSLbl cc
         ccLbl  <- costCentreLbl cc
-        let js =
-              decl ccsLbl <>
-              [j| `ccsLbl` = new h$CCS(null, `ccLbl`); |]
+        let js = ccsLbl ||= UOpExpr NewOp (app "h$CCS" [null_, e ccLbl])
         emitGlobal js
       Nothing -> pprPanic "emitCostCentreStackDecl" (ppr ccs)
 
@@ -74,11 +74,11 @@ emitCostCentreStackDecl ccs = do
 
 enterCostCentreFun :: CostCentreStack -> JStat
 enterCostCentreFun ccs
-  | isCurrentCCS ccs = [j| h$enterFunCCS(`jCurrentCCS`, `R1`.cc); |]
+  | isCurrentCCS ccs = appS "h$enterFunCCS" [jCurrentCCS, r1 .^ "cc"]
   | otherwise = mempty -- top-level function, nothing to do
 
 enterCostCentreThunk :: JStat
-enterCostCentreThunk = [j| h$enterThunkCCS(`R1`.cc); |]
+enterCostCentreThunk = appS "h$enterThunkCCS" [r1 .^ "cc"]
 
 setCC :: CostCentre -> Bool -> Bool -> G JStat
 -- FIXME: ignoring tick flags for now
@@ -87,23 +87,23 @@ setCC cc _tick True = do
     dflags <- use gsDynFlags
     addDependency $ OtherSymb (cc_mod cc)
                               (moduleGlobalSymbol dflags $ cc_mod cc)
-    return [j| `jCurrentCCS` = h$pushCostCentre(`jCurrentCCS`, `ccI`); |]
+    return $ jCurrentCCS |= app "h$pushCostCentre" [jCurrentCCS, e ccI]
 setCC _cc _tick _push = return mempty
 
 pushRestoreCCS :: JStat
-pushRestoreCCS = [j| h$pushRestoreCCS(); |]
+pushRestoreCCS = appS "h$pushRestoreCCS" []
 
 --------------------------------------------------------------------------------
 -- Some cost-centre stacks to be used in generator
 
 jCurrentCCS :: JExpr
-jCurrentCCS = [je| h$currentThread.ccs |]
+jCurrentCCS = var "h$currentThread" .^ "ccs"
 
 jCafCCS :: JExpr
-jCafCCS = [je| h$CAF |]
+jCafCCS = var "h$CAF"
 
 jSystemCCS :: JExpr
-jSystemCCS = [je| h$CCS_SYSTEM |]
+jSystemCCS = var "h$CCS_SYSTEM"
 
 --------------------------------------------------------------------------------
 -- Helpers for generating profiling related things

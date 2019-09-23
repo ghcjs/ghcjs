@@ -24,16 +24,9 @@ fi
 (
 cd "$SOURCEDIR/.."
 
-if [ ! -d "lib/ghc-api-ghcjs" ]; then
-  echo "could not find ghc-api-ghcjs package"
-  echo "source tree not booted?"
-  exit 1
-fi
-
 cabal "${CMDPREFIX}sandbox" init
-cabal "${CMDPREFIX}sandbox" add-source lib/ghc-api-ghcjs
-cabal "${CMDPREFIX}sandbox" add-source lib/haddock-api-ghcjs
-cabal "${CMDPREFIX}sandbox" add-source lib/haddock-library-ghcjs
+
+# fixme what do we do with these?
 cabal "${CMDPREFIX}sandbox" add-source lib/ghci-ghcjs
 cabal "${CMDPREFIX}sandbox" add-source lib/template-haskell-ghcjs
 cabal "${CMDPREFIX}sandbox" add-source lib/ghcjs-th

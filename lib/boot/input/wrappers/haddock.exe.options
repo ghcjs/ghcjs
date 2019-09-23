@@ -1,0 +1,3 @@
+{libexecdir}\haddock.exe
+-B{topdir}
+-l{topdir}

@@ -1,7 +1,3 @@
-#ifndef ghcjs_HOST_OS
-#include "../include_native/Stg.h"
-#else
-
 /* -----------------------------------------------------------------------------
  *
  * (c) The GHC Team, 1998-2009
@@ -589,6 +585,4 @@ typedef union {
   }                  \
   c;                                            \
 })
-#endif
-
 #endif

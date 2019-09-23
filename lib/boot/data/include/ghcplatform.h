@@ -1,40 +1,37 @@
-#ifndef ghcjs_HOST_OS
-#include "../include_native/ghcplatform.h"
-#else
-
 #ifndef __GHCPLATFORM_H__
 #define __GHCPLATFORM_H__
 
-#define BuildPlatform_TYPE  ghcjs
-#define HostPlatform_TYPE   ghcjs
+#define BuildPlatform_TYPE  x86_64_apple_darwin
+#define HostPlatform_TYPE   asmjs_unknown_none
 
-#define ghcjs_BUILD  1
-#define ghcjs_HOST  1
+#define x86_64_apple_darwin_BUILD  1
+#define asmjs_unknown_none_HOST  1
 
-#define ghcjs_BUILD_ARCH  1
-#define ghcjs_HOST_ARCH  1
-#define BUILD_ARCH  "ghcjs"
-#define HOST_ARCH  "ghcjs"
+#define x86_64_BUILD_ARCH  1
+#define asmjs_HOST_ARCH  1
+#define BUILD_ARCH  "x86_64"
+#define HOST_ARCH  "asmjs"
 
-#define ghcjs_BUILD_OS  1
-#define ghcjs_HOST_OS  1
-#define BUILD_OS  "ghcjs"
-#define HOST_OS  "ghcjs"
+#define darwin_BUILD_OS  1
+#define none_HOST_OS  1
+#define BUILD_OS  "darwin"
+#define HOST_OS  "none"
 
-#define ghcjs_BUILD_VENDOR  1
-#define ghcjs_HOST_VENDOR  1
-#define BUILD_VENDOR  "ghcjs"
-#define HOST_VENDOR  "ghcjs"
+#define apple_BUILD_VENDOR  1
+#define unknown_HOST_VENDOR  1
+#define BUILD_VENDOR  "apple"
+#define HOST_VENDOR  "unknown"
 
 /* These TARGET macros are for backwards compatibility... DO NOT USE! */
-#define TargetPlatform_TYPE ghcjs
-#define ghcjs_TARGET  1
-#define ghcjs_TARGET_ARCH  1
-#define TARGET_ARCH  "ghcjs"
-#define ghcjs_TARGET_OS  1
-#define TARGET_OS  "ghcjs"
-#define ghcjs_TARGET_VENDOR  1
+#define TargetPlatform_TYPE asmjs_unknown_none
+#define asmjs_unknown_none_TARGET  1
+#define asmjs_TARGET_ARCH  1
+#define TARGET_ARCH  "asmjs"
+#define none_TARGET_OS  1
+#define TARGET_OS  "none"
+#define unknown_TARGET_VENDOR  1
+
+#define UnregisterisedCompiler 1
 
 #endif /* __GHCPLATFORM_H__ */
 
-#endif

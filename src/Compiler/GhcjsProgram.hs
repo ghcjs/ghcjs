@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, ScopedTypeVariables, LambdaCase, MultiWayIf, TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables, LambdaCase, MultiWayIf, TupleSections #-}
 {-
   The GHCJS-specific parts of the frontend (ghcjs program)
 
@@ -14,6 +14,7 @@ import           ErrUtils (fatalErrorMsg'')
 import           Panic (handleGhcException)
 import           Exception
 import           Packages (initPackages)
+import Prelude
 
 import           Control.Applicative
 import           Control.Monad
@@ -47,6 +48,7 @@ import           Compiler.GhcjsPlatform
 import           Compiler.Info
 import           Compiler.Settings
 import           Compiler.Utils
+import qualified Compiler.Platform as Platform
 
 -- fixme, make frontend independent of backend
 import qualified Gen2.Object      as Object
@@ -57,8 +59,6 @@ import qualified Gen2.TH          as Gen2
 
 getGhcjsSettings :: [Located String] -> IO ([Located String], GhcjsSettings)
 getGhcjsSettings args =
-  --when (any (("building" `L.isInfixOf`) . unLoc) args) $
-  --  print (map unLoc ga,map unLoc args')
   case p of
     Failure failure -> do
       let (msg, code) = renderFailure failure "ghcjs"
@@ -161,23 +161,6 @@ printDeps = Object.readDepsFile >=> TL.putStrLn . Object.showDeps
 printObj :: FilePath -> IO ()
 printObj = Object.readObjectFile >=> TL.putStrLn . Object.showObject
 
-checkIsBooted :: Maybe String -> IO ()
-checkIsBooted mbMinusB = do
-  base <- mkLibDir mbMinusB
-  let bootFile = base </> "ghcjs_boot.completed"
-  e <- doesFileExist bootFile
-  when (not e) $ do
-    hPutStrLn stderr $ "cannot find `" ++ bootFile ++ "'\n\n" ++
-#ifdef WINDOWS
-                       "please install the GHCJS boot libraries or edit the `.options' file to point to the correct library location\n" ++
-#else
-                       "please install the GHCJS boot libraries or edit the `ghcjs' wrapper script to point to the correct library location\n" ++
-#endif
-                       "See README for details\n" ++
-                       "(running `ghcjs-boot' might fix this)\n"
-    exitWith (ExitFailure 87)
-
-
 runJsProgram :: Maybe String -> [String] -> IO ()
 runJsProgram Nothing _ = error noTopDirErrorMsg
 runJsProgram (Just topDir) args
@@ -195,7 +178,7 @@ runJsProgram (Just topDir) args
 bootstrapFallback :: IO ()
 bootstrapFallback = do
     ghc <- fmap (fromMaybe "ghc") $ getEnvMay "GHCJS_WITH_GHC"
-    as  <- ghcArgs <$> getFullArguments
+    as  <- ghcArgs <$> getArgs
     e   <- rawSystem ghc $ as -- run without GHCJS library prefix arg
     case (e, getOutput as) of
       (ExitSuccess, Just o) ->
@@ -355,17 +338,17 @@ setupSessionForGhcjs ghcjsSettings = do
   also handles some location information queries for Setup.hs and ghcjs-boot,
   that would otherwise fail due to missing boot libraries or a wrapper interfering
  -}
+
 getWrappedArgs :: IO ([String], Bool, Bool)
 getWrappedArgs = do
-  booting  <- getEnvOpt "GHCJS_BOOTING"        -- do not check that we're booted
-  booting1 <- getEnvOpt "GHCJS_BOOTING_STAGE1" -- enable GHC fallback
-  as <- getArgs
-  if | "--ghcjs-setup-print"   `elem` as -> printBootInfo as >> exitSuccess
-     | "--ghcjs-booting-print" `elem` as -> getFullArguments >>= printBootInfo >> exitSuccess
-     | otherwise                         -> do
-        fas <- getFullArguments
-        when (isNothing  $ getArgsTopDir fas) (error noTopDirErrorMsg)
-        return (fas, booting, booting1)
+   booting  <- getEnvOpt "GHCJS_BOOTING"        -- do not check that we're booted
+   booting1 <- getEnvOpt "GHCJS_BOOTING_STAGE1" -- enable GHC fallback
+   as <- getArgs
+   if | "--ghcjs-setup-print"   `elem` as -> printBootInfo as >> exitSuccess
+      | "--ghcjs-booting-print" `elem` as -> getArgs >>= printBootInfo >> exitSuccess
+      | otherwise                         -> do
+         fas <- getArgs
+         return (fas, booting, booting1)
 
 printBootInfo :: [String] -> IO ()
 printBootInfo v
@@ -373,24 +356,22 @@ printBootInfo v
   | "--print-libdir"         `elem` v = putStrLn t
   | "--print-global-db"      `elem` v = putStrLn (getGlobalPackageDB t)
   | "--print-user-db-dir"    `elem` v = putStrLn . fromMaybe "<none>" =<< getUserPackageDir
-  | "--print-default-libdir" `elem` v = putStrLn =<< getDefaultLibDir
-  | "--print-default-topdir" `elem` v = putStrLn =<< getDefaultTopDir
-  | "--print-native-too"     `elem` v = print ("--native-too" `elem` v)
   | "--numeric-ghc-version"  `elem` v = putStrLn getGhcCompilerVersion
   | "--print-rts-profiled"   `elem` v = print rtsIsProfiled
   | otherwise                         = error "no --ghcjs-setup-print or --ghcjs-booting-print options found"
   where
     t = fromMaybe (error noTopDirErrorMsg) (getArgsTopDir v)
 
+
 noTopDirErrorMsg :: String
 noTopDirErrorMsg = "Cannot determine library directory.\n\nGHCJS requires a -B argument to specify the library directory. " ++
-#ifdef WINDOWS
+  if Platform.isWindows
+  then
                    "On Windows, GHCJS reads the `ghcjs.exe.options' and `ghcjs-[version].exe.options' files from the " ++
                    "program directory for extra command line arguments."
-#else
+  else
                    "Usually this argument is provided added by a shell script wrapper. Verify that you are not accidentally " ++
                    "invoking the executable directly."
-#endif
 
 getArgsTopDir :: [String] -> Maybe String
 getArgsTopDir xs

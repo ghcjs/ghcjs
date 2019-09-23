@@ -22,6 +22,7 @@ import qualified Data.Text as T
 import           GHC.Generics hiding (Meta)
 
 import           System.IO
+import Prelude
 
 import           Module
 
@@ -73,7 +74,7 @@ buildArchive meta entries =
     entries' = mconcat (map snd entries)
 
 readMeta :: FilePath -> IO Meta
-readMeta file = withFile file ReadMode $ \h -> do
+readMeta file = withBinaryFile file ReadMode $ \h -> do
   sections <- hReadHeader ("readMeta " ++ file) h
   hSeek h RelativeSeek (toInteger $ sectionIndex sections)
   m <- B.hGet h (fromIntegral $ sectionMeta sections)
@@ -117,7 +118,7 @@ withAllObjects file f = withArchive "withAllObjects" file $ \sections index h ->
 ---------------------------------------------------------------------------------
 
 withArchive :: String -> FilePath -> (Sections -> Index -> Handle -> IO a) -> IO a
-withArchive name file f = withFile file ReadMode $ \h -> do
+withArchive name file f = withBinaryFile file ReadMode $ \h -> do
   let name' = name ++ " " ++ file
   sections <- hReadHeader name' h
   index <- hReadIndex name' sections h
@@ -160,7 +161,7 @@ hReadHeader name h = do
 -- | expects Handle to be positioned at the start of the index
 --   Handle is positioned at start of metadata section after return
 hReadIndex :: String -> Sections -> Handle -> IO Index
-hReadIndex name s h = do
+hReadIndex _name s h = do
   i <- B.hGet h (fromIntegral $ sectionIndex s)
   return $! runGet get i
 

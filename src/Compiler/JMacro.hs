@@ -1,4 +1,3 @@
-{-# LANGUAGE PackageImports #-}
 {- |
 Module      :  Language.Javascript.JMacro
 Copyright   :  (c) Gershom Bazerman, 2010
@@ -71,21 +70,11 @@ An experimental typechecker is available in the "Language.Javascript.JMacro.Type
 
 -- module names have been changed for temporary inclusion in GHCJS tree
 module Compiler.JMacro (
-  module Compiler.JMacro.QQ,
   module Compiler.JMacro.Base,
   module Compiler.JMacro.Lens,
-  j, je
+  module Compiler.JMacro.QQ
  ) where
 
-import "template-haskell" Language.Haskell.TH.Quote (QuasiQuoter)
-
 import Compiler.JMacro.Base hiding (expr2stat)
-import Compiler.JMacro.QQ
 import Compiler.JMacro.Lens
-
--- shorter names for jmacro / jmacroE
-j :: QuasiQuoter
-j  = jmacro
-
-je :: QuasiQuoter
-je = jmacroE
+import Compiler.JMacro.QQ

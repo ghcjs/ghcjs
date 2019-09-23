@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables, FlexibleContexts #-}
 {- |
   Shims are non-Haskell dependencies, organized in the
@@ -28,6 +28,7 @@ module Gen2.Shim where
 
 import           DynFlags
 import qualified FileCleanup
+import Prelude
 
 import           Control.Lens hiding ((<.>))
 import           Control.Monad
@@ -174,7 +175,7 @@ collectShim base (pkgName, pkgVer) = do
 checkShimsInstallation :: FilePath -> IO ()
 checkShimsInstallation base = do
   e <- doesFileExist (base </> "base.yaml")
-  when (not e) (error $ "Shims repository not found in `" ++ base ++ "'.")
+  unless e (error $ "Shims repository not found in `" ++ base ++ "'.")
 
 foldShim :: Pkg -> Version -> Shim -> [FilePath]
 foldShim pkg ver sh
@@ -213,7 +214,7 @@ parseVersionRange tv = either (const Nothing) Just $
       start <- version
       spaces >> char ',' >> spaces
       end <- version
-      spaces >> char ')'
+      spaces >> void (char ')')
       return (Interval (Just start) (Just end))
 
     -- .. 1.4

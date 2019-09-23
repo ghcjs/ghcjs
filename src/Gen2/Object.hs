@@ -60,6 +60,7 @@ import           Control.Lens
 import           Control.Monad
 import           Control.Monad.Trans
 import           Control.Monad.Trans.Reader
+import Prelude
 
 import           Data.Array
 import qualified Data.Binary     as DB
@@ -74,14 +75,14 @@ import           Data.Function (on)
 import           Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HM
 import           Data.Int
-import qualified Data.IntMap as IM
+-- import qualified Data.IntMap as IM
 import           Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
 import           Data.List (sortBy)
 import           Data.Map (Map)
 import qualified Data.Map as M
 import           Data.Maybe (catMaybes)
-import           Data.Monoid
+-- import           Data.Monoid
 import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.Text (Text)
@@ -91,7 +92,8 @@ import           Data.Word
 
 import           GHC.Generics
 
-import           System.IO (openBinaryFile, withFile, Handle, hClose, hSeek, SeekMode(..), IOMode(..) )
+import           System.IO (openBinaryFile, withBinaryFile, Handle,
+                            hClose, hSeek, SeekMode(..), IOMode(..) )
 
 import           Text.PrettyPrint.Leijen.Text (displayT, renderPretty)
 
@@ -208,13 +210,15 @@ instance Applicative (StrictStateT s m) where
   pure a  = StrictStateT (\c s -> s `seq` c s a)
   f <*> v = StrictStateT $ \c s0 -> runStrictStateT f
                 (\s1 g -> s1 `seq` runStrictStateT v (\s2 a -> s1 `seq` c s2 (g a)) s1) s0
+  m1 *> m2 = m1 `seq` m2 `seq` (StrictStateT $
+    \c s0 -> s0 `seq` runStrictStateT m1 (\s1 _ -> s1 `seq` runStrictStateT m2 c s1) s0)
 
 instance Monad m => Monad (StrictStateT s m) where
-  return a = StrictStateT (\c s -> s `seq` c s a)
+  return = pure
   m >>= f = m `seq` f `seq` (StrictStateT $
     \c s0 -> s0 `seq` runStrictStateT m (\s1 a -> let fa = f a in s1 `seq` fa `seq` runStrictStateT fa c s1) s0)
-  m1 >> m2 = m1 `seq` m2 `seq` (StrictStateT $
-    \c s0 -> s0 `seq` runStrictStateT m1 (\s1 _ -> s1 `seq` runStrictStateT m2 c s1) s0)
+  (>>) = (*>)
+
 
 instance MonadTrans (StrictStateT s) where
   lift m = m `seq` StrictStateT (\c s -> m >>= \a -> s `seq` c s a)
@@ -356,7 +360,7 @@ instance Objectable ExpFun where
 -- | reads only the part necessary to get the dependencies
 --   so it's potentially more efficient than readDeps <$> B.readFile file
 readDepsFile :: FilePath -> IO Deps
-readDepsFile file = withFile file ReadMode (hReadDeps file)
+readDepsFile file = withBinaryFile file ReadMode (hReadDeps file)
 
 hReadDeps :: String -> Handle -> IO Deps
 hReadDeps name h = do
@@ -490,7 +494,7 @@ showObject xs = mconcat (zipWith showSymbol xs [0..])
         ]
 
 showDeps :: Deps -> TL.Text
-showDeps (Deps p m r e b) =
+showDeps (Deps p m r _e b) =
   "package: " <> showPkg p <> "\n" <>
   "module: "  <> TL.fromStrict m <> "\n" <>
   "required:" <> TL.pack (show $ IS.toList r) <> "\n" <>

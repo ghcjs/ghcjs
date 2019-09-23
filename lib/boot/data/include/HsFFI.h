@@ -1,7 +1,3 @@
-#ifndef ghcjs_HOST_OS
-#include "../include_native/HsFFI.h"
-#else
-
 /* -----------------------------------------------------------------------------
  *
  * (c) The GHC Team, 2000
@@ -110,4 +106,3 @@ typedef void*			HsStablePtr;
 }
 #endif
 
-#endif

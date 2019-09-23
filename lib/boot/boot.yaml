@@ -54,15 +54,11 @@ packages:
     - ./pkg/time
     - ./pkg/text
     - ./pkg/mtl
-    - IfUnix:    ./pkg/unix
-    - IfWindows: ./pkg/Win32
+    - ./pkg/unix
 
 programs:
 
   # GHCJS programs
-  #
-  # customize their wrapper scripts to change the installation destination
-
   ghcjs:         ghcjs
   ghcjs-pkg:     ghcjs-pkg
   haddock-ghcjs: haddock-ghcjs

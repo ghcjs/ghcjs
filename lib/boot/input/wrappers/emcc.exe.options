@@ -1,0 +1,3 @@
+C:\Windows\System32\cmd.exe
+/C
+{emsdk}\upstream\emscripten\emcc.bat

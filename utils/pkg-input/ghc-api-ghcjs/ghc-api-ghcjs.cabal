@@ -1,4 +1,4 @@
-Name: ghc-api-ghcjs
+Name: old-ghc-api-ghcjs
 Version: 8.6.5
 License: BSD3
 License-File: LICENSE
@@ -104,7 +104,8 @@ Library
                    transformers == 0.5.*,
                    ghc-boot   == 8.6.*,
                    ghc-boot-th == 8.6.*,
-                   ghc-heap   == 8.6.*
+                   ghc-heap   == 8.6.*,
+                   happy >= 1.19 && <= 1.19.9
 
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.7
@@ -112,6 +113,9 @@ Library
         if flag(terminfo)
             Build-Depends: terminfo == 0.4.*
         Build-Depends: unix   >= 2.7 && < 2.9
+
+    Build-Tool-Depends: happy:happy >= 1.19 && <= 1.19.9,
+                        alex:alex  >= 3.2
 
     GHC-Options: -Wall
                  -Wno-name-shadowing

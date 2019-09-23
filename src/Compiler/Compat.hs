@@ -27,6 +27,8 @@ import Module
 import DynFlags
 import FastString
 
+import Prelude
+
 import Packages hiding ( Version )
 
 import           Data.Binary

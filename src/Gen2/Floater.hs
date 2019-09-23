@@ -17,6 +17,7 @@ module Gen2.Floater where
 
 import           Data.Generics.Aliases
 import           Data.Generics.Schemes
+import Prelude
 
 import           Compiler.JMacro
 

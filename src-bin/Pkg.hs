@@ -127,7 +127,7 @@ anyM p (x:xs) = do
 
 main :: IO ()
 main = do
-  args <- Info.getFullArguments -- for extra args on Windows, see Compiler.Info
+  args <- getArgs
 
   case getOpt Permute (flags ++ deprecFlags) args of
         (cli,_,[]) | FlagHelp `elem` cli -> do

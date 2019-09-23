@@ -1,6 +1,5 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -13,7 +12,7 @@ import           GHC.Generics
 
 import           Data.Aeson (ToJSON(..), object, (.=))
 import           Data.Array
-import           Data.Bits ((.|.), shiftL)
+import qualified Data.Bits as Bits
 import qualified Data.Binary     as DB
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as B
@@ -25,6 +24,8 @@ import qualified Data.Text as T
 import           Data.Typeable (Typeable)
 
 import           Compiler.JMacro
+import           Compiler.JMacro.Combinators
+import           Compiler.JMacro.Symbols
 
 import           Gen2.StgAst ()
 import           Gen2.Utils
@@ -40,6 +41,7 @@ import           Id
 import           Util
 import           Outputable hiding ((<>))
 import           TyCoRep
+import Prelude
 
 -- closure types
 data CType = Thunk | Fun | Pap | Con | Blackhole | StackFrame
@@ -308,6 +310,15 @@ data ClosureInfo = ClosureInfo
 
 instance NFData ClosureInfo
 
+-- fixme where to move this?
+closure :: ClosureInfo -> JStat -> JStat
+closure ci body = TxtI (ciVar ci) ||= jLam body # toStat ci
+
+conClosure :: Text -> Text -> CILayout -> Int -> JStat
+conClosure symbol name layout constr =
+  closure (ClosureInfo symbol (CIRegs 0 [PtrV]) name layout (CICon constr) noStatic)
+          (returnS (stack .! sp))
+
 data CIType = CIFun { citArity :: Int  -- ^ function arity
                     , citRegs  :: Int  -- ^ number of registers for the args
                     }
@@ -340,7 +351,7 @@ noStatic = CIStaticRefs []
 -- | static refs: array = references, null = nothing to report
 --   note: only works after all top-level objects have been created
 instance ToJExpr CIStatic where
-  toJExpr (CIStaticRefs [])  = [je| null |]
+  toJExpr (CIStaticRefs [])  = null_ -- [je| null |]
   toJExpr (CIStaticRefs rs)  = toJExpr (map TxtI rs)
 
 data CILayout = CILayoutVariable            -- layout stored in object itself, first position from the start
@@ -405,7 +416,7 @@ closureInfoStat debug (ClosureInfo obj rs name layout CIStackFrame srefs) =
     setObjInfoL debug obj rs layout StackFrame name 0 srefs
 
 mkArityTag :: Int -> Int -> Int
-mkArityTag arity registers = arity .|. (registers `shiftL` 8)
+mkArityTag arity registers = arity Bits..|. (registers `Bits.shiftL` 8)
 
 setObjInfoL :: Bool      -- ^ debug: output symbol names
             -> Text      -- ^ the object name
@@ -441,13 +452,13 @@ setObjInfo :: Bool       -- ^ debug: output all symbol names
            -> CIStatic   -- ^ static refs
            -> JStat
 setObjInfo debug obj t name fields a size regs static
-   | debug     = [j| h$setObjInfo(`TxtI obj`, `t`, `name`, `fields`, `a`, `size`, `regTag regs`, `static`); |]
-   | otherwise = [j| h$o(`TxtI obj`,`t`,`a`,`size`,`regTag regs`,`static`); |]
+   | debug     = appS "h$setObjInfo" [var obj, e t, e name, e fields, e a, e size, e (regTag regs), e static] -- error "setObjInfo1" -- [j| h$setObjInfo(`TxtI obj`, `t`, `name`, `fields`, `a`, `size`, `regTag regs`, `static`); |]
+   | otherwise = appS "h$o" [var obj, e t, e a, e size, e (regTag regs), e static] -- error "setObjInfo2" -- [j| h$o(`TxtI obj`,`t`,`a`,`size`,`regTag regs`,`static`); |]
   where
     regTag CIRegsUnknown       = -1
     regTag (CIRegs skip types) =
       let nregs = sum $ map varSize types
-      in  skip + (nregs `shiftL` 8)
+      in  skip + (nregs `Bits.shiftL` 8)
 
 
 data StaticInfo = StaticInfo { siVar    :: !Text          -- ^ global object
@@ -504,11 +515,11 @@ instance ToJExpr StaticArg where
 instance ToJExpr StaticLit where
   toJExpr (BoolLit b)           = toJExpr b
   toJExpr (IntLit i)            = toJExpr i
-  toJExpr NullLit               = jnull
+  toJExpr NullLit               = null_
   toJExpr (DoubleLit d)         = toJExpr (unSaneDouble d)
-  toJExpr (StringLit t)         = [je| h$str(`t`)() |]                           -- fixme this duplicates the string!
-  toJExpr (BinLit b)            = [je| h$rstr(`map toInteger (B.unpack b)`)() |] -- fixme this duplicates the string
-  toJExpr (LabelLit _isFun lbl) = [je| `JVar (TxtI lbl)` |]
+  toJExpr (StringLit t)         = app "h$str" [e t] -- error "StringLit" -- [je| h$str(`t`)() |]                           -- fixme this duplicates the string!
+  toJExpr (BinLit b)            = app "h$rstr" [e (map toInteger (B.unpack b))] -- error "BinLit" -- [je| h$rstr(`map toInteger (B.unpack b)`)() |] -- fixme this duplicates the string
+  toJExpr (LabelLit _isFun lbl) = var lbl -- error "LabelLit" -- [je| `JVar (TxtI lbl)` |]
 
 -- | declare and do first-pass init of a global object (create JS object for heap objects)
 staticDeclStat :: StaticInfo
@@ -517,15 +528,16 @@ staticDeclStat (StaticInfo si sv _) =
   let si' = TxtI si
       ssv (StaticUnboxed u)       = Just (ssu u)
       ssv (StaticThunk Nothing)   = Nothing
-      ssv _                       = Just [je| h$d() |]
-      ssu (StaticUnboxedBool b)   = [je| h$p(`b`) |]
-      ssu (StaticUnboxedInt i)    = [je| h$p(`i`) |]
-      ssu (StaticUnboxedDouble d) = [je| h$p(`unSaneDouble d`) |]
+      ssv _                       = Just (app "h$d" []) -- error "StaticUnboxed" -- Just [je| h$d() |]
+      ssu (StaticUnboxedBool b)   = app "h$p" [e b] -- error "StaticUnboxedBool" -- [je| h$p(`b`) |]
+      ssu (StaticUnboxedInt i)    = app "h$p" [e i] -- error "StaticUnboxedInt" -- [je| h$p(`i`) |]
+      ssu (StaticUnboxedDouble d) = app "h$p" [e (unSaneDouble d)] -- error "StaticUnboxedDouble" -- [je| h$p(`unSaneDouble d`) |]
       ssu (StaticUnboxedString str) = ApplExpr (initStr str) []
-      ssu (StaticUnboxedStringOffset {}) = jint 0
+      ssu (StaticUnboxedStringOffset {}) = 0
 
   -- fixme, we shouldn't do h$di, we need to record the statement to init the thunks
-  in maybe [j| h$di(`si'`); |] (\v -> DeclStat si' <> [j| `si'` = `v`; |]) (ssv sv)
+  in  maybe (appS "h$di" [e si']) (\v -> DeclStat si' # e si' |= v) (ssv sv)
+      -- error "staticDeclStat" -- maybe [j| h$di(`si'`); |] (\v -> DeclStat si' <> error "staticDeclStat" {- [j| `si'` = `v`; |]-}) (ssv sv)
 
 -- | initialize a global object. all global objects have to be declared (staticInfoDecl) first
 --   (this is only used with -debug, normal init would go through the static data table)
@@ -534,11 +546,12 @@ staticInitStat :: Bool         -- ^ profiling enabled
                -> JStat
 staticInitStat _prof (StaticInfo i sv cc) =
   case sv of
-    StaticData con args  -> ApplStat (jvar "h$sti") $ [jvar i, jvar con, toJExpr args] ++ ccArg
-    StaticFun f args     -> ApplStat (jvar "h$sti") $ [jvar i, jvar f, toJExpr args] ++ ccArg
+    StaticData con args  -> appS "h$sti" ([var i, var con, toJExpr args] ++ ccArg)
+    StaticFun f args     -> appS "h$sti" ([var i, var f, toJExpr args] ++ ccArg)
     StaticList args mt   ->
-      ApplStat (jvar "h$stl") $ [jvar i, toJExpr args, toJExpr $ maybe jnull (toJExpr . TxtI) mt] ++ ccArg
-    StaticThunk (Just (f,args)) -> ApplStat (jvar "h$stc") $ [jvar i, jvar f, toJExpr args] ++ ccArg
+      appS "h$stl" ([var i, toJExpr args, toJExpr $ maybe null_ (toJExpr . TxtI) mt] ++ ccArg)
+    StaticThunk (Just (f,args)) -> 
+      appS "h$stc" ([var i, var f, toJExpr args] ++ ccArg)
     _                    -> mempty
   where
     ccArg = maybeToList (fmap toJExpr cc)
@@ -547,8 +560,10 @@ staticInitStat _prof (StaticInfo i sv cc) =
 initStr :: ByteString -> JExpr
 initStr str =
   case decodeModifiedUTF8 str of
-    Just t  -> ApplExpr (jvar "h$str") [ValExpr (JStr t)]
-    Nothing -> [je| h$rstr(`map toInteger (B.unpack str)`) |]
+    Just t  -> app "h$str" [ValExpr (JStr t)]
+    Nothing -> app "h$rstr" [e $ map toInteger (B.unpack str)]
+      -- error "initStr"
+      -- [je| h$rstr(`map toInteger (B.unpack str)`) |]
 
 allocDynamicE :: CgSettings -> JExpr -> [JExpr] -> Maybe JExpr -> JExpr
 allocDynamicE s entry free cc
@@ -556,7 +571,7 @@ allocDynamicE s entry free cc
       ValExpr . jhFromList $ [ ("f", entry)
                              , ("d1", fillObj1)
                              , ("d2", fillObj2)
-                             , ("m", ji 0)
+                             , ("m", 0)
                              ] ++
                              maybe [] (\cid -> [("cc", cid)]) cc
   | otherwise = ApplExpr allocFun (toJExpr entry : free ++ maybeToList cc)
@@ -564,8 +579,8 @@ allocDynamicE s entry free cc
     allocFun = allocClsA ! length free
     (fillObj1,fillObj2)
        = case free of
-                []  -> (jnull, jnull)
-                [x] -> (x,jnull)
+                []  -> (null_, null_)
+                [x] -> (x,null_)
                 [x,y] -> (x,y)
                 (x:xs) -> (x,toJExpr (JHash $ M.fromList (zip dataFields xs)))
     dataFields = map (T.pack . ('d':) . show) [(1::Int)..]
@@ -607,4 +622,4 @@ dfCgSettings df = def { csTraceRts  = "-DGHCJS_TRACE_RTS"  `elem` opt_P df
 
 returnStack :: JStat
 -- returnStack = [j| return `Stack`[`Sp`]; |]
-returnStack = [j| return h$rs(); |]
+returnStack = returnS $ app "h$rs" [] -- error "returnStack" -- [j| return h$rs(); |]

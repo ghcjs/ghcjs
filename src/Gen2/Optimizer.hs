@@ -1,8 +1,6 @@
 {-# Language CPP,
              GADTs,
-             StandaloneDeriving,
              DeriveDataTypeable,
-             QuasiQuotes,
              NoMonomorphismRestriction,
              TupleSections,
              OverloadedStrings
@@ -24,7 +22,7 @@ import           Control.Lens
 import           Control.Monad
 
 import           Data.Array
-import           Data.Bits
+import qualified Data.Bits as Bits
 import           Data.Data
 import           Data.Data.Lens
 import           Data.Default
@@ -38,6 +36,7 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import           Data.Maybe
 import qualified Data.Set as S
+import Prelude
 
 import qualified Data.Text as T
 import           Data.Word
@@ -45,19 +44,19 @@ import           Data.Word
 import           Panic
 
 import           Compiler.JMacro
+import           Compiler.JMacro.Symbols
 
 import           Gen2.Base
 import           Gen2.Dataflow
 import           Gen2.Rts
-import           Gen2.RtsTypes
 
 optimize :: JStat -> JStat
 #ifdef DISABLE_OPTIMIZER
 optimize = id
 #else
--- optimize = id
+optimize = id
 -- fixme
-optimize = renameLocalVars . removeDeadVars . dataflow
+-- optimize = renameLocalVars . removeDeadVars . dataflow
 #endif
 
 renameLocalVars :: JStat -> JStat
@@ -283,8 +282,8 @@ dataflow = thisFunction . nestedFuns %~ f
 noDataflow :: JStat -> Bool
 noDataflow stat = any unsupportedExpr (universeOnOf template template stat)
   where
-    unsupportedExpr (ValExpr (JFunc {})) = True
-    unsupportedExpr _                    = False
+    unsupportedExpr (ValExpr JFunc {}) = True
+    unsupportedExpr _                  = False
 
 -----------------------------------------------------------
 -- liveness: remove unnecessary assignments
@@ -777,12 +776,12 @@ intInfixOp DivOp         i1 i2
   where
     d = i1 `div` i2
 intInfixOp ModOp         i1 i2 = ValE (IntV (i1 `mod` i2)) -- not rem?
-intInfixOp LeftShiftOp   i1 i2 = bitwiseInt' shiftL i1 (i2 .&. 31)
-intInfixOp RightShiftOp  i1 i2 = bitwiseInt' shiftR i1 (i2 .&. 31)
-intInfixOp ZRightShiftOp i1 i2 = bitwiseWord shiftR i1 (i2 .&. 31)
-intInfixOp BAndOp        i1 i2 = bitwiseInt (.&.) i1 i2
-intInfixOp BOrOp         i1 i2 = bitwiseInt (.|.) i1 i2
-intInfixOp BXorOp        i1 i2 = bitwiseInt xor   i1 i2
+intInfixOp LeftShiftOp   i1 i2 = bitwiseInt' Bits.shiftL i1 (i2 Bits..&. 31)
+intInfixOp RightShiftOp  i1 i2 = bitwiseInt' Bits.shiftR i1 (i2 Bits..&. 31)
+intInfixOp ZRightShiftOp i1 i2 = bitwiseWord Bits.shiftR i1 (i2 Bits..&. 31)
+intInfixOp BAndOp        i1 i2 = bitwiseInt (Bits..&.) i1 i2
+intInfixOp BOrOp         i1 i2 = bitwiseInt (Bits..|.) i1 i2
+intInfixOp BXorOp        i1 i2 = bitwiseInt Bits.xor   i1 i2
 intInfixOp GtOp          i1 i2 = eBool (i1 > i2)
 intInfixOp LtOp          i1 i2 = eBool (i1 < i2)
 intInfixOp LeOp          i1 i2 = eBool (i1 <= i2)

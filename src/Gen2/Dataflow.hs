@@ -1,7 +1,6 @@
-{-# LANGUAGE TemplateHaskell,
+{-# LANGUAGE
              TupleSections,
              DeriveDataTypeable,
-             DeriveFunctor,
              ScopedTypeVariables,
              GADTs,
              OverloadedStrings #-}
@@ -57,6 +56,7 @@ import           Data.Text (Text)
 import           Compiler.JMacro
 import           Data.Typeable
 import           Data.Data
+import Prelude
 
 type Id    = Int
 type IdSet = IntSet
@@ -115,8 +115,8 @@ fromJExpr (UOpExpr o e)       = UOpE  <$> pure o <*> fromJExpr e
 fromJExpr (IfExpr e1 e2 e3)   = CondE <$> fromJExpr e1 <*> fromJExpr e2 <*> fromJExpr e3
 fromJExpr (ApplExpr e1 es)    = ApplE <$> fromJExpr e1 <*> mapM fromJExpr es
 fromJExpr (SelExpr e i)       = SelE  <$> fromJExpr e <*> fromJIdent i
-fromJExpr (UnsatExpr{})       = error "fromJExpr: unsaturated expression"
-fromJExpr (AntiExpr{})        = error "fromJExpr: antiquoted expression"
+fromJExpr UnsatExpr{}         = error "fromJExpr: unsaturated expression"
+fromJExpr AntiExpr{}          = error "fromJExpr: antiquoted expression"
 
 toJExpr' :: IntMap Ident -> AExpr a -> JExpr
 toJExpr' m (AExpr _ e) = exprToJExpr m e
@@ -324,7 +324,7 @@ fromJVal (JInt i)    = pure (IntV i)
 fromJVal (JStr s)    = pure (StrV s)
 fromJVal (JRegEx r)  = pure (RegExV r)
 fromJVal (JFunc is s) = pure (FuncV is s)
-fromJVal (UnsatVal{}) = error "fromJVal: unsaturated value"
+fromJVal UnsatVal{}  = error "fromJVal: unsaturated value"
 fromJVal (JHash h)   = HashV . M.fromList <$> mapM f (M.toList h)
   where
    f :: (Text, JExpr) -> IdS (Text, Expr)
@@ -366,21 +366,21 @@ data SimpleStat a =
   deriving (Show, Data, Typeable, Eq, Ord)
 
 isLoop :: Node a -> Bool
-isLoop (WhileNode{}) = True
-isLoop (DoWhileNode{}) = True
-isLoop (ForInNode{}) = True
+isLoop WhileNode{} = True
+isLoop DoWhileNode{} = True
+isLoop ForInNode{} = True
 isLoop _ = False
 
 isSwitch :: Node a -> Bool
-isSwitch (SwitchNode{}) = True
+isSwitch SwitchNode{} = True
 isSwitch _ = False
 
 isContinue :: Node a -> Bool
-isContinue (ContinueNode{}) = True
+isContinue ContinueNode{} = True
 isContinue _ = False
 
 isBreak :: Node a -> Bool
-isBreak (BreakNode{}) = True
+isBreak BreakNode{} = True
 isBreak _ = False
 
 -- invariant: idents and identsR are always filled
@@ -405,9 +405,187 @@ data Arc = Arc { _arcFrom :: NodeId
 
 data ArcType = BreakArc | ContinueArc deriving (Eq, Ord, Show, Data, Typeable)
 
+{-
 makeLenses ''Graph
+-}
+arcsIn :: forall a_a57Y1. Lens' (Graph a_a57Y1) (IntMap (Set Arc))
+arcsIn
+  f_a5bOD
+  (Graph x1_a5bOE
+         x2_a5bOF
+         x3_a5bOG
+         x4_a5bOH
+         x5_a5bOI
+         x6_a5bOJ
+         x7_a5bOK
+         x8_a5bOL)
+  = (fmap
+       (\ y1_a5bON
+          -> (((((((Graph x1_a5bOE) y1_a5bON) x3_a5bOG) x4_a5bOH) x5_a5bOI)
+                 x6_a5bOJ)
+                x7_a5bOK)
+               x8_a5bOL))
+      (f_a5bOD x2_a5bOF)
+{-# INLINE arcsIn #-}
+arcsOut :: forall a_a57Y1. Lens' (Graph a_a57Y1) (IntMap (Set Arc))
+arcsOut
+  f_a5bOR
+  (Graph x1_a5bOS
+         x2_a5bOT
+         x3_a5bOU
+         x4_a5bOV
+         x5_a5bOW
+         x6_a5bOX
+         x7_a5bOY
+         x8_a5bOZ)
+  = (fmap
+       (\ y1_a5bP0
+          -> (((((((Graph x1_a5bOS) x2_a5bOT) y1_a5bP0) x4_a5bOV) x5_a5bOW)
+                 x6_a5bOX)
+                x7_a5bOY)
+               x8_a5bOZ))
+      (f_a5bOR x3_a5bOU)
+{-# INLINE arcsOut #-}
+entry :: forall a_a57Y1. Lens' (Graph a_a57Y1) NodeId
+entry
+  f_a5bP2
+  (Graph x1_a5bP3
+         x2_a5bP4
+         x3_a5bP5
+         x4_a5bP6
+         x5_a5bP7
+         x6_a5bP8
+         x7_a5bPa
+         x8_a5bPb)
+  = (fmap
+       (\ y1_a5bPc
+          -> (((((((Graph x1_a5bP3) x2_a5bP4) x3_a5bP5) y1_a5bPc) x5_a5bP7)
+                 x6_a5bP8)
+                x7_a5bPa)
+               x8_a5bPb))
+      (f_a5bP2 x4_a5bP6)
+{-# INLINE entry #-}
+idents :: forall a_a57Y1. Lens' (Graph a_a57Y1) (IntMap Ident)
+idents
+  f_a5bPd
+  (Graph x1_a5bPe
+         x2_a5bPf
+         x3_a5bPg
+         x4_a5bPh
+         x5_a5bPi
+         x6_a5bPj
+         x7_a5bPk
+         x8_a5bPl)
+  = (fmap
+       (\ y1_a5bPm
+          -> (((((((Graph x1_a5bPe) x2_a5bPf) x3_a5bPg) x4_a5bPh) x5_a5bPi)
+                 x6_a5bPj)
+                y1_a5bPm)
+               x8_a5bPl))
+      (f_a5bPd x7_a5bPk)
+{-# INLINE idents #-}
+identsR :: forall a_a57Y1. Lens' (Graph a_a57Y1) (HashMap Ident Id)
+identsR
+  f_a5bPn
+  (Graph x1_a5bPo
+         x2_a5bPp
+         x3_a5bPq
+         x4_a5bPr
+         x5_a5bPs
+         x6_a5bPt
+         x7_a5bPu
+         x8_a5bPv)
+  = (fmap
+       (\ y1_a5bPw
+          -> (((((((Graph x1_a5bPo) x2_a5bPp) x3_a5bPq) x4_a5bPr) x5_a5bPs)
+                 x6_a5bPt)
+                x7_a5bPu)
+               y1_a5bPw))
+      (f_a5bPn x8_a5bPv)
+{-# INLINE identsR #-}
+labels :: forall a_a57Y1. Lens' (Graph a_a57Y1) (Map Text NodeId)
+labels
+  f_a5bPy
+  (Graph x1_a5bPz
+         x2_a5bPA
+         x3_a5bPB
+         x4_a5bPC
+         x5_a5bPD
+         x6_a5bPE
+         x7_a5bPF
+         x8_a5bPH)
+  = (fmap
+       (\ y1_a5bPI
+          -> (((((((Graph x1_a5bPz) x2_a5bPA) x3_a5bPB) x4_a5bPC) x5_a5bPD)
+                 y1_a5bPI)
+                x7_a5bPF)
+               x8_a5bPH))
+      (f_a5bPy x6_a5bPE)
+{-# INLINE labels #-}
+nodeid :: forall a_a57Y1. Lens' (Graph a_a57Y1) NodeId
+nodeid
+  f_a5bPK
+  (Graph x1_a5bPL
+         x2_a5bPM
+         x3_a5bPN
+         x4_a5bPO
+         x5_a5bPP
+         x6_a5bPR
+         x7_a5bPS
+         x8_a5bPT)
+  = (fmap
+       (\ y1_a5bPU
+          -> (((((((Graph x1_a5bPL) x2_a5bPM) x3_a5bPN) x4_a5bPO) y1_a5bPU)
+                 x6_a5bPR)
+                x7_a5bPS)
+               x8_a5bPT))
+      (f_a5bPK x5_a5bPP)
+{-# INLINE nodeid #-}
+nodes ::
+  forall a_a57Y1 a_a5bOA.
+  Lens (Graph a_a57Y1) (Graph a_a5bOA) (IntMap (Node a_a57Y1)) (IntMap (Node a_a5bOA))
+nodes
+  f_a5bPW
+  (Graph x1_a5bPX
+         x2_a5bPY
+         x3_a5bPZ
+         x4_a5bQ0
+         x5_a5bQ1
+         x6_a5bQ2
+         x7_a5bQ3
+         x8_a5bQ4)
+  = (fmap
+       (\ y1_a5bQ6
+          -> (((((((Graph y1_a5bQ6) x2_a5bPY) x3_a5bPZ) x4_a5bQ0) x5_a5bQ1)
+                 x6_a5bQ2)
+                x7_a5bQ3)
+               x8_a5bQ4))
+      (f_a5bPW x1_a5bPX)
+{-# INLINE nodes #-}
+
+{-
 makeLenses ''Node
+-}
+{-
 makeLenses ''Arc
+-}
+
+arcFrom :: Lens' Arc NodeId
+arcFrom f_a5cjD (Arc x1_a5cjE x2_a5cjF x3_a5cjG)
+  = (fmap (\ y1_a5cjH -> ((Arc y1_a5cjH) x2_a5cjF) x3_a5cjG))
+      (f_a5cjD x1_a5cjE)
+{-# INLINE arcFrom #-}
+arcTo :: Lens' Arc NodeId
+arcTo f_a5cjI (Arc x1_a5cjJ x2_a5cjK x3_a5cjL)
+  = (fmap (\ y1_a5cjM -> ((Arc x1_a5cjJ) y1_a5cjM) x3_a5cjL))
+      (f_a5cjI x2_a5cjK)
+{-# INLINE arcTo #-}
+arcType :: Lens' Arc ArcType
+arcType f_a5cjN (Arc x1_a5cjO x2_a5cjP x3_a5cjQ)
+  = (fmap (\ y1_a5cjR -> ((Arc x1_a5cjO) x2_a5cjP) y1_a5cjR))
+      (f_a5cjN x3_a5cjQ)
+{-# INLINE arcType #-}
+
 -- makePrisms ''Node
 
 lookupId :: Graph a -> Ident -> Maybe Id
@@ -459,7 +637,7 @@ newNodeId = do
   return n
 
 newLabel :: Text -> NodeId -> State (Graph a) ()
-newLabel lbl lid = do
+newLabel lbl lid =
   labels %= M.insert lbl lid
 
 lookupLabel :: Text -> State (Graph a) NodeId
@@ -484,7 +662,7 @@ breakTo :: Maybe Text -> NodeId -> NodeId -> State (Graph a) NodeId
 breakTo lbl nid n
   | nid < 0 = error "breakTo: breaking to invalid node, not in a loop?"
   | otherwise = do
-      newNode (BreakNode lbl nid) n
+      void (newNode (BreakNode lbl nid) n)
       addArc (Arc n nid BreakArc)
       return n
 
@@ -573,7 +751,7 @@ cfg toAExpr stat = execState buildGraph emptyGraph
       newSimpleNode (DeclS i') n
     go (ReturnStat e) _lb _lc n = do
       e' <- expr e
-      newNode (ReturnNode e') n
+      _ <- newNode (ReturnNode e') n
       return n
     go (IfStat e s1 s2) lb lc n = do
       s1n <- go s1 lb lc =<< newNodeId
@@ -615,12 +793,12 @@ cfg toAExpr stat = execState buildGraph emptyGraph
        e1' <- expr e1
        e2' <- expr e2
        newSimpleNode (AssignS e1' e2') n
-    go (UnsatBlock{})                    _lb _lc _n = error "cfg: unsaturated block"
+    go UnsatBlock{}                      _lb _lc _n = error "cfg: unsaturated block"
     go (AntiStat t)                      _lb _lc _n = error ("cfg: antistat: " ++ T.unpack t)
     go (LabelStat lbl s1)                lb lc n = do
       lid <- newNodeId
       newLabel lbl lid
-      go s1                              lb lc lid
+      _ <- go s1                         lb lc lid
       newNode (LabelNode lbl lid) n
     go (BreakStat lbl@(Just lbl'))       _lb _lc n = do
       ll <- lookupLabel lbl'
@@ -781,7 +959,7 @@ foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
     upds nid is x = mapM_ (\i -> upd nid i x) is
 
     fact :: NodeId -> Int -> State (Facts b) b
-    fact n i = lookupFact z n i <$> get
+    fact n i = gets (lookupFact z n i)
 
     goEntry :: NodeId -> Facts b -> Facts b
     goEntry nid = execState (go' nid entr)
@@ -866,12 +1044,12 @@ foldForward c f entr z g = fixed (goEntry $ g^.entry) noFacts
       let x' = fReturn f nid e x
       upd nid 3 x'
       return z
-    go nid (BreakNode{}) x = do
+    go nid BreakNode{} x = do
       upds nid [0,2] x
       let x'= fBreak f nid x
       upd nid 3 x'
       return z
-    go nid (ContinueNode{}) x = do
+    go nid ContinueNode{} x = do
       upds nid [0,2] x
       let x' = fContinue f nid x
       upd nid 3 x'
@@ -923,7 +1101,7 @@ foldBackward c f exit z g = fixed (goEntry $ g^.entry) noFacts
     upd nid i x = modify (addFact nid i x)
 
     fact :: NodeId -> Int -> State (Facts b) b
-    fact n i = lookupFact z n i <$> get
+    fact n i = gets (lookupFact z n i)
 
     goEntry :: NodeId -> Facts b -> Facts b
     goEntry nid = execState (go' nid exit)

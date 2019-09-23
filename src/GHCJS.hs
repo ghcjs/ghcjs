@@ -11,3 +11,4 @@ import GHC
 import Compiler.GhcjsProgram
 import Compiler.Program
 import Compiler.Settings
+import Prelude

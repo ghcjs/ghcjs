@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 
@@ -36,6 +35,7 @@ import           Module
 import           ErrUtils
 import           HscTypes
 import           Panic
+import Prelude
 
 import qualified Compiler.Info as Info
 
@@ -54,9 +54,9 @@ data UseBase = NoBase             -- ^ don't use incremental linking
              | BaseState Base     -- ^ use this base
 
 instance Show UseBase where
-  show NoBase         = "NoBase"
-  show (BaseFile {})  = "BaseFile"
-  show (BaseState {}) = "BaseState"
+  show NoBase       = "NoBase"
+  show BaseFile {}  = "BaseFile"
+  show BaseState {} = "BaseState"
 
 instance Monoid UseBase where
   mempty             = NoBase

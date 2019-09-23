@@ -1,7 +1,5 @@
-{-# LANGUAGE QuasiQuotes,
-             BangPatterns,
+{-# LANGUAGE
              ScopedTypeVariables,
-             TemplateHaskell,
              TupleSections,
              OverloadedStrings
   #-}
@@ -24,20 +22,22 @@ import           Panic
 
 
 import           Control.Applicative
-import           Control.Lens
+import           Control.Lens hiding ((#))
 import           Control.Monad.State.Strict
+import Prelude
 
 import           Data.Array
 import qualified Data.Binary.Get as DB
 import qualified Data.Binary.Put as DB
-import           Data.Bits
+import qualified Data.Bits as Bits
+import           Data.Bits (shiftL, shiftR)
 import qualified Data.ByteString.Lazy as BL
 import           Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Builder as BB
-import           Data.Char (chr, ord)
+import           Data.Char (chr)
 import           Data.Function (on)
 import qualified Data.Graph as G
 import           Data.HashMap.Strict (HashMap)
@@ -56,6 +56,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Encoding as TE
 
 import           Compiler.JMacro
+import           Compiler.JMacro.Combinators
 import           Compiler.Settings
 
 import           Gen2.Base
@@ -66,7 +67,7 @@ import qualified Gen2.Utils as U
 import           Text.PrettyPrint.Leijen.Text (renderPretty, displayT)
 import qualified Crypto.Hash.SHA256 as SHA256
 
-import qualified Debug.Trace
+-- import qualified Debug.Trace
 
 type LinkedUnit = (JStat, [ClosureInfo], [StaticInfo])
 
@@ -96,7 +97,7 @@ packStrings :: HasDebugCallStack
             -> CompactorState
             -> [LinkedUnit]
             -> (CompactorState, [LinkedUnit])
-packStrings settings dflags cstate code =
+packStrings _settings _dflags cstate code =
   let allStatics :: [StaticInfo]
       allStatics = concatMap (\(_,_,x) -> x) code
 
@@ -242,13 +243,13 @@ packStrings settings dflags cstate code =
       appMatchStringLit _ _ = Nothing
 
       rewriteStatic :: StaticInfo -> Maybe StaticInfo
-      rewriteStatic (StaticInfo i
-                                (StaticUnboxed (StaticUnboxedString {}))
-                                cc) =
+      rewriteStatic (StaticInfo _i
+                                (StaticUnboxed StaticUnboxedString{})
+                                _cc) =
         Nothing
-      rewriteStatic (StaticInfo i
-                                (StaticUnboxed (StaticUnboxedStringOffset {}))
-                                cc) =
+      rewriteStatic (StaticInfo _i
+                                (StaticUnboxed StaticUnboxedStringOffset {})
+                                _cc) =
         Nothing
       rewriteStatic si = Just (si & staticInfoArgs %~ rewriteStaticArg)
 
@@ -340,14 +341,22 @@ renameInternals settings dflags cs0 rtsDeps stats0a = (cs, stats, meta)
             staticBlock  = encodeStr (concatMap (encodeStatic cs) ss)
             stbs'        = stbs & identsS %~ lookupRenamed cs
             staticDecls  = mconcat (map staticDeclStat ss) <> stbs'
-            meta = staticDecls <>
+            meta = staticDecls #
+                   appS "h$scheduleInit" [ entryArr
+                                         , var "h$staticDelayed"
+                                         , e lblArr
+                                         , e infoBlock
+                                         , e staticBlock
+                                         ]
+                   -- error "scheduleInit" 
+                   {-
                    [j| h$scheduleInit( `entryArr`
                                      , h$staticDelayed
                                      , `lblArr`
                                      , `infoBlock`
                                      , `staticBlock`);
                        h$staticDelayed = [];
-                     |]
+                     |] -}
         return (renamedStats, meta)
 
 
@@ -586,10 +595,11 @@ encodeStatic0 cs (StaticInfo _to sv _)
       [0]
     | StaticUnboxed (StaticUnboxedBool b) <- sv =
       [3 + fromEnum b]
-    | StaticUnboxed (StaticUnboxedInt i) <- sv =
+    | StaticUnboxed (StaticUnboxedInt _i) <- sv =
       [5] -- ++ encodeInt i
-    | StaticUnboxed (StaticUnboxedDouble d) <- sv =
+    | StaticUnboxed (StaticUnboxedDouble _d) <- sv =
       [6] -- ++ encodeDouble d
+    | (StaticUnboxed _) <- sv = [] -- unboxed strings have their own table
 --    | StaticString t <- sv         = [7, T.length t] ++ map encodeChar (T.unpack t)
 --    | StaticBin bs <- sv           = [8, BS.length bs] ++ map fromIntegral (BS.unpack bs)
     | StaticList [] Nothing <- sv =
@@ -632,7 +642,7 @@ encodeStatic0 cs (StaticInfo _to sv _)
     encodeArg (StaticObjArg t) =
       [11 + obj t]
     -- encodeArg x                             = panic ("encodeArg: unexpected: " ++ show x)
-    encodeChar = ord -- fixme make characters more readable
+    -- encodeChar = ord -- fixme make characters more readable
 
 encodeString :: Text -> [Int]
 encodeString xs = encodeBinary (TE.encodeUtf8 xs)
@@ -643,20 +653,20 @@ encodeBinary bs = BS.length bs : go bs
   where
     go b | BS.null b = []
          | l == 1    = let b0 = b `BS.index` 0
-                       in  map fromIntegral [ b0 `shiftR` 2, (b0 .&. 3) `shiftL` 4 ]
+                       in  map fromIntegral [ b0 `shiftR` 2, (b0 Bits..&. 3) `shiftL` 4 ]
          | l == 2    = let b0 = b `BS.index` 0
                            b1 = b `BS.index` 1
                        in  map fromIntegral [ b0 `shiftR` 2
-                                            , ((b0 .&. 3) `shiftL` 4) .|. (b1 `shiftR` 4)
-                                            , (b1 .&. 15) `shiftL` 2
+                                            , ((b0 Bits..&. 3) `shiftL` 4) Bits..|. (b1 `shiftR` 4)
+                                            , (b1 Bits..&. 15) `shiftL` 2
                                             ]
          | otherwise = let b0 = b `BS.index` 0
                            b1 = b `BS.index` 1
                            b2 = b `BS.index` 2
                        in  map fromIntegral [ b0 `shiftR` 2
-                                            , ((b0 .&. 3)  `shiftL` 4) .|. (b1 `shiftR` 4)
-                                            , ((b1 .&. 15) `shiftL` 2) .|. (b2 `shiftR` 6)
-                                            , b2 .&. 63
+                                            , ((b0 Bits..&. 3)  `shiftL` 4) Bits..|. (b1 `shiftR` 4)
+                                            , ((b1 Bits..&. 15) `shiftL` 2) Bits..|. (b2 `shiftR` 6)
+                                            , b2 Bits..&. 63
                                             ] ++ go (BS.drop 3 b)
       where l = BS.length b
 
@@ -667,8 +677,8 @@ encodeInt i
     = panic "encodeInt: integer outside 32 bit range"
   | otherwise = let i' :: Int32 = fromIntegral i
                 in [ 0
-                   , fromIntegral ((i' `shiftR` 16) .&. 0xffff)
-                   , fromIntegral (i' .&. 0xffff)
+                   , fromIntegral ((i' `shiftR` 16) Bits..&. 0xffff)
+                   , fromIntegral (i' Bits..&. 0xffff)
                    ]
 
 -- encode a possibly 53 bit int
@@ -679,7 +689,7 @@ encodeSignificand i
     = panic ("encodeInt: integer outside 53 bit range: " ++ show i)
   | otherwise = let i' = abs i
                 in  [if i < 0 then 0 else 1] ++
-                    map (\r -> fromIntegral ((i' `shiftR` r) .&. 0xffff))
+                    map (\r -> fromIntegral ((i' `shiftR` r) Bits..&. 0xffff))
                         [48,32,16,0]
 
 encodeDouble :: SaneDouble -> [Int]
@@ -735,11 +745,11 @@ identsS f (BlockStat xs)       = BlockStat   <$> (traverse . identsS) f xs
 identsS f (ApplStat e es)      = ApplStat    <$> identsE f e <*> (traverse . identsE) f es
 identsS f (UOpStat op e)       = UOpStat op  <$> identsE f e
 identsS f (AssignStat e1 e2)   = AssignStat  <$> identsE f e1 <*> identsE f e2
-identsS _ (UnsatBlock{})       = error "identsS: UnsatBlock"
-identsS _ (AntiStat{})         = error "identsS: AntiStat"
+identsS _ UnsatBlock{}         = error "identsS: UnsatBlock"
+identsS _ AntiStat{}           = error "identsS: AntiStat"
 identsS f (LabelStat l s)      = LabelStat l <$> identsS f s
-identsS _ b@(BreakStat{})      = pure b
-identsS _ c@(ContinueStat{})   = pure c
+identsS _ b@BreakStat{}        = pure b
+identsS _ c@ContinueStat{}     = pure c
 
 {-# INLINE identsE #-}
 identsE :: Traversal' JExpr Ident
@@ -750,20 +760,20 @@ identsE f (InfixExpr s e1 e2) = InfixExpr s <$> identsE f e1 <*> identsE f e2
 identsE f (UOpExpr o e)       = UOpExpr o   <$> identsE f e
 identsE f (IfExpr e1 e2 e3)   = IfExpr      <$> identsE f e1 <*> identsE f e2 <*> identsE f e3
 identsE f (ApplExpr e es)     = ApplExpr    <$> identsE f e <*> (traverse . identsE) f es
-identsE _ (UnsatExpr{})       = error "identsE: UnsatExpr"
-identsE _ (AntiExpr{})        = error "identsE: AntiExpr"
+identsE _ UnsatExpr{}         = error "identsE: UnsatExpr"
+identsE _ AntiExpr{}          = error "identsE: AntiExpr"
 
 {-# INLINE identsV #-}
 identsV :: Traversal' JVal Ident
 identsV f (JVar i)       = JVar  <$> f i
 identsV f (JList xs)     = JList <$> (traverse . identsE) f xs
-identsV _ d@(JDouble{})  = pure d
-identsV _ i@(JInt{})     = pure i
-identsV _ s@(JStr{})     = pure s
-identsV _ r@(JRegEx{})   = pure r
+identsV _ d@JDouble{}    = pure d
+identsV _ i@JInt{}       = pure i
+identsV _ s@JStr{}       = pure s
+identsV _ r@JRegEx{}     = pure r
 identsV f (JHash m)      = JHash <$> (traverse . identsE) f m
 identsV f (JFunc args s) = JFunc <$> traverse f args <*> identsS f s
-identsV _ (UnsatVal{})   = error "identsV: UnsatVal"
+identsV _ UnsatVal{}     = error "identsV: UnsatVal"
 
 ----------------------------
 
@@ -781,11 +791,11 @@ valsS f (BlockStat xs)       = BlockStat   <$> (traverse . valsS) f xs
 valsS f (ApplStat e es)      = ApplStat    <$> valsE f e <*> (traverse . valsE) f es
 valsS f (UOpStat op e)       = UOpStat op  <$> valsE f e
 valsS f (AssignStat e1 e2)   = AssignStat  <$> valsE f e1 <*> valsE f e2
-valsS _ (UnsatBlock{})       = panic "valsS: UnsatBlock"
-valsS _ (AntiStat{})         = panic "valsS: AntiStat"
+valsS _ UnsatBlock{}         = panic "valsS: UnsatBlock"
+valsS _ AntiStat{}           = panic "valsS: AntiStat"
 valsS f (LabelStat l s)      = LabelStat l <$> valsS f s
-valsS _ b@(BreakStat{})      = pure b
-valsS _ c@(ContinueStat{})   = pure c
+valsS _ b@BreakStat{}        = pure b
+valsS _ c@ContinueStat{}     = pure c
 
 {-# INLINE valsE #-}
 valsE :: Traversal' JExpr JVal
@@ -796,8 +806,8 @@ valsE f (InfixExpr s e1 e2) = InfixExpr s <$> valsE f e1 <*> valsE f e2
 valsE f (UOpExpr o e)       = UOpExpr o   <$> valsE f e
 valsE f (IfExpr e1 e2 e3)   = IfExpr      <$> valsE f e1 <*> valsE f e2 <*> valsE f e3
 valsE f (ApplExpr e es)     = ApplExpr    <$> valsE f e <*> (traverse . valsE) f es
-valsE _ (UnsatExpr{})       = panic "valsE: UnsatExpr"
-valsE _ (AntiExpr{})        = panic "valsE: AntiExpr"
+valsE _ UnsatExpr{}         = panic "valsE: UnsatExpr"
+valsE _ AntiExpr{}          = panic "valsE: AntiExpr"
 
 {-# INLINE exprsS #-}
 exprsS :: Traversal' JStat JExpr
@@ -813,24 +823,24 @@ exprsS f (BlockStat xs)       = BlockStat   <$> (traverse . exprsS) f xs
 exprsS f (ApplStat e es)      = ApplStat    <$> f e <*> traverse f es
 exprsS f (UOpStat op e)       = UOpStat op  <$> f e
 exprsS f (AssignStat e1 e2)   = AssignStat  <$> f e1 <*> f e2
-exprsS _ (UnsatBlock{})       = panic "exprsS: UnsatBlock"
-exprsS _ (AntiStat{})         = panic "exprsS: AntiStat"
+exprsS _ UnsatBlock{}         = panic "exprsS: UnsatBlock"
+exprsS _ AntiStat{}           = panic "exprsS: AntiStat"
 exprsS f (LabelStat l s)      = LabelStat l <$> exprsS f s
-exprsS _ b@(BreakStat{})      = pure b
-exprsS _ c@(ContinueStat{})   = pure c
+exprsS _ b@BreakStat{}        = pure b
+exprsS _ c@ContinueStat{}     = pure c
 
 -- doesn't traverse through values
 {-# INLINE exprsE #-}
 exprsE :: Traversal' JExpr JExpr
-exprsE f ve@(ValExpr v)      = pure ve
+exprsE _ ve@(ValExpr _)      = pure ve
 exprsE f (SelExpr e i)       = SelExpr     <$> f e <*> pure i
 exprsE f (IdxExpr e1 e2)     = IdxExpr     <$> f e1 <*> f e2
 exprsE f (InfixExpr s e1 e2) = InfixExpr s <$> f e1 <*> f e2
 exprsE f (UOpExpr o e)       = UOpExpr o   <$> f e
 exprsE f (IfExpr e1 e2 e3)   = IfExpr      <$> f e1 <*> f e2 <*> f e3
 exprsE f (ApplExpr e es)     = ApplExpr    <$> f e <*> traverse f es
-exprsE _ (UnsatExpr{})       = panic "exprsE: UnsatExpr"
-exprsE _ (AntiExpr{})        = panic "exprsE: AntiExpr"
+exprsE _ UnsatExpr{}         = panic "exprsE: UnsatExpr"
+exprsE _ AntiExpr{}          = panic "exprsE: AntiExpr"
 
 staticInfoArgs :: Traversal' StaticInfo StaticArg
 staticInfoArgs f (StaticInfo si sv sa) =
@@ -1004,7 +1014,7 @@ rewriteBodies globals idx1 idx2 input = (bfsNormal, bfsCycleBreaker, input')
                    -> [Ident]
                    -> JStat
                    -> JStat
-    createFunction i idx g args body =
+    createFunction _i idx g args body =
       DeclStat bi <>
       AssignStat (ValExpr (JVar bi))
                  (ValExpr (JFunc bargs bbody))
@@ -1074,7 +1084,7 @@ dedupe rtsDeps input
              (M.fromListWith (++) $
              map (\(i, h) -> (h, [i])) (M.toList hashes))
     pickShortest :: [Text] -> Text
-    pickShortest = head . sortBy (compare `on` T.length)
+    pickShortest = minimumBy (compare `on` T.length)
 
 dedupeBlock :: HashIdx
             -> JStat
@@ -1094,7 +1104,7 @@ dedupeStat hi st = go st
     go s@(DeclStat (TxtI i))
       | not (isCanon hi i) = mempty
       | otherwise          = s
-    go s@(AssignStat v@(ValExpr (JVar (TxtI i))) e)
+    go (AssignStat v@(ValExpr (JVar (TxtI i))) e)
       | not (isCanon hi i) = mempty
       | otherwise          = AssignStat v (e & identsE %~ toCanonI hi)
     -- rewrite identifiers in e
@@ -1130,7 +1140,7 @@ dedupeStaticArg hi (StaticObjArg o)
 dedupeStaticArg hi (StaticConArg c args)
   = StaticConArg (toCanon hi c)
                  (map (dedupeStaticArg hi) args)
-dedupeStaticArg hi a@(StaticLitArg{})    = a
+dedupeStaticArg _hi a@StaticLitArg{}    = a
 
 isCanon :: HashIdx -> Text -> Bool
 isCanon (HashIdx a b) t
@@ -1377,11 +1387,11 @@ hashSingleDefinition globals (TxtI i) expr = (i, ht 0 <> render st <> mconcat (m
     render     = htxt . TL.toStrict . displayT . renderPretty 0.8 150 . pretty
 
 hashClosureInfo :: ClosureInfo -> (Text, HashBuilder)
-hashClosureInfo (ClosureInfo civ cir cin cil cit cis) =
+hashClosureInfo (ClosureInfo civ cir _cin cil cit cis) =
   (civ, ht 1 <> hashCIRegs cir <> hashCILayout cil <> hashCIType cit <> hashCIStatic cis)
 
 hashStaticInfo :: StaticInfo -> (Text, HashBuilder)
-hashStaticInfo (StaticInfo sivr sivl sicc) =
+hashStaticInfo (StaticInfo sivr sivl _sicc) =
   (sivr, ht 2 <> hashStaticVal sivl)
 
 hashCIType :: CIType -> HashBuilder
@@ -1403,7 +1413,7 @@ hashCILayout (CILayoutUnknown size) = ht 2 <> hi size
 hashCILayout (CILayoutFixed n l)    = ht 3 <> hi n <> hashList hashVT l
 
 hashCIStatic :: CIStatic -> HashBuilder
-hashCIStatic (CIStaticRefs xs) = mempty -- hashList hobj xs -- we get these from the code
+hashCIStatic CIStaticRefs{} = mempty -- hashList hobj xs -- we get these from the code
 
 hashList :: (a -> HashBuilder) -> [a] -> HashBuilder
 hashList f xs = hi (length xs) <> mconcat (map f xs)

@@ -3,7 +3,6 @@
 -}
 
 {-# LANGUAGE CPP                #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE StandaloneDeriving #-}
 
@@ -15,6 +14,7 @@ import           Data.Set      (Set)
 import qualified Data.Set      as S
 import           DataCon
 import           DynFlags
+import Prelude
 
 import           BasicTypes
 import           Control.Lens
@@ -73,17 +73,17 @@ instance Show Var where show v = "(" ++ show (Var.varName v) ++ "[" ++
                                  " <" ++ show (idDetails v) ++ "> :: " ++
                                  show (Var.varType v) ++ ")"
 instance Show IdDetails where
-  show VanillaId          = "VanillaId"
-  show (RecSelId {})      = "RecSelId"
+  show VanillaId         = "VanillaId"
+  show RecSelId {}       = "RecSelId"
   show (DataConWorkId dc) = "DataConWorkId " ++ show dc
   show (DataConWrapId dc) = "DataConWrapId " ++ show dc
-  show (ClassOpId {})     = "ClassOpId"
-  show (PrimOpId {})      = "PrimOpId"
-  show (FCallId {})       = "FCallId"
-  show (TickBoxOpId {})   = "VanillaId"
-  show (DFunId {})        = "DFunId"
-  show CoVarId            = "CoVarId"
-  show (JoinId {})        = "JoinId"
+  show ClassOpId {}      = "ClassOpId"
+  show PrimOpId {}       = "PrimOpId"
+  show FCallId {}        = "FCallId"
+  show TickBoxOpId {}    = "VanillaId"
+  show DFunId {}         = "DFunId"
+  show CoVarId           = "CoVarId"
+  show JoinId {}         = "JoinId"
 
 deriving instance Show UpdateFlag
 deriving instance Show PrimOpVecCat
@@ -141,8 +141,8 @@ exprRefs :: UniqFM StgExpr -> StgExpr -> Set Id
 exprRefs u (StgApp f args) = s f <> l (argRefs u) args
 exprRefs u (StgConApp d args _) = l s [ i | AnId i <- dataConImplicitTyThings d] <> l (argRefs u) args
 exprRefs u (StgOpApp _ args _) = l (argRefs u) args
-exprRefs _ (StgLit {}) = mempty
-exprRefs _ (StgLam {}) = mempty
+exprRefs _  StgLit {} = mempty
+exprRefs _  StgLam {} = mempty
 exprRefs u (StgCase expr _ _ alts) = exprRefs u expr <> alts^.folded._3.to (exprRefs u)
 exprRefs u (StgLet bnd expr) = bindingRefs u bnd <> exprRefs u expr
 exprRefs u (StgLetNoEscape bnd expr) = bindingRefs u bnd <> exprRefs u expr

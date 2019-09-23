@@ -39,7 +39,7 @@ module Gen2.GHC.Digraph(
 -- removed them since they were not used anywhere in GHC.
 ------------------------------------------------------------------------------
 
-
+import Prelude
 import Util        ( minWith, count )
 import Outputable
 import Maybes      ( expectJust )

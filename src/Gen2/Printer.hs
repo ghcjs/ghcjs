@@ -10,6 +10,7 @@ import           Data.Char                    (isAlpha, isDigit)
 import qualified Data.Map                     as M
 import qualified Data.Text.Lazy               as TL
 import qualified Data.Text                    as T
+import Prelude
 
 import           Text.PrettyPrint.Leijen.Text (Doc, align, char, comma,
                                                fillSep, hcat, nest, parens,
@@ -130,10 +131,10 @@ mkFor r decl i v0 p s1 sb = text "for" <> forCond <+> braceNest'' (jsToDocR r $ 
 
 -- check if a statement is suitable to be converted to something in the for(;;x) position
 isForUpdStat :: JStat -> Bool
-isForUpdStat (UOpStat {})  = True
-isForUpdStat (AssignStat {}) = True
-isForUpdStat (ApplStat {})   = True
-isForUpdStat _               = False
+isForUpdStat UOpStat {}    = True
+isForUpdStat AssignStat {} = True
+isForUpdStat ApplStat {}   = True
+isForUpdStat _             = False
 
 interSemi :: [Doc] -> [Doc]
 interSemi [] = [PP.empty]

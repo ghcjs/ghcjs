@@ -12,6 +12,7 @@ import           Compiler.Settings
 import qualified Gen2.Generator        as Gen2
 import qualified Gen2.Linker           as Gen2
 import qualified Gen2.Object           as Gen2
+import Prelude
 
 import           CostCentre            (CollectedCCs)
 import           DynFlags              (DynFlags)

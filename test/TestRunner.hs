@@ -450,8 +450,8 @@ runhaskellResult :: TestOpts
 runhaskellResult testOpts settings file = do
     let args = tsArguments settings
     r <- runProcess (testsuiteLocation testOpts </> directory file) (runhaskellProgram testOpts)
-             (["-w", encodeString $ filename file] ++ args) ""
-    return r
+             (["-v0", "-w", encodeString $ filename file] ++ args) ""
+    return (fmap (\(s, i) -> (unmangleRunhaskellResult s, i)) r)
 
 extraJsFiles :: FilePath -> IO [String]
 extraJsFiles file =
@@ -489,11 +489,11 @@ runGhcjsResult opts file = do
             opt = if optimize then ["-O2"] else []
             extraCompArgs = tsCompArguments settings
             prof = tsProf settings
-            compileOpts = [ "-no-rts", "-no-stats"
-                          , "-o", encodeString outputExe
+            compileOpts = [ {-"-no-rts", "-no-stats"
+                          , -} "-o", encodeString outputExe
                           , "-odir", encodeString outputBuild
                           , "-hidir", encodeString outputBuild
-                          , "-use-base" , encodeString ((if prof then profBaseSymbs else baseSymbs) opts)
+                          -- , "-use-base" , encodeString ((if prof then profBaseSymbs else baseSymbs) opts)
                           , encodeString (filename input)
                           ] ++ opt ++ extraCompArgs ++ extraFiles
             args = tsArguments settings
@@ -507,6 +507,7 @@ runGhcjsResult opts file = do
         C.bracket (createDirectory False output')
                   (\_ -> removeTree output') $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
           createDirectory False outputBuild
+          print compileOpts
           e <- liftIO $ runProcess (testsuiteLocation opts </> directory file) (ghcjsProgram opts) compileOpts ""
           case e of
             Nothing    -> assertFailure "cannot find ghcjs"
@@ -518,10 +519,10 @@ runGhcjsResult opts file = do
             let cfile' = fromText (T.pack cfile)
             in  copyFile (testsuiteLocation opts </> directory file </> cfile') (outputExe' </> cfile')
           -- combine files with base bundle from incremental link
-          [out, lib] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
-                                ["out.js", "lib.js"]
+          [rts, out, lib] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
+                                ["rts.js", "out.js", "lib.js"]
           let runMain  = "\nh$main(h$mainZCZCMainzimain);\n"
-              allNoRun = (if prof then profBaseJs else baseJs) opts <> lib <> out
+              allNoRun = rts <> lib <> out -- (if prof then profBaseJs else baseJs) opts <> lib <> out
           B.writeFile (encodeString outputRun) (allNoRun <> runMain)
           B.writeFile (encodeString outputClient) (allNoRun <> wdRunMain opts)
           B.writeFile (encodeString outputHtml) (wdHtml opts)
@@ -555,6 +556,12 @@ unmangleJscResult (StdioResult exit out err)
                     [(n,"")] -> ExitFailure n
                     _        -> ExitFailure 999
 
+unmangleRunhaskellResult (StdioResult exit out err)
+  = StdioResult exit
+                out
+                (T.unlines . filter f . T.lines $ err)
+  where f t | "Loaded package environment from" `T.isPrefixOf` t = False
+            | otherwise = True
 
 outputPath :: IO FilePath
 outputPath = do

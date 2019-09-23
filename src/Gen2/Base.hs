@@ -1,6 +1,4 @@
-{-# LANGUAGE TemplateHaskell,
-             OverloadedStrings,
-             TupleSections
+{-# LANGUAGE OverloadedStrings
   #-}
 {-
   A base bundle is used for incremental linking. it contains information about
@@ -15,6 +13,7 @@ module Gen2.Base where
 import qualified Gen2.Object          as Object
 
 import           Compiler.JMacro
+import Prelude
 
 import           Control.Lens
 import           Control.Monad
@@ -95,8 +94,362 @@ emptyStringTable :: StringTable
 emptyStringTable = StringTable (listArray (0,-1) [])
                                HM.empty
                                HM.empty
-
+{-
 makeLenses ''CompactorState
+-}
+
+entries :: Lens' CompactorState (HashMap Text Int)
+entries
+  f_abikn
+  (CompactorState x1_abiko
+                  x2_abikp
+                  x3_abikq
+                  x4_abikr
+                  x5_abiks
+                  x6_abikt
+                  x7_abiku
+                  x8_abikv
+                  x9_abikw
+                  x10_abikx
+                  x11_abiky
+                  x12_abikz)
+  = (fmap
+       (\ y1_abikA
+          -> (((((((((((CompactorState x1_abiko) x2_abikp) y1_abikA)
+                       x4_abikr)
+                      x5_abiks)
+                     x6_abikt)
+                    x7_abiku)
+                   x8_abikv)
+                  x9_abikw)
+                 x10_abikx)
+                x11_abiky)
+               x12_abikz))
+      (f_abikn x3_abikq)
+{-# INLINE entries #-}
+identSupply :: Lens' CompactorState [Ident]
+identSupply
+  f_abikB
+  (CompactorState x1_abikC
+                  x2_abikD
+                  x3_abikE
+                  x4_abikF
+                  x5_abikG
+                  x6_abikH
+                  x7_abikI
+                  x8_abikJ
+                  x9_abikK
+                  x10_abikL
+                  x11_abikM
+                  x12_abikN)
+  = (fmap
+       (\ y1_abikO
+          -> (((((((((((CompactorState y1_abikO) x2_abikD) x3_abikE)
+                       x4_abikF)
+                      x5_abikG)
+                     x6_abikH)
+                    x7_abikI)
+                   x8_abikJ)
+                  x9_abikK)
+                 x10_abikL)
+                x11_abikM)
+               x12_abikN))
+      (f_abikB x1_abikC)
+{-# INLINE identSupply #-}
+labels :: Lens' CompactorState (HashMap Text Int)
+labels
+  f_abikP
+  (CompactorState x1_abikQ
+                  x2_abikR
+                  x3_abikS
+                  x4_abikT
+                  x5_abikU
+                  x6_abikV
+                  x7_abikW
+                  x8_abikX
+                  x9_abikY
+                  x10_abikZ
+                  x11_abil0
+                  x12_abil1)
+  = (fmap
+       (\ y1_abil2
+          -> (((((((((((CompactorState x1_abikQ) x2_abikR) x3_abikS)
+                       x4_abikT)
+                      x5_abikU)
+                     x6_abikV)
+                    y1_abil2)
+                   x8_abikX)
+                  x9_abikY)
+                 x10_abikZ)
+                x11_abil0)
+               x12_abil1))
+      (f_abikP x7_abikW)
+{-# INLINE labels #-}
+nameMap :: Lens' CompactorState (HashMap Text Ident)
+nameMap
+  f_abil3
+  (CompactorState x1_abil4
+                  x2_abil5
+                  x3_abil6
+                  x4_abil7
+                  x5_abil8
+                  x6_abil9
+                  x7_abila
+                  x8_abilb
+                  x9_abilc
+                  x10_abild
+                  x11_abile
+                  x12_abilf)
+  = (fmap
+       (\ y1_abilg
+          -> (((((((((((CompactorState x1_abil4) y1_abilg) x3_abil6)
+                       x4_abil7)
+                      x5_abil8)
+                     x6_abil9)
+                    x7_abila)
+                   x8_abilb)
+                  x9_abilc)
+                 x10_abild)
+                x11_abile)
+               x12_abilf))
+      (f_abil3 x2_abil5)
+{-# INLINE nameMap #-}
+numEntries :: Lens' CompactorState Int
+numEntries
+  f_abilh
+  (CompactorState x1_abili
+                  x2_abilj
+                  x3_abilk
+                  x4_abill
+                  x5_abilm
+                  x6_abiln
+                  x7_abilo
+                  x8_abilp
+                  x9_abilq
+                  x10_abilr
+                  x11_abils
+                  x12_abilt)
+  = (fmap
+       (\ y1_abilu
+          -> (((((((((((CompactorState x1_abili) x2_abilj) x3_abilk)
+                       y1_abilu)
+                      x5_abilm)
+                     x6_abiln)
+                    x7_abilo)
+                   x8_abilp)
+                  x9_abilq)
+                 x10_abilr)
+                x11_abils)
+               x12_abilt))
+      (f_abilh x4_abill)
+{-# INLINE numEntries #-}
+numLabels :: Lens' CompactorState Int
+numLabels
+  f_abilv
+  (CompactorState x1_abilw
+                  x2_abilx
+                  x3_abily
+                  x4_abilz
+                  x5_abilA
+                  x6_abilB
+                  x7_abilC
+                  x8_abilD
+                  x9_abilE
+                  x10_abilF
+                  x11_abilG
+                  x12_abilH)
+  = (fmap
+       (\ y1_abilI
+          -> (((((((((((CompactorState x1_abilw) x2_abilx) x3_abily)
+                       x4_abilz)
+                      x5_abilA)
+                     x6_abilB)
+                    x7_abilC)
+                   y1_abilI)
+                  x9_abilE)
+                 x10_abilF)
+                x11_abilG)
+               x12_abilH))
+      (f_abilv x8_abilD)
+{-# INLINE numLabels #-}
+numStatics :: Lens' CompactorState Int
+numStatics
+  f_abilJ
+  (CompactorState x1_abilK
+                  x2_abilL
+                  x3_abilM
+                  x4_abilN
+                  x5_abilO
+                  x6_abilP
+                  x7_abilQ
+                  x8_abilR
+                  x9_abilS
+                  x10_abilT
+                  x11_abilU
+                  x12_abilV)
+  = (fmap
+       (\ y1_abilW
+          -> (((((((((((CompactorState x1_abilK) x2_abilL) x3_abilM)
+                       x4_abilN)
+                      x5_abilO)
+                     y1_abilW)
+                    x7_abilQ)
+                   x8_abilR)
+                  x9_abilS)
+                 x10_abilT)
+                x11_abilU)
+               x12_abilV))
+      (f_abilJ x6_abilP)
+{-# INLINE numStatics #-}
+parentEntries :: Lens' CompactorState (HashMap Text Int)
+parentEntries
+  f_abilX
+  (CompactorState x1_abilY
+                  x2_abilZ
+                  x3_abim0
+                  x4_abim1
+                  x5_abim2
+                  x6_abim3
+                  x7_abim4
+                  x8_abim5
+                  x9_abim6
+                  x10_abim7
+                  x11_abim8
+                  x12_abim9)
+  = (fmap
+       (\ y1_abima
+          -> (((((((((((CompactorState x1_abilY) x2_abilZ) x3_abim0)
+                       x4_abim1)
+                      x5_abim2)
+                     x6_abim3)
+                    x7_abim4)
+                   x8_abim5)
+                  y1_abima)
+                 x10_abim7)
+                x11_abim8)
+               x12_abim9))
+      (f_abilX x9_abim6)
+{-# INLINE parentEntries #-}
+parentLabels :: Lens' CompactorState (HashMap Text Int)
+parentLabels
+  f_abimb
+  (CompactorState x1_abimc
+                  x2_abimd
+                  x3_abime
+                  x4_abimf
+                  x5_abimg
+                  x6_abimh
+                  x7_abimi
+                  x8_abimk
+                  x9_abiml
+                  x10_abimm
+                  x11_abimn
+                  x12_abimo)
+  = (fmap
+       (\ y1_abimp
+          -> (((((((((((CompactorState x1_abimc) x2_abimd) x3_abime)
+                       x4_abimf)
+                      x5_abimg)
+                     x6_abimh)
+                    x7_abimi)
+                   x8_abimk)
+                  x9_abiml)
+                 x10_abimm)
+                y1_abimp)
+               x12_abimo))
+      (f_abimb x11_abimn)
+{-# INLINE parentLabels #-}
+parentStatics :: Lens' CompactorState (HashMap Text Int)
+parentStatics
+  f_abimr
+  (CompactorState x1_abims
+                  x2_abimt
+                  x3_abimu
+                  x4_abimv
+                  x5_abimw
+                  x6_abimx
+                  x7_abimy
+                  x8_abimz
+                  x9_abimA
+                  x10_abimB
+                  x11_abimC
+                  x12_abimD)
+  = (fmap
+       (\ y1_abimE
+          -> (((((((((((CompactorState x1_abims) x2_abimt) x3_abimu)
+                       x4_abimv)
+                      x5_abimw)
+                     x6_abimx)
+                    x7_abimy)
+                   x8_abimz)
+                  x9_abimA)
+                 y1_abimE)
+                x11_abimC)
+               x12_abimD))
+      (f_abimr x10_abimB)
+{-# INLINE parentStatics #-}
+statics :: Lens' CompactorState (HashMap Text Int)
+statics
+  f_abimG
+  (CompactorState x1_abimH
+                  x2_abimI
+                  x3_abimJ
+                  x4_abimK
+                  x5_abimL
+                  x6_abimM
+                  x7_abimN
+                  x8_abimO
+                  x9_abimP
+                  x10_abimQ
+                  x11_abimR
+                  x12_abimS)
+  = (fmap
+       (\ y1_abimT
+          -> (((((((((((CompactorState x1_abimH) x2_abimI) x3_abimJ)
+                       x4_abimK)
+                      y1_abimT)
+                     x6_abimM)
+                    x7_abimN)
+                   x8_abimO)
+                  x9_abimP)
+                 x10_abimQ)
+                x11_abimR)
+               x12_abimS))
+      (f_abimG x5_abimL)
+{-# INLINE statics #-}
+stringTable :: Lens' CompactorState StringTable
+stringTable
+  f_abimU
+  (CompactorState x1_abimV
+                  x2_abimW
+                  x3_abimX
+                  x4_abimY
+                  x5_abimZ
+                  x6_abin0
+                  x7_abin1
+                  x8_abin2
+                  x9_abin3
+                  x10_abin4
+                  x11_abin5
+                  x12_abin6)
+  = (fmap
+       (\ y1_abin7
+          -> (((((((((((CompactorState x1_abimV) x2_abimW) x3_abimX)
+                       x4_abimY)
+                      x5_abimZ)
+                     x6_abin0)
+                    x7_abin1)
+                   x8_abin2)
+                  x9_abin3)
+                 x10_abin4)
+                x11_abin5)
+               y1_abin7))
+      (f_abimU x12_abin6)
+{-# INLINE stringTable #-}
+
+
+
+--- end makeLenses
 
 emptyCompactorState :: CompactorState
 emptyCompactorState = CompactorState renamedVars

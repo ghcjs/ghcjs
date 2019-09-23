@@ -7,13 +7,32 @@ GHCJS is a Haskell to JavaScript compiler that uses the GHC API.
 Quick Start - Developing GHCJS
 ==============================
 
-Starting with GHC version 8.2, GHCJS depends on a customized `ghc` library,
-installed under the name `ghc-api-ghcjs`
+GHCJS contains a library, `ghcjs`, which contains the JavaScript code generator and a slightly customized variant of the `ghc` library, and several executable programs.
 
-#### getting and preparing the source tree
+The repository has several submodules and some files must be generated before the package can be installed.
+
+### prerequisites
+
+#### GHC
+
+You need the same major version of GHC as the version of the GHCJS branch you're building.
+
+#### cabal-install
+
+cabal-install 3.0 is supported
+
+#### emscripten emsdk
+
+GHCJS uses a C toolchain, mostly for build system related tasks like the C preprocessor, Autoconf scripts and tools like `hsc2hs`. Direct support for using compiled foreign libraries from Haskell code may follow at a later date.
+
+Please follow the installation instructions at https://emscripten.org/docs/getting_started/index.html
+
+GHCJS requires the "upstream" emscripten backend, which is the default now. The earlier "fastcomp" backend will not work.
+
+### getting and preparing the source tree
 
 ```
-$ git clone --branch ghc-8.6 https://github.com/ghcjs/ghcjs.git
+$ git clone https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init --recursive
 $ ./utils/makePackages.sh
@@ -21,42 +40,37 @@ $ ./utils/makePackages.sh
 
 The `./utils/makePackages.sh` script requires Bash version 4.0 or greater. If you are building on macOS, you will need the gnu version of tar. You can install this with `brew install gnu-tar`, which makes it accessible at `gtar`. The `./utils/makePackages.sh` will automatically pick up on this.
 
-#### building the compiler
+### building the compiler
 
 GHCJS depends on a few "local" packages in the source tree. You can use
 `cabal-install` and `stack` to set up a build environment that contains
 these packages.
 
-##### Cabal new-build
+#### Cabal new-install
+
+After the source tree has been prepared, the package can be installed.
+You may want ensure that binaries (or symlinks) of earlier versions are overwritten:
 
 ```
-$ cabal new-configure
-$ cabal new-build
+$ cabal install --overwrite-policy=always
 ```
 
-Since `cabal new-build` does not install executables or wrapper scripts,
-we need to make them accessible by hand. You can do this by creating symlinks
-to the `/utils/dist-newstyle-wrapper.sh` script.
-
-For example if the `.bin` directory is in your PATH:
+At the time of writing, `cabal-install` does not support creating symbolic links on Windows, even though this is the default installation method. A workaround is telling it to copy the executables instead:
 
 ```
-$ cd .bin
-$ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs
-$ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-pkg
-$ ln -s ../utils/dist-newstyle-wrapper.sh haddock-ghcjs
-$ ln -s ../utils/dist-newstyle-wrapper.sh hsc2hs-ghcjs
-$ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-boot
+$ cabal install --overwrite-policy=always --install-method=copy
 ```
 
-##### Cabal sandbox
+#### v1 style Cabal sandbox
+
+v1 style cabal sandboxes are also supported
 
 if you want to build with a Cabal sandbox, use the `makeSandbox.sh` script
 to add the local packages.
 
 ```
-$ ./utils/makeSandbox.sh
-$ cabal install
+$ cabal v1-sandbox init
+$ cabal v1-install
 ```
 
 ##### stack
@@ -69,55 +83,25 @@ $ stack build
 
 #### Booting GHCJS
 
-The `ghcjs-boot` program builds the "boot" libraries, like `ghc-prim`, `base` and `template-haskell` with GHCJS. After booting, GHCJS can compile regular
-Haskell programs and packages.
+The `ghcjs-boot` program builds the "boot" libraries, like `ghc-prim`, `base` and `template-haskell` with GHCJS. After booting, GHCJS can compile regular Haskell programs and packages.
+
+`ghcjs-boot` needs to be able to find the emscripten toolchain, a nodejs executable. The easiest way to do this is by running the `emsdk_env.sh` script. After that, you can run `ghcjs-boot` by pointing it to the boot libraries (the directory containing the `boot.yaml` file)
 
 ```
-$ ghcjs-boot
-```
-
-when invoked without arguments, ghcjs-boot will build the libraries from
-`boot.tar` (unless the current directory contains a `boot.yaml` file), installed in GHCJS' data directory (`boot.tar` is generated
-by the `makePackages.sh` script and included in a source distribution).
-
-Optionally you can point `ghcjs-boot` to a different location, like another
-`boot.tar` archive:
-
-```
-$ ghcjs-boot -s location/of/boot.tar
-```
-
-or a directory (must contain a `boot.yaml` file):
-
-```
+$ source ~/emsdk/emsdk_env.sh
 $ ghcjs-boot -s ./lib/boot
 ```
 
 ### GHCJS executables and library paths
 
-The GHCJS binaries like `ghcjs` and `ghcjs-pkg` are private executables
-and installed in the `libexec` directory. The `Setup.hs` script installs
-wrapper scripts in the `bin` directory to pass the library path to the binary.
 
-Note: reinstalling GHCJS (`cabal install`) does not cause existing wrapper
-scripts to be overwritten. Remove the wrapper scripts first if you want
-a fresh copy.
+After booting, you can add the directory containing the GHCJS binaries to
+your executable PATH. The `ghcjs-boot` program prints the location after
+finishing building the libraries.
 
-Example:
-
-`.cabal-sandbox/bin/ghcjs` might contain the following:
-
-```
-#!/bin/sh
-topdir="/home/luite/.ghcjs/x86_64-linux-8.6.0.1-8.6.2/ghcjs"
-executablename="/home/luite/haskell/ghcjs-8.6/ghcjs/.cabal-sandbox/libexec/x86_64-linux-ghc-8.6.2/ghcjs-8.6.0.1/ghcjs"
-exec "$executablename" -B"$topdir" ${1+"$@"}
-```
-
-To change the library installation location (`topdir`), modify the scripts
-prior to running `ghcjs-boot`.
-
-on Windows, an `options` file is used instead of a wrapper script
+You can also create a symbolic link for the `ghcjs` and `ghcjs-pkg`
+programs, or use the `--with-compiler` and `--with-hc-pkg` flags
+when using `cabal-install`
 
 #### Generating a source distribution
 
@@ -128,14 +112,8 @@ make sure to update the patches in `/lib/patches` first
 $ ./utils/updatePatches.sh
 ```
 
-then regenerate the packages and the `/data/boot.tar` archive
+then regenerate the packages
 
 ```
 $ ./utils/makePackages.sh
-```
-
-and the source distribution archive
-
-```
-$ cabal sdist
 ```

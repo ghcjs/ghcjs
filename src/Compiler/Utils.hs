@@ -8,6 +8,9 @@ module Compiler.Utils
       -- * File utils
       touchFile
     , copyNoOverwrite
+    , writeBinaryFile
+    , readBinaryFile
+    , readBinaryFileL
     , findFile
     , jsexeExtension
     , addExeExtension
@@ -34,7 +37,7 @@ import           GHC
 import           Platform
 import           HscTypes
 import           Bag
-import           FileCleanup
+-- import           FileCleanup
 import           Module
 import           Outputable        hiding ((<>))
 import           ErrUtils          (mkPlainErrMsg)
@@ -42,15 +45,16 @@ import           Packages          (getPackageIncludePath, Version
                                    ,versionBranch, packageNameString
                                    ,packageVersion, lookupPackage
                                    ,explicitPackages, PackageConfig)
-import           Config            (cProjectVersionInt)
+-- import           Config            (cProjectVersionInt)
 import           Panic             (throwGhcExceptionIO)
 import qualified SysTools
 import           FileCleanup ( newTempName, TempFileLifetime(..) )
-import           Panic
+-- import           Panic
 
 import qualified Control.Exception as Ex
 import           Control.Monad
 import           Control.Monad.IO.Class
+import Prelude
 
 import           Data.Char
 import           Data.List         (isPrefixOf, isInfixOf, foldl', intercalate)
@@ -64,6 +68,14 @@ import           System.Environment
 import           System.FilePath
 
 import           Gen2.Utils
+
+import qualified Data.ByteString as B
+import           Data.ByteString (ByteString)
+import qualified Data.ByteString.Lazy as BL
+
+import           System.IO (withBinaryFile, Handle, IOMode(ReadMode, WriteMode))
+
+import qualified Compiler.Platform as Platform
 
 touchFile :: DynFlags -> FilePath -> IO ()
 touchFile df file = do
@@ -86,26 +98,53 @@ findFile mk_file_path (dir : dirs)
        if b then return (Just file_path)
             else findFile mk_file_path dirs
 
+{-
+      macOS has trouble writing more than 2GiB at once to a file
+  (tested with 10.14.6), and the base library doesn't work around this
+  problem yet (tested with GHC 8.6), so we work around it here.
+
+  in this workaround we write a binary file in chunks of 1 GiB
+ -}
+writeBinaryFile :: FilePath -> ByteString -> IO ()
+writeBinaryFile file bs =
+  withBinaryFile file WriteMode $ \h -> mapM_ (B.hPut h) (chunks bs)
+  where
+    -- split the ByteString into a nonempty list of chunks of at most 1GiB
+    chunks :: ByteString -> [ByteString]
+    chunks b =
+      let (b1, b2) = B.splitAt 1073741824 b
+      in  b1 : if B.null b1 then [] else chunks b2
+
+readBinaryFile :: FilePath -> IO ByteString
+readBinaryFile file = mconcat <$> readBinaryFileChunks file
+
+readBinaryFileL :: FilePath -> IO BL.ByteString
+readBinaryFileL file = BL.fromChunks <$> readBinaryFileChunks file
+
+readBinaryFileChunks :: FilePath -> IO [ByteString]
+readBinaryFileChunks file =
+  withBinaryFile file ReadMode getChunks
+  where
+    getChunks :: Handle -> IO [ByteString]
+    getChunks h = do
+      chunk <- B.hGet h 1073741824
+      if B.null chunk then pure [chunk]
+                      else (chunk:) <$> getChunks h
+
 jsexeExtension :: String
 jsexeExtension = "jsexe"
 
 addExeExtension :: FilePath -> FilePath
-#ifdef WINDOWS
-addExeExtension = (<.> "exe")
-#else
-addExeExtension = id
-#endif
+addExeExtension
+  | Platform.isWindows = (<.> "exe")
+  | otherwise          = id
 
 exeFileName :: DynFlags -> FilePath
 exeFileName dflags
   | Just s <- outputFile dflags =
       -- unmunge the extension
       let s' = dropPrefix "js_" (drop 1 $ takeExtension s)
-#ifdef WINDOWS
-      in if null s' || map toLower s' == "exe"
-#else
-      in if null s'
-#endif
+      in if null s' || (Platform.isWindows && map toLower s' == "exe")
            then dropExtension s <.> jsexeExtension
            else dropExtension s <.> s'
   | otherwise =

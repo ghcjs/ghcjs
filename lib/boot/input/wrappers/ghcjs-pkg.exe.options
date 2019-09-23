@@ -1,0 +1,3 @@
+{libexecdir}\ghcjs-pkg.exe
+--global-package-db
+{topdir}/package.conf.d

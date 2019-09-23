@@ -1,0 +1,3 @@
+- ignore: { name: Eta reduce }
+- ignore: { name: Use tuple-section }
+- ignore: { name: Use when }

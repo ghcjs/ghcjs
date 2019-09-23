@@ -26,6 +26,7 @@ import           System.FilePath
 import           System.IO.Error
 
 import           DynFlags
+import Prelude
 
 import qualified Compiler.Info          as Info
 

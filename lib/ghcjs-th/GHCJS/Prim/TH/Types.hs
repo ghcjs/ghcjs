@@ -19,6 +19,8 @@ module GHCJS.Prim.TH.Types ( Message(..)
                            , THResultType(..)
                            ) where
 
+import           Prelude
+
 import           Control.Applicative
 
 import           Data.Binary
