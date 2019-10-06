@@ -16,10 +16,44 @@ installed under the name `ghc-api-ghcjs`
 $ git clone --branch ghc-8.6 https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init --recursive
-$ ./utils/makePackages.sh
 ```
 
+#### preparing the required packages
+
 The `./utils/makePackages.sh` script requires Bash version 4.0 or greater. If you are building on macOS, you will need the gnu version of tar. You can install this with `brew install gnu-tar`, which makes it accessible at `gtar`. The `./utils/makePackages.sh` will automatically pick up on this.
+
+
+##### stack
+These instructions assumes you have used `stack setup` to install ghc, but ghc is not in your PATH.
+
+Create a stack.yaml without dependencies based on original ghcjs/stack.yaml
+This allows usages of `stack exec` to bring ghc and other stack built binaries into scope.
+```
+$ grep '^\s*resolver:' stack.yaml > ghcjs.yaml
+```
+
+`./utils/makePackages.sh` requirements
+```
+$ stack --stack-yaml=ghcjs.yaml build cabal-install happy alex
+$ stack --stack-yaml=ghcjs.yaml exec cabal v1-update
+```
+
+Now you can run `./utils/makePackages.sh`
+```
+$ stack --stack-yaml=ghcjs.yaml exec --no-ghc-package-path ./utils/makePackages.sh
+```
+
+### cabal
+Alternatively, install [cabal](https://www.haskell.org/cabal/download.html)
+These instructions assumes that you do have ghc in your PATH.
+```
+# ./utils/makePackages.sh requirements
+$ cabal v1-update
+$ cabal v1-install happy alex
+
+# now you can run ./utils/makePackages.sh
+$ ./utils/makePackages.sh # assumes you already have ghc in your PATH.
+```
 
 #### building the compiler
 
@@ -63,8 +97,15 @@ $ cabal install
 
 or you can use stack:
 
+
+To just compile
 ```
 $ stack build
+```
+
+To compile and install the executables and wrapper scripts
+```
+$ stack install
 ```
 
 #### Booting GHCJS
@@ -74,6 +115,11 @@ Haskell programs and packages.
 
 ```
 $ ghcjs-boot
+```
+
+Alternatively, if you are using stack and don't have ghc in your PATH.
+```
+$ stack --stack-yaml=ghcjs.yaml exec ghcjs-boot
 ```
 
 when invoked without arguments, ghcjs-boot will build the libraries from

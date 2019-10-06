@@ -65,11 +65,7 @@ GHCSRC="$GHCJSROOT/ghc"
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/$(basename $0).XXXXXXXXXXXX")
 
 CABALVER=$(cabal --numeric-version)
-if [[ ${CABALVER:0:2} != "1." && ${CABALVER:0:2} != "2." ]]; then
-  CMDPREFIX="v1-"
-else
-  CMDPREFIX=""
-fi
+CMDPREFIX="v1-"
 
 # we need ln to support the -r option.
 # the BSD ln program on macOS doesn't support it
@@ -261,6 +257,7 @@ then
 (
 mkdir -p inplace/bin
 cd utils/genprimopcode
+echo 'packages: genprimopcode.cabal' > cabal.project
 cabal ${CMDPREFIX}build --builddir=dist
 gnucp dist/build/genprimopcode/genprimopcode ../../inplace/bin
 )
