@@ -26,21 +26,15 @@ The `./utils/makePackages.sh` script requires Bash version 4.0 or greater. If yo
 ##### stack
 These instructions assumes you have used `stack setup` to install ghc, but ghc is not in your PATH.
 
-Create a stack.yaml without dependencies based on original ghcjs/stack.yaml
-This allows usages of `stack exec` to bring ghc and other stack built binaries into scope.
-```
-$ grep '^\s*resolver:' stack.yaml > ghcjs.yaml
-```
-
 `./utils/makePackages.sh` requirements
 ```
-$ stack --stack-yaml=ghcjs.yaml build cabal-install happy alex
-$ stack --stack-yaml=ghcjs.yaml exec cabal v1-update
+$ stack build cabal-install happy alex
+$ stack exec cabal v1-update
 ```
 
 Now you can run `./utils/makePackages.sh`
 ```
-$ stack --stack-yaml=ghcjs.yaml exec --no-ghc-package-path ./utils/makePackages.sh
+$ stack exec --no-ghc-package-path ./utils/makePackages.sh
 ```
 
 ### cabal
@@ -98,14 +92,15 @@ $ cabal install
 or you can use stack:
 
 
-To just compile
+To compile
 ```
-$ stack build
+$ cat stack.yaml build.extra.yaml > build.yaml
+$ stack --stack-yaml=build.yaml build
 ```
 
-To compile and install the executables and wrapper scripts
+To install the executables and wrapper scripts
 ```
-$ stack install
+$ stack --stack-yaml=build.yaml install
 ```
 
 #### Booting GHCJS
@@ -119,7 +114,7 @@ $ ghcjs-boot
 
 Alternatively, if you are using stack and don't have ghc in your PATH.
 ```
-$ stack --stack-yaml=ghcjs.yaml exec ghcjs-boot
+$ stack --stack-yaml=build.yaml exec ghcjs-boot
 ```
 
 when invoked without arguments, ghcjs-boot will build the libraries from

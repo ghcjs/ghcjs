@@ -1,18 +1,9 @@
-# the source tree needs to be "booted" for this stack.yaml file to be usable:
-#
-# $ git submodule update --init --recursive
-# $ ./utils/makePackages.sh
-#
-
 resolver: lts-14.7
+
 extra-deps:
   - haskell-src-exts-1.20.3@sha256:eb9a0a02e422f64e793fe077e445e930bc365b7f7ce92ce6983475c72f8b3785,4467
   - happy-1.19.9@sha256:f8c774230735a390c287b2980cfcd2703d24d8dde85a01ea721b7b4b4c82944f,4667
-packages:
-  - .
-  - ./lib/ghc-api-ghcjs
-  - ./lib/ghci-ghcjs
-  - ./lib/ghcjs-th
-  - ./lib/haddock-api-ghcjs
-  - ./lib/haddock-library-ghcjs
-  - ./lib/template-haskell-ghcjs
+  - Cabal-2.4.0.1
+  - cabal-install-2.4.0.0
+  - resolv-0.1.1.2
+  - zip-archive-0.3.3
