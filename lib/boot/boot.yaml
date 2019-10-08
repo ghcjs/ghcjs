@@ -51,9 +51,11 @@ packages:
     - ./pkg/template-haskell
     - ./pkg/parsec
     - ./pkg/process
+    - ./pkg/stm
     - ./pkg/time
     - ./pkg/text
     - ./pkg/mtl
+    - ./pkg/xhtml
     - IfUnix:    ./pkg/unix
     - IfWindows: ./pkg/Win32
 

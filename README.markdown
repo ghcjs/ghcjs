@@ -98,9 +98,16 @@ $ cat stack.yaml build.extra.yaml > build.yaml
 $ stack --stack-yaml=build.yaml build
 ```
 
-To install the executables and wrapper scripts
+To install the executables into `~/.local/bin`
 ```
 $ stack --stack-yaml=build.yaml install
+$ cd ~/local/bin
+$ ln -s ghcjs-run runghcjs # stack expects runghcjs
+```
+
+To use stack to compile ghcjs programs, use the following prefix
+```
+stack --system-ghc --compiler ghcjs-8.6.0.1_ghc-8.6.5 [stack_commands]
 ```
 
 #### Booting GHCJS
@@ -114,7 +121,7 @@ $ ghcjs-boot
 
 Alternatively, if you are using stack and don't have ghc in your PATH.
 ```
-$ stack --stack-yaml=build.yaml exec ghcjs-boot
+$ stack exec ghcjs-boot
 ```
 
 when invoked without arguments, ghcjs-boot will build the libraries from

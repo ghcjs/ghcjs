@@ -309,7 +309,7 @@ for PKG in base array binary bytestring containers deepseq directory \
            filepath ghc-boot ghc-heap ghc-compact \
            ghc-boot-th ghci integer-gmp integer-simple \
            parallel pretty process stm template-haskell \
-           mtl parsec text time transformers unix Win32; do
+           mtl parsec text time transformers xhtml unix Win32; do
   copy_patch_boot_package_sdist "$PKG" ""
 done
 
