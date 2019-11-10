@@ -1,43 +1,139 @@
-env:
-    - TEST_PART=CORE1
-    - TEST_PART=CORE2
-    - TEST_PART=PROFILING
-    - TEST_PART=GHCJS
+dist: bionic
+language: generic
+sudo: false
+
+cache:
+  directories:
+  - $HOME/.cabal
+  - $HOME/.ghc
+  - $HOME/.ghcjs
+  - $HOME/.local/bin
+  - $HOME/.nvm
+  - $HOME/.stack
+  - $TRAVIS_BUILD_DIR
+  - $TRAVIS_BUILD_DIR/.cabal-sandbox
+  - $TRAVIS_BUILD_DIR/data
+  - $TRAVIS_BUILD_DIR/dist
+  - $TRAVIS_BUILD_DIR/dist-newstyle
+  - $TRAVIS_BUILD_DIR/ghcjs-boot
+  - $TRAVIS_BUILD_DIR/lib
+  - $TRAVIS_BUILD_DIR/lib/boot/data
+  - $TRAVIS_BUILD_DIR/lib/boot/pkg
+  - $TRAVIS_BUILD_DIR/utils
+  - $TRAVIS_BUILD_DIR/vendor
+  - /opt/cabal/2.4/bin
+  - /opt/ghc/8.6.5/bin
+  - /opt/ghc/bin
 
 addons:
-    apt:
-        sources:
-            - hvr-ghc
-        packages:
-            - build-essential
-            - cabal-install-2.4
-            - ghc-8.6.3
-            - alex-3.1.7
-            - happy-1.19.5
+  apt:
+    update: true
+    packages:
+      - libgmp-dev
 
-before_install:
-    - nvm install 10
-    - export PATH=$PWD/.cabal-sandbox/bin:$HOME/.cabal/bin:/opt/ghc/8.6.3/bin:/opt/cabal/2.4/bin:/opt/alex/3.1.7/bin:/opt/happy/1.19.5/bin:$PATH
-    - export
-
-install:
-    - travis_retry cabal update
-    - ./utils/makePackages.sh
-    - ./utils/makeSandbox.sh
-    - cabal install -j1 --only-dependencies --enable-tests --enable-benchmarks
-    - cabal install --enable-tests --enable-benchmarks -v -j1 --ghc-options="+RTS -c -RTS"
-    - ghcjs --version
-    - ghcjs-boot --version
-    - ./test/runTravis.sh boot
-    - ghcjs-pkg list
-
-script:
-    - ./test/runTravis.sh test
+jobs:
+  include:
+    - stage: prepare cache
+      script:
+        - sudo add-apt-repository --yes ppa:hvr/ghc
+        - sudo apt-get update
+        - sudo apt-get upgrade
+        - sudo apt-get install --yes build-essential cabal-install-2.4 ghc-8.6.5
+        - export DIR=~/.local/bin
+        - if [ ! -d "$DIR" ]; then mkdir -p ~/.local/bin; fi
+        - nvm install 10
+        - export PATH=$PWD/.cabal-sandbox/bin:$HOME/.cabal/bin:/opt/ghc/8.6.5/bin:/opt/cabal/2.4/bin:$PATH
+        - export
+        - cd ../
+        - export PATH=$HOME/.local/bin:$PATH
+        - travis_retry curl -L https://get.haskellstack.org/stable/linux-x86_64.tar.gz | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+        - stack install --resolver lts-14.11 happy-1.19.9 alex-3.2.4
+        - cd ghcjs
+        - git submodule update --init --recursive
+        - travis_retry cabal update
+    - stage: make packages, sandbox; build dependencies
+      script:
+        - sudo add-apt-repository --yes ppa:hvr/ghc
+        - sudo apt-get update
+        - sudo apt-get upgrade
+        - sudo apt-get install --yes build-essential cabal-install-2.4 ghc-8.6.5
+        - export PATH=$PWD/.cabal-sandbox/bin:$HOME/.cabal/bin:/opt/ghc/8.6.5/bin:/opt/cabal/2.4/bin:$PATH
+        - export
+        - git submodule update --init --recursive
+        - ./utils/makePackages.sh
+        - ./utils/makeSandbox.sh
+        - cabal new-configure
+        - cabal new-build --only-dependencies
+    - stage: build, install
+      script:
+        - sudo add-apt-repository --yes ppa:hvr/ghc
+        - sudo apt-get update
+        - sudo apt-get upgrade
+        - sudo apt-get install --yes build-essential cabal-install-2.4 ghc-8.6.5
+        - export PATH=$PWD/.cabal-sandbox/bin:$HOME/.cabal/bin:/opt/ghc/8.6.5/bin:/opt/cabal/2.4/bin:$PATH
+        - export
+        - git submodule update --init --recursive
+        - cabal new-build
+        - cabal new-install --only-dependencies --lib
+        - cabal new-install -v --lib
+        - export DIR=~/.cabal/bin
+        - if [ ! -d "$DIR" ]; then mkdir -p ~/.cabal/bin; fi
+        - cd $HOME/.cabal/bin
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh ghcjs
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh ghcjs-pkg
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh haddock-ghcjs
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh hsc2hs-ghcjs
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh ghcjs-boot
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh ghcjs-run
+        - ghcjs --version
+    - stage: boot
+      script:
+        - sudo add-apt-repository --yes ppa:hvr/ghc
+        - sudo apt-get update
+        - sudo apt-get upgrade
+        - sudo apt-get install --yes build-essential cabal-install-2.4 ghc-8.6.5
+        - export PATH=$PWD/.cabal-sandbox/bin:$HOME/.cabal/bin:/opt/ghc/8.6.5/bin:/opt/cabal/2.4/bin:$PATH
+        - export
+        - git submodule update --init --recursive
+        - export DIR=~/.cabal/bin
+        - if [ ! -d "$DIR" ]; then mkdir -p ~/.cabal/bin; fi
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh $HOME/.cabal/bin/ghcjs
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh $HOME/.cabal/bin/ghcjs-pkg
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh $HOME/.cabal/bin/haddock-ghcjs
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh $HOME/.cabal/bin/hsc2hs-ghcjs
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh $HOME/.cabal/bin/ghcjs-boot
+        - ln -fs $TRAVIS_BUILD_DIR/utils/dist-newstyle-wrapper.sh $HOME/.cabal/bin/ghcjs-run
+        - ./utils/makePackages.sh
+        - ./utils/makeSandbox.sh
+        - ghcjs-boot --version
+        - ghcjs-boot -j 2 -s $TRAVIS_BUILD_DIR/lib/boot --no-haddock --no-prof
+    # - stage: run Travis
+    #   env: TEST_PART=CORE1
+    #   script:
+    # - stage: run Travis
+    #   env: TEST_PART=CORE2
+    #   script:
+    # - stage: run Travis
+    #   env: TEST_PART=PROFILING
+    #   script:
+    # - stage: run Travis
+    #   env: TEST_PART=GHCJS
+    #   script:
+    # - stage: run Travis test
+    #   env: TEST_PART=CORE1
+    #   script:
+    # - stage: run Travis test
+    #   env: TEST_PART=CORE2
+    #   script:
+    # - stage: run Travis test
+    #   env: TEST_PART=PROFILING
+    #   script:
+    # - stage: run Travis test
+    #   env: TEST_PART=GHCJS
+    #   script:
 
 notifications:
   irc:
     channels: "irc.freenode.net#ghcjs"
     skip_join: true
   email: true
-
-sudo: false

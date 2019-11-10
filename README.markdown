@@ -2,6 +2,8 @@
 Introduction
 ============
 
+[![Build Status](https://travis-ci.org/ghcjs/ghcjs.svg?branch=ghc-8.6)](https://travis-ci.org/ghcjs/ghcjs)
+
 GHCJS is a Haskell to JavaScript compiler that uses the GHC API.
 
 Quick Start - Developing GHCJS
