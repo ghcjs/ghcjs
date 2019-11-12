@@ -429,7 +429,7 @@ genDependencyData dflags mod units = do
       --         Right blockNumber if function refers to current module
       --
       --         assumes function is internal to the current block if it's
-      --         from teh current module and not in the unitIdExports map.
+      --         from the current module and not in the unitIdExports map.
       lookupIdFun :: Int -> Id
                   -> StateT DependencyDataCache G (Either Object.Fun Int)
       lookupIdFun n i = case lookupUFM unitIdExports i of
