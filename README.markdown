@@ -47,6 +47,7 @@ $ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-pkg
 $ ln -s ../utils/dist-newstyle-wrapper.sh haddock-ghcjs
 $ ln -s ../utils/dist-newstyle-wrapper.sh hsc2hs-ghcjs
 $ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-boot
+$ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-run
 ```
 
 ##### Cabal sandbox

@@ -19,6 +19,7 @@
 # $ ln -s ../utils/dist-newstyle-wrapper.sh haddock-ghcjs
 # $ ln -s ../utils/dist-newstyle-wrapper.sh hsc2hs-ghcjs
 # $ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-boot
+# $ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-run
 #
 # this script automatically detects the program to call from the name of
 # the link.
@@ -67,6 +68,8 @@ elif [ "$PGM" = "haddock-ghcjs" ]; then
   exec "$DISTDIR/haddock-ghcjs/haddock-ghcjs" -B"$LIBDIR" ${1+"$@"}
 elif [ "$PGM" = "ghcjs-boot" ]; then
   exec "$DISTDIR/ghcjs-boot/ghcjs-boot" ${1+"$@"}
+elif [ "$PGM" = "ghcjs-run" ]; then
+  exec "$DISTDIR/ghcjs-run/ghcjs-run" ${1+"$@"}
 else
   echo "unknown wrapped program name: $PGM"
   exit 1
