@@ -26,6 +26,9 @@ else
 fi
 
 cd "$PKG"
+
+sed -i 's/impl(ghcjs)/os(ghcjs)/g' *.cabal
+
 # configure the package
 CFLAGS="-I${PKG} ${CFLAGS}" \
     ${SETUP_HS} configure --with-ghc=${HC} \
