@@ -236,7 +236,10 @@ initPluginsEnv :: DynFlags -> Maybe HscEnv -> IO (Maybe HscEnv, HscEnv)
 initPluginsEnv _ (Just env) = pure (Just env, env)
 initPluginsEnv orig_dflags _ = do
   let trim = let f = reverse . dropWhile isSpace in f . f
-  ghcTopDir   <- readFile (topDir orig_dflags </> "ghc_libdir")
+      makeAbsolute path = if isRelative path
+        then topDir orig_dflags </> path
+        else path
+  ghcTopDir  <- makeAbsolute . trim <$> readFile (topDir orig_dflags </> "ghc_libdir")
   ghcSettings <- SysTools.initSysTools (Just $ trim ghcTopDir)
   let removeJsPrefix xs = fromMaybe xs (stripPrefix "js_" xs)
       dflags0 = orig_dflags { settings = ghcSettings }
