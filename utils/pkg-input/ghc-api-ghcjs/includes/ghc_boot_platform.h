@@ -3,7 +3,7 @@
 
 #define BuildPlatform_NAME  "x86_64-unknown-linux"
 #define HostPlatform_NAME   "x86_64-unknown-linux"
-#define TargetPlatform_NAME "x86_64-unknown-linux"
+#define TargetPlatform_NAME "x86_64-unknown-ghcjs"
 
 #define x86_64_unknown_linux_BUILD 1
 #define x86_64_unknown_linux_HOST 1

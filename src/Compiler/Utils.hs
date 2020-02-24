@@ -12,8 +12,6 @@ module Compiler.Utils
     , jsexeExtension
     , addExeExtension
     , exeFileName
-    , mkGhcjsSuf
-    , mkGhcjsOutput
     , substPatterns
       -- * Source code and JS related utilities
     , ghcjsSrcSpan
@@ -100,7 +98,7 @@ exeFileName :: DynFlags -> FilePath
 exeFileName dflags
   | Just s <- outputFile dflags =
       -- unmunge the extension
-      let s' = dropPrefix "js_" (drop 1 $ takeExtension s)
+      let s' = drop 1 $ takeExtension s
 #ifdef WINDOWS
       in if null s' || map toLower s' == "exe"
 #else
@@ -119,28 +117,6 @@ exeFileName dflags
 
 isJsFile :: FilePath -> Bool
 isJsFile = (==".js") . takeExtension
-
-mkGhcjsOutput :: String -> String
-mkGhcjsOutput "" = ""
-mkGhcjsOutput file
-  | null ext         = file
-  | ext == ".js"     = file
-  | ext == ".hi"     = replaceExtension file ".js_hi"
-  | ext == ".o"      = replaceExtension file ".js_o"
-  | ext == ".dyn_hi" = replaceExtension file ".js_dyn_hi"
-  | ext == ".dyn_o"  = replaceExtension file ".js_dyn_o"
-  |  ".js_" `isPrefixOf` ext || "_js_" `isInfixOf` ext = file
-  | otherwise        = replaceExtension file (".js_" ++ drop 1 ext)
-  where
-    ext = takeExtension file
-
-mkGhcjsSuf :: String -> String
-mkGhcjsSuf "o"      = "js_o"
-mkGhcjsSuf "hi"     = "js_hi"
-mkGhcjsSuf "dyn_o"  = "js_dyn_o"
-mkGhcjsSuf "dyn_hi" = "js_dyn_hi"
-mkGhcjsSuf xs | "js_" `isPrefixOf` xs || "_js_" `isInfixOf` xs = xs
-mkGhcjsSuf xs       = "js_" ++ xs -- is this correct?
 
 getEnvMay :: String -> IO (Maybe String)
 getEnvMay xs = fmap Just (getEnv xs)

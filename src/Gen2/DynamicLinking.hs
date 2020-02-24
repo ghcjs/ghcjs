@@ -91,7 +91,7 @@ ghcjsLinkJsLib settings jsFiles dflags hpt
   | Just jsLib <- gsLinkJsLib settings = do
       let profSuff | WayProf `elem` ways dflags = "_p"
                    | otherwise                  = ""
-          libFileName    = ("lib" ++ jsLib ++ profSuff) <.> "js_a"
+          libFileName    = ("lib" ++ jsLib ++ profSuff) <.> "a"
           inOutputDir file =
             maybe file
                   (</>file)
@@ -112,7 +112,7 @@ ghcjsLinkJsLib settings jsFiles dflags hpt
       -- generate one when building with --dynamic-too. Just write an empty file
       when (gopt Opt_BuildDynamicToo dflags || WayDyn `elem` ways dflags) $ do
         let sharedLibFileName =
-              "lib" ++ jsLib ++ "-ghcjs" ++ Info.getCompilerVersion ++ profSuff <.> "js_so"
+              "lib" ++ jsLib ++ "-ghcjs" ++ Info.getCompilerVersion ++ profSuff <.> "so"
             sharedOutputFile = inOutputDir sharedLibFileName
         -- keep strip happy
         BS.writeFile sharedOutputFile =<< BS.readFile (topDir dflags </> "empty.o")

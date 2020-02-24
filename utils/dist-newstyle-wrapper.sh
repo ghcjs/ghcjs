@@ -48,7 +48,7 @@ pushd "${GHCJS}/build" > /dev/null
 GHCJSVER="${GHCJS:6}" # drop the 'ghcjs-' prefix
 GHCLIBVER=`ghcjs/ghcjs -B/ --numeric-ghc-version`
 DISTDIR="$PWD"
-LIBDIR="$HOME/.ghcjs/${ARCH}-${GHCJSVER}-${GHCLIBVER}/ghcjs"
+LIBDIR="$SOURCEDIR/../lib/boot/inst/lib"
 popd > /dev/null
 popd > /dev/null
 popd > /dev/null

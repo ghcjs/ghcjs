@@ -1,5 +1,5 @@
 Name:           ghcjs
-Version:        8.6.0.1
+Version:        8.6.5
 Synopsis:       Haskell to JavaScript compiler
 Description:    Haskell to JavaScript compiler based on GHC
 Category:       compiler, web

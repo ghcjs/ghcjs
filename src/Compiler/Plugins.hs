@@ -248,8 +248,8 @@ initPluginsEnv orig_dflags _ = do
          dflags1 { packageFlags   = []
                  , packageDBFlags = hostPackageDBFlags . packageDBFlags $ dflags1
                  , ways           = filter (/= WayCustom "js") (ways dflags1)
-                 , hiSuf          = removeJsPrefix (hiSuf dflags1)
-                 , dynHiSuf       = removeJsPrefix (dynHiSuf dflags1)
+                --  , hiSuf          = removeJsPrefix (hiSuf dflags1)
+                --  , dynHiSuf       = removeJsPrefix (dynHiSuf dflags1)
                  }
   dflags3 <- initDynFlags dflags2
   (dflags, units) <- initPackages dflags3
