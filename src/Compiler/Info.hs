@@ -17,10 +17,9 @@ import           DynFlags
 
 import qualified Paths_ghcjs
 
-compilerInfo :: Bool
-             -> DynFlags
+compilerInfo :: DynFlags
              -> [(String, String)]
-compilerInfo nativeToo dflags = do
+compilerInfo dflags = do
       let topDir = getTopDir dflags
       nubBy ((==) `on` fst) $
            [ ("Project name"
@@ -30,28 +29,6 @@ compilerInfo nativeToo dflags = do
            , ("LibDir"           , topDir)
            ] ++ DynFlags.compilerInfo dflags
 
--- | the directory to use if started without -B flag
-{-
-getDefaultTopDir :: IO FilePath
-getDefaultTopDir = do
-  appdir <- getAppUserDataDirectory "ghcjs"
-  return (appdir </> subdir </> "ghcjs")
-      where
-        targetARCH = arch
-        targetOS   = os
-        subdir     = targetARCH ++ '-':targetOS ++ '-':getFullCompilerVersion
-
-getDefaultLibDir :: IO FilePath
-getDefaultLibDir = getDefaultTopDir
-
-mkTopDir :: Maybe String -> IO FilePath
-mkTopDir (Just x) = return x
-mkTopDir _        = getDefaultTopDir
-
-mkLibDir :: Maybe String -> IO FilePath
-mkLibDir (Just x) = return x
-mkLibDir _        = getDefaultLibDir
--}
 getTopDir :: DynFlags -> FilePath
 getTopDir = sTopDir . settings
 

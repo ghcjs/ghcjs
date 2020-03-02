@@ -57,10 +57,9 @@ instance Show Type where
   show ty = fixSpace (showPpr hackPprDflags ty)
 instance Show CostCentre where show _ = "CostCentre"
 instance Show CostCentreStack where show _ = "CostCentreStack"
-instance Show StgBinderInfo where show _ = "StgBinderInfo"
 instance Show Module where show m = unitIdString (moduleUnitId m) ++ ":" ++ moduleNameString (moduleName m)
--- instance Show (UniqFM Id) where show u = "[" ++ show (uniqSetToList u) ++ "]"
 instance Show TyCon where show = show . tyConName
+instance Show NoExtSilent where show _ = "NoExtSilent"
 instance Show Name where
   show n = case nameModule_maybe n of
                   Nothing -> show (nameOccName n)
@@ -112,7 +111,7 @@ instance Show CoAxiomRule where show _ = "CoAxiomRule"
 instance Show (CoAxiom a) where show _ = "CoAxiom"
 deriving instance Show LeftOrRight
 deriving instance Show Role
-instance Show (GenStgArg Var) where
+instance Show StgArg where
   show a@(StgVarArg occ) = "StgVarArg " ++ show occ ++ " :: " ++ show (stgArgType a)
   show (StgLitArg l)   = "StgLitArg " ++ show l
 deriving instance Show UnfoldingGuidance
@@ -134,7 +133,7 @@ bindingRefs u (StgNonRec _ rhs) = rhsRefs u rhs
 bindingRefs u (StgRec bs)       = l (rhsRefs u . snd) bs
 
 rhsRefs :: UniqFM StgExpr -> StgRhs -> Set Id
-rhsRefs u (StgRhsClosure _ _ _ _ _ body) = exprRefs u body
+rhsRefs u (StgRhsClosure _ _ _ _ body) = exprRefs u body
 rhsRefs u (StgRhsCon _ d args) = l s [ i | AnId i <- dataConImplicitTyThings d] <> l (argRefs u) args
 
 exprRefs :: UniqFM StgExpr -> StgExpr -> Set Id
@@ -144,8 +143,8 @@ exprRefs u (StgOpApp _ args _) = l (argRefs u) args
 exprRefs _  StgLit {} = mempty
 exprRefs _  StgLam {} = mempty
 exprRefs u (StgCase expr _ _ alts) = exprRefs u expr <> alts^.folded._3.to (exprRefs u)
-exprRefs u (StgLet bnd expr) = bindingRefs u bnd <> exprRefs u expr
-exprRefs u (StgLetNoEscape bnd expr) = bindingRefs u bnd <> exprRefs u expr
+exprRefs u (StgLet _ bnd expr) = bindingRefs u bnd <> exprRefs u expr
+exprRefs u (StgLetNoEscape _ bnd expr) = bindingRefs u bnd <> exprRefs u expr
 exprRefs u (StgTick _ expr) = exprRefs u expr
 
 argRefs :: UniqFM StgExpr -> StgArg -> Set Id

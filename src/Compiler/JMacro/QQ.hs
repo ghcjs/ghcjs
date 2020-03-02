@@ -35,12 +35,8 @@ import Text.ParserCombinators.Parsec.Expr
 import qualified Text.ParserCombinators.Parsec.Token as P
 import Text.ParserCombinators.Parsec.Language (javaStyle)
 
-import Text.Regex.Posix.String
-
 import Compiler.JMacro.Base
-import Compiler.JMacro.ParseTH
 
-import System.IO.Unsafe
 import Numeric (readHex)
 
 {--------------------------------------------------------------------
@@ -220,8 +216,6 @@ statement = declStat
             <|> applStat
             <|> breakStat
             <|> continueStat
-            <|> antiStat
-            <|> antiStatSimple
           <?> "statement"
     where
       declStat = do
@@ -387,24 +381,6 @@ statement = declStat
         s <- l2s <$> statblock0
         return [LabelStat (T.pack lbl) s]
 
-      antiStat  = return . AntiStat <$> do
-        x <- (try (symbol "`(") >> anyChar `manyTill` try (symbol ")`"))
-        either (fail . ("Bad AntiQuotation: \n" ++))
-               (const (return $ T.pack x))
-               (parseHSExp x)
-
-      antiStatSimple  = return . AntiStat <$> do
-        x <- (symbol "`" >> anyChar `manyTill` symbol "`")
-        either (fail . ("Bad AntiQuotation: \n" ++))
-               (const (return $ T.pack x))
-               (parseHSExp x)
-
-{-# NOINLINE compileRegex #-}
-compileRegex :: String -> Either WrapError Regex
-compileRegex s = unsafePerformIO $ compile co eo s
-    where co = compExtended
-          eo = execBlank
-
 expr :: JMParser JExpr
 expr = exprWithIf
   where
@@ -449,7 +425,7 @@ dotExpr = do
     _ -> error "dotExpr: exprApp"
 
 dotExprOne :: JMParser JExpr
-dotExprOne = addNxt =<< valExpr <|> antiExpr <|> antiExprSimple <|> parens' expr <|> newExpr
+dotExprOne = addNxt =<< valExpr <|> parens' expr <|> newExpr
   where
     addNxt e = do
             nxt <- (Just <$> lookAhead anyChar <|> return Nothing)
@@ -463,26 +439,15 @@ dotExprOne = addNxt =<< valExpr <|> antiExpr <|> antiExprSimple <|> parens' expr
 
     newExpr = UOpExpr NewOp <$> (reservedOp "new" >> dotExpr)
 
-    antiExpr  = AntiExpr <$> do
-         x <- (try (symbol "`(") >> anyChar `manyTill` try (string ")`"))
-         either (fail . ("Bad AntiQuotation: \n" ++))
-                (const (return $ T.pack x))
-                (parseHSExp x)
-
-    antiExprSimple  = AntiExpr <$> do
-         x <- (symbol "`" >> anyChar `manyTill` string "`")
-         either (fail . ("Bad AntiQuotation: \n" ++))
-                (const (return $ T.pack x))
-                (parseHSExp x)
-
     valExpr = ValExpr <$> (num <|> str <|> try regex <|> list <|> hash <|> func <|> var) <?> "value"
         where num   = lexeme $ either JInt JDouble <$> try natFloat
               str   = lexeme $ JStr . T.pack <$> (myStringLiteral '"' <|> myStringLiteral '\'')
-              regex = lexeme $ do
-                s <- regexLiteral -- myStringLiteralNoBr '/'
-                case compileRegex s of
-                  Right _ -> return (JRegEx $ T.pack s)
-                  Left err -> fail ("Parse error in regexp: " ++ show err)
+              regex = lexeme $ JRegEx . T.pack <$> regexLiteral
+              --do
+                -- s <- regexLiteral
+                -- myStringLiteralNoBr '/'
+                -- fixme: syntax check for regexp removed because it depends on regex-posix
+                -- pure (JRegEx $ T.pack s)
               list  = lexeme $ JList  <$> brackets' (commaSep expr)
               hash  = lexeme $ JHash  . M.fromList <$> braces' (commaSep propPair)
               var   = JVar <$> ident'

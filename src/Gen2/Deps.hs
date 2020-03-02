@@ -16,8 +16,8 @@ liveVars :: LiveVars -> LiveVars
 liveVars = filterDVarSet (not . isGlobalId)
 
 stgTopBindLive :: StgTopBinding -> [(Id, LiveVars)]
-stgTopBindLive (StgTopLifted b)     = stgBindLive b
-stgTopBindLive (StgTopStringLit {}) = []
+stgTopBindLive (StgTopLifted b)   = stgBindLive b
+stgTopBindLive StgTopStringLit {} = []
 
 stgBindLive :: StgBinding -> [(Id, LiveVars)]
 stgBindLive (StgNonRec b rhs) = [(b, stgRhsLive rhs)]
@@ -29,19 +29,19 @@ stgBindRhsLive b =
   in  delDVarSetList (unionDVarSets ls) bs
 
 stgRhsLive :: StgRhs -> LiveVars
-stgRhsLive (StgRhsClosure _ _ _fvs _ args e) =
+stgRhsLive (StgRhsClosure _ _ _ args e) =
   delDVarSetList (stgExprLive True e) args
 stgRhsLive (StgRhsCon _ _ args) =
   mconcat (map stgArgLive args)
 
 stgArgLive :: StgArg -> LiveVars
 stgArgLive (StgVarArg occ) = unitDVarSet occ
-stgArgLive (StgLitArg {})  = mempty
+stgArgLive  StgLitArg {}   = mempty
 
 stgExprLive :: Bool -> StgExpr -> LiveVars
 stgExprLive  _ (StgApp occ args) =
   unitDVarSet occ <> mconcat (map stgArgLive args)
-stgExprLive _ (StgLit {}) =
+stgExprLive _ StgLit {} =
   mempty
 stgExprLive _ (StgConApp _dc args _tys) =
   mconcat (map stgArgLive args)
@@ -55,9 +55,9 @@ stgExprLive includeLHS (StgCase e b _at alts)
   where
     al = mconcat (map stgAltLive alts)
     el = stgExprLive True e
-stgExprLive _ (StgLet b e) =
+stgExprLive _ (StgLet _ b e) =
   delDVarSetList (stgBindRhsLive b `unionDVarSet` stgExprLive True e) (bindees b)
-stgExprLive _ (StgLetNoEscape b e) =
+stgExprLive _ (StgLetNoEscape _ b e) =
   delDVarSetList (stgBindRhsLive b `unionDVarSet` stgExprLive True e) (bindees b)
 stgExprLive _ (StgTick _ti e) =
   stgExprLive True e

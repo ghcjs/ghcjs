@@ -342,9 +342,9 @@ rts' dflags s =
 
        conClosure "h$false_e" "GHC.Types.False" (CILayoutFixed 0 []) 1 #
        conClosure "h$true_e"  "GHC.Types.True"  (CILayoutFixed 0 []) 2 #
-       conClosure "h$integerzmgmpZCGHCziIntegerziTypeziSzh_con_e" "GHC.Integer.Type.S#" (CILayoutFixed 1 [IntV]) 1 #
-       conClosure "h$integerzmgmpZCGHCziIntegerziTypeziJpzh_con_e" "GHC.Integer.Type.Jp#" (CILayoutFixed 1 [ObjV]) 2 #
-       conClosure "h$integerzmgmpZCGHCziIntegerziTypeziJnzh_con_e" "GHC.Integer.Type.Jn#" (CILayoutFixed 1 [ObjV]) 3 #
+       conClosure "h$integerzmwiredzminZCGHCziIntegerziTypeziSzh_con_e" "GHC.Integer.Type.S#" (CILayoutFixed 1 [IntV]) 1 #
+       conClosure "h$integerzmwiredzminZCGHCziIntegerziTypeziJpzh_con_e" "GHC.Integer.Type.Jp#" (CILayoutFixed 1 [ObjV]) 2 #
+       conClosure "h$integerzmwiredzminZCGHCziIntegerziTypeziJnzh_con_e" "GHC.Integer.Type.Jn#" (CILayoutFixed 1 [ObjV]) 3 #
 
        -- generic data constructor with 1 non-heapobj field
        conClosure "h$data1_e" "data1" (CILayoutFixed 1 [ObjV]) 1 #

@@ -16,7 +16,6 @@ import           Text.PrettyPrint.Leijen.Text (Doc, align, char, comma,
                                                fillSep, hcat, nest, parens,
                                                punctuate, text, vcat, (<+>))
 import qualified Text.PrettyPrint.Leijen.Text as PP
-import           Data.Semigroup               ((<>))
 
 import           Compiler.JMacro              (Ident, JExpr(..), JStat(..), JOp(..),
                                                JVal(..), jsToDocR, RenderJs(..), defaultRenderJs)

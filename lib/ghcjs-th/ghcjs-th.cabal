@@ -28,13 +28,9 @@ library
                        ghc-prim,
                        binary,
                        bytestring,
-                       containers
-  if impl(ghcjs) || flag(use-host-template-haskell)
-    build-depends:     template-haskell >= 2.12 && < 2.15,
+                       containers,
+                       template-haskell >= 2.12 && < 2.16,
                        ghci
-  else
-    build-depends:     template-haskell-ghcjs,
-                       ghci-ghcjs
 
   default-language:    Haskell2010
   ghc-options: -O2

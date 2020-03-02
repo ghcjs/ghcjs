@@ -1,5 +1,4 @@
 {-# LANGUAGE CPP,
-             TypeSynonymInstances,
              FlexibleInstances,
              TupleSections,
              OverloadedStrings #-}
@@ -225,8 +224,8 @@ emitForeign :: Maybe RealSrcSpan
             -> [Text]
             -> Text
             -> G ()
-emitForeign mbSpan pattern safety cconv arg_tys res_ty =
-  gsGroup . ggsForeignRefs %= (ForeignRef spanTxt pattern safety cconv arg_tys res_ty :)
+emitForeign mbSpan pat safety cconv arg_tys res_ty =
+  gsGroup . ggsForeignRefs %= (ForeignRef spanTxt pat safety cconv arg_tys res_ty :)
   where
     spanTxt = case mbSpan of
                 Just sp -> T.pack $
@@ -335,7 +334,7 @@ pushOptimized' :: [(Id,Int)]
                -> C
 pushOptimized' xs = do
   slots  <- getSlots
-  pushOptimized =<< (sequence $ zipWith f xs (slots++repeat SlotUnknown))
+  pushOptimized =<< (zipWithM f xs (slots++repeat SlotUnknown))
   where
     f (i1,n1) (SlotId i2 n2) = (,i1==i2&&n1==n2) <$> genIdsN i1 n1
     f (i1,n1) _              = (,False)          <$> genIdsN i1 n1
@@ -509,8 +508,7 @@ conTag' :: JExpr -> JExpr
 conTag' f = f .^ "a"
 
 entry :: JExpr -> JExpr
-entry p = p .^ "f" -- SelExpr p (TxtI "f")
-  -- entryFun p -- [je| `p`.f |]
+entry p = p .^ "f"
 
 -- number of  arguments (arity & 0xff = arguments, arity >> 8 = number of registers)
 funArity :: JExpr -> JExpr
@@ -662,7 +660,7 @@ isGhcjsPrimPackage :: DynFlags -> InstalledUnitId -> Bool
 isGhcjsPrimPackage dflags pkgKey
   =  pn == "ghcjs-prim" ||
      (null pn && pkgKey == thisInstalledUnitId dflags &&
-      any (=="-DBOOTING_PACKAGE=ghcjs-prim") (opt_P dflags))
+      elem "-DBOOTING_PACKAGE=ghcjs-prim" (opt_P dflags))
   where
     pn = getInstalledPackageName dflags pkgKey
 
@@ -670,7 +668,7 @@ isGhcjsThPackage :: DynFlags -> InstalledUnitId -> Bool
 isGhcjsThPackage dflags pkgKey
   =  pn == "ghcjs-th" ||
      (null pn && pkgKey == thisInstalledUnitId dflags &&
-      any (=="-DBOOTING_PACKAGE=ghcjs-th") (opt_P dflags))
+      elem "-DBOOTING_PACKAGE=ghcjs-th" (opt_P dflags))
   where
     pn = getInstalledPackageName dflags pkgKey
 

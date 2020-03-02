@@ -27,7 +27,7 @@ main = getArgsWithResponseFiles >>= haddockWithGhc withGhcjs
 
 withGhcjs :: [Flag] -> Ghc a -> IO a
 withGhcjs flags action = do
-  libDir <- fmap snd (getGhcjsDirs flags)
+  libDir <- fmap snd (getGhcDirs flags)
 
   -- Catches all GHC source errors, then prints and re-throws them.
   let handleSrcErrors action' = flip handleSourceError action' $ \err -> do
@@ -97,8 +97,10 @@ unsetPatternMatchWarnings dflags =
       , Opt_WarnOverlappingPatterns
       ]
 
+{-
 getGhcjsDirs :: [Flag] -> IO (String, String)
-getGhcjsDirs flags =
+getGhcjsDirs flags = getGhcDirs
   case [ dir | Flag_GhcLibDir dir <- flags ] of
     [] -> error "haddock: missing -B option, cannot find library dir"
     xs -> return ("not available", last xs)
+-}

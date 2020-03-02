@@ -349,7 +349,7 @@ initStaticPtrs ptrs = mconcat <$> mapM initStatic ptrs
   where
     initStatic (SptEntry sp_id (Fingerprint w1 w2)) = do
       i <- jsId sp_id
-      fpa <- concat <$> mapM (genLit . mkMachWord64 . fromIntegral) [w1,w2]
+      fpa <- concat <$> mapM (genLit . mkLitWord64 . fromIntegral) [w1,w2]
       let sptInsert = app "h$hs_spt_insert" (fpa ++ [i])
       -- fixme can precedence be so that parens aren't needed?
       return $ (var "h$initStatic" .^ "push") |$ [jLam sptInsert]
@@ -547,7 +547,7 @@ genToplevelConEntry :: Id -> StgRhs -> C
 genToplevelConEntry i rhs@(StgRhsCon _cc con _args)
     | i `elem` [ i' | AnId i' <- dataConImplicitTyThings con ]
     = genSetConInfo i con (stgRhsLive rhs) -- NoSRT
-genToplevelConEntry i rhs@(StgRhsClosure _cc _bi [] _upd_flag
+genToplevelConEntry i rhs@(StgRhsClosure _ _cc _upd_flag
                     _args (removeTick -> StgConApp dc _cargs _))
     | i `elem` [ i' | AnId i' <- dataConImplicitTyThings dc ]
     = genSetConInfo i dc (stgRhsLive rhs) -- srt
@@ -579,17 +579,17 @@ getStaticRef = fmap (fmap itxt . listToMaybe) . genIdsI
 genToplevelRhs :: Id
                -> StgRhs
                -> C
-genToplevelRhs _i (StgRhsClosure _cc _bi _ _upd _args body)
+genToplevelRhs _i (StgRhsClosure _ext _cc _upd _args body)
   -- foreign exports
   | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _)) _)
-     [StgLitArg _ {- (MachInt _is_js_conv) -}, StgLitArg (MachStr _js_name), StgVarArg _tgt] _) <- body,
+     [StgLitArg _ {- (MachInt _is_js_conv) -}, StgLitArg (LitString _js_name), StgVarArg _tgt] _) <- body,
      t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
 -- general cases:
 genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
   allocConStatic ii cc con args
   return mempty
-genToplevelRhs i rhs@(StgRhsClosure cc _bi [] _upd_flag {- srt -} args body) = do
+genToplevelRhs i rhs@(StgRhsClosure _ext cc _upd_flag {- srt -} args body) = do
   eid@(TxtI eidt) <- jsEnIdI i
   (TxtI idt)   <- jsIdI i
 --  pushGlobalRefs
@@ -698,7 +698,7 @@ dataFields = listArray (1,16384) (map (TxtI . T.pack . ('d':) . show) [(1::Int).
 
 genBody :: HasDebugCallStack => ExprCtx -> Id -> StgReg -> [Id] -> StgExpr -> C
 genBody ctx i startReg args e =
-  -- trace' ("genBody: " ++ show args)
+  trace' ("genBody: " ++ show args)
   (genBody0 ctx i startReg args e)
 
 genBody0 :: HasDebugCallStack
@@ -817,11 +817,11 @@ genExpr0 top (StgOpApp (StgPrimCallOp c) args t) = genPrimCall top c args t
 genExpr0 _   StgLam{} = panic "genExpr: StgLam"
 genExpr0 top stg@(StgCase e b at alts) =
   genCase top b e at alts (liveVars $ stgExprLive False stg)
-genExpr0 top (StgLet b e) = do
+genExpr0 top (StgLet _ b e) = do
   (b',top') <- genBind top b
   (s,r)     <- genExpr top' e
   return (b' <> s, r)
-genExpr0 top (StgLetNoEscape b e) = do
+genExpr0 top (StgLetNoEscape _ b e) = do
   (b', top') <- genBindLne top b
   (s, r)     <- genExpr top' e
   return (b' <> s, r)
@@ -866,7 +866,7 @@ genApp ctx i [StgVarArg v]
    -- , Just t <- decodeModifiedUTF8 bs -- unpackFS fs -- Just t <- decodeModifiedUTF8 bs
    , matchVarName "ghcjs-prim" "GHCJS.Prim" "unsafeUnpackJSStringUtf8##" i =
       (,ExprInline Nothing) . (|=) top . app "h$decodeUtf8z" <$> genIds v
-genApp ctx i [StgLitArg (MachStr bs), x]
+genApp ctx i [StgLitArg (LitString bs), x]
     | [top] <- concatMap snd (ctx ^. ctxTarget), getUnique i == unpackCStringAppendIdKey, Just d <- decodeModifiedUTF8 bs = do
         -- fixme breaks assumption in codegen if bs doesn't decode
         prof <- csProf <$> use gsSettings
@@ -981,16 +981,17 @@ genBind ctx bndr =
      ctx' = clearCtxStack ctx
 
      assign :: Id -> StgRhs -> G (Maybe JStat)
-     assign b (StgRhsClosure _ccs _bi [the_fv] _upd [] expr)
+     assign b (StgRhsClosure _ _ccs {-[the_fv]-} _upd [] expr)
        | let strip = snd . stripStgTicksTop (not . tickishIsCode)
        , StgCase (StgApp scrutinee []) _ (AlgAlt _) [(DataAlt _, params, sel_expr)] <- strip expr
        , StgApp selectee [] <- strip sel_expr
        , let params_w_offsets = zip params (scanl' (+) 1 $ map (typeSize . idType) params)
        , let total_size = sum (map (typeSize . idType) params)
-       , the_fv == scrutinee
+       -- , the_fv == scrutinee -- fixme check
        , Just the_offset <- assocMaybe params_w_offsets selectee
        , the_offset <= 16 -- fixme make this some configurable constant
        = do
+           let the_fv = scrutinee -- error "the_fv" -- fixme
            let sel_tag | the_offset == 2 = if total_size == 2 then "2a"
                                                               else "2b"
                        | otherwise       = show the_offset
@@ -1000,7 +1001,7 @@ genBind ctx bndr =
              ([tgt], [the_fvj]) -> return $ Just
                (tgt ||= app ("h$c_sel_" <> T.pack sel_tag) [the_fvj])
              _ -> panic "genBind.assign: invalid size"
-     assign b (StgRhsClosure _ccs _bi _free _upd [] expr)
+     assign b (StgRhsClosure _ext _ccs _upd [] expr)
        | snd (isInlineExpr (ctx ^. ctxEval) expr) = do
            d   <- declIds b
            tgt <- genIds b
@@ -1012,8 +1013,8 @@ genBind ctx bndr =
      addEvalRhs c [] = c
      addEvalRhs c ((b,r):xs)
        | StgRhsCon{} <- r                       = addEvalRhs (addEval b c) xs
-       | (StgRhsClosure _ _ _ ReEntrant _ _) <- r = addEvalRhs (addEval b c) xs
-       | otherwise                                = addEvalRhs c xs
+       | (StgRhsClosure _ _ ReEntrant _ _) <- r = addEvalRhs (addEval b c) xs
+       | otherwise                              = addEvalRhs c xs
 
 genBindLne :: HasDebugCallStack
            => ExprCtx
@@ -1058,12 +1059,13 @@ stgLneLive (StgNonRec _b e) = stgLneLiveExpr e
 stgLneLive (StgRec bs)      = L.nub $ concatMap (stgLneLiveExpr . snd) bs
 
 stgLneLiveExpr :: StgRhs -> [Id]
-stgLneLiveExpr (StgRhsClosure _ _ l _ _ _) = l
-stgLneLiveExpr StgRhsCon {}                = []
+stgLneLiveExpr rhs = dVarSetElems (liveVars $ stgRhsLive rhs)
+-- stgLneLiveExpr (StgRhsClosure _ _ _ _ e) = dVarSetElems (liveVars (stgExprLive e))
+-- stgLneLiveExpr StgRhsCon {}              = []
 
 isUpdatableRhs :: StgRhs -> Bool
-isUpdatableRhs (StgRhsClosure _ _ _ u _ _) = isUpdatable u
-isUpdatableRhs _                           = False
+isUpdatableRhs (StgRhsClosure _ _ u _ _) = isUpdatable u
+isUpdatableRhs _                         = False
 
 {-
   Let-no-escape entries live on the stack. There is no heap object associated with them.
@@ -1077,7 +1079,7 @@ isUpdatableRhs _                           = False
  -}
 
 genEntryLne :: HasDebugCallStack => ExprCtx -> Id -> StgRhs -> G ()
-genEntryLne ctx i rhs@(StgRhsClosure _cc _bi _live2 update args body) =
+genEntryLne ctx i rhs@(StgRhsClosure _ext _cc update args body) =
   resetSlots $ do
   let payloadSize = length frame
       frame       = ctx ^. ctxLneFrame
@@ -1088,10 +1090,6 @@ genEntryLne ctx i rhs@(StgRhsClosure _cc _bi _live2 update args body) =
       bh | isUpdatable update =
              jVar (\x -> x |= app "h$bh_lne" [sp - e myOffset, e (payloadSize+1)] #
                          ifS x (returnS x) mempty)
-              -- (\x )
-            {-} [j| var x = h$bh_lne(`Sp`-`myOffset`, `payloadSize+1`);
-                 if(x) return(x);
-               |]-}
          | otherwise = mempty
   lvs  <- popLneFrame True payloadSize ctx
   body <- genBody ctx i R1 args body
@@ -1122,7 +1120,8 @@ genEntryLne ctx i (StgRhsCon cc con args) = resetSlots $ do
 genEntry :: HasDebugCallStack => ExprCtx -> Id -> StgRhs -> G ()
 genEntry _ _i (StgRhsCon _cc _con _args) = return () -- mempty -- error "local data entry"
 
-genEntry ctx i rhs@(StgRhsClosure cc _bi live upd_flag args body) = resetSlots $ do
+genEntry ctx i rhs@(StgRhsClosure _ext cc {-_bi live-} upd_flag args body) = resetSlots $ do
+  let live = stgLneLiveExpr rhs -- error "fixme" -- probably find live vars in body
   ll    <- loadLiveFun live
   llv   <- verifyRuntimeReps live
   upd   <- genUpdFrame upd_flag i
@@ -1213,8 +1212,9 @@ allocCls dynMiddle xs = do
                        <*> enterDataCon con
                        <*> concatMapM genArg ar
                        <*> pure cc)
-    toCl (i, StgRhsClosure cc _bi live _upd_flag _args _body) =
-      Right <$> ((,,,) <$> jsIdI i
+    toCl (i, cl@(StgRhsClosure _ext cc _upd_flag _args _body)) =
+      let live = stgLneLiveExpr cl
+      in  Right <$> ((,,,) <$> jsIdI i
                        <*> jsEntryId i
                        <*> concatMapM genIds live
                        <*> pure cc)
@@ -1835,14 +1835,14 @@ genStrThunk i nonAscii str cc = do
 -}
 
 genLit :: HasDebugCallStack => Literal -> G [JExpr]
-genLit (MachChar c)      = return [ e (ord c) ]
-genLit (MachStr  str)    =
+genLit (LitChar c)      = return [ e (ord c) ]
+genLit (LitString str)    =
   withNewIdent $ \strLit@(TxtI strLitT) ->
     withNewIdent $ \strOff@(TxtI strOffT) -> do
       emitStatic strLitT (StaticUnboxed (StaticUnboxedString str)) Nothing
       emitStatic strOffT (StaticUnboxed (StaticUnboxedStringOffset str)) Nothing
       return [ ValExpr (JVar strLit), ValExpr (JVar strOff) ]
-genLit MachNullAddr      = return [ null_, 0 ]
+genLit LitNullAddr      = return [ null_, 0 ]
 genLit (LitNumber LitNumInt i _)       = return [ e i ]
 genLit (LitNumber LitNumInt64 i _)     = return [ e (Bits.shiftR i 32)
                                                 , e (toSigned i)
@@ -1851,21 +1851,21 @@ genLit (LitNumber LitNumWord w _)      = return [ e (toSigned w) ]
 genLit (LitNumber LitNumWord64 w _)    = return [ e (toSigned (Bits.shiftR w 32))
                                                 , e (toSigned w)
                                                 ]
-genLit (MachFloat r)     = return [ e (r2f r) ]
-genLit (MachDouble r)    = return [ e (r2d r) ]
-genLit (MachLabel name _size fod)
+genLit (LitFloat r)     = return [ e (r2f r) ]
+genLit (LitDouble r)    = return [ e (r2d r) ]
+genLit (LitLabel name _size fod)
   | fod == IsFunction = return [ app "h$mkFunctionPtr" [var (T.pack $ "h$" ++ unpackFS name)], 0 ]
   | otherwise         = return [ e (TxtI . T.pack $ "h$" ++ unpackFS name), 0 ]
 genLit l = panic $ "genLit: " ++ show l -- unhandled numeric literal" -- removed by CorePrep
 
 -- | generate a literal for the static init tables
 genStaticLit :: Literal -> G [StaticLit]
-genStaticLit (MachChar c)         = return [ IntLit (fromIntegral $ ord c) ]
-genStaticLit (MachStr  str)       =
+genStaticLit (LitChar c)         = return [ IntLit (fromIntegral $ ord c) ]
+genStaticLit (LitString str)       =
   case T.decodeUtf8' str of
                          Right t -> return [ StringLit t, IntLit 0 ]
                          Left _  -> return [ BinLit str, IntLit 0]
-genStaticLit MachNullAddr         = return [ NullLit, IntLit 0 ]
+genStaticLit LitNullAddr         = return [ NullLit, IntLit 0 ]
 genStaticLit (LitNumber LitNumInt i _)          = return [ IntLit (fromIntegral i) ]
 genStaticLit (LitNumber LitNumInt64 i _)        = return [ IntLit (i `Bits.shiftR` 32)
                                            , IntLit (toSigned i)
@@ -1874,9 +1874,9 @@ genStaticLit (LitNumber LitNumWord w _)         = return [ IntLit (toSigned w) ]
 genStaticLit (LitNumber LitNumWord64 w _)       = return [ IntLit (toSigned (w `Bits.shiftR` 32))
                                            , IntLit (toSigned w)
                                            ]
-genStaticLit (MachFloat r)        = return [ DoubleLit . SaneDouble . r2f $ r ]
-genStaticLit (MachDouble r)       = return [ DoubleLit . SaneDouble . r2d $ r ]
-genStaticLit (MachLabel name _size fod) =
+genStaticLit (LitFloat r)        = return [ DoubleLit . SaneDouble . r2f $ r ]
+genStaticLit (LitDouble r)       = return [ DoubleLit . SaneDouble . r2d $ r ]
+genStaticLit (LitLabel name _size fod) =
   return [ LabelLit (fod == IsFunction) (T.pack $ "h$" ++ unpackFS name)
          , IntLit 0
          ]
@@ -1951,7 +1951,7 @@ allocUnboxedConStatic _   [a@(StaticLitArg (DoubleLit _d))] = a
 allocUnboxedConStatic con _                                =
   panic ("allocUnboxedConStatic: not an unboxed constructor: " ++ show con)
 
-allocConStatic :: HasDebugCallStack => Ident -> CostCentreStack -> DataCon -> [GenStgArg Id] {- -> Bool -} -> G ()
+allocConStatic :: HasDebugCallStack => Ident -> CostCentreStack -> DataCon -> [StgArg] {- -> Bool -} -> G ()
 allocConStatic (TxtI to) cc con args -- isRecursive
 {-  | trace' ("allocConStatic: " ++ show to ++ " " ++ show con ++ " " ++ show args) True -} = do
   as <- mapM genStaticArg args
@@ -2349,9 +2349,9 @@ isInlineExpr v (StgCase e b _ alts) =
       (vas, ias)  = unzip $ map (isInlineExpr v') (alts ^.. traverse . _3)
       vr          = foldl1' intersectUniqSets vas
   in (vr, (ie || b `elementOfUniqSet` v) && and ias)
-isInlineExpr v (StgLet b e) =
+isInlineExpr v (StgLet _ b e) =
   isInlineExpr (inspectInlineBinding v b) e
-isInlineExpr v (StgLetNoEscape _b e) =
+isInlineExpr v (StgLetNoEscape _ _b e) =
   isInlineExpr v e
 isInlineExpr v (StgTick  _ e) =
   isInlineExpr v e
@@ -2362,9 +2362,9 @@ inspectInlineBinding v (StgRec bs)       =
   foldl' (\v' (i,r) -> inspectInlineRhs v' i r) v bs
 
 inspectInlineRhs :: UniqSet Id -> Id -> StgRhs -> UniqSet Id
-inspectInlineRhs v i StgRhsCon{}                         = addOneToUniqSet v i
-inspectInlineRhs v i (StgRhsClosure _ _ _ ReEntrant _ _) = addOneToUniqSet v i
-inspectInlineRhs v _ _                                   = v
+inspectInlineRhs v i StgRhsCon{}                       = addOneToUniqSet v i
+inspectInlineRhs v i (StgRhsClosure _ _ ReEntrant _ _) = addOneToUniqSet v i
+inspectInlineRhs v _ _                                 = v
 
 isInlineForeignCall :: ForeignCall -> Bool
 isInlineForeignCall (CCall (CCallSpec _ cconv safety)) =

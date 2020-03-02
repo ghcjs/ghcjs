@@ -24,17 +24,12 @@ import qualified Data.Text.Lazy as TL
 import           Data.Time.Clock (getCurrentTime, diffUTCTime)
 import           Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import           Data.Traversable (traverse)
-import           Filesystem (removeTree, isFile, getWorkingDirectory, createDirectory, copyFile)
-import           Filesystem.Path ( replaceExtension, basename, directory, extension, addExtension
-                                 , filename, addExtensions, dropExtensions)
-import           Filesystem.Path.CurrentOS (fromText, toText, encodeString)
-import           Prelude hiding (FilePath)
-import qualified Prelude
+import           System.FilePath (dropExtensions, addExtension, replaceExtensions, takeDirectory, takeFileName, replaceExtension, isExtensionOf, takeExtension, takeBaseName)
 import           Shelly
-import           System.Directory (doesFileExist, getCurrentDirectory, findExecutable)
+import           System.Directory (createDirectoryIfMissing, doesFileExist, getCurrentDirectory, findExecutable, copyFile, removeDirectoryRecursive)
 import           System.Environment (getArgs, getEnv)
 import           System.Exit
-import           System.IO hiding (FilePath)
+import           System.IO -- hiding (FilePath)
 import           System.IO.Error
 import           System.Process ( createProcess, proc, CreateProcess(..), StdStream(..)
                                 , terminateProcess, waitForProcess, readProcessWithExitCode
@@ -74,13 +69,13 @@ getTestDir ghcjs = do
   when (ec /= ExitSuccess) (error "could not determine GHCJS installation directory")
   let testDir = fromString (trim libDir) </> "test"
   e <- doesFileExist (encodeString $ testDir </> "tests.yaml")
-  when (not e) (error $ "test suite not found in " ++ toStringIgnore testDir ++ ", GHCJS might have been installed without tests")
+  when (not e) (error $ "test suite not found in " ++ testDir ++ ", GHCJS might have been installed without tests")
   return testDir
 #else
 getTestDir _ = do
   testDir <- (</> "test") . fromString <$> getCurrentDirectory
-  e <- doesFileExist (encodeString $ testDir </> "tests.yaml")
-  when (not e) (error $ "test suite not found in " ++ toStringIgnore testDir)
+  e <- doesFileExist (testDir </> "tests.yaml")
+  when (not e) (error $ "test suite not found in " ++ testDir)
   return testDir
 #endif
 
@@ -124,7 +119,7 @@ setupTests tmpDir = do
   log           <- newIORef []
   let noProf    = taNoProfiling testArgs
       runDir    = tmpDir </> "run"
-  createDirectory False runDir
+  createDirectoryIfMissing False runDir
   (wdRunMain, wdStart, wdHtml, browserSessions) <-
     startBrowserSessions testDir
                          runDir
@@ -144,19 +139,19 @@ setupTests tmpDir = do
                               profSymbsFile profBase
                               ghcjs runhaskell nodePgm smPgm jscPgm
                               wdRunMain wdStart wdHtml browserSessions
-  es <- doesFileExist (encodeString specFile)
-  when (not es) (error $ "test suite not found in " ++ toStringIgnore testDir)
-  ts <- B.readFile (encodeString specFile) >>=
+  es <- doesFileExist specFile
+  when (not es) (error $ "test suite not found in " ++ testDir)
+  ts <- B.readFile specFile >>=
           \x -> case Yaml.decodeEither x of
-                       Left err -> error ("error in test spec file: " ++ toStringIgnore specFile ++ "\n" ++ err)
+                       Left err -> error ("error in test spec file: " ++ specFile ++ "\n" ++ err)
                        Right t  -> return t
   groups <- forM (tsuiGroups ts) $ \(dir, name) ->
     testGroup name <$> allTestsIn opts testDir dir
   checkRequiredPackages (fromString $ taWithGhcjsPkg testArgs) (tsuiRequiredPackages ts)
-  B.writeFile (encodeString symbsFile) symbs
-  B.writeFile (encodeString profSymbsFile) profSymbs
+  B.writeFile symbsFile symbs
+  B.writeFile profSymbsFile profSymbs
   when (disUnopt && disOpt) (putStrLn "nothing to do, optimized and unoptimized disabled")
-  putStrLn ("running tests in " <> toStringIgnore testDir)
+  putStrLn ("running tests in " <> testDir)
   (defaultMainWithArgs groups leftoverArgs `C.finally` closeBrowserSessions opts)
     `C.catch` \(e::ExitCode) -> do
       errs <- readIORef log
@@ -173,10 +168,10 @@ startBrowserSessions _ _ (Just "none") _ = return (mempty, mempty, mempty, [])
 startBrowserSessions testRoot serverRoot mbSeleniumHost mbSeleniumPort = do
   let seleniumHost = fromMaybe "127.0.0.1" mbSeleniumHost
       seleniumPort = fromMaybe 4444        mbSeleniumPort
-  wdRunMain  <- B.readFile (toStringIgnore $ testRoot </> "wdrunmain.js")
-  wdHtml     <- B.readFile (toStringIgnore $ testRoot </> "wdindex.html")
-  serverPort <- Server.startServer (encodeString serverRoot) -- wdScript
-  wdStart    <- T.readFile (toStringIgnore $ testRoot </> "wdstart.js")
+  wdRunMain  <- B.readFile (testRoot </> "wdrunmain.js")
+  wdHtml     <- B.readFile (testRoot </> "wdindex.html")
+  serverPort <- Server.startServer serverRoot -- wdScript
+  wdStart    <- T.readFile (testRoot </> "wdstart.js")
   sess <- Client.startSessions (Client.Server serverPort wdStart)
                                (T.pack seleniumHost)
                                seleniumPort
@@ -198,7 +193,7 @@ checkBooted ghcjs = check `C.catch` \(e::C.SomeException) -> cantRun e
       exitSuccess
 #endif
     check = do
-      (ec, _, _) <- readProcessWithExitCode (toStringIgnore ghcjs) ["-c", "x.hs"] ""
+      (ec, _, _) <- readProcessWithExitCode ghcjs ["-c", "x.hs"] ""
       case ec of
         (ExitFailure 87) -> do
           putStrLn "GHCJS is not booted, skipping tests"
@@ -214,8 +209,8 @@ checkProgram defName userName testArgs testP = do
       checkOutput (_, sout, serr)       = testP sout || testP serr
       testProg p as = either (\(e::C.SomeException) -> False) checkOutput <$>
                         C.try (readProcessWithExitCode' "/" p as "")
-  findExecutable (fromMaybe (encodeString defName) userName) >>= \case
-    Nothing | Just n <- userName -> error ("could not find program " ++ toStringIgnore defName ++ " at " ++ n)
+  findExecutable (fromMaybe defName userName) >>= \case
+    Nothing | Just n <- userName -> error ("could not find program " ++ defName ++ " at " ++ n)
     Nothing                      -> return Nothing
     Just p ->
       testProg p testArgs >>= \case
@@ -349,10 +344,11 @@ allTestsIn testOpts testDir groupDir = shelly $ do
   map (stdioTest testOpts) <$> findWhen (return . isTestFile) groupDir
   where
     testFirstChar c = isLower c || isDigit c
+    isTestFile :: FilePath -> Bool
     isTestFile file =
-      (extension file == Just "hs" || extension file == Just "lhs") &&
-      ((maybe False testFirstChar . listToMaybe . encodeString . basename $ file) ||
-      (basename file == "Main"))
+      ("hs" `isExtensionOf` file || "lhs" `isExtensionOf` file) &&
+      ((maybe False testFirstChar . listToMaybe . takeBaseName $ file) ||
+      (takeBaseName file == "Main"))
 
 
 outputLimit :: Int
@@ -369,11 +365,11 @@ instance Show StdioResult where
     "\n<<< stderr >>>\n" ++ (T.unpack . T.strip) (truncLimit outputLimit err) ++ "\n<<<\n"
 
 stdioTest :: TestOpts -> FilePath -> Test
-stdioTest testOpts file = testCaseLog testOpts (encodeString file) (stdioAssertion testOpts file)
+stdioTest testOpts file = testCaseLog testOpts file (stdioAssertion testOpts file)
 
 stdioAssertion :: TestOpts -> FilePath -> Assertion
 stdioAssertion testOpts file = do
-  putStrLn ("running test: " ++ encodeString file)
+  putStrLn ("running test: " ++ file)
   mexpected <- stdioExpected testOpts file
   case mexpected of
     Nothing -> putStrLn "test disabled"
@@ -382,10 +378,10 @@ stdioAssertion testOpts file = do
       when (null actual) (putStrLn "warning: no test results")
       case t of
         Nothing -> return ()
-        Just ms -> putStrLn ((padTo 35 $ encodeString file) ++ " - " ++ (padTo 35 "runhaskell") ++ " " ++ show ms ++ "ms")
+        Just ms -> putStrLn ((padTo 35 file) ++ " - " ++ (padTo 35 "runhaskell") ++ " " ++ show ms ++ "ms")
       forM_ actual $ \((a,t),d) -> do
-        assertEqual (encodeString file ++ ": " ++ d) expected a
-        putStrLn ((padTo 35 $ encodeString file) ++ " - " ++ (padTo 35 d) ++ " " ++ show t ++ "ms")
+        assertEqual (file ++ ": " ++ d) expected a
+        putStrLn ((padTo 35 file) ++ " - " ++ (padTo 35 d) ++ " " ++ show t ++ "ms")
 
 padTo :: Int -> String -> String
 padTo n xs | l < n     = xs ++ replicate (n-l) ' '
@@ -411,10 +407,10 @@ stdioExpected testOpts file = do
 
 readFileIfExists :: FilePath -> IO (Maybe Text)
 readFileIfExists file = do
-  e <- isFile file
+  e <- doesFileExist file
   case e of
     False -> return Nothing
-    True  -> Just <$> T.readFile (encodeString file)
+    True  -> Just <$> T.readFile file
 
 readFilesIfExists :: [FilePath] -> IO (Maybe Text)
 readFilesIfExists [] = return Nothing
@@ -427,7 +423,7 @@ readFilesIfExists (x:xs) = do
 -- test settings
 settingsFor :: TestOpts -> FilePath -> IO TestSettings
 settingsFor opts file = do
-  e <- isFile (testsuiteLocation opts </> settingsFile)
+  e <- doesFileExist (testsuiteLocation opts </> settingsFile)
   case e of
     False -> return def
     True -> do
@@ -440,8 +436,8 @@ settingsFor opts file = do
       putStrLn $ "error in test settings: " ++ settingsFile'
       putStrLn "running test with default settings"
       return def
-    settingsFile  = replaceExtension file "settings"
-    settingsFile' = encodeString (testsuiteLocation opts </> settingsFile)
+    settingsFile  = replaceExtensions file "settings"
+    settingsFile' = testsuiteLocation opts </> settingsFile
 
 runhaskellResult :: TestOpts
                  -> TestSettings
@@ -449,16 +445,16 @@ runhaskellResult :: TestOpts
                  -> IO (Maybe (StdioResult, Integer))
 runhaskellResult testOpts settings file = do
     let args = tsArguments settings
-    r <- runProcess (testsuiteLocation testOpts </> directory file) (runhaskellProgram testOpts)
-             (["-v0", "-w", encodeString $ filename file] ++ args) ""
+    r <- runProcess (testsuiteLocation testOpts </> takeDirectory file) (runhaskellProgram testOpts)
+             (["-v0", "-w", takeFileName file] ++ args) ""
     return (fmap (\(s, i) -> (unmangleRunhaskellResult s, i)) r)
 
 extraJsFiles :: FilePath -> IO [String]
 extraJsFiles file =
-  let jsFile = addExtensions (dropExtensions file) ["foreign", "js"]
+  let jsFile = dropExtensions file <.> "foreign" <.> "js"
   in do
-    e <- isFile jsFile
-    return $ if e then [encodeString jsFile] else []
+    e <- doesFileExist jsFile
+    return $ if e then [jsFile] else []
 
 runGhcjsResult :: TestOpts -> FilePath -> IO [((StdioResult, Integer), String)]
 runGhcjsResult opts file = do
@@ -474,7 +470,7 @@ runGhcjsResult opts file = do
       run settings optimize = do
         output <- outputPath
         extraFiles <- extraJsFiles file
-        cd <- getWorkingDirectory
+        cd <- getCurrentDirectory
         -- compile test
         let output'     = runDir opts </> output
             outputExe   = output' </> "a"
@@ -490,25 +486,25 @@ runGhcjsResult opts file = do
             extraCompArgs = tsCompArguments settings
             prof = tsProf settings
             compileOpts = [ {-"-no-rts", "-no-stats"
-                          , -} "-o", encodeString outputExe
-                          , "-odir", encodeString outputBuild
-                          , "-hidir", encodeString outputBuild
+                          , -} "-o", outputExe
+                          , "-odir", outputBuild
+                          , "-hidir", outputBuild
                           -- , "-use-base" , encodeString ((if prof then profBaseSymbs else baseSymbs) opts)
-                          , encodeString (filename input)
+                          , takeFileName input
                           ] ++ opt ++ extraCompArgs ++ extraFiles
             args = tsArguments settings
             runTestPgm name disabled getPgm pgmArgs pgmArgs'
               | Just p <- getPgm opts, not (disabled settings) =
                   fmap (,name ++ desc) <$>
-                      runProcess outputExe' p (pgmArgs++encodeString outputRun:pgmArgs'++args) ""
+                      runProcess outputExe' p (pgmArgs ++ outputRun:pgmArgs' ++ args) ""
               | otherwise = return Nothing
             runBrowser session = fmap (,Client.sessionName session ++ desc) <$>
-              Client.runTest (toStringIgnore outputUrl) "wdindex.html" args session
-        C.bracket (createDirectory False output')
-                  (\_ -> removeTree output') $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
-          createDirectory False outputBuild
+              Client.runTest outputUrl "wdindex.html" args session
+        C.bracket (createDirectoryIfMissing False output')
+                  (\_ -> removeDirectoryRecursive output') $ \_ -> do -- fixme this doesn't remove the output if the test program is stopped with ctrl-c
+          createDirectoryIfMissing False outputBuild
           print compileOpts
-          e <- liftIO $ runProcess (testsuiteLocation opts </> directory file) (ghcjsProgram opts) compileOpts ""
+          e <- liftIO $ runProcess (testsuiteLocation opts </> takeDirectory file) (ghcjsProgram opts) compileOpts ""
           case e of
             Nothing    -> assertFailure "cannot find ghcjs"
             Just (r,_) -> do
@@ -517,15 +513,15 @@ runGhcjsResult opts file = do
           -- copy data files for test
           forM_ (tsCopyFiles settings) $ \cfile ->
             let cfile' = fromText (T.pack cfile)
-            in  copyFile (testsuiteLocation opts </> directory file </> cfile') (outputExe' </> cfile')
+            in  copyFile (testsuiteLocation opts </> takeDirectory file </> cfile') (outputExe' </> cfile')
           -- combine files with base bundle from incremental link
-          [rts, out, lib] <- mapM (B.readFile . (\x -> encodeString (outputExe' </> x)))
+          [rts, out, lib] <- mapM (B.readFile . (\x -> outputExe' </> x))
                                 ["rts.js", "out.js", "lib.js"]
           let runMain  = "\nh$main(h$mainZCZCMainzimain);\n"
               allNoRun = rts <> lib <> out -- (if prof then profBaseJs else baseJs) opts <> lib <> out
-          B.writeFile (encodeString outputRun) (allNoRun <> runMain)
-          B.writeFile (encodeString outputClient) (allNoRun <> wdRunMain opts)
-          B.writeFile (encodeString outputHtml) (wdHtml opts)
+          B.writeFile outputRun (allNoRun <> runMain)
+          B.writeFile outputClient (allNoRun <> wdRunMain opts)
+          B.writeFile outputHtml (wdHtml opts)
           -- run with node.js and SpiderMonkey
           standaloneResults <- if tsBrowserOnly settings
             then return []
@@ -573,7 +569,7 @@ outputPath = do
 runProcess :: MonadIO m => FilePath -> FilePath -> [String] -> String -> m (Maybe (StdioResult, Integer))
 runProcess workingDir pgm args input = do
   before <- liftIO getCurrentTime
-  r <- liftIO (C.try $ timeout 180000000 (readProcessWithExitCode' (encodeString workingDir) (encodeString pgm) args input))
+  r <- liftIO (C.try $ timeout 180000000 (readProcessWithExitCode' workingDir pgm args input))
   case r of
     Left (e::C.SomeException) -> return Nothing
     Right Nothing -> return (Just (StdioResult ExitSuccess "" "process killed after timeout", 0))
@@ -589,8 +585,8 @@ runProcess workingDir pgm args input = do
 
 -- modified readProcessWithExitCode with working dir
 readProcessWithExitCode'
-    :: Prelude.FilePath         -- ^ Working directory
-    -> Prelude.FilePath         -- ^ Filename of the executable (see 'proc' for details)
+    :: FilePath                 -- ^ Working directory
+    -> FilePath                 -- ^ Filename of the executable (see 'proc' for details)
     -> [String]                 -- ^ any arguments
     -> String                   -- ^ standard input
     -> IO (ExitCode,String,String) -- ^ exitcode, stdout, stderr
@@ -671,21 +667,6 @@ ignoreSigPipe = C.handle $ \e -> case e of
                                    _ -> C.throwIO e
 -------------------
 
-{-
-  a mocha test changes to the directory,
-  runs the action, then runs `mocha'
-  fails if mocha exits nonzero
- -}
-mochaTest :: FilePath -> IO a -> IO b -> Test
-mochaTest dir pre post = do
-  undefined
-
-writeFileT :: FilePath -> Text -> IO ()
-writeFileT fp t = T.writeFile (encodeString fp) t
-
-readFileT :: FilePath -> IO Text
-readFileT fp = T.readFile (encodeString fp)
-
 readExitCode :: Text -> Maybe ExitCode
 readExitCode = fmap convert . readMaybe . T.unpack
   where
@@ -731,8 +712,5 @@ shellyE m = do
                      Left e  -> C.throw e
                      Right a -> return a
 
-toStringIgnore :: FilePath -> String
-toStringIgnore = T.unpack . either id id . toText
-
 fromString :: String -> FilePath
-fromString = fromText . T.pack
+fromString = id -- fromText . T.pack

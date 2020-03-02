@@ -111,15 +111,15 @@ ghcjsDsForeigns fos = do
   where
    do_ldecl (L loc decl) = putSrcSpanDs loc (do_decl decl)
 
-   do_decl (ForeignImport { fd_name = id, fd_i_ext = co, fd_fi = spec }) = do
+   do_decl ForeignImport { fd_name = id, fd_i_ext = co, fd_fi = spec } = do
       traceIf (text "fi start" <+> ppr id)
       let id' = unLoc id
       (bs, h, c) <- ghcjsDsFImport id' co spec
       traceIf (text "fi end" <+> ppr id)
       return (h, c, [], bs)
 
-   do_decl (ForeignExport { fd_name = L _ id, fd_e_ext = co
-                          , fd_fe = CExport (L _ (CExportStatic _ ext_nm cconv)) _ }) = do
+   do_decl ForeignExport { fd_name = L _ id, fd_e_ext = co
+                         , fd_fe = CExport (L _ (CExportStatic _ ext_nm cconv)) _ } = do
       (h, c, _, _) <- ghcjsDsFExport id co ext_nm cconv False
       return (h, c, [id], [])
    do_decl (XForeignDecl _) = panic "dsForeigns'"
@@ -360,7 +360,7 @@ dsJsImport id co (CLabel cid) cconv _ _ = do
              _ -> IsData
    (_resTy, foRhs) <- jsResultWrapper ty
 --   ASSERT(fromJust resTy `eqType` addrPrimTy)    -- typechecker ensures this
-   let rhs = foRhs (Lit (MachLabel cid stdcall_info fod))
+   let rhs = foRhs (Lit (LitLabel cid stdcall_info fod))
        rhs' = Cast rhs co
        stdcall_info = fun_type_arg_stdcall_info dflags cconv ty
                       -- in
@@ -406,7 +406,7 @@ dsJsCall :: Id -> Coercion -> ForeignCall -> Maybe Header
 dsJsCall fn_id co fcall _mDeclHeader = do
   let
       ty                   = pFst $ coercionKind co
-      (tv_bndrs, rho)      = tcSplitForAllTyVarBndrs ty
+      (tv_bndrs, rho)      = tcSplitForAllVarBndrs ty
       (arg_tys, io_res_ty) = tcSplitFunTys rho
 
   args <- newSysLocalsDs arg_tys
@@ -772,7 +772,7 @@ mkJsCall dflags u tgt args t =
                                       JavaScriptCallConv PlayRisky)) args t
 
 primTyDescChar :: DynFlags -> Type -> Char
-primTyDescChar dflags ty = panic "Gen2.Foreign.primTyDescChar"
+primTyDescChar _dflags _ty = panic "Gen2.Foreign.primTyDescChar"
 
 cLibFFI :: Bool
 cLibFFI = panic "Gen2.Foreign.cLibFFI"
@@ -827,7 +827,7 @@ ghcjsNativeDsForeigns :: [LForeignDecl GhcTc]
 ghcjsNativeDsForeigns fos = do
   dflags <- getDynFlags
   (stubs, ret) <- dsForeigns' (map (convertForeignDecl dflags) fos)
-  case catMaybes $ map (importStub dflags) fos of
+  case mapMaybe (importStub dflags) fos of
     [] -> return (stubs, ret)
     xs -> return (stubs `appendStubC'` vcat xs, ret)
     where
@@ -911,8 +911,12 @@ jsTySigLit dflags isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe
                  prim UnliftedRep = hsPtr -- fixme?
                  -- prim PtrRep   = hsPtr
                  prim IntRep   = hsInt
+                 prim Int8Rep  = hsInt
+                 prim Int16Rep = hsInt
                  prim WordRep  = hsWord
-                 prim Int64Rep = hsInt64
+                 prim Word8Rep = hsWord
+                 prim Word16Rep = hsWord
+                 prim Int64Rep  = hsInt64
                  prim Word64Rep = hsWord64
                  prim AddrRep   = hsPtr
                  prim FloatRep  = hsFloat

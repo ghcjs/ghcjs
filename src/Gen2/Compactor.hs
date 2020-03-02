@@ -746,7 +746,6 @@ identsS f (ApplStat e es)      = ApplStat    <$> identsE f e <*> (traverse . ide
 identsS f (UOpStat op e)       = UOpStat op  <$> identsE f e
 identsS f (AssignStat e1 e2)   = AssignStat  <$> identsE f e1 <*> identsE f e2
 identsS _ UnsatBlock{}         = error "identsS: UnsatBlock"
-identsS _ AntiStat{}           = error "identsS: AntiStat"
 identsS f (LabelStat l s)      = LabelStat l <$> identsS f s
 identsS _ b@BreakStat{}        = pure b
 identsS _ c@ContinueStat{}     = pure c
@@ -761,7 +760,6 @@ identsE f (UOpExpr o e)       = UOpExpr o   <$> identsE f e
 identsE f (IfExpr e1 e2 e3)   = IfExpr      <$> identsE f e1 <*> identsE f e2 <*> identsE f e3
 identsE f (ApplExpr e es)     = ApplExpr    <$> identsE f e <*> (traverse . identsE) f es
 identsE _ UnsatExpr{}         = error "identsE: UnsatExpr"
-identsE _ AntiExpr{}          = error "identsE: AntiExpr"
 
 {-# INLINE identsV #-}
 identsV :: Traversal' JVal Ident
@@ -792,7 +790,6 @@ valsS f (ApplStat e es)      = ApplStat    <$> valsE f e <*> (traverse . valsE) 
 valsS f (UOpStat op e)       = UOpStat op  <$> valsE f e
 valsS f (AssignStat e1 e2)   = AssignStat  <$> valsE f e1 <*> valsE f e2
 valsS _ UnsatBlock{}         = panic "valsS: UnsatBlock"
-valsS _ AntiStat{}           = panic "valsS: AntiStat"
 valsS f (LabelStat l s)      = LabelStat l <$> valsS f s
 valsS _ b@BreakStat{}        = pure b
 valsS _ c@ContinueStat{}     = pure c
@@ -807,7 +804,6 @@ valsE f (UOpExpr o e)       = UOpExpr o   <$> valsE f e
 valsE f (IfExpr e1 e2 e3)   = IfExpr      <$> valsE f e1 <*> valsE f e2 <*> valsE f e3
 valsE f (ApplExpr e es)     = ApplExpr    <$> valsE f e <*> (traverse . valsE) f es
 valsE _ UnsatExpr{}         = panic "valsE: UnsatExpr"
-valsE _ AntiExpr{}          = panic "valsE: AntiExpr"
 
 {-# INLINE exprsS #-}
 exprsS :: Traversal' JStat JExpr
@@ -824,7 +820,6 @@ exprsS f (ApplStat e es)      = ApplStat    <$> f e <*> traverse f es
 exprsS f (UOpStat op e)       = UOpStat op  <$> f e
 exprsS f (AssignStat e1 e2)   = AssignStat  <$> f e1 <*> f e2
 exprsS _ UnsatBlock{}         = panic "exprsS: UnsatBlock"
-exprsS _ AntiStat{}           = panic "exprsS: AntiStat"
 exprsS f (LabelStat l s)      = LabelStat l <$> exprsS f s
 exprsS _ b@BreakStat{}        = pure b
 exprsS _ c@ContinueStat{}     = pure c
@@ -840,7 +835,6 @@ exprsE f (UOpExpr o e)       = UOpExpr o   <$> f e
 exprsE f (IfExpr e1 e2 e3)   = IfExpr      <$> f e1 <*> f e2 <*> f e3
 exprsE f (ApplExpr e es)     = ApplExpr    <$> f e <*> traverse f es
 exprsE _ UnsatExpr{}         = panic "exprsE: UnsatExpr"
-exprsE _ AntiExpr{}          = panic "exprsE: AntiExpr"
 
 staticInfoArgs :: Traversal' StaticInfo StaticArg
 staticInfoArgs f (StaticInfo si sv sa) =
@@ -1246,7 +1240,7 @@ fixHashesIter n invDeps allKeys checkKeys sccs hashes finalHashes
   | not (null newHashes) = fixHashesIter (n-1) invDeps allKeys checkKeys' sccs hashes
       (M.union finalHashes $ M.fromList newHashes)
   -- - | unsafePerformIO (putStrLn ("fixHashesIter killing cycles:\n" ++ show rootSCCs)) `seq` False = undefined
-  | not (null rootSCCs)  = fixHashesIter (n {- -1 -}) invDeps allKeys allKeys sccs hashes
+  | not (null rootSCCs)  = fixHashesIter n {- -1 -} invDeps allKeys allKeys sccs hashes
       (M.union finalHashes (M.fromList $ concatMap hashRootSCC rootSCCs))
   | otherwise            = finalHashes
   where
@@ -1304,8 +1298,8 @@ makeFinalHash b bs = SHA256.hash (mconcat (b:bs))
 
 -- do not deduplicate thunks
 ignoreStatic :: StaticInfo -> Bool
-ignoreStatic (StaticInfo _ (StaticThunk {}) _) = True
-ignoreStatic _                                 = False
+ignoreStatic (StaticInfo _ StaticThunk {} _) = True
+ignoreStatic _                               = False
 
 -- combine hashes from x and y, leaving only those which have an entry in both
 combineHashes :: [(Text, HashBuilder)]

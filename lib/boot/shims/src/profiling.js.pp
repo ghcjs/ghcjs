@@ -325,3 +325,8 @@ function h$buildCCSPtr(o) {
   ccs.arr[h$ccsCC_offset] = [h$buildCCPtr(o.cc), 0];
   return ccs;
 }
+
+// run the action with an empty CCS
+function h$clearCCS(a) {
+  throw new Error("ClearCCSOp not implemented");
+}

@@ -1,6 +1,6 @@
 {-
   Somehwat modified ghc-pkg, customizes default database locations and lib names
-  based on GHC 8.4.2 release
+  based on GHC 8.8.1 release
  -}
 
 {-# LANGUAGE CPP #-}
@@ -35,18 +35,19 @@ module Main (main) where
 -- import Version ( version, targetOS, targetARCH )
 import qualified GHC.PackageDb as GhcPkg
 import GHC.PackageDb (BinaryStringRep(..))
+import GHC.HandleEncoding
 import qualified Distribution.Simple.PackageIndex as PackageIndex
 import qualified Data.Graph as Graph
 import qualified Distribution.ModuleName as ModuleName
 import Distribution.ModuleName (ModuleName)
 import Distribution.InstalledPackageInfo as Cabal
-import Distribution.Compat.ReadP hiding (get)
-import Distribution.ParseUtils
+import qualified Distribution.Parsec as Cabal
 import Distribution.Package hiding (installedUnitId)
 import Distribution.Text
 import Distribution.Version
 import Distribution.Backpack
 import Distribution.Types.UnqualComponentName
+import Distribution.Types.LibraryName
 import Distribution.Types.MungedPackageName
 import Distribution.Types.MungedPackageId
 import Distribution.Simple.Utils (fromUTF8BS, toUTF8BS, writeUTF8File, readUTF8File)
@@ -63,14 +64,14 @@ import System.Console.GetOpt
 import qualified Control.Exception as Exception
 import Data.Maybe
 
-import Data.Char ( isSpace, toLower )
+import Data.Char ( toLower )
 import Control.Monad
 import System.Directory ( doesDirectoryExist, getDirectoryContents,
                           doesFileExist, removeFile,
                           getCurrentDirectory )
 import System.Exit ( exitWith, ExitCode(..) )
 import System.Environment ( getArgs, getProgName, getEnv )
-#if defined(darwin_HOST_OS) || defined(linux_HOST_OS)
+#if defined(darwin_HOST_OS) || defined(linux_HOST_OS) || defined(mingw32_HOST_OS)
 import System.Environment ( getExecutablePath )
 #endif
 import System.IO
@@ -84,10 +85,6 @@ import qualified Data.Set as Set
 import qualified Data.Map as Map
 
 #if defined(mingw32_HOST_OS)
--- mingw32 needs these for getExecDir
-import Foreign
-import Foreign.C
-import System.Directory ( canonicalizePath )
 import GHC.ConsoleHandler
 #else
 import System.Posix hiding (fdToHandle)
@@ -127,6 +124,7 @@ anyM p (x:xs) = do
 
 main :: IO ()
 main = do
+  configureHandleEncoding
   args <- getArgs
 
   case getOpt Permute (flags ++ deprecFlags) args of
@@ -175,6 +173,7 @@ data Flag
   | FlagNoUserDb
   | FlagVerbosity (Maybe String)
   | FlagUnitId
+  | FlagShowUnitIds
   deriving Eq
 
 flags :: [OptDescr Flag]
@@ -219,6 +218,8 @@ flags = [
         "output numeric GHCJS version information and exit",
   Option [] ["simple-output"] (NoArg FlagSimpleOutput)
         "print output in easy-to-parse format for some commands",
+  Option [] ["show-unit-ids"] (NoArg FlagShowUnitIds)
+        "print unit-ids instead of package identifiers",
   Option [] ["names-only"] (NoArg FlagNamesOnly)
         "only print package names, not versions; can only be used with list --simple-output",
   Option [] ["ignore-case"] (NoArg FlagIgnoreCase)
@@ -525,11 +526,11 @@ runit verbosity cli nonopts = do
     (_cmd:_) -> do
         die ("command-line syntax error\n" ++ shortUsage prog)
 
-parseCheck :: ReadP a a -> String -> String -> IO a
-parseCheck parser str what =
-  case [ x | (x,ys) <- readP_to_S parser str, all isSpace ys ] of
-    [x] -> return x
-    _ -> die ("cannot parse \'" ++ str ++ "\' as a " ++ what)
+parseCheck :: Cabal.Parsec a => String -> String -> IO a
+parseCheck str what =
+  case Cabal.eitherParsec str of
+    Left e  -> die ("cannot parse \'" ++ str ++ "\' as a " ++ what ++ ": " ++ e)
+    Right x -> pure x
 
 -- | Either an exact 'PackageIdentifier', or a glob for all packages
 -- matching 'PackageName'.
@@ -542,20 +543,14 @@ displayGlobPkgId (ExactPackageIdentifier pid) = display pid
 displayGlobPkgId (GlobPackageIdentifier pn) = display pn ++ "-*"
 
 readGlobPkgId :: String -> IO GlobPackageIdentifier
-readGlobPkgId str = parseCheck parseGlobPackageId str "package identifier"
-
-parseGlobPackageId :: ReadP r GlobPackageIdentifier
-parseGlobPackageId =
-  fmap ExactPackageIdentifier parse
-     +++
-  (do n <- parse
-      _ <- string "-*"
-      return (GlobPackageIdentifier n))
+readGlobPkgId str
+  | "-*" `isSuffixOf` str =
+    GlobPackageIdentifier <$> parseCheck (init (init str)) "package identifier (glob)"
+  | otherwise = ExactPackageIdentifier <$> parseCheck str "package identifier (exact)"
 
 readPackageArg :: AsPackageArg -> String -> IO PackageArg
-readPackageArg AsUnitId str =
-    parseCheck (IUId `fmap` parse) str "installed package id"
-readPackageArg AsDefault str = Id `fmap` readGlobPkgId str
+readPackageArg AsUnitId str = IUId <$> parseCheck str "installed package id"
+readPackageArg AsDefault str = Id <$> readGlobPkgId str
 
 -- -----------------------------------------------------------------------------
 -- Package databases
@@ -597,6 +592,15 @@ data DbModifySelector = TopOne | ContainsPkg PackageArg
 allPackagesInStack :: PackageDBStack -> [InstalledPackageInfo]
 allPackagesInStack = concatMap packages
 
+-- | Retain only the part of the stack up to and including the given package
+-- DB (where the global package DB is the bottom of the stack). The resulting
+-- package DB stack contains exactly the packages that packages from the
+-- specified package DB can depend on, since dependencies can only extend
+-- down the stack, not up (e.g. global packages cannot depend on user
+-- packages).
+stackUpTo :: FilePath -> PackageDBStack -> PackageDBStack
+stackUpTo to_modify = dropWhile ((/= to_modify) . location)
+
 getPkgDatabases :: Verbosity
                 -> GhcPkg.DbOpenMode mode DbModifySelector
                 -> Bool    -- use the user db
@@ -622,7 +626,14 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
   let err_msg = "missing --global-package-db option, location of global package database unknown\n"
   global_conf <-
      case [ f | FlagGlobalConfig f <- my_flags ] of
-        [] -> die err_msg
+        [] -> do mb_dir <- getLibDir
+                 case mb_dir of
+                   Nothing  -> die err_msg
+                   Just dir -> do
+                     r <- lookForPackageDBIn dir
+                     case r of
+                       Nothing -> die ("Can't find package database in " ++ dir)
+                       Just path -> return path
         fs -> return (last fs)
 
   -- The value of the $topdir variable used in some package descriptions
@@ -1089,6 +1100,10 @@ initPackageDB filename verbosity _flags = do
       packageDbLock = GhcPkg.DbOpenReadWrite lock,
       packages = []
     }
+    -- We can get away with passing an empty stack here, because the new DB is
+    -- going to be initially empty, so no dependencies are going to be actually
+    -- looked up.
+    []
 
 -- -----------------------------------------------------------------------------
 -- Registering
@@ -1138,7 +1153,7 @@ registerPackage input verbosity my_flags multi_instance
   let top_dir = takeDirectory (location (last db_stack))
       pkg_expanded = mungePackagePaths top_dir pkgroot pkg
 
-  let truncated_stack = dropWhile ((/= to_modify).location) db_stack
+  let truncated_stack = stackUpTo to_modify db_stack
   -- truncate the stack for validation, because we don't allow
   -- packages lower in the stack to refer to those higher up.
   validatePackageConfig pkg_expanded verbosity truncated_stack
@@ -1156,20 +1171,18 @@ registerPackage input verbosity my_flags multi_instance
                  -- Only remove things that were instantiated the same way!
                  instantiatedWith p == instantiatedWith pkg ]
   --
-  changeDB verbosity (removes ++ [AddPackage pkg]) db_to_operate_on
+  changeDB verbosity (removes ++ [AddPackage pkg]) db_to_operate_on db_stack
 
 parsePackageInfo
         :: String
         -> IO (InstalledPackageInfo, [ValidateWarning])
 parsePackageInfo str =
   case parseInstalledPackageInfo str of
-    ParseOk warnings ok -> return (mungePackageInfo ok, ws)
+    Right (warnings, ok) -> pure (mungePackageInfo ok, ws)
       where
-        ws = [ msg | PWarning msg <- warnings
+        ws = [ msg | msg <- warnings
                    , not ("Unrecognized field pkgroot" `isPrefixOf` msg) ]
-    ParseFailed err -> case locatedErrorMsg err of
-                           (Nothing, s) -> die s
-                           (Just l, s) -> die (show l ++ ": " ++ s)
+    Left err -> die (unlines err)
 
 mungePackageInfo :: InstalledPackageInfo -> InstalledPackageInfo
 mungePackageInfo ipi = ipi
@@ -1181,12 +1194,16 @@ data DBOp = RemovePackage InstalledPackageInfo
           | AddPackage    InstalledPackageInfo
           | ModifyPackage InstalledPackageInfo
 
-changeDB :: Verbosity -> [DBOp] -> PackageDB 'GhcPkg.DbReadWrite -> IO ()
-changeDB verbosity cmds db = do
+changeDB :: Verbosity
+         -> [DBOp]
+         -> PackageDB 'GhcPkg.DbReadWrite
+         -> PackageDBStack
+         -> IO ()
+changeDB verbosity cmds db db_stack = do
   let db' = updateInternalDB db cmds
   db'' <- adjustOldFileStylePackageDB db'
   createDirectoryIfMissing True (location db'')
-  changeDBDir verbosity cmds db''
+  changeDBDir verbosity cmds db'' db_stack
 
 updateInternalDB :: PackageDB 'GhcPkg.DbReadWrite
                  -> [DBOp] -> PackageDB 'GhcPkg.DbReadWrite
@@ -1199,10 +1216,14 @@ updateInternalDB db cmds = db{ packages = foldl do_cmd (packages db) cmds }
     do_cmd (do_cmd pkgs (RemovePackage p)) (AddPackage p)
 
 
-changeDBDir :: Verbosity -> [DBOp] -> PackageDB 'GhcPkg.DbReadWrite -> IO ()
-changeDBDir verbosity cmds db = do
+changeDBDir :: Verbosity
+            -> [DBOp]
+            -> PackageDB 'GhcPkg.DbReadWrite
+            -> PackageDBStack
+            -> IO ()
+changeDBDir verbosity cmds db db_stack = do
   mapM_ do_cmd cmds
-  updateDBCache verbosity db
+  updateDBCache verbosity db db_stack
  where
   do_cmd (RemovePackage p) = do
     let file = location db </> display (installedUnitId p) <.> "conf"
@@ -1215,20 +1236,63 @@ changeDBDir verbosity cmds db = do
   do_cmd (ModifyPackage p) =
     do_cmd (AddPackage p)
 
-updateDBCache :: Verbosity -> PackageDB 'GhcPkg.DbReadWrite -> IO ()
-updateDBCache verbosity db = do
+updateDBCache :: Verbosity
+              -> PackageDB 'GhcPkg.DbReadWrite
+              -> PackageDBStack
+              -> IO ()
+updateDBCache verbosity db db_stack = do
   let filename = location db </> cachefilename
+      db_stack_below = stackUpTo (location db) db_stack
 
       pkgsCabalFormat :: [InstalledPackageInfo]
       pkgsCabalFormat = packages db
 
-      pkgsGhcCacheFormat :: [PackageCacheFormat]
-      pkgsGhcCacheFormat = map convertPackageInfoToCacheFormat pkgsCabalFormat
+      -- | All the packages we can legally depend on in this step.
+      dependablePkgsCabalFormat :: [InstalledPackageInfo]
+      dependablePkgsCabalFormat = allPackagesInStack db_stack_below
+
+      pkgsGhcCacheFormat :: [(PackageCacheFormat, Bool)]
+      pkgsGhcCacheFormat
+        -- See Note [Recompute abi-depends]
+        = map (recomputeValidAbiDeps dependablePkgsCabalFormat)
+        $ map convertPackageInfoToCacheFormat
+          pkgsCabalFormat
+
+      hasAnyAbiDepends :: InstalledPackageInfo -> Bool
+      hasAnyAbiDepends x = length (abiDepends x) > 0
+
+  -- warn when we find any (possibly-)bogus abi-depends fields;
+  -- Note [Recompute abi-depends]
+  when (verbosity >= Normal) $ do
+    let definitelyBrokenPackages =
+          nub
+            . sort
+            . map (unPackageName . GhcPkg.packageName . fst)
+            . filter snd
+            $ pkgsGhcCacheFormat
+    when (definitelyBrokenPackages /= []) $ do
+      warn "the following packages have broken abi-depends fields:"
+      forM_ definitelyBrokenPackages $ \pkg ->
+        warn $ "    " ++ pkg
+    when (verbosity > Normal) $ do
+      let possiblyBrokenPackages =
+            nub
+              . sort
+              . filter (not . (`elem` definitelyBrokenPackages))
+              . map (unPackageName . pkgName . packageId)
+              . filter hasAnyAbiDepends
+              $ pkgsCabalFormat
+      when (possiblyBrokenPackages /= []) $ do
+          warn $
+            "the following packages have correct abi-depends, " ++
+            "but may break in the future:"
+          forM_ possiblyBrokenPackages $ \pkg ->
+            warn $ "    " ++ pkg
 
   when (verbosity > Normal) $
       infoLn ("writing cache " ++ filename)
 
-  GhcPkg.writePackageDb filename pkgsGhcCacheFormat pkgsCabalFormat
+  GhcPkg.writePackageDb filename (map fst pkgsGhcCacheFormat) pkgsCabalFormat
     `catchIO` \e ->
       if isPermissionError e
       then die $ filename ++ ": you don't have permission to modify this file"
@@ -1246,6 +1310,54 @@ type PackageCacheFormat = GhcPkg.InstalledPackageInfo
                             ModuleName
                             OpenModule
 
+{- Note [Recompute abi-depends]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Like most fields, `ghc-pkg` relies on who-ever is performing package
+registration to fill in fields; this includes the `abi-depends` field present
+for the package.
+
+However, this was likely a mistake, and is not very robust; in certain cases,
+versions of Cabal may use bogus abi-depends fields for a package when doing
+builds. Why? Because package database information is aggressively cached; it is
+possible to work Cabal into a situation where it uses a cached version of
+`abi-depends`, rather than the one in the actual database after it has been
+recomputed.
+
+However, there is an easy fix: ghc-pkg /already/ knows the `abi-depends` of a
+package, because they are the ABIs of the packages pointed at by the `depends`
+field. So it can simply look up the abi from the dependencies in the original
+database, and ignore whatever the system registering gave it.
+
+So, instead, we do two things here:
+
+  - We throw away the information for a registered package's `abi-depends` field.
+
+  - We recompute it: we simply look up the unit ID of the package in the original
+    database, and use *its* abi-depends.
+
+See Trac #14381, and Cabal issue #4728.
+
+Additionally, because we are throwing away the original (declared) ABI deps, we
+return a boolean that indicates whether any abi-depends were actually
+overridden.
+
+-}
+
+recomputeValidAbiDeps :: [InstalledPackageInfo]
+                      -> PackageCacheFormat
+                      -> (PackageCacheFormat, Bool)
+recomputeValidAbiDeps db pkg =
+  (pkg { GhcPkg.abiDepends = newAbiDeps }, abiDepsUpdated)
+  where
+    newAbiDeps =
+      catMaybes . flip map (GhcPkg.abiDepends pkg) $ \(k, _) ->
+        case filter (\d -> installedUnitId d == k) db of
+          [x] -> Just (k, unAbiHash (abiHash x))
+          _   -> Nothing
+    abiDepsUpdated =
+      GhcPkg.abiDepends pkg /= newAbiDeps
+
 convertPackageInfoToCacheFormat :: InstalledPackageInfo -> PackageCacheFormat
 convertPackageInfoToCacheFormat pkg =
     GhcPkg.InstalledPackageInfo {
@@ -1256,7 +1368,7 @@ convertPackageInfoToCacheFormat pkg =
        GhcPkg.packageName        = packageName pkg,
        GhcPkg.packageVersion     = Version.Version (versionNumbers (packageVersion pkg)) [],
        GhcPkg.sourceLibName      =
-         fmap (mkPackageName . unUnqualComponentName) (sourceLibName pkg),
+         fmap (mkPackageName . unUnqualComponentName) (libraryNameString $ sourceLibName pkg),
        GhcPkg.depends            = depends pkg,
        GhcPkg.abiDepends         = map (\(AbiDependency k v) -> (k,unAbiHash v)) (abiDepends pkg),
        GhcPkg.abiHash            = unAbiHash (abiHash pkg),
@@ -1383,14 +1495,14 @@ modifyPackage fn pkgarg verbosity my_flags force = do
       dieOrForceAll force ("unregistering would break the following packages: "
               ++ unwords (map displayQualPkgId newly_broken))
 
-  changeDB verbosity cmds db
+  changeDB verbosity cmds db db_stack
 
 recache :: Verbosity -> [Flag] -> IO ()
 recache verbosity my_flags = do
   (_db_stack, GhcPkg.DbOpenReadWrite db_to_operate_on, _flag_dbs) <-
     getPkgDatabases verbosity (GhcPkg.DbOpenReadWrite TopOne)
       True{-use user-} False{-no cache-} False{-expand vars-} my_flags
-  changeDB verbosity [] db_to_operate_on
+  changeDB verbosity [] db_to_operate_on _db_stack
 
 -- -----------------------------------------------------------------------------
 -- Listing packages
@@ -1492,9 +1604,11 @@ listPackages verbosity my_flags mPackageName mModuleName = do
 
 simplePackageList :: [Flag] -> [InstalledPackageInfo] -> IO ()
 simplePackageList my_flags pkgs = do
-   let showPkg = if FlagNamesOnly `elem` my_flags then display . mungedName
-                                                  else display
-       strs = map showPkg $ map mungedId pkgs
+   let showPkg :: InstalledPackageInfo -> String
+       showPkg | FlagShowUnitIds `elem` my_flags = display . installedUnitId
+               | FlagNamesOnly `elem` my_flags   = display . mungedName . mungedId
+               | otherwise                       = display . mungedId
+       strs = map showPkg pkgs
    when (not (null pkgs)) $
       hPutStrLn stdout $ concat $ intersperse " " strs
 
@@ -1639,17 +1753,20 @@ checkConsistency verbosity my_flags = do
       -- db, because we may need it to verify package deps.
 
   let simple_output = FlagSimpleOutput `elem` my_flags
+  let unitid_output = FlagShowUnitIds `elem` my_flags
 
   let pkgs = allPackagesInStack db_stack
 
+      checkPackage :: InstalledPackageInfo -> IO [InstalledPackageInfo]
       checkPackage p = do
          (_,es,ws) <- runValidate $ checkPackageConfig p verbosity db_stack
                                                        True True
          if null es
-            then do when (not simple_output) $ do
-                      _ <- reportValidateErrors verbosity [] ws "" Nothing
-                      return ()
-                    return []
+            then do
+              when (not simple_output) $ do
+                  _ <- reportValidateErrors verbosity [] ws "" Nothing
+                  return ()
+              return []
             else do
               when (not simple_output) $ do
                   reportError ("There are problems in package " ++ display (mungedId p) ++ ":")
@@ -1665,15 +1782,20 @@ checkConsistency verbosity my_flags = do
 
   let not_broken_pkgs = filterOut broken_pkgs pkgs
       (_, trans_broken_pkgs) = closure [] not_broken_pkgs
+
+      all_broken_pkgs :: [InstalledPackageInfo]
       all_broken_pkgs = broken_pkgs ++ trans_broken_pkgs
 
   when (not (null all_broken_pkgs)) $ do
     if simple_output
       then simplePackageList my_flags all_broken_pkgs
       else do
-       reportError ("\nThe following packages are broken, either because they have a problem\n"++
+        let disp :: InstalledPackageInfo -> String
+            disp | unitid_output = display . installedUnitId
+                 | otherwise     = display . mungedId
+        reportError ("\nThe following packages are broken, either because they have a problem\n"++
                 "listed above, or because they depend on a broken package.")
-       mapM_ (hPutStrLn stderr . display . mungedId) all_broken_pkgs
+        mapM_ (hPutStrLn stderr . disp) all_broken_pkgs
 
   when (not (null all_broken_pkgs)) $ exitWith (ExitFailure 1)
 
@@ -1734,7 +1856,7 @@ liftIO k = V (k >>= \a -> return (a,[],[]))
 reportValidateErrors :: Verbosity -> [ValidateError] -> [ValidateWarning]
                      -> String -> Maybe Force -> IO Bool
 reportValidateErrors verbosity es ws prefix mb_force = do
-  mapM_ (warn . (prefix++)) ws
+  when (verbosity >= Normal) $ mapM_ (warn . (prefix++)) ws
   oks <- mapM report es
   return (and oks)
   where
@@ -1807,10 +1929,9 @@ checkPackageConfig pkg verbosity db_stack
 checkPackageId :: InstalledPackageInfo -> Validate ()
 checkPackageId ipi =
   let str = display (mungedId ipi) in
-  case [ x :: MungedPackageId | (x,ys) <- readP_to_S parse str, all isSpace ys ] of
-    [_] -> return ()
-    []  -> verror CannotForce ("invalid package identifier: " ++ str)
-    _   -> verror CannotForce ("ambiguous package identifier: " ++ str)
+  case Cabal.eitherParsec str :: Either String MungedPackageId of
+    Left e -> verror CannotForce ("invalid package identifier: '" ++ str ++ "': " ++ e)
+    Right _ -> pure ()
 
 checkUnitId :: InstalledPackageInfo -> PackageDBStack -> Bool
                 -> Validate ()
@@ -1904,7 +2025,7 @@ checkDuplicateDepends deps
 checkHSLib :: Verbosity -> [String] -> String -> Validate ()
 checkHSLib _verbosity dirs lib = do
   let filenames = ["lib" ++ lib ++ ".a",
-                   "lib" ++ lib ++ ".p_a",
+                   "lib" ++ lib ++ "_p.a",
                    "lib" ++ lib ++ "-ghcjs" ++ Info.getGhcCompilerVersion ++ ".so",
                    "lib" ++ lib ++ "-ghcjs" ++ Info.getGhcCompilerVersion ++ ".dylib",
                             lib ++ "-ghcjs" ++ Info.getGhcCompilerVersion ++ ".dll"]
@@ -2095,55 +2216,8 @@ dieForcible s = die (s ++ " (use --force to override)")
 -- Cut and pasted from ghc/compiler/main/SysTools
 
 getLibDir :: IO (Maybe String)
-#if defined(mingw32_HOST_OS)
-subst :: Char -> Char -> String -> String
-subst a b ls = map (\ x -> if x == a then b else x) ls
 
-unDosifyPath :: FilePath -> FilePath
-unDosifyPath xs = subst '\\' '/' xs
-
-getLibDir = do base   <- getExecDir "/ghcjs-pkg.exe"
-               case base of
-                 Nothing    -> return Nothing
-                 Just base' -> do
-                    libdir <- canonicalizePath $ base' </> "../lib"
-                    exists <- doesDirectoryExist libdir
-                    if exists
-                       then return $ Just libdir
-                       else return Nothing
-
--- (getExecDir cmd) returns the directory in which the current
---                  executable, which should be called 'cmd', is running
--- So if the full path is /a/b/c/d/e, and you pass "d/e" as cmd,
--- you'll get "/a/b/c" back as the result
-getExecDir :: String -> IO (Maybe String)
-getExecDir cmd =
-    getExecPath >>= maybe (return Nothing) removeCmdSuffix
-    where initN n = reverse . drop n . reverse
-          removeCmdSuffix = return . Just . initN (length cmd) . unDosifyPath
-
-getExecPath :: IO (Maybe String)
-getExecPath = try_size 2048 -- plenty, PATH_MAX is 512 under Win32.
-  where
-    try_size size = allocaArray (fromIntegral size) $ \buf -> do
-        ret <- c_GetModuleFileName nullPtr buf size
-        case ret of
-          0 -> return Nothing
-          _ | ret < size -> fmap Just $ peekCWString buf
-            | otherwise  -> try_size (size * 2)
-
-foreign import WINDOWS_CCONV unsafe "windows.h GetModuleFileNameW"
-  c_GetModuleFileName :: Ptr () -> CWString -> Word32 -> IO Word32
-#elif defined(darwin_HOST_OS) || defined(linux_HOST_OS)
--- TODO: a) this is copy-pasta from SysTools.hs / getBaseDir. Why can't we reuse
---          this here? and parameterise getBaseDir over the executable (for
---          windows)?
---          Answer: we can not, because if we share `getBaseDir` via `ghc-boot`,
---                  that would add `base` as a dependency for windows.
---       b) why is the windows getBaseDir logic, not part of getExecutablePath?
---          it would be much wider available then and we could drop all the
---          custom logic?
---          Answer: yes this should happen. No one has found the time just yet.
+#if defined(mingw32_HOST_OS) || defined(darwin_HOST_OS) || defined(linux_HOST_OS)
 getLibDir = Just . (\p -> p </> "lib") . takeDirectory . takeDirectory <$> getExecutablePath
 #else
 getLibDir = return Nothing

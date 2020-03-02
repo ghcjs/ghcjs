@@ -109,7 +109,6 @@ main = do
 
    Ghcjs.ghcjsErrorHandler defaultFatalMessager defaultFlushOut $ do
     -- 1. extract the -B flag from the args
-    argv0 <- Ghcjs.getWrappedArgs
     (argv0, booting, booting_stage1) <- Ghcjs.getWrappedArgs
 
     let (minusB_args, argv1) = partition ("-B" `isPrefixOf`) argv0
@@ -288,18 +287,14 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   liftIO $ checkOptions ghcjsSettings postLoadMode dflags6 srcs objs (js_objs ++ Ghcjs.gsJsLibSrcs ghcjsSettings)
 
   ---------------- Do the business -----------
-  let phaseMsg = when (Ghcjs.gsNativeToo ghcjsSettings) $
-                   liftIO (Ghcjs.compilationProgressMsg dflags3
-                     (if native then "generating native" else "generating JavaScript"))
-
   handleSourceError (\e -> do
        GHC.printException e
        liftIO $ exitWith (ExitFailure 1)) $ do
     case postLoadMode of
        ShowInterface f        -> liftIO (doShowIface dflags6 f)
-       DoMake                 -> phaseMsg >> doMake jsEnv ghcjsSettings native srcs
+       DoMake                 -> doMake jsEnv ghcjsSettings native srcs
        DoMkDependHS           -> doMkDependHS (map fst srcs)
-       StopBefore p           -> phaseMsg >> liftIO (Ghcjs.ghcjsOneShot jsEnv ghcjsSettings native hsc_env p srcs)
+       StopBefore p           -> liftIO (Ghcjs.ghcjsOneShot jsEnv ghcjsSettings native hsc_env p srcs)
        DoInteractive          -> ghciUI srcs Nothing
        DoEval exprs           -> (ghciUI srcs $ Just $ reverse exprs)
        DoAbiHash              -> abiHash (map fst srcs)
@@ -514,8 +509,8 @@ showInfoMode = mkPreLoadMode ShowInfo
 
 printSetting :: String -> Mode
 printSetting k = mkPreLoadMode (PrintWithDynFlags f)
-    where f settings dflags = fromMaybe (panic ("Setting not found: " ++ show k))
-                            $ lookup k (Ghcjs.compilerInfo (Ghcjs.gsNativeToo settings) dflags)
+    where f _settings dflags = fromMaybe (panic ("Setting not found: " ++ show k))
+                             $ lookup k (Ghcjs.compilerInfo dflags)
 
 mkPreLoadMode :: PreLoadMode -> Mode
 mkPreLoadMode = Right . Left
@@ -863,7 +858,7 @@ showBanner _postLoadMode dflags = do
 showInfo :: Ghcjs.GhcjsSettings -> DynFlags -> IO ()
 showInfo settings dflags = do
         let sq x = " [" ++ x ++ "\n ]"
-        putStrLn $ sq $ intercalate "\n ," $ map show $ Ghcjs.compilerInfo (Ghcjs.gsNativeToo settings) dflags
+        putStrLn $ sq $ intercalate "\n ," $ map show $ Ghcjs.compilerInfo dflags
 
 showSupportedExtensions :: IO ()
 showSupportedExtensions = mapM_ putStrLn supportedLanguagesAndExtensions
@@ -903,14 +898,21 @@ dumpFinalStats dflags =
 
 dumpFastStringStats :: DynFlags -> IO ()
 dumpFastStringStats dflags = do
-  buckets <- getFastStringTable
-  let (entries, longest, has_z) = countFS 0 0 0 buckets
-      msg = text "FastString stats:" $$
-            nest 4 (vcat [text "size:           " <+> int (length buckets),
-                          text "entries:        " <+> int entries,
-                          text "longest chain:  " <+> int longest,
-                          text "has z-encoding: " <+> (has_z `pcntOf` entries)
-                         ])
+  segments <- getFastStringTable
+  let buckets = concat segments
+      bucketsPerSegment = map length segments
+      entriesPerBucket = map length buckets
+      entries = sum entriesPerBucket
+      hasZ = sum $ map (length . filter hasZEncoding) buckets
+      msg = text "FastString stats:" $$ nest 4 (vcat
+        [ text "segments:         " <+> int (length segments)
+        , text "buckets:          " <+> int (sum bucketsPerSegment)
+        , text "entries:          " <+> int entries
+        , text "largest segment:  " <+> int (maximum bucketsPerSegment)
+        , text "smallest segment: " <+> int (minimum bucketsPerSegment)
+        , text "longest bucket:   " <+> int (maximum entriesPerBucket)
+        , text "has z-encoding:   " <+> (hasZ `pcntOf` entries)
+        ])
         -- we usually get more "has z-encoding" than "z-encoded", because
         -- when we z-encode a string it might hash to the exact same string,
         -- which is not counted as "z-encoded".  Only strings whose
@@ -919,17 +921,6 @@ dumpFastStringStats dflags = do
   putMsg dflags msg
   where
    x `pcntOf` y = int ((x * 100) `quot` y) Outputable.<> char '%'
-
-countFS :: Int -> Int -> Int -> [[FastString]] -> (Int, Int, Int)
-countFS entries longest has_z [] = (entries, longest, has_z)
-countFS entries longest has_z (b:bs) =
-  let
-        len = length b
-        longest' = max len longest
-        entries' = entries + len
-        has_zs = length (filter hasZEncoding b)
-  in
-        countFS entries' longest' (has_z + has_zs) bs
 
 showPackages, dumpPackages, dumpPackagesSimple :: DynFlags -> IO ()
 showPackages       dflags = putStrLn (showSDoc dflags (pprPackages dflags))

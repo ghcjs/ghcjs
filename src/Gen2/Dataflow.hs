@@ -116,7 +116,6 @@ fromJExpr (IfExpr e1 e2 e3)   = CondE <$> fromJExpr e1 <*> fromJExpr e2 <*> from
 fromJExpr (ApplExpr e1 es)    = ApplE <$> fromJExpr e1 <*> mapM fromJExpr es
 fromJExpr (SelExpr e i)       = SelE  <$> fromJExpr e <*> fromJIdent i
 fromJExpr UnsatExpr{}         = error "fromJExpr: unsaturated expression"
-fromJExpr AntiExpr{}          = error "fromJExpr: antiquoted expression"
 
 toJExpr' :: IntMap Ident -> AExpr a -> JExpr
 toJExpr' m (AExpr _ e) = exprToJExpr m e
@@ -794,7 +793,6 @@ cfg toAExpr stat = execState buildGraph emptyGraph
        e2' <- expr e2
        newSimpleNode (AssignS e1' e2') n
     go UnsatBlock{}                      _lb _lc _n = error "cfg: unsaturated block"
-    go (AntiStat t)                      _lb _lc _n = error ("cfg: antistat: " ++ T.unpack t)
     go (LabelStat lbl s1)                lb lc n = do
       lid <- newNodeId
       newLabel lbl lid

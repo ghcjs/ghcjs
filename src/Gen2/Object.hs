@@ -606,10 +606,9 @@ instance Objectable JStat where
   put (UOpStat o e)        = tag 10 >> put o  >> put e
   put (AssignStat e1 e2)   = tag 11 >> put e1 >> put e2
   put (UnsatBlock {})      = error "put JStat: UnsatBlock"
-  put (AntiStat xs)        = tag 12 >> put xs
-  put (LabelStat l s)      = tag 13 >> put l  >> put s
-  put (BreakStat ml)       = tag 14 >> put ml
-  put (ContinueStat ml)    = tag 15 >> put ml
+  put (LabelStat l s)      = tag 12 >> put l  >> put s
+  put (BreakStat ml)       = tag 13 >> put ml
+  put (ContinueStat ml)    = tag 14 >> put ml
   get = getTag >>= \case
                       1  -> DeclStat     <$> get
                       2  -> ReturnStat   <$> get
@@ -622,10 +621,9 @@ instance Objectable JStat where
                       9  -> ApplStat     <$> get <*> get
                       10 -> UOpStat      <$> get <*> get
                       11 -> AssignStat   <$> get <*> get
-                      12 -> AntiStat     <$> get
-                      13 -> LabelStat    <$> get <*> get
-                      14 -> BreakStat    <$> get
-                      15 -> ContinueStat <$> get
+                      12 -> LabelStat    <$> get <*> get
+                      13 -> BreakStat    <$> get
+                      14 -> ContinueStat <$> get
                       n -> unexpected ("Objectable get JStat: invalid tag: " ++ show n)
 
 instance Objectable JExpr where
@@ -637,7 +635,6 @@ instance Objectable JExpr where
   put (IfExpr e1 e2 e3)    = tag 6 >> put e1 >> put e2 >> put e3
   put (ApplExpr e es)      = tag 7 >> put e  >> put es
   put (UnsatExpr {})       = error "put JExpr: UnsatExpr"
-  put (AntiExpr xs)        = tag 8 >> put xs
   get = getTag >>= \case
                       1 -> ValExpr   <$> get
                       2 -> SelExpr   <$> get <*> get
@@ -646,7 +643,6 @@ instance Objectable JExpr where
                       5 -> UOpExpr   <$> get <*> get
                       6 -> IfExpr    <$> get <*> get <*> get
                       7 -> ApplExpr  <$> get <*> get
-                      8 -> AntiExpr  <$> get
                       n -> unexpected ("Objectable get JExpr: invalid tag: " ++ show n)
 
 instance Objectable JVal where

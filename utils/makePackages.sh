@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# set -euo pipefail
 
 # pull the code for GHCJS dependencies from the GHC tree in
 #   lib/ghc
@@ -381,44 +381,44 @@ tar -cvf "$TARGET/boot/ghcjs-node.tar" ghcjs-node/package.json ghcjs-node/LICENS
 
 echo "creating GHCJS dependencies"
 
-mkdir -p "ghc-api-ghcjs"
+mkdir -p "ghc"
 (
-cd "ghc-api-ghcjs"
+cd "ghc"
 
 
-mkdir -p "compiler"
-(
-cd "compiler"
+# mkdir -p "compiler"
+# (
+# cd "compiler"
 
-for DIR in backpack basicTypes cbits cmm codeGen coreSyn deSugar ghci hsSyn \
-           iface llvmGen main nativeGen parser prelude profiling rename \
-           simplCore simplStg specialise stgSyn stranal typecheck types \
-           utils; do
-  copy_dir "$GHCSRC/compiler" "$DIR"
-done
+# for DIR in backpack basicTypes cbits cmm codeGen coreSyn deSugar ghci hsSyn \
+#           iface llvmGen main nativeGen parser prelude profiling rename \
+#           simplCore simplStg specialise stgSyn stranal typecheck types \
+#           utils; do
+#  copy_dir "$GHCSRC/compiler" "$DIR"
+#done
 
-for FILE in HsVersions.h Unique.h; do
-  copy_file "$GHCSRC/compiler" "$FILE"
-done
-) # ghc-api-ghcjs/compiler
+#for FILE in HsVersions.h Unique.h; do
+#  copy_file "$GHCSRC/compiler" "$FILE"
+#done
+#) # ghc-api-ghcjs/compiler
 
-for FILE in LICENSE; do
-  copy_file "$GHCSRC" "$FILE"
-done
+# for FILE in LICENSE; do
+#  copy_file "$GHCSRC" "$FILE"
+#done
 
 # copy includes
-mkdir -p "includes"
-(
-cd "includes"
+# mkdir -p "includes"
+# (
+# cd "includes"
 
-for DIR in rts stg; do
-  copy_dir "$GHCSRC/includes" "$DIR"
-done
+# for DIR in rts stg; do
+#  copy_dir "$GHCSRC/includes" "$DIR"
+# done
 
-for FILE in Cmm.h CodeGen.Platform.hs ghcautoconf.h ghcconfig.h ghcplatform.h \
-            HsFFI.h MachDeps.h RtsAPI.h Rts.h Stg.h; do
-  copy_file "$GHCSRC/includes" "$FILE"
-done
+# for FILE in Cmm.h CodeGen.Platform.hs ghcautoconf.h ghcconfig.h ghcplatform.h \
+#            HsFFI.h MachDeps.h RtsAPI.h Rts.h Stg.h; do
+#  copy_file "$GHCSRC/includes" "$FILE"
+#done
 
 # fixme, should we generate the constants?
 for FILE in GHCConstantsHaskellType.hs GHCConstantsHaskellExports.hs \
@@ -426,87 +426,89 @@ for FILE in GHCConstantsHaskellType.hs GHCConstantsHaskellExports.hs \
   copy_file "$GHCSRC/includes/dist-derivedconstants/header" "$FILE"
 done
 
-) # ghc-api-ghcjs/includes
+) # ghc/includes
 
-) # ghc-api-ghcjs
+) # ghc
 
 
-mkdir -p "template-haskell-ghcjs"
-(
-cd "template-haskell-ghcjs"
+# mkdir -p "template-haskell-ghcjs"
+# (
+# cd "template-haskell-ghcjs"
 
-for FILE in changelog.md LICENSE Setup.hs; do
-  copy_file "$GHCSRC/libraries/template-haskell" "$FILE"
-done
+# for FILE in changelog.md LICENSE Setup.hs; do
+#   copy_file "$GHCSRC/libraries/template-haskell" "$FILE"
+# done
 
-for DIR in Language tests; do
-  copy_dir "$GHCSRC/libraries/template-haskell" "$DIR"
-done
-) # template-haskell-ghcjs
+# for DIR in Language tests; do
+#   copy_dir "$GHCSRC/libraries/template-haskell" "$DIR"
+# done
+# ) # template-haskell-ghcjs
 
 # ghci
-mkdir -p "ghci-ghcjs"
-(
-cd "ghci-ghcjs"
+# mkdir -p "ghci-ghcjs"
+# (
+# cd "ghci-ghcjs"
 
-for FILE in changelog.md LICENSE SizedSeq.hs; do
-  copy_file "$GHCSRC/libraries/ghci" "$FILE"
-done
+# for FILE in changelog.md LICENSE SizedSeq.hs; do
+#   copy_file "$GHCSRC/libraries/ghci" "$FILE"
+# done
 
-copy_dir "$GHCSRC/libraries/ghci" "GHCi"
-) # ghci-ghcjs
+# copy_dir "$GHCSRC/libraries/ghci" "GHCi"
+# ) # ghci-ghcjs
+
+# fixme copy haddock files
 
 # haddock-api-ghcjs
-mkdir -p "haddock-api-ghcjs"
-(
-cd "haddock-api-ghcjs"
+# mkdir -p "haddock-api-ghcjs"
+# (
+# cd "haddock-api-ghcjs"
 
-for FILE in CHANGES.md LICENSE Setup.lhs; do
-  copy_file "$GHCSRC/utils/haddock/haddock-api" "$FILE"
-done
+# for FILE in CHANGES.md LICENSE Setup.lhs; do
+#  copy_file "$GHCSRC/utils/haddock/haddock-api" "$FILE"
+# done
 
-for DIR in resources test; do
-  copy_dir "$GHCSRC/utils/haddock/haddock-api" "$DIR"
-done
+# for DIR in resources test; do
+#   copy_dir "$GHCSRC/utils/haddock/haddock-api" "$DIR"
+# done
 
-mkdir -p "src"
-(
-cd "src"
+# mkdir -p "src"
+# (
+# cd "src"
 
-for FILE in haddock.sh; do
-  copy_file "$GHCSRC/utils/haddock/haddock-api/src" "$FILE"
-done
+# for FILE in haddock.sh; do
+#  copy_file "$GHCSRC/utils/haddock/haddock-api/src" "$FILE"
+# done
 
-copy_dir "$GHCSRC/utils/haddock/haddock-api/src" "Documentation"
+# copy_dir "$GHCSRC/utils/haddock/haddock-api/src" "Documentation"
 
-mkdir -p "Haddock"
-(
-cd "Haddock"
-for FILE in Convert.hs Doc.hs GhcUtils.hs InterfaceFile.hs Interface.hs ModuleTree.hs Options.hs Parser.hs Syb.hs Utils.hs; do
-  copy_file "$GHCSRC/utils/haddock/haddock-api/src/Haddock" "$FILE"
-done
+# mkdir -p "Haddock"
+# (
+# cd "Haddock"
+# for FILE in Convert.hs Doc.hs GhcUtils.hs InterfaceFile.hs Interface.hs ModuleTree.hs Options.hs Parser.hs Syb.hs Utils.hs; do
+#  copy_file "$GHCSRC/utils/haddock/haddock-api/src/Haddock" "$FILE"
+#done
 
-for DIR in Backends Interface Utils; do
-  copy_dir "$GHCSRC/utils/haddock/haddock-api/src/Haddock" "$DIR"
-done
-) # haddock-api-ghcjs/src/Haddock
+#for DIR in Backends Interface Utils; do
+#  copy_dir "$GHCSRC/utils/haddock/haddock-api/src/Haddock" "$DIR"
+#done
+# ) # haddock-api-ghcjs/src/Haddock
 
-) # haddock-api-ghcjs/src
+# ) # haddock-api-ghcjs/src
 
-) # haddock-api-ghcjs
+# ) # haddock-api-ghcjs
 
 # haddock-library-ghcjs
-mkdir -p "haddock-library-ghcjs"
-(
-cd "haddock-library-ghcjs"
-for FILE in LICENSE Setup.hs CHANGES.md; do
-  copy_file "$GHCSRC/utils/haddock/haddock-library" "$FILE"
-done
+# mkdir -p "haddock-library-ghcjs"
+# (
+# cd "haddock-library-ghcjs"
+# for FILE in LICENSE Setup.hs CHANGES.md; do
+#   copy_file "$GHCSRC/utils/haddock/haddock-library" "$FILE"
+# done
 
-for DIR in src test fixtures; do
-  copy_dir "$GHCSRC/utils/haddock/haddock-library" "$DIR"
-done
-)
+# for DIR in src test fixtures; do
+#   copy_dir "$GHCSRC/utils/haddock/haddock-library" "$DIR"
+# done
+# )
 
 # copy our own cabal and configuration files
 echo "before apply_overrides"
@@ -515,9 +517,15 @@ apply_overrides "."
 
 # generate primops for ghc-api-ghcjs and boot/pkg/ghc-prim
 (
-cd "ghc-api-ghcjs"
+cd "lib/ghc"
 
-gcc -E -undef -traditional -P -Iincludes -x c "$GHCSRC/compiler/prelude/primops.txt.pp" | grep -v '^#pragma GCC' > "$WORKDIR/primops.txt"
+echo "generating primops"
+echo "  $PWD"
+cp "$GHCSRC/compiler/prelude/primops.txt.pp" .
+# echo gcc -E -undef -traditional -P -Iincludes -x c "primops.txt.pp" | grep -v '^#pragma GCC' > "$WORKDIR/primops.txt"
+
+
+gcc -E -undef -traditional -P -Iincludes -x c "primops.txt.pp" | grep -v '^#pragma GCC' > "$WORKDIR/primops.txt"
 
 (
 cd "includes"
@@ -545,9 +553,9 @@ $GENPRIM --make-haskell-source < "$WORKDIR/primops.txt" > "$TARGET/boot/data/Pri
 $GENPRIM --make-haskell-wrappers < "$WORKDIR/primops.txt" > "$TARGET/boot/data/PrimopWrappers.hs"
 gnucp "$WORKDIR/primops.txt" "$TARGET/boot/data/primops.txt"
 
-) # ghc-api-ghcjs/includes
-) # ghc-api-ghcjs
+) # ghc/includes
+) # ghc
 
-$SOURCEDIR/updateBootArchive.sh
+# $SOURCEDIR/updateBootArchive.sh
 
-)
+# )

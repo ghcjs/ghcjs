@@ -88,7 +88,7 @@ putCached :: DynFlags
 putCached dflags prefix key deps content =
   cacheFileName dflags prefix key >>= \case
     Nothing   -> return False
-    Just file -> do
+    Just file ->
       getCacheMeta deps >>= \case
         Nothing -> return False
         Just meta ->

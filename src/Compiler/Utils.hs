@@ -49,6 +49,7 @@ import           Packages          (getPackageIncludePath, Version
 import           Panic             (throwGhcExceptionIO)
 import qualified SysTools
 import           FileCleanup ( newTempName, TempFileLifetime(..) )
+import           LlvmCodeGen ( llvmVersionList )
 -- import           Panic
 
 import qualified Control.Exception as Ex
@@ -58,7 +59,7 @@ import Prelude
 
 import           Data.Char
 import           Data.List         (isPrefixOf, isInfixOf, foldl', intercalate)
-import           Data.Maybe        (catMaybes)
+import           Data.Maybe        (mapMaybe)
 import           Data.Text         (Text)
 import qualified Data.Text         as T
 import           Data.Version      (showVersion)
@@ -240,7 +241,7 @@ doCpp dflags raw input_fn output_fn = do
 
     -- MIN_VERSION macros
     let uids = explicitPackages (pkgState dflags)
-        pkgs = catMaybes (map (lookupPackage dflags) uids)
+        pkgs = mapMaybe (lookupPackage dflags) uids
     mb_macro_include <-
         if not (null pkgs) && gopt Opt_VersionMacros dflags
             then do macro_stub <- newTempName dflags TFL_CurrentModule "h"
@@ -286,9 +287,10 @@ doCpp dflags raw input_fn output_fn = do
 getBackendDefs :: DynFlags -> IO [String]
 getBackendDefs dflags | hscTarget dflags == HscLlvm = do
     llvmVer <- SysTools.figureLlvmVersion dflags
-    return $ case llvmVer of
-               Just n -> [ "-D__GLASGOW_HASKELL_LLVM__=" ++ format n ]
-               _      -> []
+    return $ case fmap llvmVersionList llvmVer of
+               Just [m] -> [ "-D__GLASGOW_HASKELL_LLVM__=" ++ format (m,0) ]
+               Just (m:n:_) -> [ "-D__GLASGOW_HASKELL_LLVM__=" ++ format (m,n) ]
+               _ -> []
   where
     format (major, minor)
       | minor >= 100 = error "getBackendDefs: Unsupported minor version"

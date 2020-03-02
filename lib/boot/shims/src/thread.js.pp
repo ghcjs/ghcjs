@@ -1310,9 +1310,17 @@ function h$MutVar(v) {
 }
 
 function h$atomicModifyMutVar(mv, fun) {
-  var thunk = MK_AP1(fun, mv.val);
+  var oldVal = mv.val;
+  var thunk = MK_AP1(fun, oldVal);
+  mv.val = thunk;
+  RETURN_UBX_TUP2(oldVal, thunk);
+}
+
+function h$atomicModifyMutVar2(mv, fun) {
+  var oldVal = mv.val;
+  var thunk = MK_AP1(fun, oldVal);
   mv.val = MK_SELECT1(thunk);
-  return MK_SELECT2(thunk);
+  RETURN_UBX_TUP2(oldVal, thunk);
 }
 
 // Black holes and updates

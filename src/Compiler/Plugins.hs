@@ -229,7 +229,7 @@ initPluginsEnv :: DynFlags -> Maybe HscEnv -> IO (Maybe HscEnv, HscEnv)
 initPluginsEnv _ (Just env) = pure (Just env, env)
 initPluginsEnv orig_dflags _ = do
   let trim = let f = reverse . dropWhile isSpace in f . f
-  ghcSettings <- SysTools.initSysTools (Just $ trim GHC.Paths.libdir)
+  ghcSettings <- SysTools.initSysTools (trim GHC.Paths.libdir)
   let removeJsPrefix xs = fromMaybe xs (stripPrefix "js_" xs)
       dflags0 = orig_dflags { settings = ghcSettings }
       dflags1 = gopt_unset dflags0 Opt_HideAllPackages

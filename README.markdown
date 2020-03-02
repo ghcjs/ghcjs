@@ -35,10 +35,9 @@ GHCJS requires the "upstream" emscripten backend, which is the default now. The 
 $ git clone https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init --recursive
-$ ./utils/makePackages.sh
 ```
 
-The `./utils/makePackages.sh` script requires Bash version 4.0 or greater. If you are building on macOS, you will need the gnu version of tar. You can install this with `brew install gnu-tar`, which makes it accessible at `gtar`. The `./utils/makePackages.sh` will automatically pick up on this.
+
 
 ### building the compiler
 
@@ -49,16 +48,16 @@ these packages.
 #### Cabal new-install
 
 After the source tree has been prepared, the package can be installed.
-You may want ensure that binaries (or symlinks) of earlier versions are overwritten:
+You may want ensure that binaries of earlier versions are overwritten:
 
-```
-$ cabal install --overwrite-policy=always
+```{.shell}
+cabal v2-install --overwrite-policy=always --install-method=copy --installdir=inplace
 ```
 
 At the time of writing, `cabal-install` does not support creating symbolic links on Windows, even though this is the default installation method. A workaround is telling it to copy the executables instead:
 
-```
-$ cabal install --overwrite-policy=always --install-method=copy
+```{.shell}
+cabal v1-install --prefix=inplace
 ```
 
 #### v1 style Cabal sandbox
@@ -73,12 +72,12 @@ $ cabal v1-sandbox init
 $ cabal v1-install
 ```
 
-##### stack
+#### stack
 
 or you can use stack:
 
 ```
-$ stack build
+$ stack --system-ghc --skip-ghc-check install --local-bin-dir=inplace/bin
 ```
 
 #### Booting GHCJS
@@ -89,7 +88,7 @@ The `ghcjs-boot` program builds the "boot" libraries, like `ghc-prim`, `base` an
 
 ```
 $ source ~/emsdk/emsdk_env.sh
-$ ghcjs-boot -s ./lib/boot
+$ ./inplace/bin/ghcjs-boot -s ./lib/boot
 ```
 
 ### GHCJS executables and library paths

@@ -1,6 +1,6 @@
-Cabal-Version:  2.0
+Cabal-Version:  2.4
 Name:           ghcjs
-Version:        8.6.0.0.10
+Version:        8.8.0.0.1
 Synopsis:       Haskell to JavaScript compiler
 Description:    Haskell to JavaScript compiler based on GHC
 Category:       compiler, web
@@ -10,12 +10,7 @@ Author:         Victor Nazarov, Hamish Mackenzie, Luite Stegeman
 Copyright:      Victor Nazarov, Hamish Mackenzie, Luite Stegeman
 Maintainer:     Luite Stegeman <stegeman@gmail.com>
 Stability:      Experimental
-Build-Type:     Custom
-
-data-dir:       data
-data-files:     *.tar
-                bin/*.sh
-                bin/*.exe.options
+Build-Type:     Simple
 
 extra-source-files:
                 utils/*.hs
@@ -28,7 +23,9 @@ extra-source-files:
                 README.markdown
                 test/LICENSE
                 test/ghcjs-testsuite.cabal
-                -- stack.yaml
+                stack.yaml
+                cabal.project
+                inplace/bin/README.markdown
 
                 ghc/compiler/Unique.h
                 ghc/compiler/HsVersions.h
@@ -36,14 +33,9 @@ extra-source-files:
                 ghc/compiler/parser/cutils.h
                 ghc/compiler/utils/md5.h
                 ghc/includes/CodeGen.Platform.hs
-                lib/ghc-api-ghcjs/autogen/Config.hs
-                lib/ghc-api-ghcjs/autogen/864/Config.hs
-                lib/ghc-api-ghcjs/autogen/863/Config.hs
-                lib/ghc-api-ghcjs/includes/GHCConstantsHaskellExports.hs
-                lib/ghc-api-ghcjs/includes/GHCConstantsHaskellType.hs
-                lib/ghc-api-ghcjs/includes/GHCConstantsHaskellWrappers.hs
-                lib/ghc-api-ghcjs/includes/*.h
-                lib/ghc-api-ghcjs/includes/*.hs-incl
+                lib/ghc/includes/*.h
+                lib/ghc/includes/*.hs
+                lib/ghc/includes/*.hs-incl
                 ghc/includes/rts/*.h
                 ghc/includes/rts/storage/*.h
                 ghc/includes/MachDeps.h
@@ -70,9 +62,9 @@ source-repository head
 -- for now, we use a custom setup that forces everything to be in the same
 -- component, so ghcjs-boot can find all executables through the
 -- Paths_ghcjs module.
-Custom-Setup
-  Setup-Depends:      base,
-                      Cabal >= 2.4
+-- Custom-Setup
+--  Setup-Depends:      base,
+--                      Cabal >= 2.4
 
 -- only build the library and ghcjs executable
 flag compiler-only
@@ -99,14 +91,13 @@ flag runtime-assertions
   default:     False
   manual:      True
 
--- build against the template haskell package from the host GHC
---  (which must be built with the GHCJS patches)
+--- build against the template haskell package from the host GHC
+---  (which must be built with the GHCJS patches)
 flag use-host-template-haskell
   description: build against template-haskell package from the host GHC
                instead of template-haskell-ghcjs
   default:     True
   manual:      True
-
 
 Library
     Default-Language: Haskell2010
@@ -152,7 +143,6 @@ Library
                      Compiler.JMacro,
                      Compiler.JMacro.Base,
                      Compiler.JMacro.Lens,
-                     Compiler.JMacro.ParseTH,
                      Compiler.JMacro.QQ,
                      Compiler.JMacro.Util,
                      Compiler.JMacro.Combinators,
@@ -197,7 +187,7 @@ Library
                    aeson          >= 1.4      && < 1.5,
                    text           >= 1.2      && < 1.3,
                    wl-pprint-text >= 1.1      && < 1.3,
-                   lens           >= 4.15     && < 4.18,
+                   lens           >= 4.15     && < 4.19,
                    yaml           >= 0.10     && < 0.12,
                    time,
                    transformers,
@@ -212,17 +202,14 @@ Library
                    parallel       >= 3.2      && < 3.3,
                    cryptohash     >= 0.11     && < 0.12,
                    hashable,
-                   optparse-applicative       >= 0.14 && < 0.15,
+                   optparse-applicative       >= 0.14 && < 0.16,
                    stringsearch               >= 0.3 && < 0.4,
                    base16-bytestring          >= 0.1 && < 0.2,
                    base64-bytestring          >= 1.0 && < 1.1,
+                   -- ,
                    -- for JMacro
-                   regex-posix                >= 0.90 && < 0.100,
                    safe                       >= 0.3  && < 0.4,
-                   parsec                     >= 3.1  && < 3.2,
-                   -- fixme haskell-src-exts, bump?
-                   haskell-src-exts           >= 1.20 && < 1.21,
-                   haskell-src-meta           >= 0.6.0.3  && < 0.9
+                   parsec                     >= 3.1  && < 3.2
     exposed: True
     buildable: True
     hs-source-dirs: src
@@ -233,14 +220,7 @@ Library
     if flag(runtime-assertions)
       cpp-options: -DRUNTIME_ASSERTIONS
 
-    build-tool-depends: happy:happy >= 1.19 && < 1.19.10
-
-    if(flag(use-host-template-haskell) || impl(ghcjs))
-        Build-Depends: template-haskell == 2.14.*,
-                       ghci == 8.6.*
-    else
-        Build-Depends: template-haskell-ghcjs == 2.14.*,
-                       ghci-ghcjs == 8.6.*
+    build-tool-depends: happy:happy >= 1.19
 
     Build-Depends: base       >= 4.9 && < 5,
                    deepseq    >= 1.4 && < 1.5,
@@ -248,15 +228,18 @@ Library
                    process    >= 1   && < 1.7,
                    bytestring >= 0.9 && < 0.11,
                    binary     == 0.8.*,
-                   time       >= 1.4 && < 1.9,
+                   time       >= 1.4 && < 1.10,
                    containers >= 0.5 && < 0.7,
                    array      >= 0.1 && < 0.6,
                    filepath   >= 1   && < 1.5,
+                   template-haskell == 2.15.*,
                    hpc        == 0.6.*,
                    transformers == 0.5.*,
-                   ghc-boot   == 8.6.*,
-                   ghc-boot-th == 8.6.*,
-                   ghc-heap   == 8.6.*
+                   ghc-boot   == 8.8.*,
+                   ghc-boot-th == 8.8.*,
+                   ghc-heap   == 8.8.*,
+                   ghci == 8.8.*
+
 
     if os(windows)
         Build-Depends: Win32  >= 2.3 && < 2.7
@@ -267,11 +250,9 @@ Library
 
     GHC-Options: -Wall
                  -Wno-name-shadowing
-                 -fno-warn-orphans
-                 -Wno-orphans
                  -Wnoncanonical-monad-instances
-                 -Wnoncanonical-monadfail-instances
                  -Wnoncanonical-monoid-instances
+                 -Wno-orphans
 
     if flag(debug)
         CPP-Options: -DDEBUG
@@ -320,20 +301,18 @@ Library
             if flag(stage3)
                 CPP-options: -DSTAGE3 -DSTAGE=3
 
-    Install-Includes: ghc/compiler/HsVersions.h, lib/ghc-api-ghcjs/includes/ghc_boot_platform.h
-
+    Install-Includes: ghc/compiler/HsVersions.h
 
     c-sources:
         ghc/compiler/parser/cutils.c
-        -- ghc/compiler/ghci/keepCAFsForGHCi.c
         ghc/compiler/cbits/genSym.c
 
     -- fixme multiple ghc versions support?
-    hs-source-dirs: lib/ghc-api-ghcjs/autogen
+    hs-source-dirs: lib/ghc/autogen
 
     include-dirs:
-        lib/ghc-api-ghcjs/includes
-        lib/ghc-api-ghcjs/autogen
+        lib/ghc/includes
+        lib/ghc/autogen
         ghc/includes
 
     hs-source-dirs:
@@ -361,7 +340,7 @@ Library
         ghc/compiler/typecheck
         ghc/compiler/types
         ghc/compiler/utils
-        lib/ghc-api-ghcjs/autogen
+        ghc/compiler/hieFile
 
     -- we use an explicit Prelude
     Default-Extensions:
@@ -371,6 +350,11 @@ Library
         GhcPrelude
 
     Exposed-Modules:
+        HieTypes
+        HieDebug
+        HieBin
+        HieUtils
+        HieAst
         Ar
         FileCleanup
         DriverBkp
@@ -458,7 +442,6 @@ Library
         CodeGen.Platform.ARM64
         CodeGen.Platform.NoRegs
         CodeGen.Platform.PPC
-        CodeGen.Platform.PPC_Darwin
         CodeGen.Platform.SPARC
         CodeGen.Platform.X86
         CodeGen.Platform.X86_64
@@ -625,6 +608,11 @@ Library
         SimplStg
         StgStats
         StgCse
+        StgLiftLams
+        StgLiftLams.Analysis
+        StgLiftLams.LiftM
+        StgLiftLams.Transformation
+        StgSubst
         UnariseStg
         RepType
         Rules
@@ -633,12 +621,14 @@ Library
         CoreToStg
         StgLint
         StgSyn
+        StgFVs
         CallArity
         DmdAnal
         Exitify
         WorkWrap
         WwLib
         FamInst
+        ClsInst
         Inst
         TcAnnotations
         TcArrows
@@ -675,6 +665,7 @@ Library
         TcTyClsDecls
         TcTyDecls
         TcTypeable
+        TcTypeableValidity
         TcType
         TcEvidence
         TcEvTerm
@@ -725,6 +716,7 @@ Library
         Outputable
         Pair
         Panic
+        PlainPanic
         PprColour
         Pretty
         State
@@ -749,6 +741,8 @@ Library
             TargetReg
             NCGMonad
             Instruction
+            BlockLayout
+            CFG
             Format
             Reg
             RegClass
@@ -820,11 +814,9 @@ Library
             RtClosureInspect
             GHCi
 
-
 -- ghcjs-boot is the only public executable. it is responsible for
 -- copying the other executables in place
-Executable private-ghcjs-ghcjs
-    scope: private
+Executable ghcjs
     Main-Is:        Main.hs
     Default-Language: Haskell2010
     hs-source-dirs: src-bin
@@ -834,8 +826,7 @@ Executable private-ghcjs-ghcjs
 
 -- the package manager, like with the compiler, this executable is called
 -- through a wrapper script
-Executable private-ghcjs-ghcjs-pkg
-    scope: private
+Executable ghcjs-pkg
     if flag(compiler-only)
       Buildable:      False
     Main-Is: Pkg.hs
@@ -867,8 +858,6 @@ Executable ghcjs-boot
       cpp-options: -DWINDOWS
     ghc-options:      -threaded -Wall -fno-warn-orphans -fno-warn-name-shadowing -fno-warn-unused-do-bind -fprof-auto
     Main-Is:          Boot.hs
-    other-modules:    Paths_ghcjs
-    autogen-modules:  Paths_ghcjs
     Default-Language: Haskell2010
     Hs-Source-Dirs:   src-bin
 
@@ -885,19 +874,16 @@ Executable ghcjs-boot
                       aeson,
                       text                 >= 0.11   && < 1.3,
                       bytestring           >= 0.10   && < 0.11,
-                      system-filepath      >= 0.4    && < 0.5,
-                      shelly               >= 1.7    && < 1.9,
-                      system-fileio        >= 0.3    && < 0.4,
-                      optparse-applicative >= 0.11   && < 0.15,
+                      -- shelly               >= 1.9    && < 1.10,
+                      optparse-applicative >= 0.11   && < 0.16,
                       tar                  >= 0.5    && < 0.6,
                       yaml                 >= 0.10   && < 0.12,
                       process              >= 1.2,
-                      time                 >= 1.8    && < 1.10,
+                      time                 >= 1.8    && < 1.11,
                       unix-compat          >= 0.5    && < 0.6,
                       executable-path      >= 0      && < 0.1
 
 Executable private-ghcjs-run
-    scope: private
     if flag(compiler-only)
       Buildable:      False
     if os(Windows)
@@ -912,7 +898,6 @@ Executable private-ghcjs-run
                       filepath
 
 Executable private-ghcjs-wrapper
-    scope: private
     if flag(compiler-only) || !os(Windows)
       Buildable:      False
     Main-Is:          wrapper.c
@@ -929,7 +914,6 @@ Executable private-ghcjs-wrapper
 Executable private-ghcjs-unlit
     if flag(compiler-only)
         Buildable: False
-    scope: private
     Default-Language: Haskell2010
     hs-source-dirs: ghc/utils/unlit
     Main-Is: unlit.c
@@ -939,7 +923,6 @@ Executable private-ghcjs-unlit
 Executable private-ghcjs-touchy
     if flag(compiler-only) || !os(Windows)
         Buildable: False
-    Scope: private
     Default-Language: Haskell2010
     Hs-Source-Dirs: ghc/utils/touchy
     Main-Is: touchy.c
@@ -948,7 +931,6 @@ Executable private-ghcjs-touchy
 Executable private-ghcjs-hsc2hs
     if flag(compiler-only)
       Buildable:      False
-    Scope: private
     Default-Language: Haskell2010
     Hs-Source-Dirs: ghc/utils/hsc2hs
     Cpp-Options: -DPaths_hsc2hs=Paths_ghcjs
@@ -977,12 +959,10 @@ Executable private-ghcjs-hsc2hs
                    process    >= 1.1.0 && < 1.7
 
 -- adapted from ghc/utils/haddock/haddock.cabal
-executable private-ghcjs-haddock
+executable haddock
   if flag(compiler-only)
     Buildable:      False
-  Scope: private
   default-language:     Haskell2010
-  -- main-is:              Main.hs
   -- hs-source-dirs:       ghc/utils/haddock/driver
   -- we use a custom driver that sets up DynFlags for js_hi files etc.
   main-is:              HaddockDriver.hs
@@ -991,11 +971,11 @@ executable private-ghcjs-haddock
 
   -- haddock typically only supports a single GHC major version
   build-depends:
-    base ^>= 4.12.0
+    base ^>= 4.13.0
 
   if true -- was flag(in-ghc-tree)
     hs-source-dirs: ghc/utils/haddock/haddock-api/src,  ghc/utils/haddock/haddock-library/src
-    cpp-options: -DIN_GHC_TREE -DPaths_haddock=Paths_ghcjs "-DMIN_VERSION_ghc(mj1,mj2,mn)=((mj1)<8||(mj1)==8&&(mj2)<6||(mj1)==8&&(mj2)==6&&(mn)<=5)"
+    cpp-options: -DIN_GHC_TREE -DPaths_haddock=Paths_ghcjs "-DMIN_VERSION_ghc(mj1,mj2,mn)=((mj1)<8||(mj1)==8&&(mj2)<8||(mj1)==8&&(mj2)==8&&(mn)<=1)"
     build-depends:
       filepath,
       directory,
@@ -1005,7 +985,7 @@ executable private-ghcjs-haddock
       xhtml >= 3000.2 && < 3000.3,
       Cabal >= 1.10,
       ghc-boot,
-      ghcjs == 8.6.*,
+      ghcjs == 8.8.*,
       bytestring,
       parsec,
       text,
@@ -1014,9 +994,9 @@ executable private-ghcjs-haddock
     other-modules:
       Documentation.Haddock.Parser
       Documentation.Haddock.Parser.Monad
+      Documentation.Haddock.Parser.Identifier
       Documentation.Haddock.Types
       Documentation.Haddock.Doc
-      Documentation.Haddock.Utf8
       Documentation.Haddock.Parser.Util
       Documentation.Haddock.Markup
 
@@ -1046,7 +1026,6 @@ executable private-ghcjs-haddock
       Haddock.Backends.HaddockDB
       Haddock.Backends.Hoogle
       Haddock.Backends.Hyperlinker
-      Haddock.Backends.Hyperlinker.Ast
       Haddock.Backends.Hyperlinker.Parser
       Haddock.Backends.Hyperlinker.Renderer
       Haddock.Backends.Hyperlinker.Types
@@ -1066,8 +1045,7 @@ executable private-ghcjs-haddock
     Autogen-Modules:
       Paths_ghcjs
 
-Executable private-ghcjs-ghcjs-dumparchive
-    scope: private
+Executable ghcjs-dumparchive
     if flag(compiler-only)
       Buildable:      False
     if os(Windows)
@@ -1111,8 +1089,7 @@ test-suite test
                       test-framework       >= 0.8,
                       test-framework-hunit >= 0.3,
                       HUnit                >= 1.6 && < 1.7,
-                      system-filepath      >= 0.4 && < 0.5,
-                      system-fileio        >= 0.3 && < 0.4,
+                      filepath,
                       text,
                       transformers,
                       lens,
@@ -1121,13 +1098,13 @@ test-suite test
                       bytestring,
                       deepseq,
                       unordered-containers,
-                      shelly               >= 1.5 &&  < 1.9,
+                      shelly               >= 1.9 &&  < 1.10,
                       data-default         >= 0.7 &&  < 0.8,
                       yaml                 >= 0.10 && < 0.12,
                       optparse-applicative,
                       directory,
                       http-types           >= 0.11 &&  < 0.13,
-                      warp                 >= 3.0  &&  < 3.3,
+                      warp                 >= 3.0  &&  < 3.4,
                       wai                  >= 3.0  &&  < 3.3,
                       wai-extra            >= 3.0  &&  < 3.1,
                       wai-app-static       >= 3.0  &&  < 3.2,
@@ -1165,36 +1142,4 @@ Flag terminfo
     Description: Build GHC with terminfo support on non-Windows platforms.
     Default: True
     Manual: True
-
--- build against the template haskell package from the host GHC
---  (which must be built with the GHCJS patches)
--- flag use-host-template-haskell
---  description: build against template-haskell package from the host GHC
---               instead of template-haskell-ghcjs
---  default:     False
---  manual:      True
-
-
---library ghcjs-th-internal
---  buildable: False
---  hs-source-dirs: lib/ghcjs-th
---  exposed-modules: GHCJS.Prim.TH.Eval
---                   GHCJS.Prim.TH.Serialized
---                   GHCJS.Prim.TH.Types
-
---  build-depends:       base             >= 4 && < 5,
---                       ghc-prim,
---                       binary,
---                       bytestring,
---                       containers
---  if impl(ghcjs) || flag(use-host-template-haskell)
---    build-depends:     template-haskell >= 2.12 && < 2.15,
---                       ghci
---  else
---    build-depends:     template-haskell-ghcjs,
---                       ghci-ghcjs
-
---  default-language:    Haskell2010
-  -- ghc-options: -O2
---  cpp-options: -DBOOTING_PACKAGE=ghcjs-th
 

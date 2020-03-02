@@ -206,9 +206,9 @@ liveVarsS :: Traversal' JStat Ident
 liveVarsS f s = (statExprs . liveVarsE) f s
 
 liveVarsE :: Traversal' JExpr Ident
-liveVarsE f (ValExpr (JVar i))     = ValExpr . JVar <$> f i
-liveVarsE _ v@(ValExpr (JFunc {})) = pure v
-liveVarsE f e                      = template (liveVarsE f) e
+liveVarsE f (ValExpr (JVar i))   = ValExpr . JVar <$> f i
+liveVarsE _ v@(ValExpr JFunc {}) = pure v
+liveVarsE f e                    = template (liveVarsE f) e
 
 ----------------------------------------------------------
 
@@ -269,7 +269,7 @@ dataflow = thisFunction . nestedFuns %~ f
             g1 :: Graph'
             g1 = normalizeAnnot c g0
             args' :: IdSet
-            args' = IS.fromList $ catMaybes (map (lookupId g0) args)
+            args' = IS.fromList $ mapMaybe (lookupId g0) args
             locals = localVarsGraph g0
             ung _ g = (args, unCfg g)
             -- ung _ g = (args, [j| if(runOptimized) { `unCfg g` } else { `stat` } |]) -- use this for utils/testOptimizer.hs
@@ -432,7 +432,7 @@ constants args locals c g = g & nodes %~ IM.mapWithKey rewriteNode
     -- apply our facts to an expression
     propagateExpr :: CVals -> Bool -> AExpr' -> AExpr'
     propagateExpr CUnreached _isCond ae = ae
-    propagateExpr cv@(CReached{}) isCond ae
+    propagateExpr cv@CReached{} isCond ae
       | not hasKnownDeps = ae
       | e@(ApplE (ValE _) args) <- fromA ae = annotate c . normalize isCond c g $
           propagateExpr' (maybe (CReached IM.empty) (`deleteConstants` cv) (IS.unions <$> mapM (mutated c) args)) e
@@ -467,7 +467,7 @@ constantsFacts lfs c g = {- dumpFacts g $ -} foldForward combineConstants f0 (CR
              , fSwitch  = switched
              , fReturn  = removeMutated1
              , fForIn   = \_ _ -> removeMutated1t
-             , fSimple  = \nid s m -> simple nid s m
+             , fSimple  = simple -- \nid s m -> simple nid s m
              , fTry     = \_ x -> (x, CReached IM.empty, CReached IM.empty)
              }
     usedOnce :: NodeId -> Id -> Bool
@@ -478,7 +478,7 @@ constantsFacts lfs c g = {- dumpFacts g $ -} foldForward combineConstants f0 (CR
     switched _ e es m = let m' = removeMutated e m in (replicate (length es) m', m')
     simple :: NodeId -> SimpleStat' -> CVals -> CVals
     simple _ _ CUnreached = CUnreached
-    simple _   (DeclS{}) m = m
+    simple _   DeclS{} m = m
     simple _   (ExprS e) m = removeMutated e m
     simple nid (AssignS e1 e2) m
        | (ValE (Var i)) <- fromA e1, (ValE (IntV _))                <- fromA e2 = IM.insert i (CKnown e2 True) %% dc i m'
@@ -555,7 +555,7 @@ mutated c expr = foldl' f (Just IS.empty) (universeOf tinplate expr)
     -- f s (SelE {})                  = s -- fixme might not be true with properties
     -- f s (BOpE{})                   = s
     -- f s (IdxE{})                   = s
-    f s (ValE{})                   = s
+    f s ValE{}                     = s
     f _ _                          = Nothing
     knownMutated i
       | isKnownPureFun c i         = Just IS.empty
@@ -568,7 +568,7 @@ mutated' c a = IS.unions <$> (mapM (mutated c) $ a ^.. tinplate)
 
 -- common RTS functions that we know touch only a few global variables
 knownFuns :: Graph a -> IntMap IdSet
-knownFuns g = IM.fromList . catMaybes . map f $
+knownFuns g = IM.fromList . mapMaybe f $
                [ ("h$bh", [ "h$r1" ])
                ] ++ map (\n -> ("h$p"  <> T.pack (show n), ["h$stack", "h$sp"])) [(1::Int)..32]
                  ++ map (\n -> ("h$pp" <> T.pack (show n), ["h$stack", "h$sp"])) [(1::Int)..255]
@@ -577,7 +577,7 @@ knownFuns g = IM.fromList . catMaybes . map f $
 
 -- pure RTS functions that we know we can safely move around or remove
 knownPureFuns :: Graph a -> IdSet
-knownPureFuns g = IS.fromList $ catMaybes (map (lookupId g) knownPure)
+knownPureFuns g = IS.fromList $ mapMaybe (lookupId g) knownPure
   where
     knownPure = map (TxtI . T.pack . ("h$"++)) $
           ("c" : map (('c':).show) [(1::Int)..32]) ++
@@ -602,12 +602,12 @@ mightHaveSideeffects' = aSideEffects . getAnnot
 mightHaveSideeffects :: Cache -> Expr -> Bool
 mightHaveSideeffects c e = any f (universeOf template e)
   where
-    f (ValE{})          = False
-    f (SelE{})          = False  -- might be wrong with defineProperty
-    f (IdxE{})          = False
-    f (BOpE{})          = False
+    f ValE{}            = False
+    f SelE{}            = False  -- might be wrong with defineProperty
+    f IdxE{}            = False
+    f BOpE{}            = False
     f (UOpE op _ )  = op `S.member` sideEffectOps
-    f (CondE{})         = False
+    f CondE{}           = False
     f (ApplE (ValE (Var i)) _) | isKnownPureFun c i = False
     f _                 = True
     sideEffectOps = S.fromList [DeleteOp, NewOp, PreInc, PostInc, PreDec, PostDec]
@@ -850,7 +850,7 @@ propagateStack _args _locals c g
     z      = SFOffset 0
 
     allNodes = IM.elems (g ^. nodes)
-    nrets = length [() | (ReturnNode{}) <- allNodes]
+    nrets = length [() | ReturnNode{} <- allNodes]
     stackAccess = length $ filter (stackI `IS.member`) (map exprDeps (allNodes ^.. template))
 
     sf = stackFacts c g
@@ -869,11 +869,11 @@ propagateStack _args _locals c g
       | known nid && unknown n1 = replace nid e g
     updNode nid e@(TryNode _ _ _ _) g
       | known nid = replace nid e g
-    updNode nid e@(ReturnNode{}) g
+    updNode nid e@ReturnNode{} g
       | known nid = replace nid e g
-    updNode nid e@(SimpleNode{}) g
+    updNode nid e@SimpleNode{} g
       | known nid && sfUnknown (lookupFact SFUnknownB nid 1 sf) = replace nid e g -- fixme is this right?
-    updNode nid   (SimpleNode{}) g
+    updNode nid   SimpleNode{} g
       | SFOffset x <- lookupFact SFUnknownB nid 0 sf,
         SFOffset y <- lookupFact SFUnknownB nid 1 sf,
          x /= y = nodes %~ IM.insert nid (SequenceNode []) $ g
@@ -935,7 +935,7 @@ stackFacts c g = foldForward combineStack f0 (SFOffset 0) SFUnknownB g
 
     updSf' :: SimpleStat' -> StackFacts -> StackFacts
     updSf' _ SFUnknownT = SFUnknownT
-    updSf' (DeclS {}) sf = sf
+    updSf' DeclS{} sf = sf
     updSf' (ExprS e) sf
       | Just s <- mutated c (fromA e),  spI `IS.notMember` s = sf
     updSf' (AssignS e1 e2) sf

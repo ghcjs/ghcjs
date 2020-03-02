@@ -1,6 +1,3 @@
 
 packages: ghcjs.cabal
-          lib/ghci-ghcjs/*.cabal
           lib/ghcjs-th/*.cabal
-          lib/haddock-library-ghcjs/*.cabal
-          lib/template-haskell-ghcjs/*.cabal

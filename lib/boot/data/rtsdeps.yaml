@@ -29,7 +29,7 @@ ghc-prim:
     - "(,,,,,,,)"
     - "(,,,,,,,,)"
     - "(,,,,,,,,,)"
-integer-gmp:
+integer-wired-in:
   GHC.Integer.Type:
     - "S#"
     - "Jp#"

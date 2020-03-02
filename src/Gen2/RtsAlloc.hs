@@ -79,7 +79,7 @@ allocDynAll s haveDecl middle cls = makeObjs <> return middle' <> return fillObj
               e i .^ "d1" |= ex #
               e i .^ "d2" |= fillFun es
 
-    fillFun [] = ValExpr (JVar (TxtI (T.pack "null")))
+    fillFun [] = null_ -- ValExpr (JVar (TxtI (T.pack "null")))
 
 
     -- [je| null |]

@@ -1,2 +1,2 @@
 js:
-  - pkg/unix.js
+  - pkg/unix.js.pp

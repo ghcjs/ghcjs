@@ -1,5 +1,6 @@
 /dist
 /dist-newstyle
+/inplace
 /.ghc.environment.*
 /cabal.project.local
 /lib/boot/pkg/
@@ -19,6 +20,7 @@
 /GNUmakefile
 TAGS
 cabal.sandbox.config
+*.old
 *.js_hi
 *.hi
 *.o

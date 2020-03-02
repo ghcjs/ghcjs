@@ -44,7 +44,8 @@ math_ :: Text -> [JExpr] -> JExpr
 math_ op args = math .^ op .$ args
 
 math_log, math_sin, math_cos, math_tan, math_exp, math_acos, math_asin, math_atan,
-  math_abs, math_pow, math_sign, math_sqrt :: [JExpr] -> JExpr
+  math_abs, math_pow, math_sign, math_sqrt, math_asinh, math_acosh, math_atanh
+  :: [JExpr] -> JExpr
 math_log  = math_ "log"
 math_sin  = math_ "sin"
 math_cos  = math_ "cos"
@@ -57,6 +58,9 @@ math_abs  = math_ "abs"
 math_pow  = math_ "pow"
 math_sign = math_ "sign"
 math_sqrt = math_ "sqrt"
+math_asinh = math_ "asinh"
+math_acosh = math_ "acosh"
+math_atanh = math_ "atanh"
 
 (.^) :: JExpr -> Text -> JExpr
 x .^ p = SelExpr x (TxtI p)

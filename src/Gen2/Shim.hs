@@ -44,7 +44,7 @@ import           Data.Text (Text)
 import           Data.Aeson
 import qualified Data.Yaml       as Yaml
 
-import           System.FilePath ((<.>), (</>))
+import           System.FilePath ((<.>), (</>), isExtensionOf)
 import           System.Directory (doesFileExist, canonicalizePath)
 
 import           Text.Parsec
@@ -107,18 +107,29 @@ collectShims base pkgs = do
 
 tryReadShimFile :: DynFlags -> FilePath -> IO B.ByteString
 tryReadShimFile dflags file = do
-  exists <- doesFileExist file
-  if not exists
-    then putStrLn ("warning: " <> file <> " does not exist") >> return mempty
-    else do
+  -- exists <- doesFileExist file
+  -- if not exists
+  --  then panic ("warning: " <> file <> " does not exist") -- fixme how to raise a proper error here? -- >> return mempty
+  --  else do
       let s = settings dflags
           s1 = s { sPgm_P = (fst (sPgm_P s), jsCppPgmOpts (snd $ sPgm_P s))
                  , sOpt_P = jsCppOpts (sOpt_P s)
                  }
           dflags1 = dflags { settings = s1 }
-      outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
-      Utils.doCpp dflags1 True file outfile
-      B.readFile outfile
+      if needsCpp file
+      then do
+        outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
+        Utils.doCpp dflags1 True file outfile
+        B.readFile outfile
+      else B.readFile file
+
+{-
+   running the C preprocessor on JS files is a bit fragile
+   and breaks in some situations. Therefore we only preprocess
+   files with .pp extension, for example lib.js.pp
+ -}
+needsCpp :: FilePath -> Bool
+needsCpp file = "pp" `isExtensionOf` file
 
 -- suppress line numbers and enable extended syntax
 jsCppPgmOpts :: [Option] -> [Option]
@@ -143,12 +154,15 @@ readShimsArchive dflags archive = do
                   , sOpt_P = jsCppOpts (Ar.metaCppOptions meta ++ sOpt_P s)
                   }
       dflags1 = dflags { settings = s1 }
-  srcs' <- forM srcs $ \(_filename, b) -> do
-    infile  <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
-    outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
-    BL.writeFile infile b
-    Utils.doCpp dflags1 True infile outfile
-    B.readFile outfile
+  srcs' <- forM srcs $ \(filename, b) ->
+    if needsCpp filename
+    then do
+      infile  <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
+      outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
+      BL.writeFile infile b
+      Utils.doCpp dflags1 True infile outfile
+      B.readFile outfile
+    else pure (BL.toStrict b)
   return (mconcat srcs')
 
 readShim :: FilePath -> (Pkg, Version) -> IO (Maybe Shim)

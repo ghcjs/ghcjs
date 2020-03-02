@@ -2,8 +2,7 @@
              GADTs,
              ScopedTypeVariables,
              ImpredicativeTypes,
-             OverloadedStrings,
-             TupleSections
+             OverloadedStrings
   #-}
 module Compiler.GhcjsHooks where
 
@@ -163,7 +162,7 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
                    PipeState{hsc_env=hsc_env'} <- getPipeState
                    let input_fn = expectJust "runPhase" (ml_hs_file location)
                        basename = dropExtension input_fn
-		   -- fixme do we need to create a js_o file here?
+                   -- fixme do we need to create a js_o file here?
                    -- liftIO $ compileEmptyStub dflags hsc_env' basename location
                    return (RealPhase next_phase, o_file)
             HscRecomp cgguts mod_summary
@@ -222,7 +221,7 @@ ghcjsCompileModule :: GhcjsSettings
                    -> ModSummary
                    -> IO B.ByteString
 -- dynamic-too will invoke this twice, cache results in GhcjsEnv
-ghcjsCompileModule settings jsEnv env core mod = do
+ghcjsCompileModule settings jsEnv env core mod =
   ifGeneratingDynamicToo dflags genDynToo genOther
   where
     genDynToo = do
@@ -230,7 +229,7 @@ ghcjsCompileModule settings jsEnv env core mod = do
       modifyMVar_ cms (return . M.insert mod' result)
       return result
     genOther =
-      join $ modifyMVar cms $ \m -> do
+      join $ modifyMVar cms $ \m ->
         case M.lookup mod' m of
           Nothing -> return (m, compile)
           Just r  -> return (M.delete mod' m, return r)
@@ -244,7 +243,7 @@ ghcjsCompileModule settings jsEnv env core mod = do
                                               (cg_binds core)
                                               (cg_tycons core)
       let (stg, (caf_ccs, caf_cc_stacks)) = coreToStg dflags mod' prepd_binds
-      stg' <- stg2stg dflags stg
+      stg' <- stg2stg dflags mod' stg
       let cost_centre_info =
             (S.toList local_ccs ++ caf_ccs, caf_cc_stacks)
       return $ variantRender gen2Variant settings dflags mod' stg' (cg_spt_entries core) cost_centre_info

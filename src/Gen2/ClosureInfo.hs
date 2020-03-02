@@ -215,7 +215,11 @@ primRepVt VoidRep     = VoidV
 primRepVt LiftedRep   = PtrV -- fixme does ByteArray# ever map to this?
 primRepVt UnliftedRep = RtsObjV
 primRepVt IntRep      = IntV
+primRepVt Int8Rep     = IntV
+primRepVt Int16Rep    = IntV
 primRepVt WordRep     = IntV
+primRepVt Word8Rep    = IntV
+primRepVt Word16Rep   = IntV
 primRepVt Int64Rep    = LongV
 primRepVt Word64Rep   = LongV
 primRepVt AddrRep     = AddrV
@@ -259,6 +263,10 @@ primTypeVt t = case tyConAppTyCon_maybe (unwrapType t) of
     | st == pr "Int64#"              = LongV
     | st == pr "Char#"               = IntV
     | st == pr "Word#"               = IntV
+    | st == pr "Word8#"              = IntV
+    | st == pr "Word16#"             = IntV
+    | st == pr "Int8#"               = IntV
+    | st == pr "Int16#"              = IntV
     | st == pr "Word64#"             = LongV
     | st == pr "Double#"             = DoubleV
     | st == pr "Float#"              = DoubleV

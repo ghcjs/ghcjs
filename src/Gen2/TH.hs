@@ -221,7 +221,7 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
       (spt_entries, th_binds1) <- sptCreateStaticBinds hsc_env th_mod th_binds0
       let (stg_pgm0, cost_centre_info) =
             coreToStg dflags th_mod th_binds1
-      stg_pgm1 <- stg2stg dflags stg_pgm0
+      stg_pgm1 <- stg2stg dflags th_mod stg_pgm0
       return (Gen2.generate js_settings
                             dflags
                             (mod n)
@@ -254,11 +254,12 @@ getThRunner js_env hsc_env dflags m = do
       Just r  -> return (runners, (r, return ()))
       Nothing -> do
         (r, runners') <- startTHRunner dflags js_env hsc_env runners
-        let fin = do
+        let fin = pure () {- fixme add cleanup again
+               do
               th_modfinalizers_var <- fmap tcg_th_modfinalizers
                                            getGblEnv
               writeTcRef th_modfinalizers_var
-                         [TH.qRunIO (finishTHModule dflags js_env  m' r)]
+                         [TH.qRunIO (finishTHModule dflags js_env  m' r)] -}
         return (insertActiveRunner m' r runners', (r, fin))
   fin >> return r
 
@@ -283,9 +284,10 @@ bootObject js_settings dflags m details =
       mk_decl_ty _ _                            = Nothing
       mk_decl_id _ i = Just
         (StgTopLifted (
-         (StgNonRec i (StgRhsClosure dontCareCCS
-                                   noBinderInfo
-                                   []
+         (StgNonRec i (StgRhsClosure noExtSilent
+                                     dontCareCCS
+                                   -- noBinderInfo
+                                   -- []
                                    ReEntrant
                                    []
                                     (StgApp i [])))))
@@ -465,7 +467,7 @@ endRecover recoveryTaken (thrRecover -> r) = do
   where
     unionMessages (wm1, em1) (wm2, em2) = (unionBags wm1 wm2, unionBags em1 em2)
 
-finishTHModule :: DynFlags -> GhcjsEnv -> String -> THRunner -> IO ()
+finishTHModule :: DynFlags -> GhcjsEnv -> String -> THRunner -> IO ThModFinalizers
 finishTHModule dflags js_env m runner = do
   mr <- finishTHp js_env False m runner
   ns <- readNodeSettings dflags
@@ -473,6 +475,7 @@ finishTHModule dflags js_env m runner = do
   if (fromIntegral mr > nodeKeepAliveMaxMem ns)
     then void $ finishTHp js_env True m runner
     else modifyMVar_ ( thRunners js_env ) ( pure . consIdleRunner runner )
+  pure (ThModFinalizers []) -- fixme is this right?
 
 finishTHp :: GhcjsEnv -> Bool -> String -> THRunner -> IO Int
 finishTHp _js_env endProcess _m runner = do

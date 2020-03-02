@@ -163,7 +163,7 @@ dsCImport id co (CLabel cid) cconv _ _ = do
    (_resTy, foRhs) <- resultWrapper ty
    -- ASSERT(fromJust resTy `eqType` addrPrimTy)    -- typechecker ensures this
    let
-        rhs = foRhs (Lit (MachLabel cid stdcall_info fod))
+        rhs = foRhs (Lit (LitLabel cid stdcall_info fod))
         rhs' = Cast rhs co
         stdcall_info = fun_type_arg_stdcall_info dflags cconv ty
    return ([(id, rhs')], empty, empty)
@@ -202,7 +202,7 @@ dsFCall :: Id -> Coercion -> ForeignCall -> Maybe Header
 dsFCall fn_id co fcall mDeclHeader = do
     let
         ty                   = pFst $ coercionKind co
-        (tv_bndrs, rho)      = tcSplitForAllTyVarBndrs ty
+        (tv_bndrs, rho)      = tcSplitForAllVarBndrs ty
         (arg_tys, io_res_ty) = tcSplitFunTys rho
 
     args <- newSysLocalsDs arg_tys  -- no FFI levity-polymorphism
@@ -440,8 +440,8 @@ dsFExportDynamic id co0 cconv = do
          -}
         adj_args      = [ mkIntLit dflags (toInteger (ccallConvToInt cconv))
                         , Var stbl_value
-                        , Lit (MachLabel fe_nm mb_sz_args IsFunction)
-                        , Lit (mkMachString typestring)
+                        , Lit (LitLabel fe_nm mb_sz_args IsFunction)
+                        , Lit (mkLitString typestring)
                         ]
           -- name of external entry point providing these services.
           -- (probably in the RTS.)

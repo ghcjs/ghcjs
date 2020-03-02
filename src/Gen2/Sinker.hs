@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Gen2.Sinker (sinkPgm) where
 
 import UniqSet
@@ -61,14 +63,14 @@ sinkPgm' m pgm =
 -}
 alwaysSinkable :: StgBinding -> [(Id, StgExpr)]
 alwaysSinkable (StgNonRec b rhs)
-  | (StgRhsClosure _ccs _bi _ _upd _srt e@(StgLit l)) <- rhs,
+  | (StgRhsClosure _ _ _ _ e@(StgLit l)) <- rhs,
      isSmallSinkableLit l && isLocal b = [(b,e)]
   | (StgRhsCon _ccs dc as@[StgLitArg l]) <- rhs,
      isSmallSinkableLit l && isLocal b && isUnboxableCon dc = [(b,StgConApp dc as [])]
 alwaysSinkable _ = []
 
 isSmallSinkableLit :: Literal -> Bool
-isSmallSinkableLit (MachChar c)      = ord c < 100000
+isSmallSinkableLit (LitChar c)       = ord c < 100000
 isSmallSinkableLit (LitNumber _ i _) = i > -100000 && i < 100000
 isSmallSinkableLit _                 = False
 
@@ -82,7 +84,7 @@ onceSinkable _m (StgNonRec b rhs)
   where
     getSinkable (StgRhsCon _ccs dc args)
       = Just (StgConApp dc args [])
-    getSinkable (StgRhsClosure _ccs _bi _ _upd _ e@(StgLit{}))
+    getSinkable (StgRhsClosure _ _ _ _ e@(StgLit{}))
       = Just e
     getSinkable _ = Nothing
 onceSinkable _ _ = []
@@ -119,8 +121,8 @@ foldArgs f (StgRec bs)     =
   StgRec <$> sequenceA (map (\(b,r) -> (,) b <$> foldArgsR f r) bs)
 
 foldArgsR :: Fold StgRhs Id
-foldArgsR f (StgRhsClosure x0 x1 x2 x3 x4 e) =
-  StgRhsClosure x0 x1 x2 x3 x4 <$> foldArgsE f e
+foldArgsR f (StgRhsClosure x0 x1 x2 x3 e) =
+  StgRhsClosure x0 x1 x2 x3 <$> foldArgsE f e
 foldArgsR f (StgRhsCon x y args)                =
   StgRhsCon x y <$> (traverse . foldArgsA) f args
 
@@ -133,8 +135,8 @@ foldArgsE f (StgCase e b a alts) =
   StgCase <$> foldArgsE f e
           <*> pure b <*> pure a
           <*> sequenceA (map (\(ac,bs,e) -> (,,) ac bs <$> foldArgsE f e) alts)
-foldArgsE f (StgLet b e)               = StgLet <$> foldArgs f b <*> foldArgsE f e
-foldArgsE f (StgLetNoEscape b e)       = StgLetNoEscape <$> foldArgs f b <*> foldArgsE f e
+foldArgsE f (StgLet x b e)             = StgLet x <$> foldArgs f b <*> foldArgsE f e
+foldArgsE f (StgLetNoEscape x b e)     = StgLetNoEscape x <$> foldArgs f b <*> foldArgsE f e
 foldArgsE f (StgTick i e)              = StgTick i <$> foldArgsE f e
 foldArgsE _ e                          = pure e
 

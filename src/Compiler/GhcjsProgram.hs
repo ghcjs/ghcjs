@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables, LambdaCase, MultiWayIf, TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables, MultiWayIf, TupleSections #-}
 {-
   The GHCJS-specific parts of the frontend (ghcjs program)
 
@@ -193,7 +193,7 @@ bootstrapFallback = do
       getOutput (_:xs)     = getOutput xs
 
 installExecutable :: DynFlags -> GhcjsSettings -> [String] -> IO ()
-installExecutable dflags settings srcs = do
+installExecutable dflags settings srcs =
     case (srcs, outputFile dflags) of
         ([from], Just to) -> do
           let v = fromMaybe deafening . intToVerbosity $ verbosity dflags
@@ -226,9 +226,9 @@ generateLib _settings = do
   dflags1 <- getSessionDynFlags
   liftIO $ do
     (dflags2, pkgs0) <- initPackages dflags1
-    let pkgs = catMaybes $ map (\p -> fmap (T.pack (getInstalledPackageName dflags2 p),)
-                                           (getInstalledPackageVersion dflags2 p))
-                               pkgs0
+    let pkgs = mapMaybe (\p -> fmap (T.pack (getInstalledPackageName dflags2 p),)
+                                    (getInstalledPackageVersion dflags2 p))
+                        pkgs0
         base = getDataDir (getLibDir dflags2) </> "shims"
         pkgs' :: [(T.Text, Version)]
         pkgs' = M.toList $ M.fromListWith max pkgs

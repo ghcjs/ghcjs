@@ -38,10 +38,10 @@ function h$hs_spt_keys(tgt_d, tgt_o, n) {
     return Math.min(n,ks.length);
 }
 
-function h$hs_spt_lookup(key_d, key_o) {
-    var i3 = key_d.i3, o = key_o >> 2;
+function h$hs_spt_lookup(key1,key2,key3,key4) {
+    // var i3 = key_d.i3, o = key_o >> 2;
     // h$log("hs_spt_lookup");
-    RETURN_UBX_TUP2(h$hs_spt_lookup_key(i3[o+1],i3[o],i3[o+3],i3[o+2]), 0);
+    RETURN_UBX_TUP2(h$hs_spt_lookup_key(key1,key2,key3,key4), 0);
 }
 
 function h$hs_spt_lookup_key(key1,key2,key3,key4) {

@@ -54,7 +54,6 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import Data.Data
 import Data.Hashable (Hashable)
-import Data.Monoid (Monoid, mappend, mempty)
 
 import GHC.Generics
 
@@ -101,11 +100,6 @@ takeOne = do
       put xs
       return x
     _ -> error "takeOne: empty list"
-{-
-  (x:xs) <- get
-  put xs
-  return x
--}
 
 newIdentSupply :: Maybe Text -> [Ident]
 newIdentSupply Nothing     = newIdentSupply (Just "jmId")
@@ -138,7 +132,6 @@ data JStat = DeclStat   Ident
            | UOpStat JUOp JExpr
            | AssignStat JExpr JExpr
            | UnsatBlock (IdentSupply JStat)
-           | AntiStat   Text
            | LabelStat JsLabel JStat
            | BreakStat (Maybe JsLabel)
            | ContinueStat (Maybe JsLabel)
@@ -169,11 +162,10 @@ data JExpr = ValExpr    JVal
            | SelExpr    JExpr Ident
            | IdxExpr    JExpr JExpr
            | InfixExpr  JOp JExpr JExpr
-           | UOpExpr JUOp JExpr
+           | UOpExpr    JUOp JExpr
            | IfExpr     JExpr JExpr JExpr
            | ApplExpr   JExpr [JExpr]
            | UnsatExpr  (IdentSupply JExpr)
-           | AntiExpr   Text
              deriving (Eq, Ord, Show, Data, Typeable, Generic)
 
 instance NFData JExpr
@@ -313,7 +305,6 @@ expr2stat :: JExpr -> JStat
 expr2stat (ApplExpr x y) = (ApplStat x y)
 expr2stat (IfExpr x y z) = IfStat x (expr2stat y) (expr2stat z)
 expr2stat (UOpExpr o x) = UOpStat o x
-expr2stat (AntiExpr x) = AntiStat x
 expr2stat _ = nullStat
 
 {--------------------------------------------------------------------
@@ -386,7 +377,6 @@ jmcompos ret app f' v =
            UOpStat o e -> ret (UOpStat o) `app` f e
            AssignStat e e' -> ret AssignStat `app` f e `app` f e'
            UnsatBlock _ -> ret v'
-           AntiStat _ -> ret v'
            ContinueStat l -> ret (ContinueStat l)
            BreakStat l -> ret (BreakStat l)
            LabelStat l s -> ret (LabelStat l) `app` f s
@@ -399,7 +389,6 @@ jmcompos ret app f' v =
            IfExpr e e' e'' -> ret IfExpr `app` f e `app` f e' `app` f e''
            ApplExpr e xs -> ret ApplExpr `app` f e `app` mapM' f xs
            UnsatExpr _ -> ret v'
-           AntiExpr _ -> ret v'
      JMGVal v' -> ret JMGVal `app` case v' of
            JVar i -> ret JVar `app` f i
            JList xs -> ret JList `app` mapM' f xs
@@ -646,7 +635,6 @@ defRenderJsS r (UOpStat op x)
         | isPre op && isAlphaOp op = text (uOpText op) <+> optParens r x
         | isPre op = text (uOpText op) <> optParens r x
         | otherwise = optParens r x <> text (uOpText op)
-defRenderJsS _ AntiStat{} = error "defRenderJsS: AntiStat"
 defRenderJsS r (BlockStat xs) = jsToDocR r (flattenBlocks xs)
 
 flattenBlocks :: [JStat] -> [JStat]
@@ -670,8 +658,6 @@ defRenderJsE r (UOpExpr op x)
         | isPre op = text (uOpText op) <> optParens r x
         | otherwise = optParens r x <> text (uOpText op)
 defRenderJsE r (ApplExpr je xs) = jsToDocR r je <> (parens . fillSep . punctuate comma $ map (jsToDocR r) xs)
-defRenderJsE _ AntiExpr{} = error "defRenderJsE: AntiExpr" -- text . TL.fromChunks $ ["`(", s, ")`"]
-
 defRenderJsE r (UnsatExpr e) = jsToDocR r $ sat_ e
 
 defRenderJsV :: RenderJs -> JVal -> Doc
@@ -763,15 +749,7 @@ instance (ToJExpr a, ToJExpr b, ToJExpr c, ToJExpr d, ToJExpr e) => ToJExpr (a,b
     toJExpr (a,b,c,d,e) = ValExpr . JList $ [toJExpr a, toJExpr b, toJExpr c, toJExpr d, toJExpr e]
 instance (ToJExpr a, ToJExpr b, ToJExpr c, ToJExpr d, ToJExpr e, ToJExpr f) => ToJExpr (a,b,c,d,e,f) where
     toJExpr (a,b,c,d,e,f) = ValExpr . JList $ [toJExpr a, toJExpr b, toJExpr c, toJExpr d, toJExpr e, toJExpr f]
-{-
-instance Num JExpr where
-    fromInteger = ValExpr . JInt . fromIntegral
-    x + y = InfixExpr AddOp x y
-    x - y = InfixExpr SubOp x y
-    x * y = InfixExpr MulOp x y
-    abs x = ApplExpr (jsv "Math.abs") [x]
-    signum x = IfExpr (InfixExpr GtOp x 0) 1 (IfExpr (InfixExpr EqOp x 0) 0 (-1))
--}
+
 {--------------------------------------------------------------------
   Block Sugar
 --------------------------------------------------------------------}
@@ -814,21 +792,6 @@ jVar f = UnsatBlock . IS $ do
                   BlockStat $ map DeclStat is ++ ss
                addDecls x = x
            return $ addDecls block
-
-
--- | Introduce a new variable with optional type into scope for the duration
--- of the enclosed expression. The result is a block statement.
--- Usage:
--- @jVar $ \ x y -> {JExpr involving x and y}@
-{-
-jVarTy :: ToSat a => a -> {- Maybe JLocalType -> -} JStat
-jVarTy f {- t -} = UnsatBlock . IS $ do
-           (block, is) <- runIdentSupply $ toSat_ f []
-           let addDecls (BlockStat ss) =
-                  BlockStat $ map (\x -> DeclStat x {- t -}) is ++ ss
-               addDecls x = x
-           return $ addDecls block
--}
 
 -- | Create a for in statement.
 -- Usage:

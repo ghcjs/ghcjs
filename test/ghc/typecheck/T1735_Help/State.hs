@@ -1,7 +1,6 @@
 
 module T1735_Help.State where
 
-import Control.Applicative (Applicative(..))
 import Control.Monad (ap, liftM)
 
 
@@ -12,7 +11,9 @@ instance Monad m => Monad (StateT s m) where
     m >>= k  = StateT $ \s -> do
         ~(a, s') <- runStateT m s
         runStateT (k a) s'
-    fail str = StateT $ \_ -> fail str
+
+instance MonadFail m => MonadFail (StateT s m) where
+    fail s = StateT $ \_ -> fail s
 
 instance Monad m => Functor (StateT s m) where
     fmap = liftM
