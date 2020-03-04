@@ -1,26 +1,6 @@
-diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/directory.cabal boot/pkg/directory/directory.cabal
---- upstream/pkg/directory/directory.cabal	2018-12-04 07:40:08.000000000 -0800
-+++ boot/pkg/directory/directory.cabal	2018-12-04 07:40:08.970653083 -0800
-@@ -51,6 +51,7 @@
-         System.Directory.Internal.Config
-         System.Directory.Internal.Posix
-         System.Directory.Internal.Windows
-+        System.Directory.Internal.GHCJS
- 
-     include-dirs: .
- 
-@@ -58,6 +59,8 @@
-         base     >= 4.5 && < 4.13,
-         time     >= 1.4 && < 1.10,
-         filepath >= 1.3 && < 1.5
-+    if impl(ghcjs)
-+        build-depends: ghcjs-prim
-     if os(windows)
-         build-depends: Win32 >= 2.2.2 && < 2.9
-     else
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal/Config.hs boot/pkg/directory/System/Directory/Internal/Config.hs
---- upstream/pkg/directory/System/Directory/Internal/Config.hs	2018-12-04 07:40:08.000000000 -0800
-+++ boot/pkg/directory/System/Directory/Internal/Config.hs	2018-12-04 07:40:08.978652919 -0800
+--- upstream/pkg/directory/System/Directory/Internal/Config.hs	2020-03-03 10:42:28.000000000 +0800
++++ boot/pkg/directory/System/Directory/Internal/Config.hs	2020-03-03 10:42:28.204092400 +0800
 @@ -1,9 +1,25 @@
  {-# LANGUAGE CPP #-}
 +#if defined(ghcjs_HOST_OS)
@@ -48,9 +28,9 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
  -- builds, so we use this ugly workaround where we simply paste the C string
  -- literal directly in here.  This will probably break if the EXE_EXTENSION
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/directory/System/Directory/Internal/GHCJS.hs
---- upstream/pkg/directory/System/Directory/Internal/GHCJS.hs	1969-12-31 16:00:00.000000000 -0800
-+++ boot/pkg/directory/System/Directory/Internal/GHCJS.hs	2018-12-04 07:40:08.978652919 -0800
-@@ -0,0 +1,475 @@
+--- upstream/pkg/directory/System/Directory/Internal/GHCJS.hs	1970-01-01 08:00:00.000000000 +0800
++++ boot/pkg/directory/System/Directory/Internal/GHCJS.hs	2020-03-04 09:56:54.344092400 +0800
+@@ -0,0 +1,496 @@
 +{-# LANGUAGE CPP #-}
 +#if defined(ghcjs_HOST_OS)
 +{-# LANGUAGE ForeignFunctionInterface,
@@ -171,8 +151,12 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
 +  pure (fromJSString tgt)
 +
 +prependCurrentDirectory :: FilePath -> IO FilePath
-+prependCurrentDirectory = prependCurrentDirectoryWith getCurrentDirectoryInternal
-+
++prependCurrentDirectory path
++  | isRelative path =
++    ((`ioeAddLocation` "prependCurrentDirectory") .
++     (`ioeSetFileName` path)) `modifyIOError` do
++      (</> path) <$> getCurrentDirectoryInternal
++  | otherwise = pure path
 +
 +getCurrentDirectoryInternal :: IO FilePath
 +getCurrentDirectoryInternal =
@@ -193,6 +177,10 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
 +renamePathInternal opath npath =
 +  throwErrnoIfMinus1_ "renamePath" $
 +    js_renamePath (toJSString opath) (toJSString npath)
++
++-- | On POSIX, equivalent to 'simplifyPosix'.
++simplify :: FilePath -> FilePath
++simplify = simplifyPosix -- FIXME should we assume POSIX paths with GHCJS?
 +
 +removeDirectoryInternal :: FilePath -> IO ()
 +removeDirectoryInternal path =
@@ -288,6 +276,19 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
 +getXdgDirectoryListInternal :: XdgDirectoryList -> IO [FilePath]
 +getXdgDirectoryListInternal =
 +  error "fixme: getXdgDirectoryList not implemented for GHCJS"
++
++getXdgDirectoryFallback :: IO FilePath -> XdgDirectory -> IO FilePath
++getXdgDirectoryFallback getHomeDirectory xdgDir = do
++  (<$> getHomeDirectory) $ flip (</>) $ case xdgDir of
++    XdgData   -> ".local/share"
++    XdgConfig -> ".config"
++    XdgCache  -> ".cache"
++
++getXdgDirectoryListFallback :: XdgDirectoryList -> IO [FilePath]
++getXdgDirectoryListFallback xdgDirs =
++  pure $ case xdgDirs of
++    XdgDataDirs   -> ["/usr/local/share/", "/usr/share/"]
++    XdgConfigDirs -> ["/etc/xdg"]
 +
 +setTimes :: FilePath -> (Maybe POSIXTime, Maybe POSIXTime) -> IO ()
 +setTimes path (atime, mtime) =
@@ -527,8 +528,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
 +  js_setFileTimes :: JSString -> Double -> Bool -> Double -> Bool -> IO Int
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal.hs boot/pkg/directory/System/Directory/Internal.hs
---- upstream/pkg/directory/System/Directory/Internal.hs	2018-12-04 07:40:08.000000000 -0800
-+++ boot/pkg/directory/System/Directory/Internal.hs	2018-12-04 07:40:08.978652919 -0800
+--- upstream/pkg/directory/System/Directory/Internal.hs	2020-03-03 10:42:28.000000000 +0800
++++ boot/pkg/directory/System/Directory/Internal.hs	2020-03-03 10:42:28.204092400 +0800
 @@ -13,7 +13,9 @@
  module System.Directory.Internal
    ( module System.Directory.Internal.Common
@@ -551,3 +552,23 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
  import System.Directory.Internal.Windows
  #else
  import System.Directory.Internal.Posix
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/directory.cabal boot/pkg/directory/directory.cabal
+--- upstream/pkg/directory/directory.cabal	2020-03-03 10:42:28.000000000 +0800
++++ boot/pkg/directory/directory.cabal	2020-03-03 10:42:28.204092400 +0800
+@@ -51,6 +51,7 @@
+         System.Directory.Internal.Config
+         System.Directory.Internal.Posix
+         System.Directory.Internal.Windows
++        System.Directory.Internal.GHCJS
+ 
+     include-dirs: .
+ 
+@@ -58,6 +59,8 @@
+         base     >= 4.5 && < 4.14,
+         time     >= 1.4 && < 1.10,
+         filepath >= 1.3 && < 1.5
++    if impl(ghcjs)
++        build-depends: ghcjs-prim
+     if os(windows)
+         build-depends: Win32 >= 2.2.2 && < 2.9
+     else

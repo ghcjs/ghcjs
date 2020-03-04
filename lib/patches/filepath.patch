@@ -1,33 +1,14 @@
-diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/filepath.cabal boot/pkg/filepath/filepath.cabal
---- upstream/pkg/filepath/filepath.cabal	2018-12-21 20:02:04.000000000 -0800
-+++ boot/pkg/filepath/filepath.cabal	2018-12-04 07:40:09.022652022 -0800
-@@ -47,6 +47,10 @@
-         System.FilePath.Posix
-         System.FilePath.Windows
- 
-+    if impl(GHCJS >= 0.1)
-+        Exposed-modules:
-+            System.FilePath.Current
-+
-     build-depends:
-         base >= 4 && < 4.13
- 
-diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/prologue.txt boot/pkg/filepath/prologue.txt
---- upstream/pkg/filepath/prologue.txt	1969-12-31 16:00:00.000000000 -0800
-+++ boot/pkg/filepath/prologue.txt	2018-12-04 07:40:09.022652022 -0800
-@@ -0,0 +1 @@
-+Library for manipulating FilePath's in a cross platform way.
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/System/FilePath/Current.hs boot/pkg/filepath/System/FilePath/Current.hs
---- upstream/pkg/filepath/System/FilePath/Current.hs	1969-12-31 16:00:00.000000000 -0800
-+++ boot/pkg/filepath/System/FilePath/Current.hs	2018-12-04 07:40:09.022652022 -0800
+--- upstream/pkg/filepath/System/FilePath/Current.hs	1970-01-01 08:00:00.000000000 +0800
++++ boot/pkg/filepath/System/FilePath/Current.hs	2020-03-03 10:42:28.234092400 +0800
 @@ -0,0 +1,4 @@
 +{-# LANGUAGE CPP #-}
 +#define MODULE_NAME     Current
 +#define IS_CURRENT      1
 +#include "Internal.hs"
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/System/FilePath/Internal.hs boot/pkg/filepath/System/FilePath/Internal.hs
---- upstream/pkg/filepath/System/FilePath/Internal.hs	2018-12-21 20:02:04.000000000 -0800
-+++ boot/pkg/filepath/System/FilePath/Internal.hs	2018-12-04 07:40:09.022652022 -0800
+--- upstream/pkg/filepath/System/FilePath/Internal.hs	2020-03-03 10:42:28.000000000 +0800
++++ boot/pkg/filepath/System/FilePath/Internal.hs	2020-03-03 10:42:28.234092400 +0800
 @@ -1,4 +1,6 @@
 -#if __GLASGOW_HASKELL__ >= 704
 +#ifdef IS_CURRENT
@@ -59,9 +40,28 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/System/FilePa
  
  ---------------------------------------------------------------------
  -- The basic functions
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/filepath.cabal boot/pkg/filepath/filepath.cabal
+--- upstream/pkg/filepath/filepath.cabal	2020-03-03 10:42:28.000000000 +0800
++++ boot/pkg/filepath/filepath.cabal	2020-03-03 10:42:28.234092400 +0800
+@@ -47,6 +47,10 @@
+         System.FilePath.Posix
+         System.FilePath.Windows
+ 
++    if impl(GHCJS >= 0.1)
++        Exposed-modules:
++            System.FilePath.Current
++
+     build-depends:
+         base >= 4 && < 4.14
+ 
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/prologue.txt boot/pkg/filepath/prologue.txt
+--- upstream/pkg/filepath/prologue.txt	1970-01-01 08:00:00.000000000 +0800
++++ boot/pkg/filepath/prologue.txt	2020-03-03 10:42:28.234092400 +0800
+@@ -0,0 +1 @@
++Library for manipulating FilePath's in a cross platform way.
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/filepath/travis.hs boot/pkg/filepath/travis.hs
---- upstream/pkg/filepath/travis.hs	1969-12-31 16:00:00.000000000 -0800
-+++ boot/pkg/filepath/travis.hs	2018-12-04 07:40:09.022652022 -0800
+--- upstream/pkg/filepath/travis.hs	1970-01-01 08:00:00.000000000 +0800
++++ boot/pkg/filepath/travis.hs	2020-03-03 10:42:28.234092400 +0800
 @@ -0,0 +1,2 @@
 +
 +import Generate
