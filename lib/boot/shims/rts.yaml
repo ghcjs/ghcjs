@@ -19,7 +19,7 @@ js:
   - src/thread.js.pp
   - src/stm.js.pp
   - src/staticpointer.js.pp
-  - src/stableptr.js
+  - src/stableptr.js.pp
   - src/hscore.js.pp
   - src/verify.js.pp
   - src/debug.js.pp
