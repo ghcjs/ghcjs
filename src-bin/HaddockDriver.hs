@@ -34,12 +34,14 @@ withGhcjs flags action = do
         printException err
         liftIO exitFailure
       ghcFlags fls = [ option | Flag_OptGhc option <- fls ]
-  withGhcjs' libDir (ghcFlags flags) (\_ -> handleSrcErrors action)
+      needHieFiles = Flag_HyperlinkedSource `elem` flags
+
+  withGhcjs' libDir needHieFiles (ghcFlags flags) (\_ -> handleSrcErrors action)
 
 -- | Start a GHC session with the -haddock flag set. Also turn off
 -- compilation and linking. Then run the given 'Ghc' action.
-withGhcjs' :: String -> [String] -> (DynFlags -> Ghc a) -> IO a
-withGhcjs' libDir flags ghcActs = runGhc (Just libDir) $ do
+withGhcjs' :: String -> Bool -> [String] -> (DynFlags -> Ghc a) -> IO a
+withGhcjs' libDir needHieFiles flags ghcActs = runGhc (Just libDir) $ do
   dynflags  <- getSessionDynFlags
   dynflags' <- parseGhcFlags (gopt_set dynflags Opt_Haddock) {
     hscTarget = HscNothing,
@@ -80,11 +82,18 @@ withGhcjs' libDir flags ghcActs = runGhc (Just libDir) $ do
     parseGhcFlags dynflags = do
       -- TODO: handle warnings?
 
-      let flags' = filterRtsFlags flags
-      (dynflags', rest, _) <- parseDynamicFlags dynflags (map noLoc flags')
+      let extra_opts | needHieFiles = [Opt_WriteHie, Opt_Haddock]
+                     | otherwise = [Opt_Haddock]
+          dynflags' = (foldl' gopt_set dynflags extra_opts)
+                        { hscTarget = HscNothing
+                        , ghcMode   = CompManager
+                        , ghcLink   = NoLink
+                        }
+          flags' = filterRtsFlags flags
+      (dynflags'', rest, _) <- parseDynamicFlags dynflags' (map noLoc flags')
       if not (null rest)
         then throwE ("Couldn't parse GHC options: " ++ unwords flags')
-        else return dynflags'
+        else return dynflags''
 
 unsetPatternMatchWarnings :: DynFlags -> DynFlags
 unsetPatternMatchWarnings dflags =
