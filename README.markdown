@@ -51,7 +51,7 @@ After the source tree has been prepared, the package can be installed.
 You may want ensure that binaries of earlier versions are overwritten:
 
 ```{.shell}
-cabal v2-install --overwrite-policy=always --install-method=copy --installdir=inplace
+cabal v2-install --overwrite-policy=always --install-method=copy --installdir=inplace/bin
 ```
 
 At the time of writing, `cabal-install` does not support creating symbolic links on Windows, even though this is the default installation method. A workaround is telling it to copy the executables instead:
