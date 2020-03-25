@@ -410,8 +410,8 @@ prepareLibDir = do
   initPackageDB
   liftIO $ T.writeFile (globalDB </> rtsConfFile) rtsConf
   ghcjs_pkg_ ["recache", "--global", "--no-user-package-db"]
-  cp_r ((locs ^. blSourceDir) </> "shims") ghcjsLib
-  sub $ cd "data" >> cp_r "." ghcjsLib
+  cp_r ((locs ^. blSourceDir) </> "shims") (ghcjsLib </> "shims")
+  cp_r ((locs ^. blSourceDir) </> "data")  ghcjsLib
   liftIO . T.writeFile (ghcjsLib </> "settings") =<< generateSettings
   -- workaround for hardcoded check of mingw dir in ghc when building on Windows
   when isWindows (mkdir_p $ ghcjsTop </> "mingw")
