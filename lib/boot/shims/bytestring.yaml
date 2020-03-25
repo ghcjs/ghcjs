@@ -1,2 +1,2 @@
 js:
-  - pkg/bytestring.js
+  - pkg/bytestring.js.pp

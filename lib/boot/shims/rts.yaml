@@ -2,7 +2,7 @@ js:
   - src/platform.js.pp
   - src/goog.js
   - lib/typedarray/typedarray.js
-  - lib/setImmediate/setImmediate.js
+  - lib/setImmediate/setImmediate.js.pp
   - lib/closure-library/closure/goog/math/long.js
   - src/structs.js.pp
   - src/mem.js.pp
