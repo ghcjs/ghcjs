@@ -9,6 +9,8 @@ import           Data.Foldable (foldl')
 import           Control.Monad.IO.Class
 import           System.Exit
 import           GHC.ResponseFile (getArgsWithResponseFiles)
+import           System.Environment (getExecutablePath)
+import           System.FilePath
 
 import           GHC
 import           DynFlags
@@ -23,7 +25,11 @@ import qualified Compiler.Settings      as Ghcjs
 
   
 main :: IO ()
-main = getArgsWithResponseFiles >>= haddockWithGhc withGhcjs
+main = do
+  args <- getArgsWithResponseFiles
+  haddockPath <- getExecutablePath
+  let libDir = takeDirectory haddockPath </> ".." </> "lib"
+  haddockWithGhc withGhcjs (("-B"++libDir):("-l"++libDir):args)
 
 withGhcjs :: [Flag] -> Ghc a -> IO a
 withGhcjs flags action = do
@@ -105,11 +111,3 @@ unsetPatternMatchWarnings dflags =
       , Opt_WarnIncompletePatternsRecUpd
       , Opt_WarnOverlappingPatterns
       ]
-
-{-
-getGhcjsDirs :: [Flag] -> IO (String, String)
-getGhcjsDirs flags = getGhcDirs
-  case [ dir | Flag_GhcLibDir dir <- flags ] of
-    [] -> error "haddock: missing -B option, cannot find library dir"
-    xs -> return ("not available", last xs)
--}
