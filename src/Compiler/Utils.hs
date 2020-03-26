@@ -158,7 +158,10 @@ exeFileName dflags
       | otherwise              = xs
 
 isJsFile :: FilePath -> Bool
-isJsFile = (==".js") . takeExtension
+isJsFile = (`elem` exts) . takeExtensions
+  where
+    exts = [".js", ".mjs", ".js.pp", ".mjs.pp" ]
+
 
 mkGhcjsOutput :: String -> String
 mkGhcjsOutput "" = ""
