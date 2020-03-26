@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gmp.buildinfo.in boot/pkg/integer-gmp/integer-gmp.buildinfo.in
---- upstream/pkg/integer-gmp/integer-gmp.buildinfo.in	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/integer-gmp/integer-gmp.buildinfo.in	2020-03-03 10:42:28.384092400 +0800
+--- upstream/pkg/integer-gmp/integer-gmp.buildinfo.in	2020-03-25 15:43:51.000000000 +0800
++++ boot/pkg/integer-gmp/integer-gmp.buildinfo.in	2020-03-25 15:43:51.480000000 +0800
 @@ -2,4 +2,4 @@
  extra-lib-dirs: @GMP_LIB_DIRS@
  extra-libraries: @GMP_LIBS@
@@ -8,21 +8,21 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gm
 -install-includes: HsIntegerGmp.h ghc-gmp.h
 +install-includes: HsIntegerGmp.h
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gmp.cabal boot/pkg/integer-gmp/integer-gmp.cabal
---- upstream/pkg/integer-gmp/integer-gmp.cabal	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/integer-gmp/integer-gmp.cabal	2020-03-03 10:42:28.384092400 +0800
+--- upstream/pkg/integer-gmp/integer-gmp.cabal	2020-03-25 15:43:51.000000000 +0800
++++ boot/pkg/integer-gmp/integer-gmp.cabal	2020-03-25 17:15:42.480000000 +0800
 @@ -70,6 +70,9 @@
    c-sources:
      cbits/wrappers.c
  
 +  js-sources:
-+    jsbits/ghcjsbn.js
++    jsbits/ghcjsbn.js.pp
 +
    exposed-modules:
      GHC.Integer
      GHC.Integer.Logarithms
-diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits/ghcjsbn.js
---- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1970-01-01 08:00:00.000000000 +0800
-+++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2020-03-04 09:59:23.784092400 +0800
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js.pp boot/pkg/integer-gmp/jsbits/ghcjsbn.js.pp
+--- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js.pp	1970-01-01 08:00:00.000000000 +0800
++++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js.pp	2020-03-25 17:15:23.369000000 +0800
 @@ -0,0 +1,2137 @@
 +/*
 +   GHCJS bignum library for integer-gmp package
@@ -2162,8 +2162,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +  return h$ghcjsbn_sizeInBase_b(h$ghcjsbn_mkBigNat_w(w), base);
 +}
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2020-03-03 10:42:28.384092400 +0800
+--- upstream/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2020-03-25 15:43:51.000000000 +0800
++++ boot/pkg/integer-gmp/src/GHC/Integer/GMP/Internals.hs	2020-03-25 15:43:51.480000000 +0800
 @@ -1,4 +1,5 @@
  {-# LANGUAGE BangPatterns #-}
 +
@@ -2284,8 +2284,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  -- | Compute next prime greater than @/n/@ probalistically.
  --
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2020-03-03 10:42:28.384092400 +0800
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2020-03-25 15:43:51.000000000 +0800
++++ boot/pkg/integer-gmp/src/GHC/Integer/Logarithms.hs	2020-03-25 15:43:51.480000000 +0800
 @@ -4,6 +4,9 @@
  {-# LANGUAGE UnliftedFFITypes #-}
  {-# LANGUAGE CPP #-}
@@ -2346,8 +2346,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/In
  -- | Compute base-2 log of 'Word#'
  --
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs boot/pkg/integer-gmp/src/GHC/Integer/Type.hs
---- upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/integer-gmp/src/GHC/Integer/Type.hs	2020-03-03 10:42:28.384092400 +0800
+--- upstream/pkg/integer-gmp/src/GHC/Integer/Type.hs	2020-03-25 15:43:51.000000000 +0800
++++ boot/pkg/integer-gmp/src/GHC/Integer/Type.hs	2020-03-25 15:43:51.480000000 +0800
 @@ -9,6 +9,9 @@
  {-# LANGUAGE RebindableSyntax #-}
  {-# LANGUAGE NegativeLiterals #-}
