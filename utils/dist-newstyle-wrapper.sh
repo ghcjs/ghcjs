@@ -67,6 +67,8 @@ elif [ "$PGM" = "haddock-ghcjs" ]; then
   exec "$DISTDIR/haddock-ghcjs/haddock-ghcjs" -B"$LIBDIR" ${1+"$@"}
 elif [ "$PGM" = "ghcjs-boot" ]; then
   exec "$DISTDIR/ghcjs-boot/ghcjs-boot" ${1+"$@"}
+elif [ "$PGM" = "ghcjs-run" ]; then
+  exec "$DISTDIR/ghcjs-run/ghcjs-run" ${1+"$@"}
 else
   echo "unknown wrapped program name: $PGM"
   exit 1

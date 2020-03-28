@@ -10,6 +10,28 @@ Quick Start - Developing GHCJS
 Starting with GHC version 8.2, GHCJS depends on a customized `ghc` library,
 installed under the name `ghc-api-ghcjs`
 
+### Prerequisites
+
+Make sure you have the following:
+
+* `bash` version 4.0 or higher
+* gnu `tar`
+* gnu `ln`
+
+On `Linux` you should already have the gnu versions.  On MacOS you can use
+"brew install" or "port install" to install the `bash`, `gnutar` and
+`coreutils` packages to get these. Make sure that these are available in your
+`PATH` environment variable to pick up the right versions. "port install" may
+install the gnu tar utility by the name "gnutar" which may have to linked as
+"tar" for ghcjs scripts to be able to use it.
+
+You can use `cabal-install` or `stack` to install the following haskell
+binaries needed by the GHCJS build:
+
+* cabal-install alex
+* cabal-install happy
+
+### building the compiler
 #### getting and preparing the source tree
 
 ```
@@ -19,13 +41,8 @@ $ git submodule update --init --recursive
 $ ./utils/makePackages.sh
 ```
 
-The `./utils/makePackages.sh` script requires Bash version 4.0 or greater. If you are building on macOS, you will need the gnu version of tar. You can install this with `brew install gnu-tar`, which makes it accessible at `gtar`. The `./utils/makePackages.sh` will automatically pick up on this.
-
-#### building the compiler
-
-GHCJS depends on a few "local" packages in the source tree. You can use
-`cabal-install` and `stack` to set up a build environment that contains
-these packages.
+If for some reason you need to do a clean build use `./utils/cleanPackages.sh`
+to clean, you may also have to use `make clean` in the `ghc` directory.
 
 ##### Cabal new-build
 
@@ -47,6 +64,7 @@ $ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-pkg
 $ ln -s ../utils/dist-newstyle-wrapper.sh haddock-ghcjs
 $ ln -s ../utils/dist-newstyle-wrapper.sh hsc2hs-ghcjs
 $ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-boot
+$ ln -s ../utils/dist-newstyle-wrapper.sh ghcjs-run
 ```
 
 ##### Cabal sandbox
@@ -69,25 +87,21 @@ $ stack build
 
 #### Booting GHCJS
 
-The `ghcjs-boot` program builds the "boot" libraries, like `ghc-prim`, `base` and `template-haskell` with GHCJS. After booting, GHCJS can compile regular
-Haskell programs and packages.
+The `ghcjs-boot` program builds the "boot" libraries, like `ghc-prim`, `base`
+and `template-haskell` with GHCJS. Once the boot libraries are built, GHCJS can
+compile regular Haskell programs and packages. The sources of all the boot
+libraries are available in `data/boot.tar`.
 
 ```
-$ ghcjs-boot
+$ ghcjs-boot --no-haddock --no-prof -s data/boot.tar
 ```
 
-when invoked without arguments, ghcjs-boot will build the libraries from
-`boot.tar` (unless the current directory contains a `boot.yaml` file), installed in GHCJS' data directory (`boot.tar` is generated
-by the `makePackages.sh` script and included in a source distribution).
+`--no-haddock` and `--no-prof` options can be used to save some time and also
+to avoid `haddock` issues if any.
 
-Optionally you can point `ghcjs-boot` to a different location, like another
-`boot.tar` archive:
-
-```
-$ ghcjs-boot -s location/of/boot.tar
-```
-
-or a directory (must contain a `boot.yaml` file):
+The unpacked and patched boot libraries are found in `lib/boot`. You can also
+build the boot libraries directly from there if you modified or patched some
+libary:
 
 ```
 $ ghcjs-boot -s ./lib/boot
@@ -121,20 +135,28 @@ on Windows, an `options` file is used instead of a wrapper script
 
 #### Generating a source distribution
 
-if you work on boot packages that need some for an upstream library,
-make sure to update the patches in `/lib/patches` first
+Upstream libraries can be found in `lib/upstream`. These libraries are patched
+for `ghcjs` with patches in `lib/patches`. The patched libraries are placed in
+`lib/boot`. If you need to fix something you can change the libraries in
+`lib/boot` and then run `./utils/updatePatches.sh` to generate the patches
+again, reflecting your changes. 
 
 ```
 $ ./utils/updatePatches.sh
 ```
 
-then regenerate the packages and the `/data/boot.tar` archive
+then regenerate the patched packages and the `/data/boot.tar` archive
 
 ```
 $ ./utils/makePackages.sh
 ```
 
-and the source distribution archive
+Note that when you run `./utils/makePackages.sh` it will overwrite the files in
+`lib/boot` with patched versions, therefore you may lose any modifications to
+those files. To avoid that always run `updatePatches.sh` first to save your
+changes.
+
+The source distribution archive can be generated using:
 
 ```
 $ cabal sdist
