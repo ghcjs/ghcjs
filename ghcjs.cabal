@@ -917,8 +917,9 @@ Executable private-ghcjs-unlit
     Default-Language: Haskell2010
     hs-source-dirs: ghc/utils/unlit
     Main-Is: unlit.c
-    C-Sources: ghc/utils/unlit/fs.c
-    Includes: ghc/utils/unlit/fs.h
+    Include-Dirs: ghc/utils/fs
+    C-Sources: ghc/utils/fs/fs.c
+    Includes: ghc/utils/fs/fs.h
 
 Executable private-ghcjs-touchy
     if flag(compiler-only) || !os(Windows)
