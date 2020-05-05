@@ -45,7 +45,7 @@ extra-source-files:
                 ghc/includes/HsFFI.h
                 ghc/includes/Cmm.h
                 ghc/includes/stg/*.h
-                ghc/utils/unlit/fs.h
+                ghc/utils/fs/fs.h
                 ghc/driver/utils/cwrapper.h
                 ghc/driver/utils/getLocation.h
                 utils/wrapper/getline.h
