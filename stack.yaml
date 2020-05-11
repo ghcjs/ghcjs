@@ -16,3 +16,5 @@ packages:
   - ./lib/haddock-api-ghcjs
   - ./lib/haddock-library-ghcjs
   - ./lib/template-haskell-ghcjs
+
+local-bin-path: inplace/bin
