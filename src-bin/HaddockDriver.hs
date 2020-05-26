@@ -54,7 +54,7 @@ withGhcjs' libDir needHieFiles flags ghcActs = runGhc (Just libDir) $ do
     ghcMode   = CompManager,
     ghcLink   = NoLink
     }
-  let dynflags0 = dynflags' { verbosity = 2 }
+  let dynflags0 = dynflags' { verbosity = 1 }
   env <- liftIO Ghcjs.newGhcjsEnv
   -- We disable pattern match warnings because than can be very
   -- expensive to check
