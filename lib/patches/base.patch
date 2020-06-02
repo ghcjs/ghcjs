@@ -25,14 +25,17 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/base.cabal boot/p
          -- Windows requires some extra libraries for linking because the RTS
          -- is no longer re-exporting them.
          -- msvcrt: standard C library. The RTS will automatically include this,
-@@ -375,6 +375,7 @@
+@@ -375,8 +375,9 @@
          other-modules:
              System.CPUTime.Windows
      else
-+      if !impl(ghcjs)
-         exposed-modules:
+-        exposed-modules:
++      exposed-modules:
              GHC.Event
++      if (impl(ghcjs))
          other-modules:
+             GHC.Event.Arr
+             GHC.Event.Array
 @@ -395,7 +396,8 @@
              System.CPUTime.Posix.ClockGetTime
              System.CPUTime.Posix.Times
