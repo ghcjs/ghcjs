@@ -32,7 +32,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/base.cabal boot/p
 -        exposed-modules:
 +      exposed-modules:
              GHC.Event
-+      if (impl(ghcjs))
++      if !impl(ghcjs)
          other-modules:
              GHC.Event.Arr
              GHC.Event.Array
