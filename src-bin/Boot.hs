@@ -719,7 +719,7 @@ cabalConfigureFlags = do
            , "--with-haddock",  (T.pack $ binDir </> "haddock")
            , "--with-gcc",      (T.pack $ privateBinDir </> "emcc")
            , "--prefix",        T.pack (locs ^. blGhcjsTopDir)
-           , "--configure-option", "--host=wasm32-unknown-none"
+           , "--configure-option", "--host=js-unknown-ghcjs"
            , "--ghcjs-options=-fwrite-ide-info"
            , "--enable-debug-info"
            , "--disable-library-stripping"
@@ -794,7 +794,7 @@ initBootEnv bs = do
 -- the platform triple that GHCJS reports
 -- this is in practice mostly used for the toolchain
 ghcjsTriple :: Text
-ghcjsTriple = "wasm32-unknown-none"
+ghcjsTriple = "js-unknown-ghcjs"
 
 -- this assumes that the ghcjs-boot version is correct. perhaps we should query the ghcjs executable to verify?
 ghcjsVersion :: BootPrograms -> IO Text
