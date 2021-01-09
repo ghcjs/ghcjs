@@ -111,14 +111,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/ghc-prim/ghc-prim.caba
  name:           ghc-prim
  version:        0.5.3
  -- NOTE: Don't forget to update ./changelog.md
-@@ -19,22 +19,24 @@
-     location: https://gitlab.haskell.org/ghc/ghc.git
-     subdir:   libraries/ghc-prim
- 
--custom-setup
--    setup-depends: base >= 4 && < 5, Cabal >= 1.23
-+-- custom-setup
-+--     setup-depends: base >= 4 && < 5, Cabal >= 1.23
+@@ -24,17 +24,19 @@
  
  Library
      default-language: Haskell2010
