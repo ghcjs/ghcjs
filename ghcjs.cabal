@@ -220,7 +220,8 @@ Library
     if flag(runtime-assertions)
       cpp-options: -DRUNTIME_ASSERTIONS
 
-    build-tool-depends: happy:happy >= 1.19
+    build-tool-depends: happy:happy >= 1.19 && <1.20,
+                        alex == 3.2.5
 
     Build-Depends: base       >= 4.9 && < 5,
                    deepseq    >= 1.4 && < 1.5,
