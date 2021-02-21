@@ -9,10 +9,8 @@ RUN echo 'deb http://ppa.launchpad.net/hvr/ghc/ubuntu xenial main' > \
     apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F6F88286 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-      cabal-install-2.2 \
-      ghc-8.4.2 \
-      happy-1.19.5 \
-      alex-3.1.7 \
+      cabal-install-2.4 \
+      ghc-8.6.5 \
       zlib1g-dev \
       libtinfo-dev \
       libsqlite3-0 \
@@ -27,7 +25,7 @@ RUN echo 'deb http://ppa.launchpad.net/hvr/ghc/ubuntu xenial main' > \
       python3 \
       git
 
-ENV PATH /root/.cabal/bin:/root/.local/bin:/opt/cabal/bin:/opt/ghc/8.4.2/bin:/opt/happy/1.19.5/bin:/opt/alex/3.1.7/bin:$PATH
+ENV PATH /root/.cabal/bin:/root/.local/bin:/opt/cabal/bin:/opt/ghc/8.6.5/bin:$PATH
 
 ## node.js
 RUN curl -sL https://deb.nodesource.com/setup_8.x | bash - \
@@ -38,6 +36,9 @@ RUN curl -sL https://deb.nodesource.com/setup_8.x | bash - \
 WORKDIR /opt
 
 RUN cabal update
+
+RUN cabal install alex-3.2.6
+RUN cabal install happy-1.19.9
 
 ADD . ./ghcjs
 
