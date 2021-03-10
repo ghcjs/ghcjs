@@ -703,7 +703,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Posix/Inte
 +foreign import javascript unsafe "$r = h$base_sizeof_sigset_t;" sizeof_sigset_t :: Int
 +foreign import javascript unsafe "$r = h$base_lflag($1_1,$1_2);"           c_lflag :: Ptr CTermios -> IO CTcflag
 +foreign import javascript unsafe "h$base_poke_lflag($1_1,$1_2,$2);"      poke_c_lflag :: Ptr CTermios -> CTcflag -> IO ()
-+foreign import javascript unsafe "$r1 = h$base_ptr_c_cc($1_1,$1_2); $r2 = h$ret_1;"   ptr_c_cc  :: Ptr CTermios -> IO (Ptr Word8)
++foreign import javascript unsafe "$r1 = h$base_ptr_c_cc($1_1,$1_2); $r2 = h$ret1;"   ptr_c_cc  :: Ptr CTermios -> IO (Ptr Word8)
 +s_issock :: CMode -> Bool
 +s_issock cmode = c_s_issock cmode /= 0
 +foreign import javascript unsafe "h$base_c_s_issock($1)"          c_s_issock :: CMode -> CInt
