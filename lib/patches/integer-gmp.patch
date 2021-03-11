@@ -20,9 +20,9 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/integer-gm
    exposed-modules:
      GHC.Integer
      GHC.Integer.Logarithms
-diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js boot/pkg/integer-gmp/jsbits/ghcjsbn.js
---- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js	1970-01-01 01:00:00.000000000 +0100
-+++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js	2021-02-19 15:52:11.482512700 +0100
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghcjsbn.js.pp boot/pkg/integer-gmp/jsbits/ghcjsbn.js.pp
+--- upstream/pkg/integer-gmp/jsbits/ghcjsbn.js.pp	1970-01-01 01:00:00.000000000 +0100
++++ boot/pkg/integer-gmp/jsbits/ghcjsbn.js.pp	2021-02-19 15:52:11.482512700 +0100
 @@ -0,0 +1,2140 @@
 +/*
 +   GHCJS bignum library for integer-gmp package
