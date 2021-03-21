@@ -114,7 +114,6 @@ err   = Verbosity 0
 
 data BootSettings = BootSettings
   { _bsShowVersion  :: Bool       -- ^show the version and exit
-  , _bsJobs         :: Maybe Int  -- ^number of parallel jobs
   , _bsDebug        :: Bool       {- ^build debug version of the libraries
                                       (GHCJS records the STG in the object
                                       files for easier inspection) -}
@@ -131,7 +130,6 @@ data BootSettings = BootSettings
                                       GHCJS-compatible Cabal library
                                       installed. ghcjs-boot copies some files
                                       from this compiler) -}
-  , _bsWithGhcPkg   :: Maybe Text -- ^location of ghc-pkg program
   , _bsWithNode     :: Maybe Text -- ^location of the node.js program
   , _bsWithNodePath :: Maybe Text -- ^ NODE_PATH to use when running node.js Template Haskell or REPL
                                   --      (if unspecified, GHCJS uses bundled packages)
@@ -147,13 +145,9 @@ data BootSettings = BootSettings
 data BootStages = BootStages
   { _bstStage1a   :: Stage
   , _bstStage1b   :: Stage
-  , _bstPretend   :: [Package] {- ^packages we pretend to have in stage one,
-                                   but actually hand off to GHC -}
   , _bstCabal     :: Package   {- ^installed between 1b and 2,
                                    only when doing a full boot -}
-  , _bstGhcjsTh   :: Package   -- ^installed between 1b and 2
   , _bstGhcjsPrim :: Package   -- ^installed between 1a and 1b
-  , _bstGhcPrim   :: Package   -- ^installed before stage 1a
   } deriving (Data, Typeable)
 
 type Stage   = [Package]
@@ -186,7 +180,6 @@ data Program = Program
 
 -- | configured programs, fail early if any of the required programs is missing
 data BootPrograms = BootPrograms { _bpGhc        :: Program
-                                 , _bpGhcPkg     :: Program
                                  , _bpCabal      :: Program
                                  , _bpNode       :: Program
                                  } deriving (Data, Typeable, Show)
@@ -228,17 +221,16 @@ main = do
       prepareLibDir
       let base = libDir (e ^. beLocations)
       liftIO $ setEnv "CFLAGS" ("-I" <> (base </> "include"))
-      installFakes
       installStage1
-      removeFakes
       installCabal
       when (e ^. beSettings . bsHaddock) buildDocIndex
       liftIO . printBootEnvSummary True =<< ask
 
 instance Yaml.FromJSON BootPrograms where
   parseJSON (Yaml.Object v) = BootPrograms
-    <$> v ..: "ghc"   <*> v ..: "ghc-pkg"
-    <*> v ..: "cabal" <*> v ..: "node"
+    <$> v ..: "ghc"
+    <*> v ..: "cabal"
+    <*> v ..: "node"
     where
       o ..: p = ((\t -> Program p t Nothing Nothing []) <$> o .: p) <|>
                 (withArgs p =<< o .: p)
@@ -253,13 +245,9 @@ instance Yaml.FromJSON BootStages where
   parseJSON (Yaml.Object v) = BootStages
     <$> v ..: "stage1a"
     <*> v ..: "stage1b"
-    <*> v .:: "stage1PretendToHave"
     <*> v  .: "cabal"
-    <*> v  .: "ghcjs-th"
     <*> v  .: "ghcjs-prim"
-    <*> v  .: "ghc-prim"
     where
-      o .:: p = ((:[])<$>o.:p) <|> o.:p
       o ..: p = pkgs =<< o .: p
       pkgs (Yaml.String t) =
         pure [t]
@@ -292,11 +280,6 @@ optParser =
     <$> switch
         (long "version" <>
         help "show the ghcjs-boot version")
-    <*> (optional . option auto)
-           (long "jobs" <>
-            short 'j' <>
-            metavar "JOBS" <>
-            help "number of jobs to run in parallel")
     <*> switch
           (long "debug" <>
            short 'd' <>
@@ -323,9 +306,6 @@ optParser =
           (long "with-ghc" <>
            metavar "PROGRAM" <>
            help "ghc program to use")
-    <*> (optional . fmap T.pack . strOption)
-          (long "with-ghc-pkg" <> metavar "PROGRAM" <>
-           help "ghc-pkg program to use")
     <*> (optional . fmap T.pack . strOption)
           (long "with-node" <>
            metavar "PROGRAM" <>
@@ -543,39 +523,34 @@ buildDocIndex = subTop' "doc" $ do
 installCabal :: B ()
 installCabal = subBuild $ do
   msg info "installing Cabal library"
-  removeFakes
-  cabalPkg <- view (beStages . bstCabal)
-  preparePackage cabalPkg
-  cabalInstall [cabalPkg]
+  preparePackage "Cabal"
+  buildCabalPackage "Cabal"
 
 installGhcjsPrim :: B ()
 installGhcjsPrim = do
   msg info "installing ghcjs-prim"
-  prim <- view (beStages . bstGhcjsPrim)
-  preparePackage prim
-  cabalStage1 [prim]
+  preparePackage "ghcjs-prim"
+  buildCabalPackage "ghcjs-prim"
 
 installGhcjsTh :: B ()
 installGhcjsTh = do
   msg info "installing ghcjs-th"
-  ghcjsTh <- view (beStages . bstGhcjsTh)
-  preparePackage ghcjsTh
-  cabalStage1 [ghcjsTh]
+  preparePackage "ghcjs-th"
+  buildCabalPackage "ghcjs-th"
 
 installStage1 :: B ()
 installStage1 = subBuild $ do
-  prim <- view (beStages . bstGhcPrim)
-  installStage "0" [prim]
-  -- fixGhcPrim
-  installStage "1a" =<< stagePackages bstStage1a
+  buildCabalPackage "ghc-prim"
+  mapM_ installPackage =<< stagePackages bstStage1a
   installGhcjsPrim
-  installStage "1b" =<< stagePackages bstStage1b
+  mapM_ installPackage =<< stagePackages bstStage1b
   installGhcjsTh
   resolveWiredInPackages
     where
-      installStage name s = do
-        msg info ("installing stage " <> name)
-        forM_ s preparePackage >> cabalStage1 s
+      installPackage pkg = do
+        msg info ("installing package " <> pkg)
+        preparePackage pkg
+        buildCabalPackage pkg
 
 resolveWiredInPackages :: B ()
 resolveWiredInPackages = subLib $ do
@@ -602,65 +577,7 @@ preparePackage pkg
     rm_rf "dist"
   | otherwise = return ()
 
--- | register fake, empty packages to be able to build packages
---   that depend on Cabal
-installFakes :: B ()
-installFakes = do
-  fakes <- view (beStages . bstPretend)
-  forM_ fakes $ \pkg -> do
-    latest <- T.lines <$> ghc_pkg ["--global", "latest", pkg]
-    case latest of
-      [pkgVer] -> do
-        let getField field = ghc_pkg [ "--global"
-                                     , "--simple-output"
-                                     , "field"
-                                     , pkgVer
-                                     , field
-                                     ]
-            version = T.drop (T.length pkg + 1) pkgVer
-        globalDB <- view (beLocations . blGlobalDB)
-        pkgAbi <- getField "abi"
-        pkgId  <- getField "id"
-        libDir <- libDir <$> view beLocations
-        let conf = fakeConf libDir libDir pkg version pkgId pkgAbi
-        liftIO $ T.writeFile (globalDB </> T.unpack pkgId <.> "conf") conf
-      _ -> failWith ("required package " <> pkg <> " not found in host GHC")
-  ghcjs_pkg_ ["recache", "--global", "--no-user-package-db"]
-
-fakeConf :: FilePath -> FilePath -> Text -> Text -> Text -> Text -> Text
-fakeConf incl lib name version pkgId pkgAbi = T.unlines
-            [ "name:           " <> name
-            , "version:        " <> version
-            , "id:             " <> pkgId
-            , "key:            " <> pkgId
-            , "abi:            " <> pkgAbi
-            , "license:        BSD3"
-            , "maintainer:     stegeman@gmail.com"
-            , "import-dirs:    " <> T.pack incl
-            , "include-dirs:   " <> T.pack incl
-            , "library-dirs:   " <> T.pack lib
-            , "exposed:        False"
-            ]
-
--- | remove the fakes after we're done with them
-removeFakes :: B ()
-removeFakes = do
-  fakes <- map (<>"-") <$> view (beStages . bstPretend)
-  pkgs <- T.words <$> ghcjs_pkg [ "list"
-                                , "--simple-output"
-                                , "--no-user-package-db"
-                                ]
-  forM_ pkgs $ \p ->
-    when (any (`T.isPrefixOf` p) fakes)
-         (msg info ("unregistering " <> p) >>
-          ghcjs_pkg_ ["unregister", p, "--no-user-package-db"])
-
 -- | subshell in path relative to build dir
-{-
-subBuild' :: FilePath -> B a -> B a
-subBuild' p a = subBuild (cd p >> a)
--}
-
 subBuild :: B a -> B a
 subBuild a = sub (view (beLocations . blBuildDir) >>= cd >> a)
 
@@ -752,9 +669,6 @@ run_inplace_ pgm args = do
 ghc_ :: [Text] -> B ()
 ghc_         = runE_ bpGhc
 
-ghc_pkg :: [Text] -> B Text
-ghc_pkg      = runE  bpGhcPkg
-
 ghcjs_pkg :: [Text] -> B Text
 ghcjs_pkg = run_inplace "ghcjs-pkg"
 
@@ -763,9 +677,6 @@ ghcjs_pkg_   = run_inplace_ "ghcjs-pkg"
 
 haddock_ :: [Text] -> B ()
 haddock_     = run_inplace_ "haddock"
-
-cabal_ :: [Text] -> B ()
-cabal_       = runE_ bpCabal
 
 npm_ :: [Text] -> B ()
 npm_ args = do
@@ -783,85 +694,33 @@ npm_ args = do
         let npmLoc = FP.takeDirectory loc </> "npm"
         run''_ npmLoc args
 
-runE :: ((Program -> Const Program Program)
-     -> BootPrograms -> Const Program BootPrograms)
-     -> [Text] -> B Text
-runE  g a = view (bePrograms . g) >>= \p -> run p "" a
-
 runE_ :: ((Program -> Const Program Program)
       -> BootPrograms -> Const Program BootPrograms)
       -> [Text] -> B ()
 runE_ g a = view (bePrograms . g) >>= \p -> run_ p a
 
-{- | stage 1 cabal install: boot mode, hand off to GHC if GHCJS
-     cannot yet compile it -}
-cabalStage1 :: [Text] -> B ()
-cabalStage1 pkgs = sub $ do
-  ghc <- requirePgmLoc =<< view (bePrograms . bpGhc)
-  liftIO $ do
-    setEnv "GHCJS_BOOTING" "1"
-    setEnv "GHCJS_BOOTING_STAGE1" "1"
-    setEnv "GHCJS_WITH_GHC" ghc
-  let configureOpts = []
-  globalFlags <- cabalGlobalFlags
-  flags <- cabalInstallFlags (length pkgs == 1)
-  cmd <- cabalInstallCommand
-  let args = globalFlags ++ (cmd : pkgs) ++
-             [ "--allow-boot-library-installs"
-             ] ++ map ("--configure-option="<>) configureOpts ++ flags
-  cabal_ args
+customSetupPackages :: [Text]
+customSetupPackages = [ "ghc-prim" ]
 
--- | regular cabal install for GHCJS
-cabalInstall :: [Package] -> B ()
-cabalInstall [] = do
-  msg info "cabal-install: no packages, nothing to do"
-  return ()
-cabalInstall pkgs = do
-  globalFlags <- cabalGlobalFlags
-  flags <- cabalInstallFlags (length pkgs == 1)
-  cmd <- cabalInstallCommand
-  liftIO $ setEnv "GHCJS_BOOTING" "1"
-  let args = globalFlags ++ cmd : pkgs ++ flags
-  cabal_ args
-
-cabalInstallCommand :: B Text
-cabalInstallCommand = pure "v1-install"
-
-cabalGlobalFlags :: B [Text]
-cabalGlobalFlags = do
-  instDir  <- libDir <$> view beLocations
-  return ["--config-file"
-         ,T.pack (instDir </> "cabalBootConfig")
-         ,"--ignore-sandbox"
-         ]
-
-cabalInstallFlags :: Bool -> B [Text]
-cabalInstallFlags parmakeGhcjs = do
+cabalConfigureFlags :: B [Text]
+cabalConfigureFlags = do
   debug    <- view (beSettings . bsDebug)
   v        <- view (beSettings . bsVerbosity)
-  j        <- view (beSettings . bsJobs)
   instDir  <- libDir <$> view beLocations
   prof     <- view (beSettings . bsProf)
-  haddock  <- view (beSettings . bsHaddock)
   locs     <- view beLocations
   let binDir        = (locs ^. blGhcjsTopDir) </> "bin"
       privateBinDir = instDir </> "bin"
   return $ [ "--global"
            , "--ghcjs"
-           , "--one-shot"
-           , "--avoid-reinstalls"
            , "--builddir",      "dist"
            , "--with-compiler", (T.pack $ binDir </> "ghcjs")
            , "--with-hc-pkg",   (T.pack $ binDir </> "ghcjs-pkg")
            , "--with-haddock",  (T.pack $ binDir </> "haddock")
            , "--with-gcc",      (T.pack $ privateBinDir </> "emcc")
            , "--prefix",        T.pack (locs ^. blGhcjsTopDir)
-           , bool haddock "--enable-documentation" "--disable-documentation"
            , "--configure-option", "--host=wasm32-unknown-none"
            , "--ghcjs-options=-fwrite-ide-info"
-           , "--haddock-html"
-           , "--haddock-hoogle"
-           , "--haddock-hyperlink-source"
            , "--enable-debug-info"
            , "--disable-library-stripping"
            , "--disable-executable-stripping"
@@ -874,12 +733,47 @@ cabalInstallFlags parmakeGhcjs = do
            -- on other platforms we get this more
            -- or less for free, thanks to dynamic-too
            bool isWindows [] ["--enable-shared"] ++
-           catMaybes [ (((bool parmakeGhcjs
-                               "--ghcjs-options=-j"
-                               "-j")<>) . showT) <$> j
-                     , bj debug "--ghcjs-options=-debug"
+           catMaybes [ bj debug "--ghcjs-options=-debug"
                      , bj (v > info) "-v2"
                      ]
+
+
+buildCabalPackage :: Text -> B ()
+buildCabalPackage pkg = subBuild $ do
+  cd ("pkg" </> T.unpack pkg) -- hopefully correct
+  -- build custom setup if necessary
+  msg info ("configuring package: " <> pkg)
+  configureFlags <- cabalConfigureFlags
+  haddock  <- view (beSettings . bsHaddock)
+
+  -- configure / build
+  liftIO $ setEnv "GHCJS_BOOTING" "1"
+  case pkg `elem` customSetupPackages of
+                True -> do
+                  {-
+                     XXX there is only one custom setup package
+
+                         we should probably just build the ghc-prim
+                         Setup.hs as part of the ghcjs package, so
+                         we can avoid having to know about GHC at all
+                         (and have proper dependencies)
+                    -}
+                  ghc <- requirePgmLoc =<< view (bePrograms . bpGhc)
+                  run''_ ghc ["Setup.hs"]
+                  let setup args = run''_ "./Setup" args
+                  setup ("configure" : configureFlags)
+                  setup ["build"]
+                  when haddock (setup ["haddock"])
+                  setup ["copy"]
+                  setup ["register"]
+                _ -> do
+                  cmd <- requirePgmLoc =<< view (bePrograms . bpCabal)
+                  let setup args = run''_ cmd args
+                  setup ("v1-configure" : configureFlags)
+                  setup ["v1-build"]
+                  when haddock (setup ["v1-haddock"])
+                  setup ["v1-copy"]
+                  setup ["v1-register"]
 
 stagePackages :: Getter BootStages Stage -> B [Package]
 stagePackages l = view (beStages . l)
@@ -1338,15 +1232,6 @@ sub x = do
   liftIO (setCurrentDirectory workingDir)
   pure r
 
-run :: Program -> Text -> [Text] -> B Text
-run p stdin xs
-  = traceDir >>
-    msgD info (traceRun p xs) >>
-                 requirePgmLoc p >>=
-                 \loc ->
-                   let pc = proc loc (map T.unpack $ p ^. pgmArgs ++ xs)
-                   in T.pack <$> lift (readCreateProcess pc (T.unpack stdin))
-
 run_ :: Program -> [Text] -> B ()
 run_ p xs = do
   traceDir
@@ -1447,21 +1332,6 @@ requirePgmLoc p
                    "\n" <>
                    "  searched in PATH:\n" <>
                    T.pack path
-
-{-
-run' :: BootSettings -> Program -> [Text] -> IO Text
-run' bs p xs = do
-  traceDir' bs
-  msgD' bs info (traceRun p xs)
-  (e, out, _err) <- readProcessWithExitCode (p ^. pgmLocString)
-                                            (map T.unpack xs)
-                                            ""
-  when (e /= ExitSuccess)
-       (failWith $ "program " <>
-                   p ^. pgmLocText <>
-                   " returned a nonzero exit code")
-  return (T.pack out)
--}
 
 pgmLocText :: Getter Program Text
 pgmLocText = pgmLoc . to (maybe "<not found>" T.pack)

@@ -7,12 +7,12 @@ packages:
 
   # special packages installed between stages:
 
-  ghc-prim:   ./pkg/ghc-prim
+  ghc-prim:   ghc-prim
 
-  ghcjs-prim: ./pkg/ghcjs-prim
-  ghcjs-th:   ./pkg/ghcjs-th
+  ghcjs-prim: ghcjs-prim
+  ghcjs-th:   ghcjs-th
 
-  cabal:      ./pkg/Cabal
+  cabal:      Cabal
 
 
   # pretend to have these packages installed during stage 1,
@@ -26,35 +26,35 @@ packages:
   # before this
 
   stage1a:
-    - ./pkg/base
-    - ./pkg/integer-gmp
-    - ./pkg/transformers
+    - integer-gmp
+    - base
+    - transformers
 
   # after stage 1a, ghcjs-boot installs ghcjs-prim and
   # continues with stage 1b
 
   stage1b:
-    - ./pkg/array
-    - ./pkg/binary
-    - ./pkg/bytestring
-    - ./pkg/containers
-    - ./pkg/deepseq
-    - ./pkg/directory
-    - ./pkg/filepath
-    - ./pkg/ghc
-    - ./pkg/ghc-boot
-    - ./pkg/ghc-boot-th
-    - ./pkg/ghc-compact
-    - ./pkg/ghc-heap
-    - ./pkg/ghci
-    - ./pkg/pretty
-    - ./pkg/template-haskell
-    - ./pkg/parsec
-    - ./pkg/process
-    - ./pkg/time
-    - ./pkg/text
-    - ./pkg/mtl
-    - ./pkg/unix
+    - array
+    - deepseq
+    - containers
+    - bytestring
+    - binary
+    - filepath
+    - time
+    - unix
+    - directory
+    - pretty
+    - mtl
+    - ghc-boot-th
+    - template-haskell
+    - text
+    - parsec
+    - ghc-boot
+    - ghc-compact
+    - ghc-heap
+    - ghci
+    - process
+    - ghc
 
 programs:
 
