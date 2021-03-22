@@ -1932,7 +1932,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +function h$ghcjsbn_sizeof_b(b) {
 +  if(b.length < 1) return 0;
 +  var bl = b[0];
-+  return Math.ceil((bl * GHCJSBN_BITS) / 32);
++  return (h$ghcjsbn_nbits_b(b)+31)>>5;
 +}
 +
 +#if GHCJSBN_BITS == 28
