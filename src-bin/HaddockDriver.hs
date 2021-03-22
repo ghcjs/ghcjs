@@ -6,6 +6,7 @@
 module Main where
 
 import           Data.Foldable (foldl')
+import           Data.Maybe
 import           Control.Monad.IO.Class
 import           System.Exit
 import           GHC.ResponseFile (getArgsWithResponseFiles)
@@ -33,7 +34,8 @@ main = do
 
 withGhcjs :: [Flag] -> Ghc a -> IO a
 withGhcjs flags action = do
-  libDir <- fmap snd (getGhcDirs flags)
+  libDir <- fmap (fromMaybe (error "No GhcDir found") . snd) (getGhcDirs flags)
+  -- libDir <- fmap snd (getGhcDirs flags)
 
   -- Catches all GHC source errors, then prints and re-throws them.
   let handleSrcErrors action' = flip handleSourceError action' $ \err -> do
@@ -54,7 +56,6 @@ withGhcjs' libDir needHieFiles flags ghcActs = runGhc (Just libDir) $ do
     ghcMode   = CompManager,
     ghcLink   = NoLink
     }
-  let dynflags0 = dynflags' { verbosity = 2 }
   env <- liftIO Ghcjs.newGhcjsEnv
   -- We disable pattern match warnings because than can be very
   -- expensive to check
@@ -63,7 +64,7 @@ withGhcjs' libDir needHieFiles flags ghcActs = runGhc (Just libDir) $ do
                    Ghcjs.setGhcjsPlatform mempty env [] libDir $
                    updateWays $ addWay' (WayCustom "js") $
                    Ghcjs.setGhcjsSuffixes False $
-                   gopt_unset dynflags0 Opt_SplitObjs
+                   gopt_unset dynflags' Opt_SplitSections
   -- ignore the following return-value, which is a list of packages
   -- that may need to be re-linked: Haddock doesn't do any
   -- dynamic or static linking at all!

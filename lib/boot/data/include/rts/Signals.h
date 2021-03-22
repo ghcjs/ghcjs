@@ -7,12 +7,11 @@
  * Do not #include this file directly: #include "Rts.h" instead.
  *
  * To understand the structure of the RTS headers, see the wiki:
- *   http://ghc.haskell.org/trac/ghc/wiki/Commentary/SourceTree/Includes
+ *   https://gitlab.haskell.org/ghc/ghc/wikis/commentary/source-tree/includes
  *
  * ---------------------------------------------------------------------------*/
 
-#ifndef RTS_SIGNALS_H
-#define RTS_SIGNALS_H
+#pragma once
 
 /* NB. #included in Haskell code, no prototypes in here. */
 
@@ -22,5 +21,3 @@
 #define STG_SIG_ERR   (-3)
 #define STG_SIG_HAN   (-4)
 #define STG_SIG_RST   (-5)
-
-#endif /* RTS_SIGNALS_H */

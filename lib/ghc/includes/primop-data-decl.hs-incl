@@ -148,6 +148,11 @@ data PrimOp
    | BSwap32Op
    | BSwap64Op
    | BSwapOp
+   | BRev8Op
+   | BRev16Op
+   | BRev32Op
+   | BRev64Op
+   | BRevOp
    | Narrow8IntOp
    | Narrow16IntOp
    | Narrow32IntOp
@@ -169,7 +174,9 @@ data PrimOp
    | Double2IntOp
    | Double2FloatOp
    | DoubleExpOp
+   | DoubleExpM1Op
    | DoubleLogOp
+   | DoubleLog1POp
    | DoubleSqrtOp
    | DoubleSinOp
    | DoubleCosOp
@@ -200,7 +207,9 @@ data PrimOp
    | FloatFabsOp
    | Float2IntOp
    | FloatExpOp
+   | FloatExpM1Op
    | FloatLogOp
+   | FloatLog1POp
    | FloatSqrtOp
    | FloatSinOp
    | FloatCosOp
@@ -235,10 +244,12 @@ data PrimOp
    | CasArrayOp
    | NewSmallArrayOp
    | SameSmallMutableArrayOp
+   | ShrinkSmallMutableArrayOp_Char
    | ReadSmallArrayOp
    | WriteSmallArrayOp
    | SizeofSmallArrayOp
    | SizeofSmallMutableArrayOp
+   | GetSizeofSmallMutableArrayOp
    | IndexSmallArrayOp
    | UnsafeFreezeSmallArrayOp
    | UnsafeThawSmallArrayOp
@@ -524,6 +535,7 @@ data PrimOp
    | MkApUpd0_Op
    | NewBCOOp
    | UnpackClosureOp
+   | ClosureSizeOp
    | GetApStackValOp
    | GetCCSOfOp
    | GetCurrentCCSOp
@@ -531,7 +543,6 @@ data PrimOp
    | TraceEventOp
    | TraceEventBinaryOp
    | TraceMarkerOp
-   | GetThreadAllocationCounter
    | SetThreadAllocationCounter
    | VecBroadcastOp PrimOpVecCat Length Width
    | VecPackOp PrimOpVecCat Length Width

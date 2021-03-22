@@ -199,15 +199,16 @@ generate :: GhcjsSettings
          -> Module
          -> [StgTopBinding]
          -> [SptEntry]
+         -> ForeignStubs
          -> CollectedCCs
          -> ByteString -- ^ binary data for the .js_o object file
-generate settings df m s spt_entries cccs =
+generate settings df m s spt_entries foreign_stubs cccs =
   let (uf, s') = sinkPgm m s
   in trace' ("generate\n" ++ intercalate "\n\n" (map showIndent s)) $
 
      flip evalState (initState df m uf) $ do
         ifProfiling' $ initCostCentres cccs
-        (st, lus) <- genUnits df m s' spt_entries
+        (st, lus) <- genUnits df m s' spt_entries foreign_stubs
         -- (exported symbol names, javascript statements) for each linkable unit
         p <- forM lus $ \u ->
            mapM (fmap (\(TxtI i) -> i) . jsIdI) (luIdExports u) >>=
@@ -232,7 +233,7 @@ dumpAst st _settings _dflags s
   | True {-|| buildingDebug dflags-} = (st', [(["h$debug", "h$dumpAst"], bs)])
   | otherwise            = (st, [])
       where
-        (st', bs) = Object.serializeStat st [] [] (    BlockStat [(AssignStat (ValExpr (JVar (TxtI (T.pack "h$dumpAst"))))) (toJExpr x)]){-[j| h$dumpAst = `x` |]-} [] []
+        (st', bs) = Object.serializeStat st [] [] (    BlockStat [(AssignStat (ValExpr (JVar (TxtI (T.pack "h$dumpAst"))))) (toJExpr x)]) {-[j| h$dumpAst = `x` |]-} "" [] []
         x = T.intercalate "\n\n" (map (T.pack . showIndent) s)
 
 -- | variable prefix for the nth block in module
@@ -258,11 +259,14 @@ genUnits :: HasDebugCallStack
          -> Module
          -> [StgTopBinding] -- StgPgm
          -> [SptEntry]
+         -> ForeignStubs
          -> G (Object.SymbolTable, [LinkableUnit]) -- ^ the final symbol table and the linkable units
-genUnits dflags m ss spt_entries = generateGlobalBlock =<< go 2 Object.emptySymbolTable ss
+-- XXX use foreign stubs here
+genUnits dflags m ss spt_entries foreign_stubs
+                                 = generateGlobalBlock =<<
+                                   generateExportsBlock =<<
+                                   go 2 Object.emptySymbolTable ss
     where
-      -- ss' = [l | StgTopLifted l <- ss]
-
       go :: HasDebugCallStack
          => Int                 -- ^ the block we're generating (block 0 is the global unit for the module)
          -> Object.SymbolTable  -- ^ the shared symbol table
@@ -281,6 +285,28 @@ genUnits dflags m ss spt_entries = generateGlobalBlock =<< go 2 Object.emptySymb
                           => (Object.SymbolTable, [LinkableUnit])
                           -> G (Object.SymbolTable, [LinkableUnit])
       generateGlobalBlock (st, lus) = do
+        glbl <- use gsGlobal
+        staticInit <-
+          initStaticPtrs spt_entries
+        (st', _, bs) <- serializeLinkableUnit m st [] [] []
+                         ( O.optimize
+                         . jsSaturate (Just $ modulePrefix m 1)
+                         $ mconcat (reverse glbl) <> staticInit) [] []
+        return ( st'
+               , LinkableUnit bs
+                              []
+                              [moduleGlobalSymbol dflags m]
+                              []
+                              []
+                              False
+                              []
+                 : lus
+               )
+
+      generateExportsBlock :: HasDebugCallStack
+                           => (Object.SymbolTable, [LinkableUnit])
+                           -> G (Object.SymbolTable, [LinkableUnit])
+      generateExportsBlock (st, lus) = do
         glbl <- use gsGlobal
         staticInit <-
           initStaticPtrs spt_entries
@@ -323,9 +349,6 @@ genUnits dflags m ss spt_entries = generateGlobalBlock =<< go 2 Object.emptySymb
       generateBlock st (StgTopLifted decl) n =
         trace' ("generateBlock:\n" ++ showIndent decl) $
        do
-        -- let bsdecl = {- Bin.runGet Bin.get -} (Bin.runPut (Bin.put $ dumpDecl decl))
-
-        -- let decl = Bin.runGet Bin.get (Bin.runPut (Bin.put $ dumpDecl decl0))
         tl        <- genToplevel decl
         extraTl   <- use (gsGroup . ggsToplevelStats)
         ci        <- use (gsGroup . ggsClosureInfo)
@@ -380,7 +403,7 @@ serializeLinkableUnit :: HasDebugCallStack
                       -> G (Object.SymbolTable, [Text], BL.ByteString)
 serializeLinkableUnit _m st i ci si stat fe fi = do
   i' <- mapM idStr i
-  let (st', o) = Object.serializeStat st ci si stat fe fi
+  let (st', o) = Object.serializeStat st ci si stat "" fe fi
   rnf i' `seq` rnf o `seq` return (st', i', o)
     where
       idStr i = itxt <$> jsIdI i
@@ -627,22 +650,6 @@ genToplevelRhs i rhs@(StgRhsClosure _ext cc _upd_flag {- srt -} args body) = do
   ccId <- costCentreStackLbl cc
   emitStatic idt static ccId
   return $ (eid ||= e (JFunc [] (ll # upd # setcc # body)))
-genToplevelRhs _ _ = panic "genToplevelRhs: top-level values cannot have live variables"
-
-{-
-dumpGlobalIdCache :: Text -> G ()
-dumpGlobalIdCache itxt = do
-  GlobalIdCache gidc <- use globalIdCache
-  let i  = TxtI ("h$globalIdCache_" <> itxt)
-      vs = M.keys
-  emitToplevel (e i |= e (M.keys gidc)) 
-  -}
-  -- [j| `i` = `M.keys gidc`; |]
-{-  emitToplevel $ [j|
-
-                   AssignStat (ValExpr (JVar . TxtI $ "h$globalIdCache_" <> idt))
-                            (ValExpr (JList
--}
 
 liftToGlobal :: JStat -> G [(Ident, Id)]
 liftToGlobal jst = do
@@ -742,7 +749,7 @@ resultSize0 xxs@(_:xs) t
   , Just (fa, fr) <- splitFunTy_maybe t' -- isFunTy t' =
   , Just (tc, ys) <- splitTyConApp_maybe fa
   , isUnboxedTupleTyCon tc =
-      resultSize0 xxs (mkFunTys (dropRuntimeRepArgs ys) fr)
+      resultSize0 xxs (mkVisFunTys (dropRuntimeRepArgs ys) fr)
   | t' <- unwrapType t
   , Just (_fa, fr) <- splitFunTy_maybe t' = -- isFunTy t' =
       resultSize0 xs fr

@@ -109,7 +109,12 @@ typedef struct generation_ {
     memcount       n_compact_blocks_in_import; // no. of blocks used by compacts
                                                // being imported
 
-    memcount       max_blocks;          // max blocks
+    // Max blocks to allocate in this generation before collecting it. Collect
+    // this generation when
+    //
+    //     n_blocks + n_large_blocks + n_compact_blocks > max_blocks
+    //
+    memcount       max_blocks;
 
     StgTSO *       threads;             // threads in this gen
                                         // linked via global_link
@@ -229,15 +234,23 @@ void setKeepCAFs (void);
    and is put on the mutable list.
    -------------------------------------------------------------------------- */
 
-void dirty_MUT_VAR(StgRegTable *reg, StgClosure *p);
+void dirty_MUT_VAR(StgRegTable *reg, StgMutVar *mv, StgClosure *old);
 
 /* set to disable CAF garbage collection in GHCi. */
 /* (needed when dynamic libraries are used). */
 extern bool keepCAFs;
+
+#include "rts/Flags.h"
 
 INLINE_HEADER void initBdescr(bdescr *bd, generation *gen, generation *dest)
 {
     bd->gen     = gen;
     bd->gen_no  = gen->no;
     bd->dest_no = dest->no;
+
+#if !IN_STG_CODE
+    /* See Note [RtsFlags is a pointer in STG code] */
+    ASSERT(gen->no < RtsFlags.GcFlags.generations);
+    ASSERT(dest->no < RtsFlags.GcFlags.generations);
+#endif
 }

@@ -9,7 +9,7 @@
  * NB: THIS FILE IS INCLUDED IN NON-C CODE AND DATA!  #defines only please.
  *
  * To understand the structure of the RTS headers, see the wiki:
- *   http://ghc.haskell.org/trac/ghc/wiki/Commentary/SourceTree/Includes
+ *   https://gitlab.haskell.org/ghc/ghc/wikis/commentary/source-tree/includes
  *
  * ---------------------------------------------------------------------------*/
 
@@ -26,11 +26,15 @@
 #define USING_LIBBFD 1
 #endif
 
-/* DEBUG implies TRACING and TICKY_TICKY  */
-#if defined(DEBUG)
+/* DEBUG and PROFILING both imply TRACING */
+#if defined(DEBUG) || defined(PROFILING)
 #if !defined(TRACING)
 #define TRACING
 #endif
+#endif
+
+/* DEBUG implies TICKY_TICKY */
+#if defined(DEBUG)
 #if !defined(TICKY_TICKY)
 #define TICKY_TICKY
 #endif

@@ -147,6 +147,11 @@
    , BSwap32Op
    , BSwap64Op
    , BSwapOp
+   , BRev8Op
+   , BRev16Op
+   , BRev32Op
+   , BRev64Op
+   , BRevOp
    , Narrow8IntOp
    , Narrow16IntOp
    , Narrow32IntOp
@@ -168,7 +173,9 @@
    , Double2IntOp
    , Double2FloatOp
    , DoubleExpOp
+   , DoubleExpM1Op
    , DoubleLogOp
+   , DoubleLog1POp
    , DoubleSqrtOp
    , DoubleSinOp
    , DoubleCosOp
@@ -199,7 +206,9 @@
    , FloatFabsOp
    , Float2IntOp
    , FloatExpOp
+   , FloatExpM1Op
    , FloatLogOp
+   , FloatLog1POp
    , FloatSqrtOp
    , FloatSinOp
    , FloatCosOp
@@ -234,10 +243,12 @@
    , CasArrayOp
    , NewSmallArrayOp
    , SameSmallMutableArrayOp
+   , ShrinkSmallMutableArrayOp_Char
    , ReadSmallArrayOp
    , WriteSmallArrayOp
    , SizeofSmallArrayOp
    , SizeofSmallMutableArrayOp
+   , GetSizeofSmallMutableArrayOp
    , IndexSmallArrayOp
    , UnsafeFreezeSmallArrayOp
    , UnsafeThawSmallArrayOp
@@ -523,6 +534,7 @@
    , MkApUpd0_Op
    , NewBCOOp
    , UnpackClosureOp
+   , ClosureSizeOp
    , GetApStackValOp
    , GetCCSOfOp
    , GetCurrentCCSOp
@@ -530,7 +542,6 @@
    , TraceEventOp
    , TraceEventBinaryOp
    , TraceMarkerOp
-   , GetThreadAllocationCounter
    , SetThreadAllocationCounter
    , (VecBroadcastOp IntVec 16 W8)
    , (VecBroadcastOp IntVec 8 W16)

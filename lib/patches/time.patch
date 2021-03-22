@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc boot/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc
---- upstream/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc	2018-12-04 07:40:09.000000000 -0800
-+++ boot/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc	2018-12-04 07:40:09.946633153 -0800
+--- upstream/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc	2020-03-03 10:42:28.000000000 +0800
++++ boot/pkg/time/lib/Data/Time/Clock/Internal/CTimespec.hsc	2020-03-03 10:42:28.804092400 +0800
 @@ -1,5 +1,80 @@
  module Data.Time.Clock.Internal.CTimespec where
  

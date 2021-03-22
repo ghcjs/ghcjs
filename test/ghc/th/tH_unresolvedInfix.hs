@@ -1,6 +1,6 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE NoStarIsType #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE QuasiQuotes #-}
 
 module Main where
@@ -43,10 +43,7 @@ exprs = [
 -------------- Sections
   $( infixE (Just $ n +? n) plus Nothing ) N,
   -- see B.hs for the (non-compiling) other version of the above
-  $( infixE Nothing plus (Just $ parensE $ uInfixE n plus n) ) N,
-
--------------- Dropping constructors
-  $( n *? tupE [n +? n] )
+  $( infixE Nothing plus (Just $ parensE $ uInfixE n plus n) ) N
   ]
 
 --------------------------------------------------------------------------------
@@ -86,10 +83,7 @@ patterns = [
   case (N :+ N) :* (N :+ N) of
     [p14|unused|] -> True,
   case (N :+ (N :* N)) :+ N of
-    [p15|unused|] -> True,
--------------- Dropping constructors
-  case (N :* (N :+ N)) of
-    [p16|unused|] -> True
+    [p15|unused|] -> True
  ]
 
 --------------------------------------------------------------------------------

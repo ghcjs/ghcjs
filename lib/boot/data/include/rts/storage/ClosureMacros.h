@@ -117,36 +117,22 @@ INLINE_HEADER StgHalfWord GET_TAG(const StgClosure *con)
    -------------------------------------------------------------------------- */
 
 #if defined(PROFILING)
-#if defined(DEBUG_RETAINER)
 /*
-  For the sake of debugging, we take the safest way for the moment. Actually, this
-  is useful to check the sanity of heap before beginning retainer profiling.
-  flip is defined in RetainerProfile.c, and declared as extern in RetainerProfile.h.
-  Note: change those functions building Haskell objects from C datatypes, i.e.,
-  all rts_mk???() functions in RtsAPI.c, as well.
- */
-#define SET_PROF_HDR(c,ccs_)            \
-        ((c)->header.prof.ccs = ccs_, (c)->header.prof.hp.rs = (retainerSet *)((StgWord)NULL | flip))
-#else
-/*
-  For retainer profiling only: we do not have to set (c)->header.prof.hp.rs to
-  NULL | flip (flip is defined in RetainerProfile.c) because even when flip
-  is 1, rs is invalid and will be initialized to NULL | flip later when
-  the closure *c is visited.
- */
-/*
-#define SET_PROF_HDR(c,ccs_)            \
-        ((c)->header.prof.ccs = ccs_, (c)->header.prof.hp.rs = NULL)
- */
-/*
-  The following macro works for both retainer profiling and LDV profiling:
-  for retainer profiling, ldvTime remains 0, so rs fields are initialized to 0.
-  See the invariants on ldvTime.
+  The following macro works for both retainer profiling and LDV profiling. For
+ retainer profiling, 'era' remains 0, so by setting the 'ldvw' field we also set
+ 'rs' to zero.
+
+ Note that we don't have to bother handling the 'flip' bit properly[1] since the
+ retainer profiling code will just set 'rs' to NULL upon visiting a closure with
+ an invalid 'flip' bit anyways.
+
+ See Note [Profiling heap traversal visited bit] for details.
+
+ [1]: Technically we should set 'rs' to `NULL | flip`.
  */
 #define SET_PROF_HDR(c,ccs_)            \
         ((c)->header.prof.ccs = ccs_,   \
         LDV_RECORD_CREATE((c)))
-#endif /* DEBUG_RETAINER */
 #else
 #define SET_PROF_HDR(c,ccs)
 #endif
@@ -184,8 +170,8 @@ STATIC_LINK(const StgInfoTable *info, StgClosure *p)
     case IND_STATIC:
         return IND_STATIC_LINK(p);
     default:
-        return &(p)->payload[info->layout.payload.ptrs +
-                             info->layout.payload.nptrs];
+        return &p->payload[info->layout.payload.ptrs +
+                           info->layout.payload.nptrs];
     }
 }
 
@@ -542,8 +528,10 @@ void LDV_recordDead (const StgClosure *c, uint32_t size);
 
 EXTERN_INLINE void overwritingClosure_ (StgClosure *p,
                                         uint32_t offset /* in words */,
-                                        uint32_t size /* closure size, in words */);
-EXTERN_INLINE void overwritingClosure_ (StgClosure *p, uint32_t offset, uint32_t size)
+                                        uint32_t size /* closure size, in words */,
+                                        bool prim /* Whether to call LDV_recordDead */
+                                        );
+EXTERN_INLINE void overwritingClosure_ (StgClosure *p, uint32_t offset, uint32_t size, bool prim USED_IF_PROFILING)
 {
 #if ZERO_SLOP_FOR_LDV_PROF && !ZERO_SLOP_FOR_SANITY_CHECK
     // see Note [zeroing slop], also #8402
@@ -552,7 +540,7 @@ EXTERN_INLINE void overwritingClosure_ (StgClosure *p, uint32_t offset, uint32_t
 
     // For LDV profiling, we need to record the closure as dead
 #if defined(PROFILING)
-    LDV_recordDead(p, size);
+    if (!prim) { LDV_recordDead(p, size); };
 #endif
 
     for (uint32_t i = offset; i < size; i++) {
@@ -563,7 +551,7 @@ EXTERN_INLINE void overwritingClosure_ (StgClosure *p, uint32_t offset, uint32_t
 EXTERN_INLINE void overwritingClosure (StgClosure *p);
 EXTERN_INLINE void overwritingClosure (StgClosure *p)
 {
-    overwritingClosure_(p, sizeofW(StgThunkHeader), closure_sizeW(p));
+    overwritingClosure_(p, sizeofW(StgThunkHeader), closure_sizeW(p), false);
 }
 
 // Version of 'overwritingClosure' which overwrites only a suffix of a
@@ -571,17 +559,26 @@ EXTERN_INLINE void overwritingClosure (StgClosure *p)
 // be less than or equal to closure_sizeW(p), and usually at least as
 // large as the respective thunk header.
 //
-// Note: As this calls LDV_recordDead() you have to call LDV_RECORD()
+// Note: As this calls LDV_recordDead() you have to call LDV_RECORD_CREATE()
 //       on the final state of the closure at the call-site
 EXTERN_INLINE void overwritingClosureOfs (StgClosure *p, uint32_t offset);
 EXTERN_INLINE void overwritingClosureOfs (StgClosure *p, uint32_t offset)
 {
-    overwritingClosure_(p, offset, closure_sizeW(p));
+    // Set prim = true because overwritingClosureOfs is only
+    // ever called by
+    //   shrinkMutableByteArray# (ARR_WORDS)
+    //   shrinkSmallMutableArray# (SMALL_MUT_ARR_PTRS)
+    // This causes LDV_recordDead to be invoked. We want this
+    // to happen because the implementations of the above
+    // primops both call LDV_RECORD_CREATE after calling this,
+    // effectively replacing the LDV closure biography.
+    // See Note [LDV Profiling when Shrinking Arrays]
+    overwritingClosure_(p, offset, closure_sizeW(p), true);
 }
 
 // Version of 'overwritingClosure' which takes closure size as argument.
 EXTERN_INLINE void overwritingClosureSize (StgClosure *p, uint32_t size /* in words */);
 EXTERN_INLINE void overwritingClosureSize (StgClosure *p, uint32_t size)
 {
-    overwritingClosure_(p, sizeofW(StgThunkHeader), size);
+    overwritingClosure_(p, sizeofW(StgThunkHeader), size, false);
 }

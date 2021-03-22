@@ -20,7 +20,7 @@ import Data.List (unzip4, stripPrefix)
 import Hooks
 import DynFlags
 
-import HsExtension
+import GHC.Hs.Extension
 import Id
 import OrdList
 import Name
@@ -28,12 +28,12 @@ import Bag
 import CoreSyn
 import ErrUtils
 import HscTypes
-import HsBinds
-import HsDecls
+import GHC.Hs.Binds
+import GHC.Hs.Decls
 import Gen2.GHC.DsForeign (dsForeigns', dsPrimCall)
 import DsMonad
 import Encoding
-import HsUtils
+import GHC.Hs.Utils
 import TcEnv
 import TcExpr
 import TcRnTypes
@@ -66,7 +66,7 @@ import Module
 import TcType
 import TcRnMonad
 import TcHsType
-import Platform
+import GHC.Platform
 import CmmType
 import DsUtils
 import CmmUtils
@@ -224,10 +224,11 @@ mkFExportJSBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
     | isNothing maybe_target = panic "aug_arg_info" -- fixme stable_ptr_arg : insertRetAddr dflags cc arg_info
     | otherwise              = arg_info
 
+{-
   stable_ptr_arg =
         (text "the_stableptr", text "StgStablePtr", undefined,
          typeCmmType dflags (mkStablePtrPrimTy alphaTy))
-
+-}
   -- stuff to do with the return type of the C function
   res_hty_is_unit = res_hty `eqType` unitTy     -- Look through any newtypes
 
@@ -383,11 +384,13 @@ dsJsFExportDynamic id co0 _cconv = do
     u <- newUnique
     let fun_ty = head arg_tys
     arg_id <- newSysLocalDs fun_ty
+{-
     let mkExport = mkFCallId dflags u
                       (CCall (CCallSpec (StaticTarget NoSourceText (fsLit "h$mkExportDyn") Nothing True) JavaScriptCallConv PlayRisky))
-                      (mkFunTy addrPrimTy ty)
-        mkExportTy = mkFunTy (mkFunTys arg_tys res_ty) unitTy
-        (_fun_args0, _fun_r) = splitFunTys (dropForAlls fun_ty)
+                      (mkVisFunTy addrPrimTy ty)
+-}
+--        mkExportTy = mkVisFunTy (mkVisFunTys arg_tys res_ty) unitTy
+    let (_fun_args0, _fun_r) = splitFunTys (dropForAlls fun_ty)
         -- fixme: disabled due to bug. enable again to make foreign exports work
         expr       = Lam arg_id $ (Var arg_id) -- mkApps (Var mkExport) [Lit (mkMachString $ (snd (jsTySigLit dflags True fun_r) : ".") ++ map (snd . jsTySigLit dflags False) fun_args0), Var arg_id]
         fed        = (id `setInlineActivation` NeverActive)
@@ -424,7 +427,7 @@ dsJsCall fn_id co fcall _mDeclHeader = do
 
   let
     -- Build the worker
-    worker_ty     = mkForAllTys tv_bndrs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
+    worker_ty     = mkForAllTys tv_bndrs (mkVisFunTys (map idType work_arg_ids) ccall_result_ty)
     tvs           = map binderVar tv_bndrs
     the_ccall_app = mkFCall dflags ccall_uniq fcall val_args ccall_result_ty
     work_rhs      = mkLams tvs (mkLams work_arg_ids the_ccall_app)
@@ -547,8 +550,8 @@ unboxJsArg arg
 
 
 boxJsResult :: Type
-          -> DsM (Type, CoreExpr -> CoreExpr)
-boxJSResult result_ty
+            -> DsM (Type, CoreExpr -> CoreExpr)
+boxJsResult result_ty
   | isRuntimeRepKindedTy result_ty = panic "boxJsResult: runtime rep ty" -- fixme
 -- Takes the result of the user-level ccall:
 --      either (IO t),
@@ -595,7 +598,7 @@ boxJsResult result_ty
                                              [the_alt]
                                      ]
 
-        ; return (realWorldStatePrimTy `mkFunTy` ccall_res_ty, wrap) }
+        ; return (realWorldStatePrimTy `mkVisFunTy` ccall_res_ty, wrap) }
 
 boxJsResult result_ty
   = do -- It isn't IO, so do unsafePerformIO
@@ -607,7 +610,7 @@ boxJsResult result_ty
                                            ccall_res_ty
                                            (coreAltType the_alt)
                                            [the_alt]
-       return (realWorldStatePrimTy `mkFunTy` ccall_res_ty, wrap)
+       return (realWorldStatePrimTy `mkVisFunTy` ccall_res_ty, wrap)
   where
     return_result _ ans = ans
 
@@ -678,7 +681,7 @@ jsResultWrapper result_ty
     (tys, wrappers) <- unzip <$> mapM jsResultWrapper args'
     matched <- mapM (mapM newSysLocalDs) tys
     let tys'    = catMaybes tys
-        arity   = length args'
+        -- arity   = length args'
         -- resCon  = tupleDataCon Unboxed (length args)
         err     = panic "jsResultWrapper: used Id with result type Nothing"
         resWrap :: CoreExpr
@@ -786,7 +789,7 @@ getPrimTyOf ty
   -- with a single primitive-typed argument (see TcType.legalFEArgTyCon).
   | otherwise =
   case splitDataProductType_maybe rep_ty of
-     Just (_, _, data_con, [prim_ty]) ->
+     Just (_, _, _data_con, [prim_ty]) ->
 --        ASSERT(dataConSourceArity data_con == 1)
 --        ASSERT2(isUnliftedType prim_ty, ppr prim_ty)
         prim_ty
@@ -837,7 +840,7 @@ ghcjsNativeDsForeigns fos = do
       inclGhcjs = text "#include \"ghcjs.h\""
 
       convertForeignDecl :: DynFlags -> LForeignDecl GhcTc -> LForeignDecl GhcTc
-      convertForeignDecl dflags (L l (ForeignImport c n t (CImport (L lc JavaScriptCallConv) _safety mheader _spec txt))) =
+      convertForeignDecl dflags (L l (ForeignImport c n t (CImport (L _lc JavaScriptCallConv) _safety mheader _spec txt))) =
         (L l (ForeignImport c n t (CImport (noLoc CCallConv) (noLoc PlaySafe) mheader (convertSpec dflags n) txt)))
       convertForeignDecl _dflags (L l (ForeignExport c n t (CExport (L _ (CExportStatic srcTxt lbl JavaScriptCallConv)) txt))) =
         (L l (ForeignExport c n t (CExport (noLoc (CExportStatic srcTxt lbl CCallConv)) txt)))
@@ -864,9 +867,9 @@ ghcjsNativeDsForeigns fos = do
                   CLabel cls                         -> escapeQuoted (unpackFS cls)
                   CFunction (StaticTarget _ cls _ _) -> escapeQuoted (unpackFS cls) -- fixme source text may be better?
                   _ -> error "ghcjsNativeDsForeigns: unexpected import spec"
-           safety | s == PlayRisky         = int 0
-                  | s == PlaySafe          = int 1
-                  | s == PlayInterruptible = int 2
+           safety PlayRisky         = int 0
+           safety PlaySafe          = int 1
+           safety PlayInterruptible = int 2
            escapeQuoted xs = doubleQuotes $ text (concatMap escapeChar xs)
              where
                -- fixme proper escaping and handling of non-ascii characters
@@ -884,7 +887,7 @@ ghcjsNativeDsForeigns fos = do
            body | resSig == 'v' = vcat [text "int res;", call]
                 | otherwise     = vcat [text resTy <+> text "res;", call, text "return res;"]
            call = text "getJavaScriptHandler()" <> parens (pprWithCommas id handlerArgs) <> semi
-           handlerArgs = [js, safety, escapeQuoted (resSig : argsSig), text "(void*)&res"]
+           handlerArgs = [js, safety s, escapeQuoted (resSig : argsSig), text "(void*)&res"]
                            ++ take (length args) argNames
            stubArgs = parens $ pprWithCommas id (zipWith (\ty n -> text ty <+> n) argTys argNames)
 
@@ -913,9 +916,11 @@ jsTySigLit dflags isResult t | isResult, Just (_ ,result) <- tcSplitIOType_maybe
                  prim IntRep   = hsInt
                  prim Int8Rep  = hsInt
                  prim Int16Rep = hsInt
+                 prim Int32Rep = hsInt
                  prim WordRep  = hsWord
                  prim Word8Rep = hsWord
                  prim Word16Rep = hsWord
+                 prim Word32Rep = hsWord
                  prim Int64Rep  = hsInt64
                  prim Word64Rep = hsWord64
                  prim AddrRep   = hsPtr
@@ -1025,7 +1030,7 @@ isGhcjsFFIImportResultTy dflags ty
               (text $ "JavaScript FFI result type must be a valid CCall FFI result type or JSVal: " ++ showPpr dflags ty ++ " " ++ show (map (isValid . check) args') ++ " " ++ show (map (showPpr dflags) args'))
   | otherwise = isGhcjsFFIImportResultTy' dflags ty
     where
-      check ty | Just (tc, args) <- tcSplitTyConApp_maybe ty
+      check ty | Just (tc, _args) <- tcSplitTyConApp_maybe ty
                , getUnique tc == liftedTypeKindTyConKey
                 {- || getUnique tc == unliftedTypeKindTyConKey -} = IsValid -- fixme
                | isValid (isGhcjsFFIImportResultTy' dflags ty) = IsValid

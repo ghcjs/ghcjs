@@ -21,18 +21,13 @@ module GHCJS.Prim.TH.Types ( Message(..)
 
 import           Prelude
 
-import           Control.Applicative
-
 import           Data.Binary
 import           Data.ByteString (ByteString)
 import           Data.Data
-import           Data.Word
 
 import           GHC.Generics
-import           GHC.Exts
 
-import           GHCJS.Prim.TH.Serialized
-import           GHCi.TH.Binary
+import           GHCi.TH.Binary ()
 
 #if defined(__GHCJS__) || !defined(MIN_VERSION_template_haskell_ghcjs)
 import qualified Language.Haskell.TH        as TH

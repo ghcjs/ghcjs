@@ -19,14 +19,14 @@
  * "Rts.h" instead.
  *
  * To understand the structure of the RTS headers, see the wiki:
- *   http://ghc.haskell.org/trac/ghc/wiki/Commentary/SourceTree/Includes
+ *   https://gitlab.haskell.org/ghc/ghc/wikis/commentary/source-tree/includes
  *
  * ---------------------------------------------------------------------------*/
 
 #pragma once
 
-#if !(__STDC_VERSION__ >= 199901L)
-# error __STDC_VERSION__ does not advertise C99 or later
+#if !(__STDC_VERSION__ >= 199901L) && !(__cplusplus >= 201103L)
+# error __STDC_VERSION__ does not advertise C99, C++11 or later
 #endif
 
 /*
@@ -61,7 +61,7 @@
 # define _DEFAULT_SOURCE
 #endif
 
-#if IN_STG_CODE == 0 || defined(llvm_CC_FLAVOR)
+#if IN_STG_CODE == 0 || defined(CC_LLVM_BACKEND)
 // C compilers that use an LLVM back end (clang or llvm-gcc) do not
 // correctly support global register variables so we make sure that
 // we do not declare them for these compilers.
@@ -196,7 +196,18 @@
 #define GNUC3_ATTRIBUTE(at)
 #endif
 
-#if __GNUC__ > 4 || __GNUC__ == 4 && __GNUC_MINOR__ >= 3
+/* Used to mark a switch case that falls-through */
+#if (defined(__GNUC__) && __GNUC__ >= 7)
+// N.B. Don't enable fallthrough annotations when compiling with Clang.
+// Apparently clang doesn't enable implicitly fallthrough warnings by default
+// http://llvm.org/viewvc/llvm-project?revision=167655&view=revision
+// when compiling C and the attribute cause warnings of their own (#16019).
+#define FALLTHROUGH GNU_ATTRIBUTE(fallthrough)
+#else
+#define FALLTHROUGH ((void)0)
+#endif /* __GNUC__ >= 7 */
+
+#if !defined(DEBUG) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3))
 #define GNUC_ATTR_HOT __attribute__((hot))
 #else
 #define GNUC_ATTR_HOT /* nothing */
@@ -251,7 +262,7 @@ typedef StgFunPtr       F_;
 /* foreign functions: */
 #define EFF_(f)   void f() /* See Note [External function prototypes] */
 
-/* Note [External function prototypes]  See Trac #8965, #11395
+/* Note [External function prototypes]  See #8965, #11395
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 In generated C code we need to distinct between two types
 of external symbols:
@@ -278,7 +289,7 @@ believe that all functions declared this way can be called without an
 argument save area, but if the callee has sufficiently many arguments then
 it will expect that area to be present, and will thus corrupt the caller's
 stack.  This happens in particular with calls to runInteractiveProcess in
-libraries/process/cbits/runProcess.c, and led to Trac #8965.
+libraries/process/cbits/runProcess.c, and led to #8965.
 
 The simplest fix appears to be to declare these external functions with an
 unspecified argument list rather than a void argument list.  This is no
@@ -303,7 +314,7 @@ external prototype return neither of these types to workaround #11395.
    -------------------------------------------------------------------------- */
 
 #include "stg/DLL.h"
-#include "stg/RtsMachRegs.h"
+#include "stg/MachRegsForHost.h"
 #include "stg/Regs.h"
 #include "stg/Ticky.h"
 
@@ -586,3 +597,4 @@ typedef union {
   c;                                            \
 })
 #endif
+

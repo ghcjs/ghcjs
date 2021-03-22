@@ -45,6 +45,7 @@ module Gen2.Object ( object
                    , serializeStat
                    , emptySymbolTable
                    , isGlobalUnit
+                   , isExportsUnit -- XXX verify that this is used
                    , SymbolTable
                    , ObjUnit (..)
                    , Deps (..), BlockDeps (..)
@@ -143,8 +144,13 @@ data ExpFun = ExpFun { isIO   :: !Bool
 isGlobalUnit :: Int -> Bool
 isGlobalUnit n = n == 0
 
+-- fixme document, exports unit is always linked
+isExportsUnit :: Int -> Bool
+isExportsUnit n = n == 1
+
 instance NFData ExpFun where
   rnf (ExpFun _x as _r) = rnf as `seq` ()
+
 
 instance NFData JSFFIType where
   rnf x = x `seq` ()
@@ -259,6 +265,7 @@ data ObjUnit = ObjUnit { oiSymbols  :: [Text]         -- toplevel symbols (store
                        , oiClInfo   :: [ClosureInfo]  -- closure information of all closures in block
                        , oiStatic   :: [StaticInfo]   -- static closure data
                        , oiStat     :: JStat          -- the code
+                       , oiRaw      :: Text           -- raw JS code
                        , oiFExports :: [ExpFun]
                        , oiFImports :: [ForeignRef]
                        }
@@ -270,8 +277,8 @@ object :: Deps        -- ^ the dependencies
 object ds units = object' symbs ds xs
   where
     (xs, symbs) = go emptySymbolTable units
-    go st0 (ObjUnit sy cl si st fe fi : ys) =
-      let (st1, bs)  = serializeStat st0 cl si st fe fi
+    go st0 (ObjUnit sy cl si st str fe fi : ys) =
+      let (st1, bs)  = serializeStat st0 cl si st str fe fi
           (bss, st2) = go st1 ys
       in  ((sy,bs):bss, st2)
     go st0 [] = ([], st0)
@@ -280,11 +287,18 @@ serializeStat :: SymbolTable
               -> [ClosureInfo]
               -> [StaticInfo]
               -> JStat
+              -> Text
               -> [ExpFun]
               -> [ForeignRef]
               -> (SymbolTable, ByteString)
-serializeStat st ci si s fe fi =
-  let (st', bs) = runPutS st (put ci >> put s >> put si >> put fe >> put fi) -- fixme order
+serializeStat st ci si s sraw fe fi =
+  let (st', bs) = runPutS st $ do
+                    put ci
+                    put si
+                    put s
+                    put sraw
+                    put fe
+                    put fi
       bs' = B.toStrict bs
   in  (st', B.fromChunks [bs'])
 
@@ -418,8 +432,8 @@ readObjectKeys' name p st bsidx bsobjs = catMaybes (zipWith readObj [0..] idx)
     where
       idx = getIndex name st bsidx
       readObj n (x,off)
-        | p n x     = let (ci, s, si, fe, fi) = runGetS name st ((,,,,) <$> get <*> get <*> get <*> get <*> get) (B.drop off bsobjs) -- fixme order!
-                      in  Just (ObjUnit x ci si s fe fi)
+        | p n x     = let (ci, si, s, sraw, fe, fi) = runGetS name st ((,,,,,) <$> get <*> get <*> get <*> get <*> get <*> get) (B.drop off bsobjs)
+                      in  Just (ObjUnit x ci si s sraw fe fi)
         | otherwise = Nothing
 
 getSymbolTable :: ByteString -> SymbolTableR
@@ -481,7 +495,7 @@ showObject :: [ObjUnit] -> TL.Text
 showObject xs = mconcat (zipWith showSymbol xs [0..])
   where
     showSymbol :: ObjUnit -> Int -> TL.Text
-    showSymbol (ObjUnit symbs cis sis stat _fexp _fimp) n -- fixme show static data
+    showSymbol (ObjUnit symbs cis sis stat _raw _fexp _fimp) n -- fixme show static data
       | "h$debug" `elem` symbs =
            "/*\n" <> (TL.fromStrict $ T.unlines ( stat ^.. template . _JStr )) <> "\n*/\n"
       | otherwise = TL.unlines

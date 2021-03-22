@@ -27,7 +27,7 @@
    hackery can go away sometime.
    ------------------------------------------------------------------------- */
 
-#if defined(x86_64_TARGET_ARCH)
+#if defined(x86_64_HOST_ARCH)
 #define OFFSET_FIELD(n) StgHalfInt n; StgHalfWord __pad_##n
 #else
 #define OFFSET_FIELD(n) StgInt n
@@ -153,7 +153,7 @@ typedef union {
 } StgClosureInfo;
 
 
-#if defined(x86_64_TARGET_ARCH) && defined(TABLES_NEXT_TO_CODE)
+#if defined(x86_64_HOST_ARCH) && defined(TABLES_NEXT_TO_CODE)
 // On x86_64 we can fit a pointer offset in half a word, so put the SRT offset
 // in the info->srt field directly.
 //
@@ -189,7 +189,7 @@ typedef struct StgInfoTable_ {
     StgHalfWord     type;       /* closure type */
     StgSRTField     srt;
        /* In a CONSTR:
-            - the constructor tag
+            - the zero-based constructor tag
           In a FUN/THUNK
             - if USE_INLINE_SRT_FIELD
               - offset to the SRT (or zero if no SRT)
@@ -338,7 +338,7 @@ typedef struct StgConInfoTable_ {
  * info must be a Stg[Ret|Thunk]InfoTable* (an info table that has a SRT)
  */
 #if defined(TABLES_NEXT_TO_CODE)
-#if defined(x86_64_TARGET_ARCH)
+#if defined(x86_64_HOST_ARCH)
 #define GET_SRT(info) \
   ((StgClosure*) (((StgWord) ((info)+1)) + (info)->i.srt))
 #else
@@ -355,7 +355,7 @@ typedef struct StgConInfoTable_ {
  */
 #if defined(TABLES_NEXT_TO_CODE)
 #define GET_CON_DESC(info) \
-            ((const char *)((StgWord)((info)+1) + (info->con_desc)))
+            ((const char *)((StgWord)((info)+1) + ((info)->con_desc)))
 #else
 #define GET_CON_DESC(info) ((const char *)(info)->con_desc)
 #endif
@@ -365,7 +365,7 @@ typedef struct StgConInfoTable_ {
  * info must be a StgFunInfoTable*
  */
 #if defined(TABLES_NEXT_TO_CODE)
-#if defined(x86_64_TARGET_ARCH)
+#if defined(x86_64_HOST_ARCH)
 #define GET_FUN_SRT(info) \
   ((StgClosure*) (((StgWord) ((info)+1)) + (info)->i.srt))
 #else

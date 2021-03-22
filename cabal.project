@@ -1,3 +1,15 @@
 
 packages: ghcjs.cabal
           lib/ghcjs-th/*.cabal
+
+allow-newer: unliftio-core:base,
+             parallel:base,
+             hashable:base,
+             aeson:ghc-prim,
+             aeson:template-haskell,
+             th-abstraction:template-haskell,
+             tar:base,
+             vault:base
+
+
+

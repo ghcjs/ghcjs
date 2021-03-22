@@ -8,7 +8,7 @@
  * Do not #include this file directly: #include "Rts.h" instead.
  *
  * To understand the structure of the RTS headers, see the wiki:
- *   http://ghc.haskell.org/trac/ghc/wiki/Commentary/SourceTree/Includes
+ *   https://gitlab.haskell.org/ghc/ghc/wikis/commentary/source-tree/includes
  *
  * NOTE: assumes #include "ghcconfig.h"
  *
@@ -21,8 +21,15 @@
 #pragma once
 
 #if defined(mingw32_HOST_OS)
+#  if defined(__USE_MINGW_ANSI_STDIO)
+#    if __USE_MINGW_ANSI_STDIO != 1
+#       warning "Mismatch between __USE_MINGW_ANSI_STDIO definitions. \
+If using Rts.h make sure it is the first header included."
+#    endif
+#  else
 /* Inform mingw we want the ISO rather than Windows printf format specifiers. */
-#define __USE_MINGW_ANSI_STDIO 1
+#    define __USE_MINGW_ANSI_STDIO 1
+#endif
 #endif
 
 /* ISO C 99 says:
@@ -185,3 +192,10 @@ typedef StgWord8*          StgByteArray;
 
 typedef void  *(*(*StgFunPtr)(void))(void);
 typedef StgFunPtr StgFun(void);
+
+// Forward declarations for the unregisterised backend, which
+// only depends upon Stg.h and not the entirety of Rts.h, which
+// is where these are defined.
+struct StgClosure_;
+struct StgThunk_;
+struct Capability_;

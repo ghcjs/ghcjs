@@ -59,7 +59,7 @@ instance Show CostCentre where show _ = "CostCentre"
 instance Show CostCentreStack where show _ = "CostCentreStack"
 instance Show Module where show m = unitIdString (moduleUnitId m) ++ ":" ++ moduleNameString (moduleName m)
 instance Show TyCon where show = show . tyConName
-instance Show NoExtSilent where show _ = "NoExtSilent"
+instance Show NoExtFieldSilent where show _ = "NoExtFieldSilent"
 instance Show Name where
   show n = case nameModule_maybe n of
                   Nothing -> show (nameOccName n)

@@ -27,6 +27,7 @@ js:
 module Gen2.Shim where
 
 import           DynFlags
+import           ToolSettings
 import qualified FileCleanup
 import Prelude
 
@@ -111,11 +112,13 @@ tryReadShimFile dflags file = do
   -- if not exists
   --  then panic ("warning: " <> file <> " does not exist") -- fixme how to raise a proper error here? -- >> return mempty
   --  else do
-      let s = settings dflags
-          s1 = s { sPgm_P = (fst (sPgm_P s), jsCppPgmOpts (snd $ sPgm_P s))
-                 , sOpt_P = jsCppOpts (sOpt_P s)
-                 }
-          dflags1 = dflags { settings = s1 }
+      let s = toolSettings dflags
+          s1 = s { toolSettings_pgm_P =
+                      ( fst (toolSettings_pgm_P s)
+                      , jsCppPgmOpts (snd $ toolSettings_pgm_P s))
+                  , toolSettings_opt_P = jsCppOpts (toolSettings_opt_P s)
+                  }
+          dflags1 = dflags { toolSettings = s1 }
       if needsCpp file
       then do
         outfile <- FileCleanup.newTempName dflags FileCleanup.TFL_CurrentModule "jspp"
@@ -149,11 +152,14 @@ readShimsArchive :: DynFlags -> FilePath -> IO B.ByteString
 readShimsArchive dflags archive = do
   meta <- Ar.readMeta archive
   srcs <- Ar.readAllSources archive
-  let s       = settings dflags
-      s1      = s { sPgm_P = (fst (sPgm_P s), jsCppPgmOpts (snd $ sPgm_P s))
-                  , sOpt_P = jsCppOpts (Ar.metaCppOptions meta ++ sOpt_P s)
+  let s       = toolSettings dflags
+      s1      = s { toolSettings_pgm_P = 
+                        ( fst (toolSettings_pgm_P s)
+                        , jsCppPgmOpts (snd $ toolSettings_pgm_P s))
+                  , toolSettings_opt_P = jsCppOpts (Ar.metaCppOptions meta ++
+                                         toolSettings_opt_P s)
                   }
-      dflags1 = dflags { settings = s1 }
+      dflags1 = dflags { toolSettings = s1 }
   srcs' <- forM srcs $ \(filename, b) ->
     if needsCpp filename
     then do

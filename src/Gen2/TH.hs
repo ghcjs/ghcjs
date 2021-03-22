@@ -25,7 +25,8 @@ import qualified Gen2.Cache          as Gen2
 import qualified Gen2.Rts            as Gen2
 import Prelude
 
-import           HsExtension
+import           GHC.Hs.Extension
+import           BasicTypes
 import           CoreToStg
 import           CoreUtils
 import           CorePrep
@@ -42,7 +43,7 @@ import           Packages
 import           Maybes
 import           SimplStg
 import           GHC.Serialized
-import           Convert
+import           GHC.ThToHs
 import           Bag
 import           StaticPtrTable
 import           Finder
@@ -75,13 +76,14 @@ import qualified Data.Text.Lazy.Encoding        as TL
 
 import qualified GHCJS.Prim.TH.Types            as TH
 
-#if defined(MIN_VERSION_template_haskell_ghcjs)
-import qualified "template-haskell-ghcjs" Language.Haskell.TH            as TH
-import qualified "template-haskell-ghcjs" Language.Haskell.TH.Syntax     as TH
-#else
+-- #if defined(MIN_VERSION_template_haskell_ghcjs)
+-- import qualified "template-haskell-ghcjs" Language.Haskell.TH            as TH
+-- import qualified "template-haskell-ghcjs" Language.Haskell.TH.Syntax     as TH
+-- #else
+
 import qualified "template-haskell"       Language.Haskell.TH            as TH
 import qualified "template-haskell"       Language.Haskell.TH.Syntax     as TH
-#endif
+-- #endif
 
 import           System.Process
   (terminateProcess, waitForProcess)
@@ -92,12 +94,12 @@ import           System.IO.Error
 import           System.Timeout
 
 import           ErrUtils
-import           HsExpr
+import           GHC.Hs.Expr
 import           DsMonad
 import           DsExpr
-import           HsPat
-import           HsTypes
-import           HsDecls
+import           GHC.Hs.Pat
+import           GHC.Hs.Types
+import           GHC.Hs.Decls
 import           TcSplice ()
 import           UniqDFM
 
@@ -117,14 +119,23 @@ convertD = convertTH (get :: Get [TH.Dec]) convertToHsDecls
 
 convertTH :: Binary a
           => Get a
-          -> (SrcSpan -> a -> Either MsgDoc b)
+          -> (Origin -> SrcSpan -> a -> Either MsgDoc b)
           -> SrcSpan
           -> ByteString
           -> TcM b
 convertTH g f s b
-  = case f s (runGet g (BL.fromStrict b)) of
+  = do
+    th_origin <- getThSpliceOrigin
+    case f th_origin s (runGet g (BL.fromStrict b)) of
       Left msg -> failWithTc msg
       Right x  -> return x
+
+-- | We only want to produce warnings for TH-splices if the user requests so.
+-- See Note [Warnings for TH splices].
+getThSpliceOrigin :: TcM Origin
+getThSpliceOrigin = do
+  warn <- goptM Opt_EnableThSpliceWarnings
+  if warn then return FromSource else return Generated
 
 convertAnn :: SrcSpan -> ByteString -> TcM Serialized
 convertAnn _ bs = return (toSerialized B.unpack bs)
@@ -227,6 +238,7 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
                             (mod n)
                             stg_pgm1
                             spt_entries
+                            NoStubs
                             cost_centre_info
              , symb n)
   where
@@ -284,7 +296,7 @@ bootObject js_settings dflags m details =
       mk_decl_ty _ _                            = Nothing
       mk_decl_id _ i = Just
         (StgTopLifted (
-         (StgNonRec i (StgRhsClosure noExtSilent
+         (StgNonRec i (StgRhsClosure noExtFieldSilent
                                      dontCareCCS
                                    -- noBinderInfo
                                    -- []
@@ -293,7 +305,7 @@ bootObject js_settings dflags m details =
                                     (StgApp i [])))))
   in ObjLoaded
        (moduleNameString mn ++ " [boot]")
-       (Gen2.generate js_settings dflags m stg_pgm [] emptyCollectedCCs)
+       (Gen2.generate js_settings dflags m stg_pgm [] NoStubs emptyCollectedCCs)
 
 linkTh :: GhcjsEnv
        -> GhcjsSettings        -- settings (contains the base state)

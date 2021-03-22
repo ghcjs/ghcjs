@@ -7,7 +7,7 @@
  * Do not #include this file directly: #include "Rts.h" instead.
  *
  * To understand the structure of the RTS headers, see the wiki:
- *   http://ghc.haskell.org/trac/ghc/wiki/Commentary/SourceTree/Includes
+ *   https://gitlab.haskell.org/ghc/ghc/wikis/commentary/source-tree/includes
  *
  * ---------------------------------------------------------------------------*/
 
@@ -52,6 +52,9 @@ typedef struct _GC_FLAGS {
     double  oldGenFactor;
     double  pcFreeHeap;
 
+    bool         useNonmoving; // default = false
+    bool         nonmovingSelectorOpt; // Do selector optimization in the
+                                       // non-moving heap, default = false
     uint32_t     generations;
     bool squeezeUpdFrames;
 
@@ -95,8 +98,10 @@ typedef struct _DEBUG_FLAGS {
     bool weak;           /* 'w' */
     bool gccafs;         /* 'G' */
     bool gc;             /* 'g' */
+    bool nonmoving_gc;   /* 'n' */
     bool block_alloc;    /* 'b' */
     bool sanity;         /* 'S'   warning: might be expensive! */
+    bool zero_on_gc;     /* 'Z' */
     bool stable;         /* 't' */
     bool prof;           /* 'p' */
     bool linker;         /* 'l'   the object linker */
@@ -167,9 +172,11 @@ typedef struct _TRACE_FLAGS {
     bool timestamp;      /* show timestamp in stderr output */
     bool scheduler;      /* trace scheduler events */
     bool gc;             /* trace GC events */
+    bool nonmoving_gc;   /* trace nonmoving GC events */
     bool sparks_sampled; /* trace spark events by a sampled method */
     bool sparks_full;    /* trace spark events 100% accurately */
     bool user;           /* trace user events (emitted from Haskell code) */
+    char *trace_output;  /* output filename for eventlog */
 } TRACE_FLAGS;
 
 /* See Note [Synchronization of flags and base APIs] */
@@ -187,6 +194,17 @@ typedef struct _CONCURRENT_FLAGS {
  */
 #define DEFAULT_TICK_INTERVAL USToTime(10000)
 
+/*
+ * When linkerAlwaysPic is true, the runtime linker assume that all object
+ * files were compiled with -fPIC -fexternal-dynamic-refs and load them
+ * anywhere in the address space.
+ */
+#if defined(x86_64_HOST_ARCH) && defined(darwin_HOST_OS)
+#define DEFAULT_LINKER_ALWAYS_PIC true
+#else
+#define DEFAULT_LINKER_ALWAYS_PIC false
+#endif
+
 /* See Note [Synchronization of flags and base APIs] */
 typedef struct _MISC_FLAGS {
     Time    tickInterval;        /* units: TIME_RESOLUTION */
@@ -195,7 +213,14 @@ typedef struct _MISC_FLAGS {
     bool generate_dump_file;
     bool generate_stack_trace;
     bool machineReadable;
+    bool disableDelayedOsMemoryReturn; /* See Note [MADV_FREE and MADV_DONTNEED].
+                                          It's in `MiscFlags` instead of
+                                          `GcFlags` because if GHC used madvise()
+                                          memory management for non-GC related
+                                          tasks in the future, we'd respect it
+                                          there as well. */
     bool internalCounters;       /* See Note [Internal Counter Stats] */
+    bool linkerAlwaysPic;        /* Assume the object code is always PIC */
     StgWord linkerMemBase;       /* address to ask the OS for memory
                                   * for the linker, NULL ==> off */
 } MISC_FLAGS;
@@ -254,7 +279,11 @@ typedef struct _RTS_FLAGS {
 #if defined(COMPILING_RTS_MAIN)
 extern DLLIMPORT RTS_FLAGS RtsFlags;
 #elif IN_STG_CODE
-/* Hack because the C code generator can't generate '&label'. */
+/* Note [RtsFlags is a pointer in STG code]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * When compiling with IN_STG_CODE the RtsFlags symbol is defined as a pointer.
+ * This is necessary because the C code generator can't generate '&label'.
+ */
 extern RTS_FLAGS RtsFlags[];
 #else
 extern RTS_FLAGS RtsFlags;

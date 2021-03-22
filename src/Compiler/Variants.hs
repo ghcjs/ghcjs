@@ -18,7 +18,7 @@ import           CostCentre            (CollectedCCs)
 import           DynFlags              (DynFlags)
 import           Module                (Module (..), InstalledUnitId)
 import           StgSyn                (StgBinding, StgTopBinding)
-import           HscTypes              (SptEntry)
+import           HscTypes              (SptEntry, ForeignStubs)
 
 data Variant = Variant
     { variantRender            :: GhcjsSettings
@@ -26,6 +26,7 @@ data Variant = Variant
                                -> Module
                                -> [StgTopBinding]
                                -> [SptEntry]
+                               -> ForeignStubs
                                -> CollectedCCs
                                -> ByteString
     , variantLink              :: DynFlags

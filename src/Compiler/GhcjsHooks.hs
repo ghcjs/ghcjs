@@ -22,6 +22,9 @@ import           SimplStg             (stg2stg)
 import           HeaderInfo
 import           HscTypes
 import           Maybes               (expectJust)
+import           MkIface
+import           PipelineMonad
+import           HscMain
 
 import           Control.Concurrent.MVar
 import           Control.Monad
@@ -139,41 +142,61 @@ runGhcjsPhase settings env (HscOut src_flavour mod_name result) _ dflags = do
 
         let o_file = ml_obj_file location -- The real object file
             hsc_lang = hscTarget dflags
-            next_phase = hscPostBackendPhase dflags src_flavour hsc_lang
+            next_phase = hscPostBackendPhase {-dflags-} src_flavour hsc_lang
 
         case result of
-            HscNotGeneratingCode ->
+            HscNotGeneratingCode _ ->
                 return (RealPhase next_phase,
                         panic "No output filename from Hsc when no-code")
-            HscUpToDate ->
+            HscUpToDate _ ->
                 do liftIO $ touchObjectFile dflags o_file
                    -- The .o file must have a later modification date
                    -- than the source file (else we wouldn't get Nothing)
                    -- but we touch it anyway, to keep 'make' happy (we think).
                    return (RealPhase StopLn, o_file)
-            HscUpdateBoot ->
+            HscUpdateBoot _ ->
                 do -- In the case of hs-boot files, generate a dummy .o-boot
                    -- stamp file for the benefit of Make
                    liftIO $ touchObjectFile dflags o_file
                    return (RealPhase next_phase, o_file)
-            HscUpdateSig ->
+            HscUpdateSig _ ->
                 do -- We need to create a REAL but empty .o file
                    -- because we are going to attempt to put it in a library
+                   {-
                    PipeState{hsc_env=hsc_env'} <- getPipeState
                    let input_fn = expectJust "runPhase" (ml_hs_file location)
                        basename = dropExtension input_fn
+                    -}
                    -- fixme do we need to create a js_o file here?
                    -- liftIO $ compileEmptyStub dflags hsc_env' basename location
                    return (RealPhase next_phase, o_file)
-            HscRecomp cgguts mod_summary
+            HscRecomp { hscs_guts = cgguts,
+                        hscs_mod_location = mod_location,
+                        hscs_partial_iface = partial_iface,
+                        hscs_old_iface_hash = mb_old_iface_hash,
+                        hscs_iface_dflags = iface_dflags }
               -> do output_fn <- phaseOutputFilename next_phase
 
                     PipeState{hsc_env=hsc_env'} <- getPipeState
 
                     outputFilename <- liftIO $
                       ghcjsWriteModule settings env
-                        hsc_env' cgguts mod_summary output_fn
+                        hsc_env' cgguts (mi_module partial_iface) mod_location output_fn
 
+                    final_iface <- liftIO (mkFullIface hsc_env'{hsc_dflags=iface_dflags} partial_iface)
+                    setIface final_iface
+
+                    -- See Note [Writing interface files]
+                    let if_dflags = dflags `gopt_unset` Opt_BuildDynamicToo
+                    liftIO $ hscMaybeWriteIface if_dflags final_iface mb_old_iface_hash mod_location
+
+                    {-
+                    stub_o <- liftIO (mapM (compileStub hsc_env') mStub)
+                    
+                    foreign_os <- liftIO $
+                      mapM (uncurry (compileForeign hsc_env')) foreign_files
+                    setForeignOs (maybe [] return stub_o ++ foreign_os)
+                     -}
                     return (RealPhase next_phase, outputFilename)
 -- skip these, but copy the result
 runGhcjsPhase _ _ (RealPhase ph) input _dflags
@@ -205,11 +228,12 @@ ghcjsWriteModule :: GhcjsSettings
                  -> GhcjsEnv
                  -> HscEnv      -- ^ Environment in which to compile the module
                  -> CgGuts
-                 -> ModSummary
+                 -> Module
+                 -> ModLocation
                  -> FilePath    -- ^ Output path
                  -> IO FilePath
-ghcjsWriteModule settings jsEnv env core mod output = do
-    b <- ghcjsCompileModule settings jsEnv env core mod
+ghcjsWriteModule settings jsEnv env core mod mod_location output = do
+    b <- ghcjsCompileModule settings jsEnv env core mod mod_location
     createDirectoryIfMissing True (takeDirectory output)
     Utils.writeBinaryFile output b
     return output
@@ -218,10 +242,11 @@ ghcjsCompileModule :: GhcjsSettings
                    -> GhcjsEnv
                    -> HscEnv      -- ^ Environment in which to compile the module
                    -> CgGuts
-                   -> ModSummary
+                   -> Module
+                   -> ModLocation
                    -> IO B.ByteString
 -- dynamic-too will invoke this twice, cache results in GhcjsEnv
-ghcjsCompileModule settings jsEnv env core mod =
+ghcjsCompileModule settings jsEnv env core mod' mod_location =
   ifGeneratingDynamicToo dflags genDynToo genOther
   where
     genDynToo = do
@@ -233,17 +258,23 @@ ghcjsCompileModule settings jsEnv env core mod =
         case M.lookup mod' m of
           Nothing -> return (m, compile)
           Just r  -> return (M.delete mod' m, return r)
-    mod'  = ms_mod mod
     cms    = compiledModules jsEnv
     dflags = hsc_dflags env
     compile = do
       (prepd_binds, local_ccs) <- corePrepPgm env
                                               mod'
-                                              (ms_location mod)
+                                              mod_location
                                               (cg_binds core)
                                               (cg_tycons core)
       let (stg, (caf_ccs, caf_cc_stacks)) = coreToStg dflags mod' prepd_binds
       stg' <- stg2stg dflags mod' stg
       let cost_centre_info =
             (S.toList local_ccs ++ caf_ccs, caf_cc_stacks)
-      return $ variantRender gen2Variant settings dflags mod' stg' (cg_spt_entries core) cost_centre_info
+      return $ variantRender gen2Variant
+                             settings
+                             dflags
+                             mod'
+                             stg'
+                             (cg_spt_entries core)
+                             (cg_foreign core)
+                             cost_centre_info

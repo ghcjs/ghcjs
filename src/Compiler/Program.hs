@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, NondecreasingIndentation, TupleSections #-}
+{-# LANGUAGE CPP, NondecreasingIndentation, TupleSections, LambdaCase #-}
 -- GHC frontend ( ghc/Main.hs ) adapted for GHCJS
 #undef GHCI
 
@@ -36,13 +36,12 @@ import LoadIface        ( showIface )
 import HscMain          ( newHscEnv )
 import DriverPipeline   ( oneShot, compileFile )
 import DriverMkDepend   ( doMkDependHS )
-import DriverBkp   ( doBackpack )
-#if defined(GHCI)
+#if defined(HAVE_INTERNAL_INTERPRETER)
 import GHCi.UI          ( interactiveUI, ghciWelcomeMsg, defaultGhciSettings )
 #endif
 
 -- Frontend plugins
--- #if defined(GHCI)
+-- #if defined(HAVE_INTERNAL_INTERPRETER)
 import DynamicLoading   ( loadFrontendPlugin )
 import Plugins
 -- #else
@@ -53,6 +52,8 @@ import Module           ( ModuleName )
 
 -- Various other random stuff that we need
 import GHC.HandleEncoding
+import GHC.Platform
+import GHC.Platform.Host
 import Config
 import Constants
 import HscTypes
@@ -63,11 +64,13 @@ import DynFlags hiding (WarnReason(..))
 import ErrUtils
 import FastString
 import Outputable
+import SysTools.BaseDir
 import SrcLoc
 import Util
 import Panic
 import UniqSupply
 import MonadUtils       ( liftIO )
+import SysTools.Settings
 
 -- Imports for --abi-hash
 import LoadIface           ( loadUserInterface )
@@ -79,12 +82,13 @@ import BinFingerprint      ( fingerprintBinMem )
 
 -- Standard Haskell libraries
 import System.IO
-import System.Environment
 import System.Exit
 import System.FilePath
 import Control.Monad
+import Control.Monad.Trans.Class
+import Control.Monad.Trans.Except (throwE, runExceptT)
 import Data.Char
-import Data.List
+import Data.List ( isPrefixOf, partition, intercalate )
 import Data.Maybe
 
 -----------------------------------------------------------------------------
@@ -109,7 +113,7 @@ main = do
 
    Ghcjs.ghcjsErrorHandler defaultFatalMessager defaultFlushOut $ do
     -- 1. extract the -B flag from the args
-    (argv0, booting, booting_stage1) <- Ghcjs.getWrappedArgs
+    (argv0, _booting, booting_stage1) <- Ghcjs.getWrappedArgs
 
     let (minusB_args, argv1) = partition ("-B" `isPrefixOf`) argv0
         mbMinusB | null minusB_args = Nothing
@@ -137,7 +141,7 @@ main = do
     case mode of
         Left preStartupMode ->
             do case preStartupMode of
-                   ShowSupportedExtensions   -> showSupportedExtensions
+                   ShowSupportedExtensions   -> showSupportedExtensions mbMinusB
                    ShowVersion               -> Ghcjs.printVersion
                    ShowNumVersion            -> Ghcjs.printNumericVersion
                    ShowNumGhcVersion         -> putStrLn cProjectVersion
@@ -310,7 +314,7 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
   return ()
 
 ghciUI :: [(FilePath, Maybe Phase)] -> Maybe [String] -> Ghc ()
-#if !defined(GHCI)
+#if !defined(HAVE_INTERNAL_INTERPRETER)
 ghciUI _ _ = throwGhcException (CmdLineError "not built for interactive use")
 #else
 ghciUI     = interactiveUI defaultGhciSettings
@@ -422,6 +426,10 @@ checkOptions settings mode dflags srcs objs js_objs = do
       StopBefore HCc | hscTarget dflags /= HscC
         -> throwGhcException $ UsageError $
            "the option -C is only available with an unregisterised GHC"
+      StopBefore (As False) | ghcLink dflags == NoLink
+        -> throwGhcException $ UsageError $
+           "the options -S and -fno-code are incompatible. Please omit -S"
+
       _ -> return ()
 
      -- Verify that output files point somewhere sensible.
@@ -594,7 +602,7 @@ isDoEvalMode :: Mode -> Bool
 isDoEvalMode (Right (Right (DoEval _))) = True
 isDoEvalMode _ = False
 
-#if defined(GHCI)
+#if defined(HAVE_INTERNAL_INTERPRETER)
 isInteractiveMode :: PostLoadMode -> Bool
 isInteractiveMode DoInteractive = True
 isInteractiveMode _             = False
@@ -839,7 +847,7 @@ showBanner :: PostLoadMode -> DynFlags -> IO ()
 showBanner _postLoadMode dflags = do
    let verb = verbosity dflags
 
-#if defined(GHCI)
+#if defined(HAVE_INTERNAL_INTERPRETER)
    -- Show the GHCi banner
    when (isInteractiveMode _postLoadMode && verb >= 1) $ putStrLn ghciWelcomeMsg
 #endif
@@ -856,12 +864,27 @@ showBanner _postLoadMode dflags = do
 -- We print out a Read-friendly string, but a prettier one than the
 -- Show instance gives us
 showInfo :: Ghcjs.GhcjsSettings -> DynFlags -> IO ()
-showInfo settings dflags = do
+showInfo _settings dflags = do
         let sq x = " [" ++ x ++ "\n ]"
         putStrLn $ sq $ intercalate "\n ," $ map show $ Ghcjs.compilerInfo dflags
 
-showSupportedExtensions :: IO ()
-showSupportedExtensions = mapM_ putStrLn supportedLanguagesAndExtensions
+showSupportedExtensions :: Maybe String -> IO ()
+showSupportedExtensions m_top_dir = do
+  res <- runExceptT $ do
+    top_dir <- lift (tryFindTopDir m_top_dir) >>= \case
+      Nothing -> throwE $ SettingsError_MissingData "Could not find the top directory, missing -B flag"
+      Just dir -> pure dir
+    initSettings top_dir
+  targetPlatformMini <- case res of
+    Right s -> pure $ platformMini $ sTargetPlatform s
+    Left (SettingsError_MissingData msg) -> do
+      hPutStrLn stderr $ "WARNING: " ++ show msg
+      hPutStrLn stderr $ "cannot know target platform so guessing target == host (native compiler)."
+      pure cHostPlatformMini
+    Left (SettingsError_BadData msg) -> do
+      hPutStrLn stderr msg
+      exitWith $ ExitFailure 1
+  mapM_ putStrLn $ supportedLanguagesAndExtensions targetPlatformMini
 
 showVersion :: IO ()
 showVersion = putStrLn (cProjectName ++ ", version " ++ cProjectVersion)
@@ -899,11 +922,11 @@ dumpFinalStats dflags =
 dumpFastStringStats :: DynFlags -> IO ()
 dumpFastStringStats dflags = do
   segments <- getFastStringTable
+  hasZ <- getFastStringZEncCounter
   let buckets = concat segments
       bucketsPerSegment = map length segments
       entriesPerBucket = map length buckets
       entries = sum entriesPerBucket
-      hasZ = sum $ map (length . filter hasZEncoding) buckets
       msg = text "FastString stats:" $$ nest 4 (vcat
         [ text "segments:         " <+> int (length segments)
         , text "buckets:          " <+> int (sum bucketsPerSegment)
@@ -931,15 +954,11 @@ dumpPackagesSimple dflags = putMsg dflags (pprPackagesSimple dflags)
 -- Frontend plugin support
 
 doFrontend :: ModuleName -> [(String, Maybe Phase)] -> Ghc ()
--- #if !defined(GHCI)
--- doFrontend modname _ = pluginError [modname]
--- #else
 doFrontend modname srcs = do
     hsc_env <- getSession
     frontend_plugin <- liftIO $ loadFrontendPlugin hsc_env modname
     frontend frontend_plugin
       (reverse $ frontendPluginOpts (hsc_dflags hsc_env)) srcs
--- #endif
 
 -- -----------------------------------------------------------------------------
 -- ABI hash support
@@ -959,7 +978,7 @@ to get a hash of the package's ABI.
 
 -- | Print ABI hash of input modules.
 --
--- The resulting hash is the MD5 of the GHC version used (Trac #5328,
+-- The resulting hash is the MD5 of the GHC version used (#5328,
 -- see 'hiVersion') and of the existing ABI hash from each module (see
 -- 'mi_mod_hash').
 abiHash :: [String] -- ^ List of module names
@@ -987,7 +1006,7 @@ abiHash strs = do
   put_ bh hiVersion
     -- package hashes change when the compiler version changes (for now)
     -- see #5328
-  mapM_ (put_ bh . mi_mod_hash) ifaces
+  mapM_ (put_ bh . mi_mod_hash . mi_final_exts) ifaces
   f <- fingerprintBinMem bh
 
   putStrLn (showPpr dflags f)
@@ -1035,4 +1054,6 @@ link statically.
 
 -- foreign import ccall safe "initGCStatistics"
 --  initGCStatistics :: IO ()
+
+initGCStatistics :: IO ()
 initGCStatistics = pure ()

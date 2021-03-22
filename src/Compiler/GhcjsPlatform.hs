@@ -13,7 +13,9 @@ module Compiler.GhcjsPlatform
 import Prelude
 
 import           DynFlags
-import           Platform
+import           ToolSettings
+
+import           GHC.Platform
 
 import           Data.List (foldl')
 
@@ -33,20 +35,26 @@ setGhcjsPlatform set js_env js_objs basePath df
       $ setDfOpts
       $ installGhcjsHooks js_env set js_objs
       $ installDriverHooks set js_env
-      $ df { settings = settings' }
+      $ df { targetPlatform    = ghcjsPlatform
+           , platformConstants = ghcjsPlatformConstants
+           , ghcNameVersion    = GhcNameVersion "ghcjs" Info.getFullCompilerVersion
+           }
+          -- settings = settings' }
   where
-    settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
-                              , sPlatformConstants = ghcjsPlatformConstants
-#if __GLASGOW_HASKELL__ >= 709
-                              , sProgramName       = "ghcjs"
-                              , sProjectVersion    = Info.getFullCompilerVersion
-#endif
-                              }
-    ghcjsPlatform = (sTargetPlatform (settings df))
-       { platformArch     = ArchJavaScript
-       , platformWordSize = 4
+ --   settings' = (settings df) { sTargetPlatform    = ghcjsPlatform
+ --                             , sPlatformConstants = ghcjsPlatformConstants
+ -- #if __GLASGOW_HASKELL__ >= 709
+ --                             , sProgramName       = "ghcjs"
+ --                             , sProjectVersion    = Info.getFullCompilerVersion
+ -- #endif
+ --                              }
+    ghcjsPlatform = (targetPlatform df)
+       { platformMini     = PlatformMini ArchJavaScript OSUnknown
+       -- }platformArch     = ArchJavaScript
+       , platformWordSize = PW4
+       , platformIsCrossCompiling = True
        }
-    ghcjsPlatformConstants = (sPlatformConstants (settings df))
+    ghcjsPlatformConstants = (platformConstants df)
        { pc_WORD_SIZE       = 4
        , pc_DOUBLE_SIZE     = 8
        , pc_CINT_SIZE       = 4
@@ -62,12 +70,11 @@ setNativePlatform env gs baseDir df
   $ df
 
 -- | Apply additional dynamic flags options.
--- Currently: unset 'Opt_SplitObjs'
 setDfOpts :: DynFlags -> DynFlags
 setDfOpts df = foldl' gopt_set (foldl' gopt_unset df unsetList) setList
   where
     setList = []
-    unsetList = [Opt_SplitObjs]
+    unsetList = [Opt_SplitSections]
 
 addPlatformDefines :: FilePath -> DynFlags -> DynFlags
 addPlatformDefines baseDir df = addCpp (("-I" ++ includeDir) : map ("-D"++) defs) $
@@ -81,7 +88,8 @@ addPlatformDefines baseDir df = addCpp (("-I" ++ includeDir) : map ("-D"++) defs
     defs = [ "__GHCJS__=" ++ Info.getShortCompilerVersion ]
 
 addCpp :: [String] -> DynFlags -> DynFlags
-addCpp cpp df = df { settings = settings1 }
-  where
-    settings0 = settings df
-    settings1 = settings0 { sOpt_P = cpp ++ sOpt_P settings0 }
+addCpp cpp = alterToolSettings
+  (\s -> s { toolSettings_opt_P = cpp ++ toolSettings_opt_P s })
+
+alterToolSettings :: (ToolSettings -> ToolSettings) -> DynFlags -> DynFlags
+alterToolSettings f dynFlags = dynFlags { toolSettings = f (toolSettings dynFlags) }

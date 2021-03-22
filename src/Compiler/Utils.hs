@@ -34,7 +34,7 @@ module Compiler.Utils
 
 import           DynFlags
 import           GHC
-import           Platform
+import           GHC.Platform
 import           HscTypes
 import           Bag
 -- import           FileCleanup
@@ -207,7 +207,7 @@ doCpp dflags raw input_fn output_fn = do
     let verbFlags = getVerbFlags dflags
 
     let cpp_prog args | raw       = SysTools.runCpp dflags args
-                      | otherwise = SysTools.runCc dflags (SysTools.Option "-E" : args)
+                      | otherwise = SysTools.runCc Nothing dflags (SysTools.Option "-E" : args)
 
 
     let target_defs =

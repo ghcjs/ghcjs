@@ -22,6 +22,9 @@
 #endif
 #endif
 
+-- Fine if this comes from make/Hadrian or the pre-built base.
+#include <ghcplatform.h>
+
 -----------------------------------------------------------------------------
 --
 -- (c) The University of Glasgow 2004-2009.
@@ -32,10 +35,15 @@
 
 module Main (main) where
 
--- import Version ( version, targetOS, targetARCH )
 import qualified GHC.PackageDb as GhcPkg
 import GHC.PackageDb (BinaryStringRep(..))
 import GHC.HandleEncoding
+import GHC.BaseDir (getBaseDir)
+import GHC.Settings (getTargetPlatform, maybeReadFuzzy)
+import GHC.Platform (platformMini)
+import GHC.Platform.Host (cHostPlatformMini)
+import GHC.UniqueSubdir (uniqueSubdir)
+import GHC.Version ( cProjectVersion )
 import qualified Distribution.Simple.PackageIndex as PackageIndex
 import qualified Data.Graph as Graph
 import qualified Distribution.ModuleName as ModuleName
@@ -71,9 +79,6 @@ import System.Directory ( doesDirectoryExist, getDirectoryContents,
                           getCurrentDirectory )
 import System.Exit ( exitWith, ExitCode(..) )
 import System.Environment ( getArgs, getProgName, getEnv )
-#if defined(darwin_HOST_OS) || defined(linux_HOST_OS) || defined(mingw32_HOST_OS)
-import System.Environment ( getExecutablePath )
-#endif
 import System.IO
 import System.IO.Error
 import GHC.IO.Exception (IOErrorType(InappropriateType))
@@ -83,6 +88,7 @@ import qualified Data.Foldable as F
 import qualified Data.Traversable as F
 import qualified Data.Set as Set
 import qualified Data.Map as Map
+import qualified Data.ByteString as BS
 
 #if defined(mingw32_HOST_OS)
 import GHC.ConsoleHandler
@@ -131,13 +137,9 @@ main = do
         (cli,_,[]) | FlagHelp `elem` cli -> do
            prog <- getProgramName
            bye (usageInfo (usageHeader prog) flags)
-        (cli,_,[]) | FlagGhcVersion `elem` cli ->
+        (cli,_,[]) | FlagVersion `elem` cli ->
            bye ourCopyright
-        (cli,_,[]) | FlagGhcjsVersion `elem` cli ->
-           bye ("GHCJS package manager version " ++ Info.getCompilerVersion ++ "\n")
-        (cli,_,[]) | FlagNumericGhcVersion `elem` cli ->
-           bye (Info.getGhcCompilerVersion ++ "\n")
-        (cli,_,[]) | FlagNumericGhcjsVersion `elem` cli ->
+        (cli,_,[]) | FlagNumericVersion `elem` cli ->
           bye (Info.getCompilerVersion ++ "\n")
         (cli,nonopts,[]) ->
            case getVerbosity Normal cli of
@@ -154,10 +156,8 @@ data Flag
   = FlagUser
   | FlagGlobal
   | FlagHelp
-  | FlagGhcVersion
-  | FlagNumericGhcVersion
-  | FlagGhcjsVersion
-  | FlagNumericGhcjsVersion
+  | FlagVersion
+  | FlagNumericVersion
   | FlagConfig FilePath
   | FlagGlobalConfig FilePath
   | FlagUserConfig FilePath
@@ -208,14 +208,10 @@ flags = [
         "preserve ${pkgroot}-relative paths in output package descriptions",
   Option ['?'] ["help"] (NoArg FlagHelp)
         "display this help and exit",
-  Option ['V'] ["ghc-version", "version"] (NoArg FlagGhcVersion)
-        "output GHC version information and exit",
-  Option [] ["numeric-ghc-version"] (NoArg FlagNumericGhcVersion)
-        "output numeric GHC version information and exit",
-  Option [] ["ghcjs-version"] (NoArg FlagGhcjsVersion)
-        "output GHCJS version information and exit",
-  Option [] ["numeric-ghcjs-version"] (NoArg FlagNumericGhcjsVersion)
-        "output numeric GHCJS version information and exit",
+  Option ['V'] ["version", "ghc-version", "ghcjs-version"] (NoArg FlagVersion)
+        "output version information and exit",
+  Option [] ["numeric-version", "numeric-ghc-version", "numeric-ghcjs-version"] (NoArg FlagNumericVersion)
+        "output numeric version information and exit",
   Option [] ["simple-output"] (NoArg FlagSimpleOutput)
         "print output in easy-to-parse format for some commands",
   Option [] ["show-unit-ids"] (NoArg FlagShowUnitIds)
@@ -248,7 +244,7 @@ deprecFlags = [
   ]
 
 ourCopyright :: String
-ourCopyright = "GHCJS package manager version " ++ Info.getGhcCompilerVersion ++ "\n"
+ourCopyright = "GHCJS package manager version " ++ Info.getCompilerVersion ++ "\n"
 
 shortUsage :: String -> String
 shortUsage prog = "For usage information see '" ++ prog ++ " --help'."
@@ -619,14 +615,15 @@ getPkgDatabases :: Verbosity
                           -- commands that just read the DB, such as 'list'.
 
 getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
-  -- first we determine the location of the global package config.  On Windows,
+  -- Second we determine the location of the global package config.  On Windows,
   -- this is found relative to the ghc-pkg.exe binary, whereas on Unix the
   -- location is passed to the binary using the --global-package-db flag by the
   -- wrapper script.
   let err_msg = "missing --global-package-db option, location of global package database unknown\n"
   global_conf <-
      case [ f | FlagGlobalConfig f <- my_flags ] of
-        [] -> do mb_dir <- getLibDir
+        -- See Note [Base Dir] for more information on the base dir / top dir.
+        [] -> do mb_dir <- getBaseDir
                  case mb_dir of
                    Nothing  -> die err_msg
                    Just dir -> do
@@ -646,7 +643,7 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
 
   -- get the location of the user package database, and create it if necessary
   -- getAppUserDataDirectory can fail (e.g. if $HOME isn't set)
-  e_appdir <- tryIO $ Info.getUserPackageDir'
+  e_appdir <- tryIO $ getAppUserDataDirectory "ghcjs"
 
   mb_user_conf <-
     case [ f | FlagUserConfig f <- my_flags ] of
@@ -654,8 +651,26 @@ getPkgDatabases verbosity mode use_user use_cache expand_vars my_flags = do
       [] -> case e_appdir of
         Left _    -> return Nothing
         Right appdir -> do
-          let -- subdir = targetARCH ++ '-':targetOS ++ '-':Version.version
-              dir = appdir -- appdir </> subdir
+          -- See Note [Settings File] about this file, and why we need GHC to share it with us.
+          let settingsFile = top_dir </> "settings"
+          exists_settings_file <- doesFileExist settingsFile
+          targetPlatformMini <- case exists_settings_file of
+            False -> do
+              warn $ "WARNING: settings file doesn't exist " ++ show settingsFile
+              warn "cannot know target platform so guessing target == host (native compiler)."
+              pure cHostPlatformMini
+            True -> do
+              settingsStr <- readFile settingsFile
+              mySettings <- case maybeReadFuzzy settingsStr of
+                Just s -> pure $ Map.fromList s
+                -- It's excusable to not have a settings file (for now at
+                -- least) but completely inexcusable to have a malformed one.
+                Nothing -> die $ "Can't parse settings file " ++ show settingsFile
+              case getTargetPlatform settingsFile mySettings of
+                Right platform -> pure $ platformMini platform
+                Left e -> die e
+          let subdir = uniqueSubdir targetPlatformMini
+              dir = appdir </> subdir
           r <- lookForPackageDBIn dir
           case r of
             Nothing -> return (Just (dir </> "package.conf.d", False))
@@ -946,7 +961,7 @@ readParseDatabase verbosity mb_user_conf mode use_cache path
 parseSingletonPackageConf :: Verbosity -> FilePath -> IO InstalledPackageInfo
 parseSingletonPackageConf verbosity file = do
   when (verbosity > Normal) $ infoLn ("reading package config: " ++ file)
-  readUTF8File file >>= fmap fst . parsePackageInfo
+  BS.readFile file >>= fmap fst . parsePackageInfo
 
 cachefilename :: FilePath
 cachefilename = "package.cache"
@@ -1140,7 +1155,7 @@ registerPackage input verbosity my_flags multi_instance
   expanded <- if expand_env_vars then expandEnvVars s force
                                  else return s
 
-  (pkg, ws) <- parsePackageInfo expanded
+  (pkg, ws) <- parsePackageInfo $ toUTF8BS expanded
   when (verbosity >= Normal) $
       infoLn "done."
 
@@ -1174,7 +1189,7 @@ registerPackage input verbosity my_flags multi_instance
   changeDB verbosity (removes ++ [AddPackage pkg]) db_to_operate_on db_stack
 
 parsePackageInfo
-        :: String
+        :: BS.ByteString
         -> IO (InstalledPackageInfo, [ValidateWarning])
 parsePackageInfo str =
   case parseInstalledPackageInfo str of
@@ -1182,7 +1197,7 @@ parsePackageInfo str =
       where
         ws = [ msg | msg <- warnings
                    , not ("Unrecognized field pkgroot" `isPrefixOf` msg) ]
-    Left err -> die (unlines err)
+    Left err -> die (unlines (F.toList err))
 
 mungePackageInfo :: InstalledPackageInfo -> InstalledPackageInfo
 mungePackageInfo ipi = ipi
@@ -1336,7 +1351,7 @@ So, instead, we do two things here:
   - We recompute it: we simply look up the unit ID of the package in the original
     database, and use *its* abi-depends.
 
-See Trac #14381, and Cabal issue #4728.
+See #14381, and Cabal issue #4728.
 
 Additionally, because we are throwing away the original (declared) ABI deps, we
 return a boolean that indicates whether any abi-depends were actually
@@ -2211,17 +2226,6 @@ reportError s = do hFlush stdout; hPutStrLn stderr s
 
 dieForcible :: String -> IO ()
 dieForcible s = die (s ++ " (use --force to override)")
-
------------------------------------------
--- Cut and pasted from ghc/compiler/main/SysTools
-
-getLibDir :: IO (Maybe String)
-
-#if defined(mingw32_HOST_OS) || defined(darwin_HOST_OS) || defined(linux_HOST_OS)
-getLibDir = Just . (\p -> p </> "lib") . takeDirectory . takeDirectory <$> getExecutablePath
-#else
-getLibDir = return Nothing
-#endif
 
 -----------------------------------------
 -- Adapted from ghc/compiler/utils/Panic

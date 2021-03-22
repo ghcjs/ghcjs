@@ -1,13 +1,13 @@
 primOpStrictness CatchOp =  \ _arity -> mkClosedStrictSig [ lazyApply1Dmd
                                                  , lazyApply2Dmd
                                                  , topDmd] topRes 
-primOpStrictness RaiseOp =  \ _arity -> mkClosedStrictSig [topDmd] exnRes 
-primOpStrictness RaiseIOOp =  \ _arity -> mkClosedStrictSig [topDmd, topDmd] exnRes 
+primOpStrictness RaiseOp =  \ _arity -> mkClosedStrictSig [topDmd] botRes 
+primOpStrictness RaiseIOOp =  \ _arity -> mkClosedStrictSig [topDmd, topDmd] botRes 
 primOpStrictness MaskAsyncExceptionsOp =  \ _arity -> mkClosedStrictSig [strictApply1Dmd,topDmd] topRes 
 primOpStrictness MaskUninterruptibleOp =  \ _arity -> mkClosedStrictSig [strictApply1Dmd,topDmd] topRes 
 primOpStrictness UnmaskAsyncExceptionsOp =  \ _arity -> mkClosedStrictSig [strictApply1Dmd,topDmd] topRes 
 primOpStrictness AtomicallyOp =  \ _arity -> mkClosedStrictSig [strictApply1Dmd,topDmd] topRes 
-primOpStrictness RetryOp =  \ _arity -> mkClosedStrictSig [topDmd] exnRes 
+primOpStrictness RetryOp =  \ _arity -> mkClosedStrictSig [topDmd] botRes 
 primOpStrictness CatchRetryOp =  \ _arity -> mkClosedStrictSig [ lazyApply1Dmd
                                                  , lazyApply1Dmd
                                                  , topDmd ] topRes 

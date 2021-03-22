@@ -20,7 +20,20 @@
 typedef struct {
   CostCentreStack *ccs;
   union {
-    struct _RetainerSet *rs;  /* Retainer Set */
+
+    union {
+      /* Accessor for the least significant bit of the entire union. Invariant:
+       * This must be at least as large as the largest field in this union for
+       * this to work. If you add more fields make sure you maintain this.
+       *
+       * See Note [Profiling heap traversal visited bit].
+       */
+      StgWord lsb;
+
+      /* Retainer Set */
+      struct _RetainerSet *rs;
+    } trav;
+
     StgWord ldvw;             /* Lag/Drag/Void Word */
   } hp;
 } StgProfHeader;
@@ -81,7 +94,7 @@ typedef struct StgClosure_ {
     struct StgClosure_ *payload[];
 } *StgClosurePtr; // StgClosure defined in rts/Types.h
 
-typedef struct {
+typedef struct StgThunk_ {
     StgThunkHeader  header;
     struct StgClosure_ *payload[];
 } StgThunk;
@@ -260,6 +273,9 @@ typedef struct {
  * info table describes the pointerhood of the arguments).
  *
  * The stack frame size is also cached in the frame for convenience.
+ *
+ * The only RET_FUN is stg_gc_fun, which is created by __stg_gc_fun,
+ * both in HeapStackCheck.cmm.
  */
 typedef struct {
     const StgInfoTable* info;

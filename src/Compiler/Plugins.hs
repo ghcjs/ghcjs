@@ -82,6 +82,7 @@ import LoadIface
 import RdrName
 import SrcLoc
 import TcRnMonad
+import TyCoRep
 
 -- we need the library directory of the GHC that built GHCJS
 import qualified GHC.Paths
@@ -236,7 +237,17 @@ initPluginsEnv orig_dflags _ = do
   ghcTopDir  <- makeAbsolute . trim <$> readFile (topDir orig_dflags </> "ghc_libdir")
   ghcSettings <- SysTools.initSysTools (trim ghcTopDir)
   let removeJsPrefix xs = fromMaybe xs (stripPrefix "js_" xs)
-      dflags0 = orig_dflags { settings = ghcSettings }
+      dflags0 = orig_dflags { {-hscTarget = defaultHscTarget (sTargetPlatform ghcSettings) (sPlatformMisc ghcSettings)
+                            ,-}
+                             integerLibrary = sIntegerLibraryType ghcSettings
+                            , ghcNameVersion = sGhcNameVersion ghcSettings
+                            , fileSettings = sFileSettings ghcSettings
+                            , toolSettings = sToolSettings ghcSettings
+                            , targetPlatform = sTargetPlatform ghcSettings
+                            , platformMisc = sPlatformMisc ghcSettings
+                            , platformConstants = sPlatformConstants ghcSettings
+                            , rawSettings = sRawSettings ghcSettings
+                            }
       dflags1 = gopt_unset dflags0 Opt_HideAllPackages
       dflags2 = updateWays $
          dflags1 { packageFlags   = []

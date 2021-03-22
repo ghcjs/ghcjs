@@ -21,7 +21,7 @@ import Module
 import SrcLoc
 import BasicTypes
 import SysTools.ExtraObj
-import Platform
+import GHC.Platform
 import ErrUtils
 import DriverPhases
 import DriverPipeline hiding ( linkingNeeded )
@@ -117,11 +117,6 @@ ghcjsLinkJsLib settings jsFiles dflags hpt
   | otherwise =
       return Succeeded
 
-dumpHpt :: DynFlags -> HomePackageTable -> String
-dumpHpt dflags pt = "hpt:\n" ++ unlines
-  (map (\hmi -> (moduleNameString . moduleName . mi_module . hm_iface $ hmi) ++
-                " -> " ++ maybe "<no linkable>" (showPpr dflags) (hm_linkable hmi))
-       (eltsUDFM pt))
 ghcjsLinkJsBinary :: GhcjsEnv
                   -> GhcjsSettings
                   -> [FilePath]
