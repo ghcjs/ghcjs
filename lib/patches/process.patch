@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process/Common.hs boot/pkg/process/System/Process/Common.hs
---- upstream/pkg/process/System/Process/Common.hs	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/process/System/Process/Common.hs	2020-03-03 10:42:28.514092400 +0800
+--- upstream/pkg/process/System/Process/Common.hs	2020-04-03 10:40:30.000000000 +0200
++++ boot/pkg/process/System/Process/Common.hs	2020-04-03 10:40:30.628965700 +0200
 @@ -55,6 +55,9 @@
  import System.Posix.Types
  #endif
@@ -21,8 +21,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process
    cmdspec      :: CmdSpec,                 -- ^ Executable & arguments, or shell command.  If 'cwd' is 'Nothing', relative paths are resolved with respect to the current working directory.  If 'cwd' is provided, it is implementation-dependent whether relative paths are resolved with respect to 'cwd' or the current working directory, so absolute paths should be used to ensure portability.
    cwd          :: Maybe FilePath,          -- ^ Optional path to the working directory for the new process
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process/Internals.hs boot/pkg/process/System/Process/Internals.hs
---- upstream/pkg/process/System/Process/Internals.hs	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/process/System/Process/Internals.hs	2020-03-03 10:42:28.514092400 +0800
+--- upstream/pkg/process/System/Process/Internals.hs	2020-04-03 10:40:30.000000000 +0200
++++ boot/pkg/process/System/Process/Internals.hs	2020-04-03 10:40:30.628965700 +0200
 @@ -3,6 +3,10 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE InterruptibleFFI #-}
@@ -263,8 +263,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process
  -- Deprecated / compat
  
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process.hs boot/pkg/process/System/Process.hs
---- upstream/pkg/process/System/Process.hs	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/process/System/Process.hs	2020-03-03 10:42:28.514092400 +0800
+--- upstream/pkg/process/System/Process.hs	2020-04-03 10:40:30.000000000 +0200
++++ boot/pkg/process/System/Process.hs	2020-04-03 10:40:30.628965700 +0200
 @@ -6,6 +6,10 @@
  #endif
  {-# LANGUAGE InterruptibleFFI #-}
@@ -276,7 +276,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process
  -----------------------------------------------------------------------------
  -- |
  -- Module      :  System.Process
-@@ -775,6 +779,22 @@
+@@ -820,6 +824,22 @@
  -- ----------------------------------------------------------------------------
  -- Interface to C bits
  
@@ -299,7 +299,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process
  foreign import ccall unsafe "terminateProcess"
    c_terminateProcess
          :: PHANDLE
-@@ -792,6 +812,7 @@
+@@ -837,6 +857,7 @@
          -> Ptr CInt
          -> IO CInt
  
@@ -308,8 +308,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/System/Process
  -- ----------------------------------------------------------------------------
  -- Old deprecated variants
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/process/process.cabal boot/pkg/process/process.cabal
---- upstream/pkg/process/process.cabal	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/process/process.cabal	2020-03-03 10:42:28.514092400 +0800
+--- upstream/pkg/process/process.cabal	2020-04-03 10:40:30.000000000 +0200
++++ boot/pkg/process/process.cabal	2020-04-03 10:40:30.628965700 +0200
 @@ -78,6 +78,9 @@
                     filepath  >= 1.2 && < 1.5,
                     deepseq   >= 1.1 && < 1.5
