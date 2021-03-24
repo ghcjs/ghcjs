@@ -167,11 +167,13 @@ copy_patch_boot_package_sdist() {
   # collect the files of the upstream package by making a source distribution
   (
   cd "$PKGSRC"
-  rm -f "dist-install/$PKG-*.tar.gz"
-  cabal "${CMDPREFIX}sdist" --builddir=dist-install
+  rm -f "dist-install/sdist/$PKG-*.tar.gz"
+  echo 'packages: .' > cabal.project
+  cabal "v2-sdist" --builddir=dist-install
+  rm cabal.project
   )
   # unpack the source distribution
-  for SRCDISTTMP in $PKGSRC/dist-install/$PKG-*.tar.gz; do
+  for SRCDISTTMP in $PKGSRC/dist-install/sdist/$PKG-*.tar.gz; do
     SRCDIST="$SRCDISTTMP"
   done
   (
