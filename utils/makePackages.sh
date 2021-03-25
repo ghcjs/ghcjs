@@ -311,7 +311,7 @@ mkdir -p "boot/pkg"
 
 # copy packages by source distribution
 for PKG in base array binary bytestring deepseq directory \
-           filepath ghc-boot ghc-heap ghc-compact \
+           filepath ghc-heap ghc-compact \
            ghc-boot-th ghci integer-gmp integer-simple \
            parallel pretty process stm template-haskell \
            mtl parsec text time transformers unix; do
@@ -324,6 +324,7 @@ copy_patch_boot_package_sdist "containers" "containers/"
 
 # packages for which source distribution does not work
 copy_patch_boot_package_list "ghc-prim" "changelog.md cbits/ GHC/ ghc-prim.cabal LICENSE Setup.hs tests/"
+copy_patch_boot_package_list "ghc-boot" "GHC/ ghc-prim.cabal LICENSE dist-install/build/GHC/"
 
 # GHCJS packages
 (
