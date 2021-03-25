@@ -324,7 +324,7 @@ copy_patch_boot_package_sdist "containers" "containers/"
 
 # packages for which source distribution does not work
 copy_patch_boot_package_list "ghc-prim" "changelog.md cbits/ GHC/ ghc-prim.cabal LICENSE Setup.hs tests/"
-copy_patch_boot_package_list "ghc-boot" "GHC/ ghc-prim.cabal LICENSE dist-install/build/GHC/"
+copy_patch_boot_package_list "ghc-boot" "GHC/ ghc-boot.cabal LICENSE dist-install/build/GHC/"
 
 # GHCJS packages
 (
