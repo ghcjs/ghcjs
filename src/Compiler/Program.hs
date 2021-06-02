@@ -1,6 +1,7 @@
 {-# LANGUAGE CPP, NondecreasingIndentation, TupleSections, LambdaCase #-}
 -- GHC frontend ( ghc/Main.hs ) adapted for GHCJS
 #undef GHCI
+#undef HAVE_INTERNAL_INTERPRETER
 
 {-# OPTIONS -fno-warn-incomplete-patterns -optc-DNON_POSIX_SOURCE #-}
 
