@@ -68,7 +68,7 @@ Library
     GHC-Options: -Wall -fno-warn-name-shadowing
 
     if flag(ghci)
-        CPP-Options: -DGHCI
+        CPP-Options: -DHAVE_INTERNAL_INTERPRETER
 --        Include-Dirs: ../rts/dist/build
 
     Other-Extensions:
