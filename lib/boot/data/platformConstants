@@ -1,6 +1,5 @@
 PlatformConstants {
-    pc_platformConstants = ()
-    , pc_CONTROL_GROUP_CONST_291 = 291
+      pc_CONTROL_GROUP_CONST_291 = 291
     , pc_STD_HDR_SIZE = 1
     , pc_PROF_HDR_SIZE = 2
     , pc_BLOCK_SIZE = 4096

@@ -1,6 +1,5 @@
 data PlatformConstants = PlatformConstants {
-    pc_platformConstants :: ()
-    , pc_CONTROL_GROUP_CONST_291 :: Int
+      pc_CONTROL_GROUP_CONST_291 :: Int
     , pc_STD_HDR_SIZE :: Int
     , pc_PROF_HDR_SIZE :: Int
     , pc_BLOCK_SIZE :: Int
