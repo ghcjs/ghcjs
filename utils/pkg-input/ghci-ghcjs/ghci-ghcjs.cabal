@@ -47,7 +47,7 @@ library
         UnboxedTuples
 
     if flag(ghci)
-        CPP-Options: -DGHCI
+        CPP-Options: -DHAVE_INTERNAL_INTERPRETER
         exposed-modules:
             GHCi.Run
             GHCi.CreateBCO

@@ -245,7 +245,7 @@ Library
         CPP-Options: -DDEBUG
 
     if flag(ghci)
-        CPP-Options: -DGHCI
+        CPP-Options: -DHAVE_INTERNAL_INTERPRETER
         -- Include-Dirs: ../rts/dist/build
 
     Other-Extensions:
@@ -1145,4 +1145,3 @@ Flag terminfo
     Description: Build GHC with terminfo support on non-Windows platforms.
     Default: True
     Manual: True
-
