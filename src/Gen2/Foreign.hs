@@ -409,46 +409,32 @@ dsJsFExportDynamic id co0 _cconv = do
 
 dsJsCall :: Id -> Coercion -> ForeignCall -> Maybe Header
         -> DsM ([(Id, Expr TyVar)], SDoc, SDoc)
+dsJsCall fn_id co (CCall (CCallSpec target cconv safety _ _)) _mDeclHeader = do
+    let
+        ty                   = pFst $ coercionKind co
+        (tv_bndrs, rho)      = tcSplitForAllVarBndrs ty
+        (arg_tys, io_res_ty) = tcSplitFunTys rho
 
-dsJsCall fn_id co fcall _mDeclHeader = do
-  let
-      ty                   = pFst $ coercionKind co
-      (tv_bndrs, rho)      = tcSplitForAllVarBndrs ty
-      (arg_tys, io_res_ty) = tcSplitFunTys rho
+    args <- newSysLocalsDs arg_tys  -- no FFI levity-polymorphism
+    (val_args, arg_wrappers) <- mapAndUnzipM unboxJsArg (map Var args)
 
-  args <- newSysLocalsDs arg_tys
-  (val_args, arg_wrappers) <- mapAndUnzipM unboxJsArg (map Var args)
+    let
+        work_arg_ids  = [v | Var v <- val_args] -- All guaranteed to be vars
 
-  let
-      work_arg_ids  = [v | Var v <- val_args] -- All guaranteed to be vars
+    (ccall_result_ty, res_wrapper) <- boxJsResult io_res_ty
 
-  (ccall_result_ty, res_wrapper) <- boxJsResult io_res_ty
+    ccall_uniq <- newUnique
+    work_uniq  <- newUnique
 
-  ccall_uniq <- newUnique
-  work_uniq  <- newUnique
+    dflags <- getDynFlags
 
-  dflags <- getDynFlags
+    let
+      fcall = CCall (mkCCallSpec target cconv safety io_res_ty arg_tys)
 
-  let
-    -- Build the worker
-    worker_ty     = mkForAllTys tv_bndrs (mkVisFunTys (map idType work_arg_ids) ccall_result_ty)
-    tvs           = map binderVar tv_bndrs
-    the_ccall_app = mkFCall dflags ccall_uniq fcall val_args ccall_result_ty
-    work_rhs      = mkLams tvs (mkLams work_arg_ids the_ccall_app)
-    work_id       = mkSysLocal (fsLit "$wccall") work_uniq worker_ty
-
-    -- Build the wrapper
-    work_app     = mkApps (mkVarApps (Var work_id) tvs) val_args
-    wrapper_body = foldr ($) (res_wrapper work_app) arg_wrappers
-    wrap_rhs     = mkLams (tvs ++ args) wrapper_body
-    wrap_rhs'    = Cast wrap_rhs co
-    fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfoldingWithArity
-                                            (length args) wrap_rhs'
-
-  return ([(work_id, work_rhs), (fn_id_w_inl, wrap_rhs')], empty, empty)
-{-
+    let
         -- Build the worker
-        worker_ty     = mkForAllTys named_bndrs (mkFunTys (map idType work_arg_ids) ccall_result_ty)
+        worker_ty     = mkForAllTys tv_bndrs (mkVisFunTys (map idType work_arg_ids) ccall_result_ty)
+        tvs           = map binderVar tv_bndrs
         the_ccall_app = mkFCall dflags ccall_uniq fcall val_args ccall_result_ty
         work_rhs      = mkLams tvs (mkLams work_arg_ids the_ccall_app)
         work_id       = mkSysLocal (fsLit "$wccall") work_uniq worker_ty
@@ -458,10 +444,11 @@ dsJsCall fn_id co fcall _mDeclHeader = do
         wrapper_body = foldr ($) (res_wrapper work_app) arg_wrappers
         wrap_rhs     = mkLams (tvs ++ args) wrapper_body
         wrap_rhs'    = Cast wrap_rhs co
-        fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfolding (Just (length args)) wrap_rhs'
+        fn_id_w_inl  = fn_id `setIdUnfolding` mkInlineUnfoldingWithArity
+                                                (length args) wrap_rhs'
 
     return ([(work_id, work_rhs), (fn_id_w_inl, wrap_rhs')], empty, empty)
--}
+
 
 mkHObj :: Type -> SDoc
 mkHObj t = text "rts_mk" <> text (showFFIType t)
