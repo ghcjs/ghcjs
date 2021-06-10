@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal/Config.hs boot/pkg/directory/System/Directory/Internal/Config.hs
---- upstream/pkg/directory/System/Directory/Internal/Config.hs	2020-04-03 10:40:30.000000000 +0200
-+++ boot/pkg/directory/System/Directory/Internal/Config.hs	2020-04-03 10:40:30.238965700 +0200
+--- upstream/pkg/directory/System/Directory/Internal/Config.hs	2001-09-09 13:46:40.000000000 +1200
++++ boot/pkg/directory/System/Directory/Internal/Config.hs	2021-06-10 20:42:21.000000000 +1200
 @@ -1,9 +1,25 @@
  {-# LANGUAGE CPP #-}
 +#if defined(ghcjs_HOST_OS)
@@ -28,8 +28,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
  -- builds, so we use this ugly workaround where we simply paste the C string
  -- literal directly in here.  This will probably break if the EXE_EXTENSION
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal/GHCJS.hs boot/pkg/directory/System/Directory/Internal/GHCJS.hs
---- upstream/pkg/directory/System/Directory/Internal/GHCJS.hs	1970-01-01 01:00:00.000000000 +0100
-+++ boot/pkg/directory/System/Directory/Internal/GHCJS.hs	2020-04-03 10:40:30.238965700 +0200
+--- upstream/pkg/directory/System/Directory/Internal/GHCJS.hs	1970-01-01 12:00:00.000000000 +1200
++++ boot/pkg/directory/System/Directory/Internal/GHCJS.hs	2021-06-10 20:42:21.000000000 +1200
 @@ -0,0 +1,496 @@
 +{-# LANGUAGE CPP #-}
 +#if defined(ghcjs_HOST_OS)
@@ -528,8 +528,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
 +  js_setFileTimes :: JSString -> Double -> Bool -> Double -> Bool -> IO Int
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Directory/Internal.hs boot/pkg/directory/System/Directory/Internal.hs
---- upstream/pkg/directory/System/Directory/Internal.hs	2020-04-03 10:40:30.000000000 +0200
-+++ boot/pkg/directory/System/Directory/Internal.hs	2020-04-03 10:40:30.238965700 +0200
+--- upstream/pkg/directory/System/Directory/Internal.hs	2001-09-09 13:46:40.000000000 +1200
++++ boot/pkg/directory/System/Directory/Internal.hs	2021-06-10 20:42:21.000000000 +1200
 @@ -13,7 +13,9 @@
  module System.Directory.Internal
    ( module System.Directory.Internal.Common
@@ -553,8 +553,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/System/Direc
  #else
  import System.Directory.Internal.Posix
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/directory/directory.cabal boot/pkg/directory/directory.cabal
---- upstream/pkg/directory/directory.cabal	2020-04-03 10:40:30.000000000 +0200
-+++ boot/pkg/directory/directory.cabal	2020-04-03 10:40:30.238965700 +0200
+--- upstream/pkg/directory/directory.cabal	2001-09-09 13:46:40.000000000 +1200
++++ boot/pkg/directory/directory.cabal	2021-06-10 20:42:21.000000000 +1200
 @@ -50,6 +50,7 @@
          System.Directory.Internal.Config
          System.Directory.Internal.Posix

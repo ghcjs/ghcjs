@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Files/Common.hsc boot/pkg/unix/System/Posix/Files/Common.hsc
---- upstream/pkg/unix/System/Posix/Files/Common.hsc	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/unix/System/Posix/Files/Common.hsc	2020-03-03 10:42:28.924092400 +0800
+--- upstream/pkg/unix/System/Posix/Files/Common.hsc	2001-09-09 13:46:40.000000000 +1200
++++ boot/pkg/unix/System/Posix/Files/Common.hsc	2021-06-10 20:42:21.000000000 +1200
 @@ -520,7 +520,7 @@
  -- Note: calls @ftruncate@.
  setFdSize :: Fd -> FileOffset -> IO ()
@@ -11,8 +11,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/File
  -- -----------------------------------------------------------------------------
  -- pathconf()/fpathconf() support
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/IO/Common.hsc boot/pkg/unix/System/Posix/IO/Common.hsc
---- upstream/pkg/unix/System/Posix/IO/Common.hsc	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/unix/System/Posix/IO/Common.hsc	2020-03-03 10:42:28.924092400 +0800
+--- upstream/pkg/unix/System/Posix/IO/Common.hsc	2001-09-09 13:46:40.000000000 +1200
++++ boot/pkg/unix/System/Posix/IO/Common.hsc	2021-06-10 20:42:21.000000000 +1200
 @@ -281,7 +281,7 @@
  -- | May throw an exception if this is an invalid descriptor.
  fdSeek :: Fd -> SeekMode -> FileOffset -> IO FileOffset
@@ -23,8 +23,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/IO/C
  -- -----------------------------------------------------------------------------
  -- Locking
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Process/Internals.hs boot/pkg/unix/System/Posix/Process/Internals.hs
---- upstream/pkg/unix/System/Posix/Process/Internals.hs	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/unix/System/Posix/Process/Internals.hs	2020-03-03 10:42:28.924092400 +0800
+--- upstream/pkg/unix/System/Posix/Process/Internals.hs	2001-09-09 13:46:40.000000000 +1200
++++ boot/pkg/unix/System/Posix/Process/Internals.hs	2021-06-10 20:42:21.000000000 +1200
 @@ -1,5 +1,6 @@
  {-# LANGUAGE CApiFFI #-}
  {-# LANGUAGE Trustworthy #-}
@@ -46,8 +46,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Proc
  -- | The exit status of a process
  data ProcessStatus
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Signals.hsc boot/pkg/unix/System/Posix/Signals.hsc
---- upstream/pkg/unix/System/Posix/Signals.hsc	2020-03-03 10:42:28.000000000 +0800
-+++ boot/pkg/unix/System/Posix/Signals.hsc	2020-03-03 10:42:28.924092400 +0800
+--- upstream/pkg/unix/System/Posix/Signals.hsc	2001-09-09 13:46:40.000000000 +1200
++++ boot/pkg/unix/System/Posix/Signals.hsc	2021-06-10 20:42:21.000000000 +1200
 @@ -349,11 +349,10 @@
                 -> Maybe SignalSet       -- ^ other signals to block
                 -> IO Handler            -- ^ old handler
