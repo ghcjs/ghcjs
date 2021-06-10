@@ -368,9 +368,13 @@ dsJsImport id co (CLabel cid) cconv _ _ = do
    return ([(id, rhs')], empty, empty)
 
 dsJsImport id co (CFunction target) cconv@PrimCallConv safety _
-  = dsPrimCall id co (CCall (CCallSpec target cconv safety))
+  = dsPrimCall id co (CCall (mkCCallSpec target cconv safety
+                                         (panic "Missing Return PrimRep")
+                                         (panic "Missing Argument PrimReps")))
 dsJsImport id co (CFunction target) cconv safety mHeader
-  = dsJsCall id co (CCall (CCallSpec target cconv safety)) mHeader
+  = dsJsCall id co (CCall (mkCCallSpec target cconv safety
+                                         (panic "Missing Return PrimRep")
+                                         (panic "Missing Argument PrimReps"))) mHeader
 dsJsImport id co CWrapper cconv _ _
   = dsJsFExportDynamic id co cconv
 
@@ -769,10 +773,13 @@ jsResultWrapper result_ty
 -- low-level primitive JavaScript call:
 mkJsCall :: DynFlags -> Unique -> String -> [CoreExpr] -> Type -> CoreExpr
 mkJsCall dflags u tgt args t =
-  mkFCall dflags u (CCall (CCallSpec (StaticTarget NoSourceText (mkFastString tgt)
+  mkFCall dflags u (CCall (mkCCallSpec (StaticTarget NoSourceText (mkFastString tgt)
                                                        (Just primPackageKey)
                                                        True)
-                                      JavaScriptCallConv PlayRisky)) args t
+                                      JavaScriptCallConv PlayRisky
+                                      (panic "Missing Return PrimRep")
+                                      (panic "Missing Argument PrimReps")
+                                      )) args t
 
 primTyDescChar :: DynFlags -> Type -> Char
 primTyDescChar _dflags _ty = panic "Gen2.Foreign.primTyDescChar"

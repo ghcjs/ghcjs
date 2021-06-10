@@ -9,6 +9,7 @@ Desugaring foreign declarations (see also DsCCall).
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Gen2.GHC.DsForeign where
 
@@ -50,9 +51,9 @@ import Outputable
 import FastString
 import DynFlags
 import GHC.Platform
--- import Config
 import OrdList
 import Pair
+import Util
 import Hooks
 import Encoding
 
@@ -86,18 +87,19 @@ dsForeigns' :: [LForeignDecl GhcTc]
 dsForeigns' []
   = return (NoStubs, nilOL)
 dsForeigns' fos = do
+    mod <- getModule
     fives <- mapM do_ldecl fos
     let
         (hs, cs, idss, bindss) = unzip4 fives
         fe_ids = concat idss
-        fe_init_code = map foreignExportInitialiser fe_ids
+        fe_init_code = foreignExportsInitialiser mod fe_ids
     --
     return (ForeignStubs
              (vcat hs)
-             (vcat cs $$ vcat fe_init_code),
+             (vcat cs $$ fe_init_code),
             foldr (appOL . toOL) nilOL bindss)
   where
-   do_ldecl (L loc decl) = putSrcSpanDs loc (do_decl decl)
+   do_ldecl (dL->L loc decl) = putSrcSpanDs loc (do_decl decl)
 
    do_decl (ForeignImport { fd_name = id, fd_i_ext = co, fd_fi = spec }) = do
       traceIf (text "fi start" <+> ppr id)
@@ -106,11 +108,13 @@ dsForeigns' fos = do
       traceIf (text "fi end" <+> ppr id)
       return (h, c, [], bs)
 
-   do_decl (ForeignExport { fd_name = L _ id, fd_e_ext = co
-                          , fd_fe = CExport (L _ (CExportStatic _ ext_nm cconv)) _ }) = do
+   do_decl (ForeignExport { fd_name = (dL->L _ id)
+                          , fd_e_ext = co
+                          , fd_fe = CExport
+                              (dL->L _ (CExportStatic _ ext_nm cconv)) _ }) = do
       (h, c, _, _) <- dsFExport id co ext_nm cconv False
       return (h, c, [id], [])
-   do_decl (XForeignDecl _) = panic "dsForeigns'"
+   do_decl (XForeignDecl nec) = noExtCon nec
 
 {-
 ************************************************************************
@@ -160,7 +164,7 @@ dsCImport id co (CLabel cid) cconv _ _ = do
               | tyConUnique tycon == funPtrTyConKey ->
                  IsFunction
              _ -> IsData
-   (_resTy, foRhs) <- resultWrapper ty
+   (resTy, foRhs) <- resultWrapper ty
    -- ASSERT(fromJust resTy `eqType` addrPrimTy)    -- typechecker ensures this
    let
         rhs = foRhs (Lit (LitLabel cid stdcall_info fod))
@@ -169,9 +173,13 @@ dsCImport id co (CLabel cid) cconv _ _ = do
    return ([(id, rhs')], empty, empty)
 
 dsCImport id co (CFunction target) cconv@PrimCallConv safety _
-  = dsPrimCall id co (CCall (CCallSpec target cconv safety))
+  = dsPrimCall id co (CCall (mkCCallSpec target cconv safety
+                                         (panic "Missing Return PrimRep")
+                                         (panic "Missing Argument PrimReps")))
 dsCImport id co (CFunction target) cconv safety mHeader
-  = dsFCall id co (CCall (CCallSpec target cconv safety)) mHeader
+  = dsFCall id co (CCall (mkCCallSpec target cconv safety
+                                      (panic "Missing Return PrimRep")
+                                      (panic "Missing Argument PrimReps"))) mHeader
 dsCImport id co CWrapper cconv _ _
   = dsFExportDynamic id co cconv
 
@@ -199,7 +207,7 @@ fun_type_arg_stdcall_info _ _other_conv _
 
 dsFCall :: Id -> Coercion -> ForeignCall -> Maybe Header
         -> DsM ([(Id, Expr TyVar)], SDoc, SDoc)
-dsFCall fn_id co fcall mDeclHeader = do
+dsFCall fn_id co (CCall (CCallSpec target cconv safety _ _)) mDeclHeader = do
     let
         ty                   = pFst $ coercionKind co
         (tv_bndrs, rho)      = tcSplitForAllVarBndrs ty
@@ -217,19 +225,23 @@ dsFCall fn_id co fcall mDeclHeader = do
     work_uniq  <- newUnique
 
     dflags <- getDynFlags
-    (fcall', cDoc) <-
-              case fcall of
+
+    let
+      fcall = CCall (mkCCallSpec target cconv safety io_res_ty arg_tys)
+
+    (fcall', cDoc) <- case fcall of
               CCall (CCallSpec (StaticTarget _ cName mUnitId isFun)
-                               CApiConv safety) ->
+                               CApiConv safety _ _) ->
                do wrapperName <- mkWrapperName "ghc_wrapper" (unpackFS cName)
-                  let fcall' = CCall (CCallSpec
+                  let fcall' = CCall (mkCCallSpec
                                       (StaticTarget NoSourceText
                                                     wrapperName mUnitId
                                                     True)
-                                      CApiConv safety)
+                                      CApiConv safety io_res_ty arg_tys)
                       c = includes
                        $$ fun_proto <+> braces (cRet <> semi)
-                      includes = vcat [ text "#include <" <> ftext h <> text ">"
+                      includes = vcat [ text "#include \"" <> ftext h
+                                        <> text "\""
                                       | Header _ h <- nub headers ]
                       fun_proto = cResType <+> pprCconv <+> ppr wrapperName <> parens argTypes
                       cRet
@@ -299,7 +311,7 @@ for calling convention they are really prim ops.
 
 dsPrimCall :: Id -> Coercion -> ForeignCall
            -> DsM ([(Id, Expr TyVar)], SDoc, SDoc)
-dsPrimCall fn_id co fcall = do
+dsPrimCall fn_id co (CCall (CCallSpec target cconv safety _ _)) = do
     let
         ty                   = pFst $ coercionKind co
         (tvs, fun_ty)        = tcSplitForAllTys ty
@@ -310,6 +322,7 @@ dsPrimCall fn_id co fcall = do
     ccall_uniq <- newUnique
     dflags <- getDynFlags
     let
+        fcall = CCall (mkCCallSpec target cconv safety io_res_ty arg_tys)
         call_app = mkFCall dflags ccall_uniq fcall (map Var args) io_res_ty
         rhs      = mkLams tvs (mkLams args call_app)
         rhs'     = Cast rhs co
@@ -603,7 +616,7 @@ mkFExportCBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
 
   -- the expression we give to rts_evalIO
   expr_to_run
-     = foldl appArg the_cfun arg_info -- NOT aug_arg_info
+     = foldl' appArg the_cfun arg_info -- NOT aug_arg_info
        where
           appArg acc (arg_cname, _, arg_hty, _)
              = text "rts_apply"
@@ -663,8 +676,8 @@ mkFExportCBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
      ]
 
 
-foreignExportInitialiser :: Id -> SDoc
-foreignExportInitialiser hs_fn =
+foreignExportsInitialiser :: Module -> [Id] -> SDoc
+foreignExportsInitialiser mod hs_fns =
    -- Initialise foreign exports by registering a stable pointer from an
    -- __attribute__((constructor)) function.
    -- The alternative is to do this from stginit functions generated in
@@ -673,14 +686,27 @@ foreignExportInitialiser hs_fn =
    -- all modules that are imported directly or indirectly are actually used by
    -- the program.
    -- (this is bad for big umbrella modules like Graphics.Rendering.OpenGL)
+   --
+   -- See Note [Tracking foreign exports] in rts/ForeignExports.c
    vcat
-    [ text "static void stginit_export_" <> ppr hs_fn
-         <> text "() __attribute__((constructor));"
-    , text "static void stginit_export_" <> ppr hs_fn <> text "()"
-    , braces (text "foreignExportStablePtr"
-       <> parens (text "(StgPtr) &" <> ppr hs_fn <> text "_closure")
-       <> semi)
+    [ text "static struct ForeignExportsList" <+> list_symbol <+> equals
+         <+> braces (
+           text ".exports = " <+> export_list <> comma <+>
+           text ".n_entries = " <+> ppr (length hs_fns))
+         <> semi
+    , text "static void " <> ctor_symbol <> text "(void)"
+         <+> text " __attribute__((constructor));"
+    , text "static void " <> ctor_symbol <> text "()"
+    , braces (text "registerForeignExports" <> parens (char '&' <> list_symbol) <> semi)
     ]
+  where
+    mod_str = pprModuleName (moduleName mod)
+    ctor_symbol = text "stginit_export_" <> mod_str
+    list_symbol = text "stg_exports_" <> mod_str
+    export_list = braces $ pprWithCommas closure_ptr hs_fns
+
+    closure_ptr :: Id -> SDoc
+    closure_ptr fn = text "(StgPtr) &" <> ppr fn <> text "_closure"
 
 
 mkHObj :: Type -> SDoc
@@ -784,7 +810,7 @@ getPrimTyOf ty
   -- with a single primitive-typed argument (see TcType.legalFEArgTyCon).
   | otherwise =
   case splitDataProductType_maybe rep_ty of
-     Just (_, _, _data_con, [prim_ty]) ->
+     Just (_, _, data_con, [prim_ty]) ->
         -- ASSERT(dataConSourceArity data_con == 1)
         -- ASSERT2(isUnliftedType prim_ty, ppr prim_ty)
         prim_ty
@@ -802,6 +828,12 @@ primTyDescChar dflags ty
  = case typePrimRep1 (getPrimTyOf ty) of
      IntRep      -> signed_word
      WordRep     -> unsigned_word
+     Int8Rep     -> 'B'
+     Word8Rep    -> 'b'
+     Int16Rep    -> 'S'
+     Word16Rep   -> 's'
+     Int32Rep    -> 'W'
+     Word32Rep   -> 'w'
      Int64Rep    -> 'L'
      Word64Rep   -> 'l'
      AddrRep     -> 'p'
