@@ -525,8 +525,11 @@
 /* Define to `int' if <sys/types.h> does not define. */
 /* #undef pid_t */
 
-/* The supported LLVM version number */
-#define sUPPORTED_LLVM_VERSION (7)
+/* The maximum supported LLVM version number */
+#define sUPPORTED_LLVM_VERSION_MAX (12)
+
+/* The minimum supported LLVM version number */
+#define sUPPORTED_LLVM_VERSION_MIN (10)
 
 /* Define to `unsigned int' if <sys/types.h> does not define. */
 /* #undef size_t */
