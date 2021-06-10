@@ -1,13 +1,7 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/ghc-prim/Setup.hs boot/pkg/ghc-prim/Setup.hs
---- upstream/pkg/ghc-prim/Setup.hs	2021-06-08 14:01:28.000000000 +1200
-+++ boot/pkg/ghc-prim/Setup.hs	2021-06-10 20:42:21.000000000 +1200
-@@ -6,23 +6,31 @@
- import Control.Monad
- import Data.List
- import Data.Maybe
-+import Distribution.ModuleName (components)
- import Distribution.PackageDescription
- import Distribution.Simple
+--- upstream/pkg/ghc-prim/Setup.hs	2021-06-10 11:42:32.592166900 +0200
++++ boot/pkg/ghc-prim/Setup.hs	2021-06-10 14:36:29.340000000 +0200
+@@ -11,6 +11,9 @@
  import Distribution.Simple.LocalBuildInfo
  import Distribution.Simple.Program
  import Distribution.Simple.Utils
@@ -17,15 +11,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/ghc-prim/Setup.hs boot
  import Distribution.Text
  import System.Cmd
  import System.FilePath
- import System.Exit
- import System.Directory
- 
-+import qualified Data.ByteString               as B
-+import qualified Distribution.Compat.Exception as E
-+
- main :: IO ()
- main = do let hooks = simpleUserHooks {
-                   regHook = addPrimModule
+@@ -23,6 +26,7 @@
                            $ regHook simpleUserHooks,
                    buildHook = build_primitive_sources
                              $ buildHook simpleUserHooks,
@@ -33,57 +19,50 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/ghc-prim/Setup.hs boot
                    haddockHook = addPrimModuleForHaddock
                                $ build_primitive_sources
                                $ haddockHook simpleUserHooks }
-@@ -58,31 +66,56 @@
+@@ -58,22 +62,48 @@
  
  build_primitive_sources :: Hook a -> Hook a
  build_primitive_sources f pd lbi uhs x
 - = do when (compilerFlavor (compiler lbi) == GHC) $ do
-+ = do let primhs = joinPath ["GHC", "Prim.hs"]
-+          primhs_tmp = addExtension primhs "tmp"
-+          primopwrappers = joinPath ["GHC", "PrimopWrappers.hs"]
-+          primopwrappers_tmp = addExtension primopwrappers "tmp"
-+      when (compilerFlavor (compiler lbi) == GHC) $ do
-           let genprimopcode = joinPath ["..", "..", "utils",
-                                         "genprimopcode", "genprimopcode"]
-               primops = joinPath ["..", "..", "compiler", "prelude",
-                                   "primops.txt"]
+-          let genprimopcode = joinPath ["..", "..", "utils",
+-                                        "genprimopcode", "genprimopcode"]
+-              primops = joinPath ["..", "..", "compiler", "prelude",
+-                                  "primops.txt"]
 -              primhs = joinPath ["GHC", "Prim.hs"]
 -              primopwrappers = joinPath ["GHC", "PrimopWrappers.hs"]
 -              primhs_tmp = addExtension primhs "tmp"
 -              primopwrappers_tmp = addExtension primopwrappers "tmp"
-           maybeExit $ system (genprimopcode ++ " --make-haskell-source < "
-                            ++ primops ++ " > " ++ primhs_tmp)
-           maybeUpdateFile primhs_tmp primhs
-           maybeExit $ system (genprimopcode ++ " --make-haskell-wrappers < "
-                            ++ primops ++ " > " ++ primopwrappers_tmp)
-           maybeUpdateFile primopwrappers_tmp primopwrappers
-+      when (compilerFlavor (compiler lbi) == GHCJS) $ do
-+          copyFile (joinPath ["..", "..", "data", "Prim.hs"])
-+                   primhs_tmp
-+          copyFile (joinPath ["..", "..", "data", "PrimopWrappers.hs"])
-+                   primopwrappers_tmp
-+          maybeUpdateFile primhs_tmp primhs
-+          maybeUpdateFile primopwrappers_tmp primopwrappers
-       f pd lbi uhs x
- 
- -- Replace a file only if the new version is different from the old.
- -- This prevents make from doing unnecessary work after we run 'setup makefile'
- maybeUpdateFile :: FilePath -> FilePath -> IO ()
- maybeUpdateFile source target = do
--  r <- rawSystem "cmp" ["-s" {-quiet-}, source, target]
--  case r of
--    ExitSuccess   -> removeFile source
--    ExitFailure _ -> do exists <- doesFileExist target
--                        when exists $ removeFile target
--                        renameFile source target
--
-+  let readf file = fmap (either (const Nothing) Just) (E.tryIO $ B.readFile file)
-+  s <- readf source
-+  t <- readf  target
-+  if isJust s && s == t
-+    then removeFile source
-+    else do doesFileExist target >>= flip when (removeFile target)
-+            renameFile source target
+-          maybeExit $ system (genprimopcode ++ " --make-haskell-source < "
+-                           ++ primops ++ " > " ++ primhs_tmp)
+-          maybeUpdateFile primhs_tmp primhs
+-          maybeExit $ system (genprimopcode ++ " --make-haskell-wrappers < "
+-                           ++ primops ++ " > " ++ primopwrappers_tmp)
+-          maybeUpdateFile primopwrappers_tmp primopwrappers
+-      f pd lbi uhs x
++ = do
++    let genprimopcode = joinPath ["..", "..", "utils",
++                                "genprimopcode", "genprimopcode"]
++        primops = joinPath ["..", "..", "compiler", "prelude",
++                            "primops.txt"]
++        primhs = joinPath ["GHC", "Prim.hs"]
++        primopwrappers = joinPath ["GHC", "PrimopWrappers.hs"]
++        primhs_tmp = addExtension primhs "tmp"
++        primopwrappers_tmp = addExtension primopwrappers "tmp"
++    when (compilerFlavor (compiler lbi) == GHC) $ do
++        maybeExit $ system (genprimopcode ++ " --make-haskell-source < "
++                        ++ primops ++ " > " ++ primhs_tmp)
++        maybeUpdateFile primhs_tmp primhs
++        maybeExit $ system (genprimopcode ++ " --make-haskell-wrappers < "
++                        ++ primops ++ " > " ++ primopwrappers_tmp)
++        maybeUpdateFile primopwrappers_tmp primopwrappers
++    when (compilerFlavor (compiler lbi) == GHCJS) $ do
++        copyFile (joinPath ["..", "..", "data", "Prim.hs"])
++                primhs_tmp
++        copyFile (joinPath ["..", "..", "data", "PrimopWrappers.hs"])
++                primopwrappers_tmp
++        maybeUpdateFile primhs_tmp primhs
++        maybeUpdateFile primopwrappers_tmp primopwrappers
++    f pd lbi uhs x
 +
 +myInstHook :: PackageDescription -> LocalBuildInfo
 +                   -> UserHooks -> InstallFlags -> IO ()
@@ -102,3 +81,6 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/ghc-prim/Setup.hs boot
 +                      }
 +  when (hasLibs pkg_descr) $ addPrimModule (\pd lbi _ -> register pd lbi)
 +     pkg_descr localbuildinfo uh registerFlags
+ 
+ -- Replace a file only if the new version is different from the old.
+ -- This prevents make from doing unnecessary work after we run 'setup makefile'
