@@ -764,8 +764,8 @@ mkJsCall dflags u tgt args t =
                                                        (Just primPackageKey)
                                                        True)
                                       JavaScriptCallConv PlayRisky
-                                      (panic "Missing Return PrimRep")
-                                      (panic "Missing Argument PrimReps")
+                                      t
+                                      (map exprType args)
                                       )) args t
 
 primTyDescChar :: DynFlags -> Type -> Char
