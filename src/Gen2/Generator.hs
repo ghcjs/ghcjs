@@ -604,7 +604,7 @@ genToplevelRhs :: Id
                -> C
 genToplevelRhs _i (StgRhsClosure _ext _cc _upd _args body)
   -- foreign exports
-  | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _)) _)
+  | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _ _ _)) _)
      [StgLitArg _ {- (MachInt _is_js_conv) -}, StgLitArg (LitString _js_name), StgVarArg _tgt] _) <- body,
      t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
 -- general cases:
@@ -2056,8 +2056,8 @@ genForeignCall :: HasDebugCallStack
                -> G (JStat, ExprResult)
 genForeignCall _top
                (CCall (CCallSpec (StaticTarget _ tgt Nothing True)
-                                 JavaScriptCallConv
-                                 PlayRisky))
+                                   JavaScriptCallConv
+                                   PlayRisky _ _))
                _t
                [obj]
                args
@@ -2067,7 +2067,7 @@ genForeignCall _top
       return ( (|=) obj (ValExpr (JHash $ M.fromList pairs'))
              , ExprInline Nothing
              )
-genForeignCall top (CCall (CCallSpec ccTarget cconv safety)) t tgt args = do
+genForeignCall top (CCall (CCallSpec ccTarget cconv safety _ _)) t tgt args = do
   emitForeign (top ^. ctxSrcSpan) (T.pack lbl) safety cconv (map showArgType args) (showType t)
   (,exprResult) <$> parseFFIPattern catchExcep async isJsCc lbl t tgt' args
   where
@@ -2374,7 +2374,7 @@ inspectInlineRhs v i (StgRhsClosure _ _ ReEntrant _ _) = addOneToUniqSet v i
 inspectInlineRhs v _ _                                 = v
 
 isInlineForeignCall :: ForeignCall -> Bool
-isInlineForeignCall (CCall (CCallSpec _ cconv safety)) =
+isInlineForeignCall (CCall (CCallSpec _ cconv safety _ _)) =
   not (playInterruptible safety) &&
   not (cconv /= JavaScriptCallConv && playSafe safety)
 
