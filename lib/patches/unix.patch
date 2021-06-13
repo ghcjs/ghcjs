@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Files/Common.hsc boot/pkg/unix/System/Posix/Files/Common.hsc
---- upstream/pkg/unix/System/Posix/Files/Common.hsc	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/unix/System/Posix/Files/Common.hsc	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/unix/System/Posix/Files/Common.hsc	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/unix/System/Posix/Files/Common.hsc	2021-06-10 22:32:23.930000000 +0200
 @@ -520,7 +520,7 @@
  -- Note: calls @ftruncate@.
  setFdSize :: Fd -> FileOffset -> IO ()
@@ -11,8 +11,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/File
  -- -----------------------------------------------------------------------------
  -- pathconf()/fpathconf() support
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/IO/Common.hsc boot/pkg/unix/System/Posix/IO/Common.hsc
---- upstream/pkg/unix/System/Posix/IO/Common.hsc	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/unix/System/Posix/IO/Common.hsc	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/unix/System/Posix/IO/Common.hsc	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/unix/System/Posix/IO/Common.hsc	2021-06-10 22:32:23.930000000 +0200
 @@ -281,7 +281,7 @@
  -- | May throw an exception if this is an invalid descriptor.
  fdSeek :: Fd -> SeekMode -> FileOffset -> IO FileOffset
@@ -23,8 +23,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/IO/C
  -- -----------------------------------------------------------------------------
  -- Locking
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Process/Internals.hs boot/pkg/unix/System/Posix/Process/Internals.hs
---- upstream/pkg/unix/System/Posix/Process/Internals.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/unix/System/Posix/Process/Internals.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/unix/System/Posix/Process/Internals.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/unix/System/Posix/Process/Internals.hs	2021-06-10 22:32:23.930000000 +0200
 @@ -1,5 +1,6 @@
  {-# LANGUAGE CApiFFI #-}
  {-# LANGUAGE Trustworthy #-}
@@ -46,8 +46,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Proc
  -- | The exit status of a process
  data ProcessStatus
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Signals.hsc boot/pkg/unix/System/Posix/Signals.hsc
---- upstream/pkg/unix/System/Posix/Signals.hsc	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/unix/System/Posix/Signals.hsc	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/unix/System/Posix/Signals.hsc	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/unix/System/Posix/Signals.hsc	2021-06-10 22:32:23.930000000 +0200
 @@ -349,11 +349,10 @@
                 -> Maybe SignalSet       -- ^ other signals to block
                 -> IO Handler            -- ^ old handler
@@ -71,3 +71,23 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/System/Posix/Sign
  
  -- -----------------------------------------------------------------------------
  -- Alarms
+diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/unix/config.sub boot/pkg/unix/config.sub
+--- upstream/pkg/unix/config.sub	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/unix/config.sub	2021-06-11 14:49:50.712651100 +0200
+@@ -1169,6 +1169,7 @@
+ 			| arm | arm[lb]e | arme[lb] | armv* \
+ 			| avr | avr32 \
+ 			| asmjs \
++			| js \
+ 			| ba \
+ 			| be32 | be64 \
+ 			| bfin | bpf | bs2000 \
+@@ -1728,7 +1729,7 @@
+ 	     | powermax* | dnix* | nx6 | nx7 | sei* | dragonfly* \
+ 	     | skyos* | haiku* | rdos* | toppers* | drops* | es* \
+ 	     | onefs* | tirtos* | phoenix* | fuchsia* | redox* | bme* \
+-	     | midnightbsd* | amdhsa* | unleashed* | emscripten* | wasi* \
++	     | midnightbsd* | amdhsa* | unleashed* | emscripten* | wasi* | ghcjs* \
+ 	     | nsk* | powerunix* | genode* | zvmoe* | qnx* | emx*)
+ 		;;
+ 	# This one is extra strict with allowed versions
