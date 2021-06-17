@@ -438,18 +438,6 @@ zeroApply s =
       closure (ClosureInfo "h$ap_0_0" (CIRegs 0 [PtrV]) "h$ap_0_0" (CILayoutFixed 0 []) CIStackFrame noStatic)
               (adjSpN' 1 # enter s r1) #
       
-      closure (ClosureInfo "h$ap_1_0" (CIRegs 0 [PtrV]) "h$ap_1_0" (CILayoutFixed 0 []) CIStackFrame noStatic)
-              (jVar $ \c ->
-                  c |= r1 .^ "f" #
-                  traceRts s ("h$ap_1_0: " + (c.^"n") + " :a " + (c.^"a") + " (" + clTypeName c + ")") #
-                  ifS (c.^"t" .===. e Thunk)
-                        (profStat s pushRestoreCCS # returnS c)
-                        (ifS (c.^"t" .===. e Blackhole)
-                           (push' s [r1, var "h$return"] #
-                              returnS (app "h$blockOnBlackhole" [r1]))
-                           (adjSpN' 1 # returnS c)
-               )) #
-
       "h$e" ||= jLam (\c -> r1 |= c # enter s c)
 
 -- carefully enter a closure that might be a thunk or a function
