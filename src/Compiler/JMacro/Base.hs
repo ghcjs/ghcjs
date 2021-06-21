@@ -35,7 +35,8 @@ module Compiler.JMacro.Base (
   -- * Hash combinators
   jhEmpty, jhSingle, jhAdd, jhFromList,
   -- * Utility
-  jsSaturate, SaneDouble(..)
+  jsSaturate, SaneDouble(..),
+  encodeJson
   ) where
 import Prelude hiding (tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
 -- import Control.Applicative hiding (empty)

@@ -1,4 +1,4 @@
-{-# LANGUAGE MagicHash, DeriveDataTypeable, CPP #-}
+{-# LANGUAGE MagicHash, DeriveDataTypeable, ScopedTypeVariables, CPP #-}
 #ifdef __GHCJS__
 {-# LANGUAGE JavaScriptFFI,
              GHCForeignImportPrim,
@@ -11,6 +11,9 @@ module GHCJS.Prim ( JSVal(..), JSVal#
                   , JSException(..)
                   , WouldBlockException(..)
 #ifdef ghcjs_HOST_OS
+                  , toIO
+                  , resolve
+                  , resolveIO
                   , mkJSException
                   , fromJSString
                   , toJSString
@@ -72,6 +75,23 @@ instance Show JSException where
   show (JSException _ xs) = "JavaScript exception: " ++ xs
 
 #ifdef ghcjs_HOST_OS
+
+{-# NOINLINE toIO #-}
+toIO :: Exts.Any -> IO Exts.Any
+toIO x = pure x
+
+{-# NOINLINE resolve #-}
+resolve :: JSVal# -> JSVal# -> Exts.Any -> IO ()
+resolve accept reject x = resolveIO accept reject (pure x)
+
+{-# NOINLINE resolveIO #-}
+resolveIO :: JSVal# -> JSVal# -> IO Exts.Any -> IO ()
+resolveIO accept reject x =
+  (x >>= evaluate >>= js_callback_any accept) `catch`
+  (\(e::Ex.SomeException) -> do
+    exceptionText <- evaluate (toJSString $ Ex.displayException e) `catch`
+                         (\(_::Ex.SomeException) -> evaluate (toJSString "unknown exception"))
+    js_callback_jsval reject exceptionText)
 
 mkJSException :: JSVal -> IO JSException
 mkJSException ref =
@@ -294,6 +314,12 @@ foreign import javascript unsafe "h$decodeUtf8z($1_1, $1_2)"
 
 foreign import javascript unsafe "h$decodeUtf8z($1_1, $1_2)"
   js_unsafeUnpackJSStringUtf8## :: Addr# -> JSVal#
+
+foreign import javascript unsafe "$1($2)"
+  js_callback_any :: JSVal# -> Exts.Any -> IO ()
+
+foreign import javascript unsafe "$1($2)"
+  js_callback_jsval :: JSVal# -> JSVal -> IO ()
 
 #endif
 

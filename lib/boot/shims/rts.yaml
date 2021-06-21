@@ -23,5 +23,5 @@ js:
   - src/hscore.js.pp
   - src/verify.js.pp
   - src/debug.js.pp
-  - src/rts.js
+  - src/rts.js.pp
 

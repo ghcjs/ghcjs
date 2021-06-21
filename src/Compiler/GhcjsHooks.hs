@@ -13,6 +13,7 @@ import           CoreToStg            (coreToStg)
 import           DriverPipeline
 import           DriverPhases
 import           DynFlags
+import           Outputable
 import           GHC
 import           GhcMonad
 import           Hooks
@@ -268,6 +269,7 @@ ghcjsCompileModule settings jsEnv env core mod' mod_location =
                                               (cg_tycons core)
       let (stg, (caf_ccs, caf_cc_stacks)) = coreToStg dflags mod' prepd_binds
       stg' <- stg2stg dflags mod' stg
+
       let cost_centre_info =
             (S.toList local_ccs ++ caf_ccs, caf_cc_stacks)
       return $ variantRender gen2Variant

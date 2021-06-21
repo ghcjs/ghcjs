@@ -16,6 +16,7 @@ import Control.Monad
 
 import Data.Maybe
 import Data.List (unzip4, stripPrefix)
+import qualified Data.Text as T
 
 import Hooks
 import DynFlags
@@ -69,9 +70,10 @@ import TcHsType
 import GHC.Platform
 import CmmType
 import DsUtils
-import CmmUtils
+import CmmUtils hiding (mkIntExpr)
 
 import Compiler.Compat
+import Compiler.JMacro.Base (encodeJson)
 
 import GHC.LanguageExtensions
 
@@ -102,11 +104,9 @@ ghcjsDsForeigns fos = do
     let
         (hs, cs, idss, bindss) = unzip4 fives
         fe_ids = concat idss
-        fe_init_code = map foreignExportInitialiser fe_ids
-    --
     return (ForeignStubs
              (vcat hs)
-             (vcat cs $$ vcat fe_init_code),
+             (vcat cs),
             foldr (appOL . toOL) nilOL bindss)
   where
    do_ldecl (L loc decl) = putSrcSpanDs loc (do_decl decl)
@@ -124,7 +124,6 @@ ghcjsDsForeigns fos = do
       return (h, c, [id], [])
    do_decl (XForeignDecl _) = panic "dsForeigns'"
 
--- fixme let this return new bindings?
 ghcjsDsFExport :: Id                 -- Either the exported Id,
                                 -- or the foreign-export-dynamic constructor
           -> Coercion           -- Coercion between the Haskell type callable
@@ -158,14 +157,12 @@ ghcjsDsFExport fn_id co ext_name cconv isDyn = do
                                 Just (_ioTyCon, res_ty) -> (res_ty, True)
                                 -- The function returns t
                                 Nothing                 -> (orig_res_ty, False)
-
     dflags <- getDynFlags
     return $
       mkFExportJSBits dflags ext_name
                      (if isDyn then Nothing else Just fn_id)
                      fe_arg_tys res_ty is_IO_res_ty cconv
 
--- fixme this generates C
 mkFExportJSBits :: DynFlags
                -> FastString
                -> Maybe Id      -- Just==static, Nothing==dynamic
@@ -179,8 +176,8 @@ mkFExportJSBits :: DynFlags
                    Int          -- total size of arguments
                   )
 mkFExportJSBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
- = (header_bits, c_bits, type_string,
-    sum [ widthInBytes (typeWidth rep) | (_,_,_,rep) <- aug_arg_info] -- all the args
+ = (header_bits, js_bits, type_string,
+    sum [ widthInBytes (typeWidth rep) | (_,_,_,rep) <- arg_info] -- all the args
          -- NB. the calculation here isn't strictly speaking correct.
          -- We have a primitive Haskell type (eg. Int#, Double#), and
          -- we want to know the size, when passed on the C stack, of
@@ -190,7 +187,7 @@ mkFExportJSBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
          -- use that instead.  I hope the two coincide --SDM
     )
  where
-  -- list the arguments to the C function
+  -- list the arguments to the JS function
   arg_info :: [(SDoc,           -- arg name
                 SDoc,           -- C type
                 Type,           -- Haskell type
@@ -202,138 +199,95 @@ mkFExportJSBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
                  typeCmmType dflags (getPrimTyOf ty))
               | (ty,n) <- zip arg_htys [1::Int ..] ]
 
-  arg_cname n stg_ty
-        | libffi    = char '*' <> parens (stg_ty <> char '*') <>
-                      ptext (sLit "args") <> brackets (int (n-1))
-        | otherwise = text ('a':show n)
+  arg_cname n stg_ty = text ('a':show n)
 
-  -- generate a libffi-style stub if this is a "wrapper" and libffi is enabled
-  libffi = cLibFFI && isNothing maybe_target
-
-  type_string
-      -- libffi needs to know the result type too:
-      | libffi    = primTyDescChar dflags res_hty : arg_type_string
-      | otherwise = arg_type_string
+  type_string = primTyDescChar dflags res_hty : arg_type_string
 
   arg_type_string = [primTyDescChar dflags ty | (_,_,ty,_) <- arg_info]
-                -- just the real args
 
-  -- add some auxiliary args; the stable ptr in the wrapper case, and
-  -- a slot for the dummy return address in the wrapper + ccall case
-  aug_arg_info
-    | isNothing maybe_target = panic "aug_arg_info" -- fixme stable_ptr_arg : insertRetAddr dflags cc arg_info
-    | otherwise              = arg_info
-
-{-
-  stable_ptr_arg =
-        (text "the_stableptr", text "StgStablePtr", undefined,
-         typeCmmType dflags (mkStablePtrPrimTy alphaTy))
--}
-  -- stuff to do with the return type of the C function
+  -- stuff to do with the return type of the JS function
   res_hty_is_unit = res_hty `eqType` unitTy     -- Look through any newtypes
 
-  cResType | res_hty_is_unit = text "void"
-           | otherwise       = showStgType res_hty
+  unboxResType | res_hty_is_unit = text "h$rts_getUnit"
+               | otherwise       = unpackHObj res_hty
 
-  -- when the return type is integral and word-sized or smaller, it
-  -- must be assigned as type ffi_arg (#3516).  To see what type
-  -- libffi is expecting here, take a look in its own testsuite, e.g.
-  -- libffi/testsuite/libffi.call/cls_align_ulonglong.c
-  ffi_cResType
-     | is_ffi_arg_type = text "ffi_arg"
-     | otherwise       = cResType
-     where
-       res_ty_key = getUnique (getName (typeTyCon res_hty))
-       is_ffi_arg_type = res_ty_key `notElem`
-              [floatTyConKey, doubleTyConKey,
-               int64TyConKey, word64TyConKey]
-
-  -- Now we can cook up the prototype for the exported function.
-  pprCconv = ccallConvAttribute cc
-
-  header_bits = ptext (sLit "extern") <+> fun_proto <> semi
+  header_bits = maybe empty idTag maybe_target
+  idTag i = let (tag, u) = unpkUnique (getUnique i)
+            in  char tag <> int u
 
   fun_args
-    | null aug_arg_info = text "void"
+    | null arg_info = empty -- text "void"
     | otherwise         = hsep $ punctuate comma
-                               $ map (\(nm,ty,_,_) -> ty <+> nm) aug_arg_info
+                               $ map (\(nm,_ty,_,_) -> nm) arg_info
 
   fun_proto
-    | libffi
-      = ptext (sLit "void") <+> ftext c_nm <>
-          parens (ptext (sLit "void *cif STG_UNUSED, void* resp, void** args, void* the_stableptr"))
-    | otherwise
-      = cResType <+> pprCconv <+> ftext c_nm <> parens fun_args
+      = text "async" <+>
+        text "function" <+>
+        (if isNothing maybe_target
+         then text "h$" <> ftext c_nm
+         else ftext c_nm) <>
+        parens fun_args
+
+  fun_export
+     = case maybe_target of
+          Just hs_fn | Just m <- nameModule_maybe (getName hs_fn) ->
+            text "h$foreignExport" <>
+                        parens (
+                          ftext c_nm <> comma <>
+                          strlit (installedUnitIdString (toInstalledUnitId $ moduleUnitId m)) <> comma <>
+                          strlit (moduleNameString (moduleName m)) <> comma <>
+                          strlit (unpackFS c_nm) <> comma <>
+                          strlit type_string
+                        ) <> semi
+          _ -> empty
+
+  strlit xs = text "\"" <>
+              text (T.unpack . encodeJson . T.pack $ xs) <>
+              text "\""
 
   -- the target which will form the root of what we ask rts_evalIO to run
   the_cfun
      = case maybe_target of
-          Nothing    -> text "(StgClosure*)deRefStablePtr(the_stableptr)"
-          Just hs_fn -> char '&' <> ppr hs_fn <> text "_closure"
+          Nothing    -> text "h$deRefStablePtr(the_stableptr)"
+          Just hs_fn -> idClosureText dflags hs_fn
 
-  cap = text "cap" <> comma
-
-  -- the expression we give to rts_evalIO
+  -- the expression we give to rts_eval
+  expr_to_run :: SDoc
   expr_to_run
-     = foldl appArg the_cfun arg_info -- NOT aug_arg_info
+     = foldl appArg the_cfun arg_info
        where
           appArg acc (arg_cname, _, arg_hty, _)
-             = text "rts_apply"
-               <> parens (cap <> acc <> comma <> mkHObj arg_hty <> parens (cap <> arg_cname))
-
-  -- various other bits for inside the fn
-  declareResult = text "HaskellObj ret;"
-  declareCResult | res_hty_is_unit = empty
-                 | otherwise       = cResType <+> text "cret;"
-
-  assignCResult | res_hty_is_unit = empty
-                | otherwise       =
-                        text "cret=" <> unpackHObj res_hty <> parens (text "ret") <> semi
-
-  -- an extern decl for the fn being called
-  extern_decl
-     = case maybe_target of
-          Nothing -> empty
-          Just hs_fn -> text "extern StgClosure " <> ppr hs_fn <> text "_closure" <> semi
-
+             = text "h$rts_apply"
+               <> parens (acc <> comma <> mkHObj arg_hty <> parens arg_cname)
 
   -- finally, the whole darn thing
-  c_bits =
+  js_bits =
     space $$
-    extern_decl $$
     fun_proto  $$
     vcat
      [ lbrace
-     ,   ptext (sLit "Capability *cap;")
-     ,   declareResult
-     ,   declareCResult
-     ,   text "cap = rts_lock();"
-          -- create the application + perform it.
-     ,   ptext (sLit "rts_evalIO") <> parens (
-                char '&' <> cap <>
-                ptext (sLit "rts_apply") <> parens (
-                    cap <>
-                    text "(HaskellObj)"
-                 <> ptext (if is_IO_res_ty
-                                then (sLit "runIO_closure")
-                                else (sLit "runNonIO_closure"))
-                 <> comma
-                 <> expr_to_run
-                ) <+> comma
-               <> text "&ret"
+     ,   text "return" <+> text "await" <+>
+         ptext (sLit "h$rts_eval") <> parens (
+                (if is_IO_res_ty
+                       then expr_to_run
+                       else ptext (sLit "h$rts_toIO") <> parens expr_to_run)
+                 <> comma <+> unboxResType
              ) <> semi
-     ,   ptext (sLit "rts_checkSchedStatus") <> parens (doubleQuotes (ftext c_nm)
-                                                <> comma <> text "cap") <> semi
-     ,   assignCResult
-     ,   ptext (sLit "rts_unlock(cap);")
-     ,   ppUnless res_hty_is_unit $
-         if libffi
-                  then char '*' <> parens (ffi_cResType <> char '*') <>
-                       ptext (sLit "resp = cret;")
-                  else ptext (sLit "return cret;")
      , rbrace
-     ]
+     ] $$
+     fun_export
 
+idClosureText :: DynFlags -> Id -> SDoc
+idClosureText df i
+  | isExportedId i, Just m <- nameModule_maybe (getName i)
+     = let modName :: String
+           modName = moduleNameString (moduleName m)
+           name :: String
+           name    = showPpr df . localiseName . getName $ i
+           pkg :: String
+           pkg     = installedUnitIdString (toInstalledUnitId $ moduleUnitId m)
+       in text "h$" <> text (zEncodeString $ pkg ++ ":" ++ modName ++ "." ++ name)
+  | otherwise = panic "idClosureText: unknown module"
 
 ghcjsDsFImport :: Id
                -> Coercion
@@ -383,29 +337,73 @@ dsJsFExportDynamic :: Id
                  -> Coercion
                  -> CCallConv
                  -> DsM ([Binding], SDoc, SDoc)
-dsJsFExportDynamic id co0 _cconv = do
+dsJsFExportDynamic id co0 cconv = do
+    mod <- getModule
     dflags <- getDynFlags
-    u <- newUnique
-    let fun_ty = head arg_tys
-    arg_id <- newSysLocalDs fun_ty
-{-
-    let mkExport = mkFCallId dflags u
-                      (CCall (CCallSpec (StaticTarget NoSourceText (fsLit "h$mkExportDyn") Nothing True) JavaScriptCallConv PlayRisky))
-                      (mkVisFunTy addrPrimTy ty)
--}
---        mkExportTy = mkVisFunTy (mkVisFunTys arg_tys res_ty) unitTy
-    let (_fun_args0, _fun_r) = splitFunTys (dropForAlls fun_ty)
-        -- fixme: disabled due to bug. enable again to make foreign exports work
-        expr       = Lam arg_id $ (Var arg_id) -- mkApps (Var mkExport) [Lit (mkMachString $ (snd (jsTySigLit dflags True fun_r) : ".") ++ map (snd . jsTySigLit dflags False) fun_args0), Var arg_id]
-        fed        = (id `setInlineActivation` NeverActive)
-    return ([(fed,expr)], empty, empty)
+    let fe_nm = mkFastString $ zEncodeString
+            ("h$" ++ moduleStableString mod ++ "$" ++ toCName dflags id)
+        -- Construct the label based on the passed id, don't use names
+        -- depending on Unique. See #13807 and Note [Unique Determinism].
+    cback <- newSysLocalDs arg_ty
+    newStablePtrId <- dsLookupGlobalId newStablePtrName
+    stable_ptr_tycon <- dsLookupTyCon stablePtrTyConName
+    let
+        stable_ptr_ty = mkTyConApp stable_ptr_tycon [arg_ty]
+        export_ty     = mkVisFunTy stable_ptr_ty arg_ty
+    bindIOId <- dsLookupGlobalId bindIOName
+    stbl_value <- newSysLocalDs stable_ptr_ty
+    (h_code, c_code, typestring, args_size) <- ghcjsDsFExport id (mkRepReflCo export_ty) fe_nm cconv True
+    let
+         {-
+          The arguments to the external function which will
+          create a little bit of (template) code on the fly
+          for allowing the (stable pointed) Haskell closure
+          to be entered using an external calling convention
+          (stdcall, ccall).
+         -}
+        adj_args      = [ mkIntLit dflags (toInteger (ccallConvToInt cconv))
+                        , Var stbl_value
+                        , Lit (LitLabel fe_nm mb_sz_args IsFunction)
+                        , Lit (mkLitString typestring)
+                        ]
+          -- name of external entry point providing these services.
+          -- (probably in the RTS.)
+        adjustor   = fsLit "createAdjustor"
+
+          -- Determine the number of bytes of arguments to the stub function,
+          -- so that we can attach the '@N' suffix to its label if it is a
+          -- stdcall on Windows.
+        mb_sz_args = case cconv of
+                        StdCallConv -> Just args_size
+                        _           -> Nothing
+
+    ccall_adj <- dsCCall adjustor adj_args PlayRisky (mkTyConApp io_tc [res_ty])
+        -- PlayRisky: the adjustor doesn't allocate in the Haskell heap or do a callback
+
+    let io_app = mkLams tvs                  $
+                 Lam cback                   $
+                 mkApps (Var bindIOId)
+                        [ Type stable_ptr_ty
+                        , Type res_ty
+                        , mkApps (Var newStablePtrId) [ Type arg_ty, Var cback ]
+                        , Lam stbl_value ccall_adj
+                        ]
+
+        fed = (id `setInlineActivation` NeverActive, Cast io_app co0)
+               -- Never inline the f.e.d. function, because the litlit
+               -- might not be in scope in other modules.
+
+    return ([fed], h_code, c_code)
 
  where
   ty                       = pFst (coercionKind co0)
-  (_tvs, sans_foralls)     = tcSplitForAllTys ty
-  (arg_tys, fn_res_ty)     = tcSplitFunTys sans_foralls
-  Just (_io_tc, res_ty)    = tcSplitIOType_maybe fn_res_ty
+  (tvs,sans_foralls)       = tcSplitForAllTys ty
+  ([arg_ty], fn_res_ty)    = tcSplitFunTys sans_foralls
+  Just (io_tc, res_ty)     = tcSplitIOType_maybe fn_res_ty
         -- Must have an IO type; hence Just
+
+toCName :: DynFlags -> Id -> String
+toCName dflags i = showSDoc dflags (pprCode CStyle (ppr (idName i)))
 
 dsJsCall :: Id -> Coercion -> ForeignCall -> Maybe Header
         -> DsM ([(Id, Expr TyVar)], SDoc, SDoc)
@@ -451,10 +449,10 @@ dsJsCall fn_id co (CCall (CCallSpec target cconv safety _ _)) _mDeclHeader = do
 
 
 mkHObj :: Type -> SDoc
-mkHObj t = text "rts_mk" <> text (showFFIType t)
+mkHObj t = text "h$rts_mk" <> text (showFFIType t)
 
 unpackHObj :: Type -> SDoc
-unpackHObj t = text "rts_get" <> text (showFFIType t)
+unpackHObj t = text "h$rts_get" <> text (showFFIType t)
 
 showStgType :: Type -> SDoc
 showStgType t = text "Hs" <> text (showFFIType t)
@@ -614,13 +612,8 @@ mk_alt return_result (Nothing, wrap_result)
        let
              the_rhs = return_result (Var state_id)
                                      (wrap_result $ panic "jsBoxResult")
-#if __GLASGOW_HASKELL__ >= 711
              ccall_res_ty = mkTupleTy Unboxed [realWorldStatePrimTy]
              the_alt      = (DataAlt (tupleDataCon Unboxed 1), [state_id], the_rhs)
-#else
-             ccall_res_ty = mkTyConApp unboxedSingletonTyCon [realWorldStatePrimTy]
-             the_alt      = (DataAlt unboxedSingletonDataCon, [state_id], the_rhs)
-#endif
        return (ccall_res_ty, the_alt)
 
 mk_alt return_result (Just prim_res_ty, wrap_result)
@@ -768,11 +761,31 @@ mkJsCall dflags u tgt args t =
                                       (map exprType args)
                                       )) args t
 
+-- represent a primitive type as a Char, for building a string that
+-- described the foreign function type.  The types are size-dependent,
+-- e.g. 'W' is a signed 32-bit integer.
 primTyDescChar :: DynFlags -> Type -> Char
-primTyDescChar _dflags _ty = panic "Gen2.Foreign.primTyDescChar"
+primTyDescChar dflags ty
+ | ty `eqType` unitTy = 'v'
+ | ty `eqType` boolTy = 'b'
+ | otherwise
+ = case typePrimRep1 (getPrimTyOf ty) of
+     IntRep      -> signed_word
+     WordRep     -> unsigned_word
+     Int64Rep    -> 'L'
+     Word64Rep   -> 'l'
+     AddrRep     -> 'p'
+     FloatRep    -> 'f'
+     DoubleRep   -> 'd'
+     _           -> pprPanic "primTyDescChar" (ppr ty)
+  where
+    (signed_word, unsigned_word)
+       | wORD_SIZE dflags == 4  = ('W','w')
+       | wORD_SIZE dflags == 8  = ('L','l')
+       | otherwise              = panic "primTyDescChar"
 
 cLibFFI :: Bool
-cLibFFI = panic "Gen2.Foreign.cLibFFI"
+cLibFFI = False
 
 -- This function returns the primitive type associated with the boxed
 -- type argument to a foreign export (eg. Int ==> Int#).
@@ -1207,23 +1220,3 @@ badCName :: CLabelString -> MsgDoc
 badCName target
   = sep [quotes (ppr target) <+> ptext (sLit "is not a valid C identifier")]
 
-#if __GLASGOW_HASKELL__ >= 711
-foreignExportInitialiser :: Id -> SDoc
-foreignExportInitialiser hs_fn =
-   -- Initialise foreign exports by registering a stable pointer from an
-   -- __attribute__((constructor)) function.
-   -- The alternative is to do this from stginit functions generated in
-   -- codeGen/CodeGen.hs; however, stginit functions have a negative impact
-   -- on binary sizes and link times because the static linker will think that
-   -- all modules that are imported directly or indirectly are actually used by
-   -- the program.
-   -- (this is bad for big umbrella modules like Graphics.Rendering.OpenGL)
-   vcat
-    [ text "static void stginit_export_" <> ppr hs_fn
-         <> text "() __attribute__((constructor));"
-    , text "static void stginit_export_" <> ppr hs_fn <> text "()"
-    , braces (text "foreignExportStablePtr"
-       <> parens (text "(StgPtr) &" <> ppr hs_fn <> text "_closure")
-       <> semi)
-    ]
-#endif

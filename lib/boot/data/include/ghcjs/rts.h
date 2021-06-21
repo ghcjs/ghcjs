@@ -60,9 +60,9 @@
 
 // GHC.Ptr.Ptr
 #ifdef GHCJS_PROF
-#define MK_PTR(val,offset) (h$c2(baseZCGHCziPtrziPtr_con_e, (val), (offset), h$CCS_SYSTEM))
+#define MK_PTR(val,offset) (h$c2(h$baseZCGHCziPtrziPtr_con_e, (val), (offset), h$CCS_SYSTEM))
 #else
-#define MK_PTR(val,offset) (h$c2(baseZCGHCziPtrziPtr_con_e, (val), (offset)))
+#define MK_PTR(val,offset) (h$c2(h$baseZCGHCziPtrziPtr_con_e, (val), (offset)))
 #endif
 
 // GHC.Integer.GMP.Internals
@@ -157,6 +157,7 @@
 #define MK_SELECT2(val) (h$c1(h$select2_e, (val), h$CCS_SYSTEM))
 #define MK_AP1(fun,val) (h$c2(h$ap1_e, (fun), (val), h$CCS_SYSTEM))
 #define MK_AP2(fun,val1,val2) (h$c3(h$ap2_e, (fun), (val1), (val2), h$CCS_SYSTEM))
+#define MK_AP3(fun,val1,val2,val3) (h$c4(h$ap3_e, (fun), (val1), (val2), (val3), h$CCS_SYSTEM))
 #else
 #define MK_DATA1_1(val) (h$c1(h$data1_e, (val)))
 #define MK_DATA1_2(val1,val2) (h$c2(h$data1_e, (val1), (val2)))
@@ -166,6 +167,7 @@
 #define MK_SELECT2(val) (h$c1(h$select2_e, (val)))
 #define MK_AP1(fun,val) (h$c2(h$ap1_e,(fun),(val)))
 #define MK_AP2(fun,val1,val2) (h$c3(h$ap2_e,(fun),(val1),(val2)))
+#define MK_AP3(fun,val1,val2,val3) (h$c4(h$ap3_e, (fun), (val1), (val2), (val3)))
 #endif
 
 // unboxed tuple returns

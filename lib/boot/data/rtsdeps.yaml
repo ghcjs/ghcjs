@@ -40,6 +40,9 @@ ghcjs-prim:
     - JSException
     - $fShowJSException
     - $fExceptionJSException
+    - resolve
+    - resolveIO
+    - toIO
   GHCJS.Prim.Internal:
     - wouldBlock
     - blockedIndefinitelyOnMVar

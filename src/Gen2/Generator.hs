@@ -44,6 +44,9 @@ import           Name
 import           GHC
 import           Id
 import           HscTypes
+import           Outputable hiding ((<>))
+import qualified Outputable
+
 import Prelude
 
 import           Control.Applicative
@@ -248,20 +251,20 @@ data LinkableUnit = LinkableUnit
   , luIdExports    :: [Id]          -- ^ exported names from haskell identifiers
   , luOtherExports :: [Text]        -- ^ other exports
   , luIdDeps       :: [Id]          -- ^ identifiers this unit depends on
+  , luPseudoIdDeps :: [Unique]      -- ^ pseudo-id identifiers this unit depends on (fixme)
   , luOtherDeps    :: [OtherSymb]   -- ^ symbols not from a haskell id that this unit depends on
   , luRequired     :: Bool          -- ^ always link this unit
   , luForeignRefs  :: [ForeignRef]
-  } deriving (Eq, Ord, Show)
+  } deriving (Eq, {- Ord, -} Show)
 
 -- | Generate the ingredients for the linkable units for this module
 genUnits :: HasDebugCallStack
          => DynFlags
          -> Module
-         -> [StgTopBinding] -- StgPgm
+         -> [StgTopBinding]
          -> [SptEntry]
          -> ForeignStubs
          -> G (Object.SymbolTable, [LinkableUnit]) -- ^ the final symbol table and the linkable units
--- XXX use foreign stubs here
 genUnits dflags m ss spt_entries foreign_stubs
                                  = generateGlobalBlock =<<
                                    generateExportsBlock =<<
@@ -291,11 +294,12 @@ genUnits dflags m ss spt_entries foreign_stubs
         (st', _, bs) <- serializeLinkableUnit m st [] [] []
                          ( O.optimize
                          . jsSaturate (Just $ modulePrefix m 1)
-                         $ mconcat (reverse glbl) <> staticInit) [] []
+                         $ mconcat (reverse glbl) <> staticInit) "" [] []
         return ( st'
                , LinkableUnit bs
                               []
                               [moduleGlobalSymbol dflags m]
+                              []
                               []
                               []
                               False
@@ -304,23 +308,33 @@ genUnits dflags m ss spt_entries foreign_stubs
                )
 
       generateExportsBlock :: HasDebugCallStack
-                           => (Object.SymbolTable, [LinkableUnit])
-                           -> G (Object.SymbolTable, [LinkableUnit])
+                          => (Object.SymbolTable, [LinkableUnit])
+                          -> G (Object.SymbolTable, [LinkableUnit])
       generateExportsBlock (st, lus) = do
         glbl <- use gsGlobal
-        staticInit <-
-          initStaticPtrs spt_entries
-        (st', _, bs) <- serializeLinkableUnit m st [] [] []
-                         ( O.optimize
-                         . jsSaturate (Just $ modulePrefix m 1)
-                         $ mconcat (reverse glbl) <> staticInit) [] []
+        let (f_hdr, f_c) = case foreign_stubs of
+                                  NoStubs            -> (Outputable.empty, Outputable.empty)
+                                  ForeignStubs hdr c -> (hdr, c)
+            unique_deps = map mkUniqueDep (lines $ showSDoc dflags f_hdr)
+            mkUniqueDep (tag:xs) = mkUnique tag (read xs)
+
+        (st', _, bs) <- serializeLinkableUnit m
+                                              st
+                                              []
+                                              []
+                                              []
+                                              mempty
+                                              (T.pack $ showSDoc dflags f_c)
+                                              []
+                                              []
         return ( st'
                , LinkableUnit bs
                               []
-                              [moduleGlobalSymbol dflags m]
+                              [moduleExportsSymbol dflags m]
+                              [] -- id deps
+                              unique_deps -- pseudo id deps
                               []
-                              []
-                              False
+                              True
                               []
                  : lus
                )
@@ -343,8 +357,8 @@ genUnits dflags m ss spt_entries foreign_stubs
             si        <- use (gsGroup . ggsStatic)
             let stat = mempty -- mconcat (reverse extraTl) <> b1 ||= e1 <> b2 ||= e2
             (st', _ss, bs) <- serializeLinkableUnit m st [bnd] [] si
-                              (jsSaturate (Just $ modulePrefix m n) stat) [] []
-            pure (st', Just $ LinkableUnit bs [bnd] [] [] [] False [])
+                              (jsSaturate (Just $ modulePrefix m n) stat) "" [] []
+            pure (st', Just $ LinkableUnit bs [bnd] [] [] [] [] False [])
           _ -> panic "generateBlock: invalid size"
       generateBlock st (StgTopLifted decl) n =
         trace' ("generateBlock:\n" ++ showIndent decl) $
@@ -363,9 +377,9 @@ genUnits dflags m ss spt_entries foreign_stubs
             stat     = {-decl -} O.optimize
                      . jsSaturate (Just $ modulePrefix m n)
                      $ mconcat (reverse extraTl) <> tl
-        (st', _ss, bs) <- serializeLinkableUnit m st topDeps ci si {-mempty-} stat [] fRefs
+        (st', _ss, bs) <- serializeLinkableUnit m st topDeps ci si stat mempty [] fRefs
         return $! seqList topDeps `seq` seqList allDeps `seq` st' `seq`
-          (st', Just $ LinkableUnit bs topDeps [] allDeps (S.toList extraDeps) required fRefs)
+          (st', Just $ LinkableUnit bs topDeps [] allDeps [] (S.toList extraDeps) required fRefs)
 
 initStaticPtrs :: [SptEntry] -> C
 initStaticPtrs ptrs = mconcat <$> mapM initStatic ptrs
@@ -398,12 +412,13 @@ serializeLinkableUnit :: HasDebugCallStack
                       -> [ClosureInfo]
                       -> [StaticInfo]
                       -> JStat               -- generated code for the unit
+                      -> Text
                       -> [Object.ExpFun]
                       -> [Object.ForeignRef]
                       -> G (Object.SymbolTable, [Text], BL.ByteString)
-serializeLinkableUnit _m st i ci si stat fe fi = do
+serializeLinkableUnit _m st i ci si stat rawStat fe fi = do
   i' <- mapM idStr i
-  let (st', o) = Object.serializeStat st ci si stat "" fe fi
+  let (st', o) = Object.serializeStat st ci si stat rawStat fe fi
   rnf i' `seq` rnf o `seq` return (st', i', o)
     where
       idStr i = itxt <$> jsIdI i
@@ -467,22 +482,28 @@ genDependencyData _dflags mod units = do
       oneDep :: LinkableUnit
              -> Int
              -> StateT DependencyDataCache G (Int, Object.BlockDeps, Bool, [Object.Fun])
-      oneDep (LinkableUnit _ idExports otherExports idDeps otherDeps req _frefs) n = do
+      oneDep (LinkableUnit _ idExports otherExports idDeps pseudoIdDeps otherDeps req _frefs) n = do
         (edi, bdi) <- partitionEithers <$> mapM (lookupIdFun n) idDeps
         (edo, bdo) <- partitionEithers <$> mapM lookupOtherFun otherDeps
+        (edp, bdp) <- partitionEithers <$> mapM (lookupPseudoIdFun n) pseudoIdDeps
         expi <- mapM lookupExportedId (filter isExportedId idExports)
         expo <- mapM lookupExportedOther otherExports
         -- fixme thin deps, remove all transitive dependencies!
         let bdeps = Object.BlockDeps
-                      (IS.toList . IS.fromList . filter (/=n) $ bdi++bdo)
-                      (S.toList . S.fromList $ edi++edo)
-                      -- [] -- fixme support foreign exported
-                      -- frefs
+                      (IS.toList . IS.fromList . filter (/=n) $ bdi++bdo++bdp)
+                      (S.toList . S.fromList $ edi++edo++edp)
         return (n, bdeps, req, expi++expo)
 
       idModule :: Id -> Maybe Module
       idModule i = nameModule_maybe (getName i) >>= \m ->
                    guard (m /= mod) >> return m
+
+      lookupPseudoIdFun :: Int -> Unique
+                        -> StateT DependencyDataCache G (Either Object.Fun Int)
+      lookupPseudoIdFun n u =
+        case lookupUFM_Directly unitIdExports u of
+          Just k -> return (Right k)
+          _      -> panic "lookupPseudoIdFun"
 
       -- get the function for an Id from the cache, add it if necessary
       -- result: Left Object.Fun   if function refers to another module
@@ -603,10 +624,6 @@ genToplevelRhs :: Id
                -> StgRhs
                -> C
 genToplevelRhs _i (StgRhsClosure _ext _cc _upd _args body)
-  -- foreign exports
-  | (StgOpApp (StgFCallOp (CCall (CCallSpec (StaticTarget _ t _ _) _ _ _ _)) _)
-     [StgLitArg _ {- (MachInt _is_js_conv) -}, StgLitArg (LitString _js_name), StgVarArg _tgt] _) <- body,
-     t == fsLit "__mkExport" = return mempty -- fixme error "export not implemented"
 -- general cases:
 genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
@@ -615,19 +632,12 @@ genToplevelRhs i (StgRhsCon cc con args) = do
 genToplevelRhs i rhs@(StgRhsClosure _ext cc _upd_flag {- srt -} args body) = do
   eid@(TxtI eidt) <- jsEnIdI i
   (TxtI idt)   <- jsIdI i
---  pushGlobalRefs
   body <- genBody (ExprCtx i [] emptyUniqSet emptyUniqSet emptyUFM [] Nothing) i R2 args body
   (lidents, lids) <- unzip <$> liftToGlobal (jsSaturate (Just . T.pack $ "ghcjs_tmp_sat_") body)
   let lidents' = map (\(TxtI t) -> t) lidents
---  li
---  refs <- popGlobalRefs
   CIStaticRefs sr0 <- genStaticRefsRhs rhs
   let sri = filter (`notElem` lidents') sr0
       sr   = CIStaticRefs sri
-
---  emitToplevel $ AssignStat (ValExpr (JVar $ TxtI ("h$globalRefs_" <> idt)))
---                            (ValExpr (JList $ map (ValExpr . JVar) lidents ++ [jnull] ++ map (ValExpr . JVar . TxtI) sri))
-
   et <- genEntryType args
   ll <- loadLiveFun lids
   (static, regs, upd) <-
@@ -644,7 +654,7 @@ genToplevelRhs i rhs@(StgRhsClosure _ext cc _upd_flag {- srt -} args body) = do
   emitClosureInfo (ClosureInfo eidt
                                regs
                                idt
-                               (fixedLayout $ map (uTypeVt . idType) lids) -- (CILayoutFixed 0 [])
+                               (fixedLayout $ map (uTypeVt . idType) lids)
                                et
                                sr)
   ccId <- costCentreStackLbl cc
@@ -1833,7 +1843,7 @@ genStrThunk i nonAscii str cc = do
   return $ case decodeModifiedUTF8 str of
     Just t -> d <>
       if nonAscii
-      then iie |= app "h$strt" ([e (T.unpack t)]++ccsArg) 
+      then iie |= app "h$strt" ([e (T.unpack t)]++ccsArg)
       else iie |= app "h$strta" ([e (T.unpack t)]++ccsArg)
     Nothing -> d <>
       if nonAscii

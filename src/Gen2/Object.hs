@@ -71,6 +71,9 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as B
 import           Data.ByteString.Lazy (ByteString)
 import qualified Data.ByteString.Lazy.Char8 as C8 (pack, unpack)
+import qualified Data.ByteString.Char8 as CS8 (pack, unpack)
+import qualified Data.ByteString.Base16.Lazy as B16
+import qualified Data.ByteString.Base16 as BS16
 import           Data.Data.Lens
 import           Data.Function (on)
 import           Data.HashMap.Strict (HashMap)
@@ -104,6 +107,7 @@ import           Compiler.Info
 import           Gen2.ClosureInfo hiding (Fun)
 import           Gen2.Printer (pretty)
 import           Gen2.Utils (trim)
+import           GHC.Stack
 
 data Header = Header { symbsLen :: !Int64
                      , depsLen  :: !Int64
@@ -134,7 +138,6 @@ data ExpFun = ExpFun { isIO   :: !Bool
                      , args   :: [JSFFIType]
                      , result :: !JSFFIType
                      } deriving (Eq, Ord, Show)
-
 
 {- | we use the convention that the first unit (0) is a module-global
      unit that's always included when something from the module
@@ -472,7 +475,7 @@ versionTagLength = 32
 
 getHeader :: ByteString -> Either String Header
 getHeader bs | B.length bs < fromIntegral headerLength = Left "not enough input, file truncated?"
-             | magic /= "GHCJSOBJ"                     = Left "magic number incorrect, not a js_o file?"
+             | magic /= "GHCJSOBJ"                     = Left $ "magic number incorrect (" ++  CS8.unpack (BS16.encode magic) ++ "), not a js_o file?"
              | tag   /= versionTag                     = Left $ "incorrect version, expected " ++ getFullCompilerVersion ++
                                                                     " but got " ++ (trim . C8.unpack $ tag)
              | otherwise                               = Right header
@@ -495,12 +498,14 @@ showObject :: [ObjUnit] -> TL.Text
 showObject xs = mconcat (zipWith showSymbol xs [0..])
   where
     showSymbol :: ObjUnit -> Int -> TL.Text
-    showSymbol (ObjUnit symbs cis sis stat _raw _fexp _fimp) n -- fixme show static data
+    showSymbol (ObjUnit symbs cis sis stat rawStat _fexp _fimp) n -- fixme show static data
       | "h$debug" `elem` symbs =
            "/*\n" <> (TL.fromStrict $ T.unlines ( stat ^.. template . _JStr )) <> "\n*/\n"
       | otherwise = TL.unlines
         [ "// begin: [" <> TL.intercalate "," (map TL.fromStrict symbs) <> "] (" <> TL.pack (show n) <> ")"
         , displayT . renderPretty 0.8 150 . pretty $ (stat <> mconcat (map toStat cis))
+        , "// raw:"
+        , TL.fromStrict rawStat
         , "/* static:"
         , TL.pack (show sis)
         , "end of static */"
@@ -516,14 +521,10 @@ showDeps (Deps p m r _e b) =
   where
     listOf n f xs = "  " <> n <> ":\n" <>
                     TL.unlines (map (TL.pack . ("  - "++) . f) xs)
-    -- blockExps = IM.fromListWith (++) $ map (\(f,n) -> (n,[f])) (M.toList e)
     dumpBlock (n, (BlockDeps bbd bfd)) = TL.pack (show n) <> " ->\n" <>
       listOf "block deps" show bbd <>
 
-      listOf "external deps" showFun bfd {- <>
-      listOf "exports"       showFun (fromMaybe [] $ IM.lookup n blockExps) <>
-      listOf "foreign refs"  show bfi <>
-      listOf "foreign exports" fixme bfe fixme -}
+      listOf "external deps" showFun bfd
 
 showPkg :: Package -> TL.Text
 showPkg = TL.fromStrict . unPackage

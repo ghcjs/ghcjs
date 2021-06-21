@@ -29,6 +29,27 @@ function h$makeStablePtr(v) {
   return slot << 2;
 }
 
+var h$foreignExports = [];
+function h$foreignExport(f, packageName, moduleName, functionName, typeSig) {
+  h$foreignExports.push({ exported: f,
+                          package: packageName,
+                          mod:  moduleName,
+                          name: functionName,
+                          sig: typeSig
+                        });
+  // console.log("foreign export:", f, packageName, moduleName, functionName, typeSig);
+  h$makeStablePtr(f);
+  if(typeof exports === 'object') {
+    if(typeof exports[functionName] === 'undefined') {
+      exports[functionName] = f;
+    }
+  }
+}
+/*
+function h$foreignExportStablePtr(x) {
+  // h$makeStablePtr(x);
+}
+*/
 function h$deRefStablePtr(stable_o) {
   var slot = stable_o >> 2;
   return h$stablePtrData[slot];

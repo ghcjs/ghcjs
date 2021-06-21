@@ -1,4 +1,180 @@
+#include <ghcjs/rts.h>
+
 var h$start = new Date();
+
+function h$rts_eval(action, unbox) {
+  return new Promise((accept, reject) =>
+    h$run(MK_AP3( h$ghcjszmprimZCGHCJSziPrimziresolveIO
+                , x => { accept(unbox(x))}
+                , e => { reject(new h$HaskellException(e))}
+                , action
+                ))
+  );
+}
+
+function h$rts_eval_sync(closure, unbox) {
+  var res, status = 0;
+  try {
+  h$runSync(MK_AP3( h$ghcjszmprimZCGHCJSziPrimziresolveIO
+           , MK_JSVAL(x => { status = 1; res = unbox(x); })
+           , MK_JSVAL(e => { status = 2; res = new h$HaskellException(e); })
+           , closure), false);
+  } catch(e) { status = 2; res = e; }
+  switch(status) {
+    case 0:  throw new h$HaskellException("internal error"); // thread didn't reach update frame
+    case 1:  return res;
+    default: throw res;
+  }
+}
+
+
+function h$rts_apply(f, x) {
+  return MK_AP1(f, x);
+}
+
+/*
+  marshalling for "foreign export"
+ */
+/*
+   | getUnique tc `elem` [ intTyConKey, int8TyConKey, int16TyConKey
+                         , int32TyConKey, int64TyConKey
+                         , wordTyConKey, word8TyConKey, word16TyConKey
+                         , word32TyConKey, word64TyConKey
+                         , floatTyConKey, doubleTyConKey
+                         , ptrTyConKey, funPtrTyConKey
+                         , charTyConKey
+                         , stablePtrTyConKey
+                         , boolTyConKey
+                         ]
+  */
+
+function h$rts_mkChar(x) { return x|0; }
+function h$rts_getChar(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkWord(x) { return x|0; }
+function h$rts_getWord(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkInt(x) { return x|0; }
+function h$rts_getInt(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkInt32(x) { return x|0; }
+function h$rts_getInt32(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkWord32(x) { return x|0; }
+function h$rts_getWord32(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkInt16(x) { return (x<<16)>>16; }
+function h$rts_getInt16(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkInt64(x) { throw new Error("rts_mkInt64"); /* return MK_INT64(); */ }
+function h$rts_getInt64(x) { throw new Error("rts_getInt64"); }
+
+function h$rts_mkWord64(x) { throw new Error("rts_mkWord64"); /* return MK_WORD64(); */ }
+function h$rts_getWord64(x) { throw new Error("rts_getWord64"); }
+
+function h$rts_mkWord16(x) { return x&0xffff; }
+function h$rts_getWord16(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkInt8(x) { return (x<<24)>>24; }
+function h$rts_getInt8(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkWord8(x) { return x&0xff; }
+function h$rts_getWord8(x) { return UNWRAP_NUMBER(x); }
+
+function h$rts_mkFloat(x) { return x; }
+function h$rts_getFloat(x) { return x; }
+
+function h$rts_mkDouble(x) { return x; }
+function h$rts_getDouble(x) { return x; }
+
+function h$rts_mkBool(x) { return x; }
+function h$rts_getBool(x) { return x; }
+
+function h$rts_getUnit(x) { return 0; }
+
+function h$rts_toString(x) {
+  var buf;
+  if(typeof x === 'object' &&
+     typeof x.len === 'number' &&
+     x.buf instanceof ArrayBuffer) {
+      buf = x;
+  } else if(typeof x === 'object' &&
+            x.buffer instanceof ArrayBuffer &&
+            typeof x.byteOffset === 'number') {
+    buf = h$wrapBuffer(x.buffer, true, x.byteOffset, x.byteLength);
+  } else if(x instanceof ArrayBuffer) {
+    buf = h$wrapBuffer(x, true, 0, x.byteLength);
+  } else {
+    throw new Error("rts_toString: unsupported value" + x);
+  }
+  return h$decodeUtf8z(buf);
+}
+
+function h$rts_mkPtr(x) {
+  var buf, off = 0;
+  if(typeof x == 'string') {
+    // string: UTF-8 encode
+    buf = h$encodeUtf8(x);
+    off = 0;
+  } else if(typeof x == 'object' &&
+     typeof x.len == 'number' &&
+     x.buf instanceof ArrayBuffer) {
+    // already a Haskell ByteArray
+    buf = x;
+    off = 0;
+  } else if(x.isView) {
+    // ArrayBufferView: make ByteArray with the same byteOffset
+    buf = h$wrapBuffer(x.buffer, true, 0, x.buffer.byteLength);
+    off = x.byteOffset;
+  } else {
+    // plain ArrayBuffer
+    buf = h$wrapBuffer(x, true, 0, x.byteLength);
+    off = 0;
+  }
+  return MK_PTR(buf, off);
+}
+
+function h$rts_getPtr(x) {
+  var arr = x.d1;
+  var offset = x.d2;
+  return new Uint8Array(arr.buf, offset);
+}
+
+function h$rts_mkFunPtr(x) {
+  // not yet implemented
+  throw new Error("rts_mkFunPtr");
+}
+
+function h$rts_getFunPtr(x) {
+  // not yet implemented
+  throw new Error("rts_getFunPtr");
+}
+
+function h$rts_toIO(x) {
+  return MK_AP1(h$ghcjszmprimZCGHCJSziPrimzitoIO, x);
+}
+
+// running IO actions
+
+function h$rts_evalIO_sync(closure) {
+  // return h$runSyncReturn(closure, false);
+}
+
+async function h$rts_evalIO(closure) {
+
+}
+
+/*
+function h$handleCallback(f, result) {
+  try {
+    f(result);
+  } catch() {
+
+  }
+}
+*/
+
+/* end foreign export stuff */
 
 function h$runio(c) {
   return h$c1(h$runio_e, c);
@@ -96,10 +272,10 @@ function h$printcl(i) {
       idx++;
       break;
       default:
-      r += "unknown field: " + cl.i[i];          
+      r += "unknown field: " + cl.i[i];
     }
   }
-  
+
 }
 
 function h$init_closure(c, xs) {

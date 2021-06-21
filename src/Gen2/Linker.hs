@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings,
              TupleSections,
              DeriveGeneric
-             
+
   #-}
 {- |
   GHCJS linker, collects dependencies from
@@ -69,6 +69,8 @@ import           GHC.Generics
 import           System.FilePath
   (splitPath, (<.>), (</>), dropExtension)
 
+import System.IO
+
 import           System.Directory
   ( createDirectoryIfMissing, canonicalizePath
   , doesFileExist, getCurrentDirectory, copyFile)
@@ -89,6 +91,11 @@ import           Gen2.Printer             (pretty)
 import           Gen2.Rts                 (rtsText, rtsDeclsText)
 import           Gen2.RtsTypes
 import           Gen2.Shim
+
+import qualified Data.ByteString.Char8 as CS8 (pack, unpack)
+import qualified Data.ByteString.Base16.Lazy as B16
+import qualified Data.ByteString.Base16 as BS16
+
 
 import qualified Compiler.Platform as Platform
 
@@ -223,7 +230,7 @@ link' dflags env settings target _include pkgs objFiles jsFiles isRootFun extraS
       (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims dflags [] (filter (isAlreadyLinked base) pkgs')
       (shimsBefore, shimsAfter) <- getShims dflags jsFiles pkgs''
       return $ LinkResult outJs stats metaSize
-                 (concatMap (\(_,_,_,_,_,r) -> r) code)
+                 (concatMap (\(_,_,_,_,_,_,r) -> r) code)
                  (filter (`notElem` alreadyLinkedBefore) shimsBefore)
                  (filter (`notElem` alreadyLinkedAfter)  shimsAfter)
                  pkgArchs base'
@@ -242,15 +249,16 @@ renderLinker :: GhcjsSettings
              -> DynFlags
              -> CompactorState
              -> Set Fun
-             -> [(Package, Module, JStat, [ClosureInfo], [StaticInfo], [ForeignRef])] -- ^ linked code per module
+             -> [(Package, Module, JStat, Text, [ClosureInfo], [StaticInfo], [ForeignRef])] -- ^ linked code per module
              -> (BL.ByteString, Int64, CompactorState, LinkerStats)
 renderLinker settings dflags renamerState rtsDeps code =
-  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,ci,si,_) -> (s,ci,si)) code)
+  let (renamerState', compacted, meta) = Compactor.compact settings dflags renamerState (map funSymbol $ S.toList rtsDeps) (map (\(_,_,s,_,ci,si,_) -> (s,ci,si)) code)
       pe = TLE.encodeUtf8 . (<>"\n") . displayT . renderPretty 0.8 150 . pretty
       rendered  = parMap rdeepseq pe compacted
       renderedMeta = pe meta
-      mkStat (p,m,_,_,_,_) b = ((p,m), BL.length b)
-  in ( mconcat rendered <> renderedMeta
+      renderedExports = TLE.encodeUtf8 . TL.fromStrict . T.unlines . filter (not . T.null) $ map (\(_,_,_,rs,_,_,_) -> rs) code
+      mkStat (p,m,_,_,_,_,_) b = ((p,m), BL.length b)
+  in ( mconcat rendered <> renderedMeta <> renderedExports
      , BL.length renderedMeta
      , renamerState'
      , M.fromList $ zipWith mkStat code rendered
@@ -311,9 +319,11 @@ convertPkg dflags p
      directly with node.js or SpiderMonkey jsshell
  -}
 combineFiles :: DynFlags -> FilePath -> IO ()
-combineFiles df fp = do
+combineFiles dflags fp = do
   files   <- mapM (B.readFile.(fp</>)) ["rts.js", "lib.js", "out.js"]
-  runMain <- B.readFile (getLibDir df </> "runmain.js")
+  runMain <- if   gopt Opt_NoHsMain dflags
+             then pure mempty
+             else B.readFile (getLibDir dflags </> "runmain.js")
   writeBinaryFile (fp</>"all.js") (mconcat (files ++ [runMain]))
 
 -- | write the index.html file that loads the program if it does not exit
@@ -432,7 +442,7 @@ collectDeps :: DynFlags
             -> Set Fun -- ^ roots
             -> [LinkableUnit] -- ^ more roots
             -> IO ( Set LinkableUnit
-                  , [(Package, Module, JStat, [ClosureInfo], [StaticInfo], [ForeignRef])]
+                  , [(Package, Module, JStat, Text, [ClosureInfo], [StaticInfo], [ForeignRef])]
                   )
 collectDeps _dflags lookup packages base roots units = do
   allDeps <- getDeps (fmap fst lookup) base roots units
@@ -451,7 +461,7 @@ collectDeps _dflags lookup packages base roots units = do
 extractDeps :: Map (Package, Module) IntSet
             -> Deps
             -> DepsLocation
-            -> IO (Maybe (Package, Module, JStat, [ClosureInfo], [StaticInfo], [ForeignRef]))
+            -> IO (Maybe (Package, Module, JStat, Text, [ClosureInfo], [StaticInfo], [ForeignRef]))
 extractDeps units deps loc =
   case M.lookup (pkg, mod) units of
     Nothing       -> return Nothing
@@ -472,6 +482,7 @@ extractDeps units deps loc =
     collectCode l = let x = ( pkg
                             , mod
                             , mconcat (map oiStat l)
+                            , T.unlines (map oiRaw l)
                             , concatMap oiClInfo l
                             , concatMap oiStatic l
                             , concatMap oiFImports l)
@@ -649,10 +660,8 @@ loadArchiveDeps' :: [FilePath]
                        , [LinkableUnit]
                        )
 loadArchiveDeps' archives = do
-  archDeps <- forM archives $ \file ->
-    -- putStrLn $ "reading archive: " ++ file
-    Ar.withAllObjects file $ \modulename h _len ->
-        -- putStrLn ("reading module: " ++ moduleNameString modulename)
+  archDeps <- forM archives $ \file -> do
+    Ar.withAllObjects file $ \modulename h _len -> do
         (,ArchiveFile file) <$>
           hReadDeps (file ++ ':':moduleNameString modulename) h
   return (prepareLoadedDeps $ concat archDeps)

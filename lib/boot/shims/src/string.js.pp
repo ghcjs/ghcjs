@@ -490,11 +490,9 @@ var h$dU16 = h$decodeUtf16;
 // decode a buffer with UTF-8 chars to a JS string
 // stop at the first zero
 function h$decodeUtf8z(v,start) {
-//  h$log("h$decodeUtf8z");
   var n = start;
   var max = v.len;
   while(n < max) {
-//    h$log("### " + n + " got char: " + v.u8[n]);
     if(v.u8[n] === 0) { break; }
     n++;
   }

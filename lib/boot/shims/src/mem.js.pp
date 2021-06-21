@@ -907,18 +907,6 @@ function h$mkSelThunk(r, f, rf) {
   return res;
 }
 
-function h$mkExportDyn(t, f) {
-    h$log("making dynamic export: " + t);
-    h$log("haskell fun: " + f + " " + h$collectProps(f));
-
-    // fixme register things, global static data
-    var ff = function() {
-        h$log("running some haskell for you");
-        return 12;
-    };
-    return h$mkPtr(ff, 0);
-}
-
 function h$memchr(a_v, a_o, c, n) {
   for(var i=0;i<n;i++) {
     if(a_v.u8[a_o+i] === c) {
@@ -1212,6 +1200,18 @@ var h$extraRoots = new h$Set();
 function h$addExtraRoot() {
   // fixme
 }
+
+function h$createAdjustor(cconv, stbl_d, stbl_o, lbl_d, lbl_o, typeStr_d, typeStr_o) {
+  // fixme shouldn't we just use stablePtr for this?
+  var func    = lbl_d.arr[lbl_o];
+  // var typeStr = h$decodeUtf8z(typeStr_d, typeStr_o);
+  var stbl    = h$deRefStablePtr(stbl_o);
+  if(typeof func !== 'function') {
+    throw new Error("h$createAdjustor: not a function");
+  }
+  RETURN_UBX_TUP2(h$stablePtrBuf, h$makeStablePtr(func.bind(null, stbl_o)));
+}
+
 
 function h$makeCallback(f, extraArgs, action) {
     var args = extraArgs.slice(0);

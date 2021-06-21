@@ -592,6 +592,12 @@ moduleGlobalSymbol dflags m
     T.pack (zEncodeString $ showModule dflags m) <>
     "_<global>"
 
+moduleExportsSymbol :: DynFlags -> Module -> Text
+moduleExportsSymbol dflags m
+  = "h$" <>
+    T.pack (zEncodeString $ showModule dflags m) <>
+    "_<exports>"
+
 jsIdIdent :: Id -> Maybe Int -> IdType -> G Ident
 jsIdIdent i mi suffix = do
   IdCache cache <- use gsIdents
