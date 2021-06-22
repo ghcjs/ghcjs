@@ -1,6 +1,6 @@
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc/IO.hs boot/pkg/base/GHC/Conc/IO.hs
---- upstream/pkg/base/GHC/Conc/IO.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Conc/IO.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Conc/IO.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Conc/IO.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -64,19 +64,21 @@
  import GHC.Conc.Windows (asyncRead, asyncWrite, asyncDoProc, asyncReadBA,
                           asyncWriteBA, ConsoleEvent(..), win32ConsoleHandler,
@@ -92,8 +92,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc/IO.hs bo
  #endif
    | otherwise = errorWithoutStackTrace "registerDelay: requires -threaded"
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc/Windows.hs boot/pkg/base/GHC/Conc/Windows.hs
---- upstream/pkg/base/GHC/Conc/Windows.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Conc/Windows.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Conc/Windows.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Conc/Windows.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -19,6 +19,9 @@
  
  -- #not-home
@@ -110,8 +110,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc/Windows.
  
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc.hs boot/pkg/base/GHC/Conc.hs
---- upstream/pkg/base/GHC/Conc.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Conc.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Conc.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Conc.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -93,14 +93,14 @@
          , asyncWriteBA
  #endif
@@ -138,8 +138,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Conc.hs boot/
  import GHC.Conc.Signal
  #endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/Manager.hs boot/pkg/base/GHC/Event/Manager.hs
---- upstream/pkg/base/GHC/Event/Manager.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Event/Manager.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Event/Manager.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Event/Manager.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -19,6 +19,9 @@
  -- polling if available. Otherwise we use multi-shot polling.
  
@@ -158,8 +158,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/Manager
 +#endif
 +
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/Thread.hs boot/pkg/base/GHC/Event/Thread.hs
---- upstream/pkg/base/GHC/Event/Thread.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Event/Thread.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Event/Thread.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Event/Thread.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -1,7 +1,11 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE BangPatterns, NoImplicitPrelude #-}
@@ -180,8 +180,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/Thread.
 +#endif
 +
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/TimerManager.hs boot/pkg/base/GHC/Event/TimerManager.hs
---- upstream/pkg/base/GHC/Event/TimerManager.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Event/TimerManager.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Event/TimerManager.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Event/TimerManager.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -8,6 +8,9 @@
    #-}
  
@@ -199,8 +199,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event/TimerMa
 +
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event.hs boot/pkg/base/GHC/Event.hs
---- upstream/pkg/base/GHC/Event.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Event.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Event.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Event.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -1,5 +1,6 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE NoImplicitPrelude #-}
@@ -224,8 +224,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Event.hs boot
  
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs
---- upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/IO/Encoding/CodePage/API.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -32,6 +32,7 @@
  
  import System.Posix.Internals
@@ -244,8 +244,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/Encoding/C
 +mkCodePageEncoding = ""
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/Encoding.hs boot/pkg/base/GHC/IO/Encoding.hs
---- upstream/pkg/base/GHC/IO/Encoding.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/IO/Encoding.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/IO/Encoding.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/IO/Encoding.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -142,8 +142,11 @@
  
  -- | @since 4.5.0.0
@@ -261,8 +261,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/Encoding.h
  -- because some iconvs (in particular GNU iconv) will brokenly UTF-8 encode
  -- lone surrogates without complaint.
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/FD.hs boot/pkg/base/GHC/IO/FD.hs
---- upstream/pkg/base/GHC/IO/FD.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/IO/FD.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/IO/FD.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/IO/FD.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -508,6 +508,10 @@
  
  readRawBufferPtr :: String -> FD -> Ptr Word8 -> Int -> CSize -> IO Int
@@ -352,8 +352,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/IO/FD.hs boot
  throwErrnoIfMinus1RetryOnBlock loc f on_block  =
    do
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Stack/CCS.hsc boot/pkg/base/GHC/Stack/CCS.hsc
---- upstream/pkg/base/GHC/Stack/CCS.hsc	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Stack/CCS.hsc	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Stack/CCS.hsc	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Stack/CCS.hsc	2021-06-22 10:20:50.629710900 +0200
 @@ -15,7 +15,7 @@
  -- @since 4.5.0.0
  -----------------------------------------------------------------------------
@@ -395,16 +395,16 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Stack/CCS.hsc
  -- | Returns a @[String]@ representing the current call stack.  This
  -- can be useful for debugging.
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Stats.hsc boot/pkg/base/GHC/Stats.hsc
---- upstream/pkg/base/GHC/Stats.hsc	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Stats.hsc	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Stats.hsc	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Stats.hsc	2021-06-22 10:20:50.629710900 +0200
 @@ -1,3 +1,4 @@
 +{-# LANGUAGE CPP #-}
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE NoImplicitPrelude #-}
  {-# LANGUAGE RecordWildCards #-}
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/TopHandler.hs boot/pkg/base/GHC/TopHandler.hs
---- upstream/pkg/base/GHC/TopHandler.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/TopHandler.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/TopHandler.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/TopHandler.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -94,7 +94,9 @@
        topHandler
  
@@ -435,8 +435,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/TopHandler.hs
  #else
    -- we must exit via the default action for SIGINT, so that the
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Windows.hs boot/pkg/base/GHC/Windows.hs
---- upstream/pkg/base/GHC/Windows.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/GHC/Windows.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/GHC/Windows.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/GHC/Windows.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -21,6 +21,10 @@
  -----------------------------------------------------------------------------
  
@@ -455,8 +455,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/GHC/Windows.hs bo
 +
 +#endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/CPUTime.hsc boot/pkg/base/System/CPUTime.hsc
---- upstream/pkg/base/System/CPUTime.hsc	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/System/CPUTime.hsc	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/System/CPUTime.hsc	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/System/CPUTime.hsc	2021-06-22 10:20:50.629710900 +0200
 @@ -1,5 +1,8 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE CPP, CApiFFI #-}
@@ -502,8 +502,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/CPUTime.hs
 +
 +##endif
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Environment/ExecutablePath.hsc boot/pkg/base/System/Environment/ExecutablePath.hsc
---- upstream/pkg/base/System/Environment/ExecutablePath.hsc	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/System/Environment/ExecutablePath.hsc	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/System/Environment/ExecutablePath.hsc	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/System/Environment/ExecutablePath.hsc	2021-06-22 10:20:50.629710900 +0200
 @@ -18,6 +18,13 @@
  
  module System.Environment.ExecutablePath ( getExecutablePath ) where
@@ -526,8 +526,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Environmen
 +##endif
 \ No newline at end of file
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Posix/Internals.hs boot/pkg/base/System/Posix/Internals.hs
---- upstream/pkg/base/System/Posix/Internals.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/System/Posix/Internals.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/System/Posix/Internals.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/System/Posix/Internals.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -1,6 +1,9 @@
  {-# LANGUAGE Trustworthy #-}
  {-# LANGUAGE CPP, NoImplicitPrelude, CApiFFI #-}
@@ -764,8 +764,8 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Posix/Inte
  -}
 -
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Timeout.hs boot/pkg/base/System/Timeout.hs
---- upstream/pkg/base/System/Timeout.hs	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/System/Timeout.hs	2021-06-10 20:42:21.000000000 +1200
+--- upstream/pkg/base/System/Timeout.hs	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/System/Timeout.hs	2021-06-22 10:20:50.629710900 +0200
 @@ -18,7 +18,7 @@
  
  module System.Timeout ( Timeout, timeout ) where
@@ -785,9 +785,9 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Timeout.hs
          -- In the threaded RTS, we use the Timer Manager to delay the
          -- (fairly expensive) 'forkIO' call until the timeout has expired.
 diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/base.cabal boot/pkg/base/base.cabal
---- upstream/pkg/base/base.cabal	2001-09-09 13:46:40.000000000 +1200
-+++ boot/pkg/base/base.cabal	2021-06-10 20:42:21.000000000 +1200
-@@ -52,7 +52,7 @@
+--- upstream/pkg/base/base.cabal	2001-09-09 03:46:40.000000000 +0200
++++ boot/pkg/base/base.cabal	2021-06-22 10:20:50.639710900 +0200
+@@ -51,7 +51,7 @@
  Flag integer-gmp
      Description: Use integer-gmp
      Manual: True
@@ -796,7 +796,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/base.cabal boot/p
  
  Library
      default-language: Haskell2010
-@@ -363,7 +363,7 @@
+@@ -362,7 +362,7 @@
          consUtils.h
  
      -- OS Specific
@@ -805,7 +805,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/base.cabal boot/p
          -- Windows requires some extra libraries for linking because the RTS
          -- is no longer re-exporting them.
          -- msvcrt: standard C library. The RTS will automatically include this,
-@@ -382,6 +382,7 @@
+@@ -381,6 +381,7 @@
          other-modules:
              System.CPUTime.Windows
      else
@@ -813,7 +813,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/base.cabal boot/p
          exposed-modules:
              GHC.Event
          other-modules:
-@@ -402,7 +403,8 @@
+@@ -401,7 +402,8 @@
              System.CPUTime.Posix.ClockGetTime
              System.CPUTime.Posix.Times
              System.CPUTime.Posix.RUsage
