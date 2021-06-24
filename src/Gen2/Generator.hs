@@ -623,7 +623,6 @@ getStaticRef = fmap (fmap itxt . listToMaybe) . genIdsI
 genToplevelRhs :: Id
                -> StgRhs
                -> C
-genToplevelRhs _i (StgRhsClosure _ext _cc _upd _args body)
 -- general cases:
 genToplevelRhs i (StgRhsCon cc con args) = do
   ii <- jsIdI i
