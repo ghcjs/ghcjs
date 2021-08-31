@@ -22,7 +22,7 @@ cProjectName          :: String
 cProjectName          = "The Glorious Glasgow Haskell Compilation System"
 
 cBooterVersion        :: String
-cBooterVersion        = "8.10.5"
+cBooterVersion        = "8.10.7"
 
 cStage                :: String
 cStage                = show (2 :: Int)
