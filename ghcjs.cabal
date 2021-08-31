@@ -1,6 +1,6 @@
 Cabal-Version:  2.4
 Name:           ghcjs
-Version:        8.10.5
+Version:        8.10.7
 Synopsis:       Haskell to JavaScript compiler
 Description:    Haskell to JavaScript compiler based on GHC
 Category:       compiler, web
