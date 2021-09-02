@@ -1210,9 +1210,8 @@ fixHashes hashes = fmap (\(bs,h) -> (bs, map replaceHash h)) hashes
   where
     replaceHash h = fromMaybe h (M.lookup h finalHashes)
     hashText  bs = "h$$$" <> TE.decodeUtf8 (B16.encode bs)
-    sccs :: [[Text]]
-    sccs         = map fromSCC $
-                   G.stronglyConnComp (map (\(k, (_bs, deps)) -> (k, k, deps)) (M.toList hashes))
+    sccs :: [G.SCC (Hash, Text, [Text])]
+    sccs         = G.stronglyConnCompR (map (\(k, hash@(_bs, deps)) -> (hash, k, deps)) (M.toList hashes))
     ks           = M.keys hashes
     invDeps      = M.fromListWith (++) (concatMap mkInvDeps $ M.toList hashes)
     mkInvDeps (k, (_, ds)) = map (,[k]) ds
@@ -1226,7 +1225,7 @@ fixHashesIter :: Int
               -> Map Text [Text]
               -> [Text]
               -> [Text]
-              -> [[Text]]
+              -> [G.SCC (Hash, Text, [Text])]
               -> Map Text Hash
               -> Map Text BS.ByteString
               -> Map Text BS.ByteString
@@ -1250,20 +1249,22 @@ fixHashesIter n invDeps allKeys checkKeys sccs hashes finalHashes
                 | otherwise = Nothing
     newHashes :: [(Text, BS.ByteString)]
     newHashes = mapMaybe mkNewHash checkKeys
-    rootSCCs :: [[Text]]
+    rootSCCs :: [G.SCC (Hash, Text, [Text])]
     rootSCCs = filter isRootSCC sccs
-    isRootSCC :: [Text] -> Bool
-    isRootSCC scc = not (all (`M.member` finalHashes) scc) && all check scc
+    isRootSCC :: G.SCC (Hash, Text, [Text]) -> Bool
+    isRootSCC scc = not (all (`M.member` finalHashes) flatSCC) && all check flatSCC
       where
+        flatSCC = view _2 <$> G.flattenSCC scc
         check n = let Just (_bs, out) = M.lookup n hashes
                   in  all checkEdge out
         checkEdge e = e `S.member` s || e `M.member` finalHashes
-        s = S.fromList scc
-    hashRootSCC :: [Text] -> [(Text,BS.ByteString)]
+        s = S.fromList flatSCC
+    hashRootSCC :: G.SCC (Hash, Text, [Text]) -> [(Text,BS.ByteString)]
     hashRootSCC scc
-      | any (`M.member` finalHashes) scc = Panic.panic "Gen2.Compactor.hashRootSCC: has finalized nodes"
+      | any (`M.member` finalHashes) flatSCC = Panic.panic "Gen2.Compactor.hashRootSCC: has finalized nodes"
       | otherwise = map makeHash toHash
       where
+        flatSCC = view _2 <$> G.flattenSCC scc
         makeHash k = let Just (bs,deps) = M.lookup k hashes
                          luds           = map lookupDep deps
                      in (k, makeFinalHash bs luds)
@@ -1287,7 +1288,19 @@ fixHashesIter n invDeps allKeys checkKeys sccs hashes finalHashes
               BB.int64LE (fromIntegral $ length deps') <>
               mconcat (map BB.byteString deps')
         toHash :: [Text]
-        toHash = sortBy (compare `on` (fst . (hashes M.!))) scc
+        toHash = depthFirstSCC scc
+
+-- | Sort the nodes influenced by the topology. This is important so that two
+-- graphs which share nodes but have different edges are hashed differently.
+depthFirstSCC :: G.SCC (Hash, Text, [Text]) -> [Text]
+depthFirstSCC scc = case sortedByHash of
+  [] -> Panic.panic "Gen2.Compactor.depthFirstSCC: SCC has no nodes"
+  (_, rootKey, _):_ -> case vertexFromKey rootKey of
+    Nothing -> Panic.panic $ "Gen2.Compactor.depthFirstSCC: vertex not found for key: " <> T.unpack rootKey
+    Just rootVertex -> (foldMap . foldMap) (\v -> [view _2 $ nodeFromVertex v]) $ G.dfs graph [rootVertex]
+  where
+    sortedByHash = sortOn (view _1) $ G.flattenSCC scc
+    (graph, nodeFromVertex, vertexFromKey) = G.graphFromEdges sortedByHash
 
 makeFinalHash :: BS.ByteString -> [BS.ByteString] -> BS.ByteString
 makeFinalHash b bs = SHA256.hash (mconcat (b:bs))
