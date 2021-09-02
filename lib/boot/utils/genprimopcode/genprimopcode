@@ -1,0 +1,7 @@
+#!/bin/bash
+(>&2 echo $@)
+case "$1" in
+    "--make-haskell-source") cat ../../data/Prim.hs;;
+    "--make-haskell-wrappers") cat ../../data/PrimopWrappers.hs;;
+    *) (>&2 echo "Unknown command $1"); exit 1;;
+esac

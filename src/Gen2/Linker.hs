@@ -199,13 +199,17 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
       compilationProgressMsg dflags $
         case gsGenBase settings of
           Just baseMod -> "Linking base bundle " ++ target ++ " (" ++ baseMod ++ ")"
-          _            -> "Linking " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
+          _            -> "Linking: " ++ target ++ " (" ++ intercalate "," rootMods ++ ")"
+
       base <- case gsUseBase settings of
         NoBase        -> return emptyBase
         BaseFile file -> Compactor.loadBase file
         BaseState b   -> return b
+
       (rdPkgs, rds) <- rtsDeps dflags
+
       c   <- newMVar M.empty
+
       let rtsPkgs     =  map stringToInstalledUnitId
                              ["@rts", "@rts_" ++ buildTag dflags]
           pkgs' :: [InstalledUnitId]
@@ -214,9 +218,13 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
           pkgLibPaths = mkPkgLibPaths pkgs'
           getPkgLibPaths :: InstalledUnitId -> ([FilePath],[String])
           getPkgLibPaths k = fromMaybe ([],[]) (lookup k pkgLibPaths)
+
       (archsDepsMap, archsRequiredUnits) <- loadArchiveDeps env =<<
           getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs')
+
+
       pkgArchs <- getPackageArchives dflags (map snd $ mkPkgLibPaths pkgs'')
+
       (allDeps, code) <-
         collectDeps dflags
                     (objDepsMap `M.union` archsDepsMap)
@@ -224,12 +232,17 @@ link' dflags env settings target include pkgs objFiles jsFiles isRootFun extraSt
                     (baseUnits base)
                     (roots `S.union` rds `S.union` extraStaticDeps)
                     (archsRequiredUnits ++ objRequiredUnits)
+
       let (outJs, metaSize, compactorState, stats) =
              renderLinker settings dflags (baseCompactorState base) rds code
           base'  = Base compactorState (nub $ basePkgs base ++ map mkPackage pkgs'')
                          (allDeps `S.union` baseUnits base)
+
+
       (alreadyLinkedBefore, alreadyLinkedAfter) <- getShims dflags [] (filter (isAlreadyLinked base) pkgs')
+
       (shimsBefore, shimsAfter) <- getShims dflags jsFiles pkgs''
+
       return $ LinkResult outJs stats metaSize
                  (concatMap (\(_,_,_,_,_,r) -> r) code)
                  (filter (`notElem` alreadyLinkedBefore) shimsBefore)
@@ -294,7 +307,7 @@ splitPath' = map (filter (`notElem` ("/\\"::String))) . splitPath
 
 getPackageArchives :: DynFlags -> [([FilePath],[String])] -> IO [FilePath]
 getPackageArchives dflags pkgs =
-  filterM doesFileExist [ p </> "lib" ++ l ++ profSuff <.> "js_a"
+  filterM doesFileExist [ p </> "lib" ++ l ++ profSuff <.> "a"
                         | (paths, libs) <- pkgs, p <- paths, l <- libs ]
   where
     profSuff | WayProf `elem` ways dflags = "_p"
@@ -680,9 +693,9 @@ loadArchiveDeps' :: [FilePath]
                        )
 loadArchiveDeps' archives = do
   archDeps <- forM archives $ \file -> do
-    -- putStrLn $ "reading archive: " ++ file
+    putStrLn $ "reading archive: " ++ file
     Ar.withAllObjects file $ \modulename h _len -> do
-        -- putStrLn ("reading module: " ++ moduleNameString modulename)
+        putStrLn ("reading module: " ++ moduleNameString modulename)
         (,ArchiveFile file) <$>
           hReadDeps (file ++ ':':moduleNameString modulename) h
   return (prepareLoadedDeps $ concat archDeps)

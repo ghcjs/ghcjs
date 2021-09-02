@@ -362,7 +362,9 @@ hReadDeps :: String -> Handle -> IO Deps
 hReadDeps name h = do
   mhdr <- getHeader <$> B.hGet h headerLength
   case mhdr of
-    Left err -> error ("hReadDeps: not a valid GHCJS object: " ++ name ++ "\n    " ++ err)
+    Left err -> do
+      putStrLn ("hReadDeps: not a valid GHCJS object: " ++ name ++ "\n    " ++ err)
+      return $ Deps (Package "C") "C" mempty mempty (array (0,1) [])
     Right hdr -> do
       hSeek h RelativeSeek (fromIntegral $ symbsLen hdr)
       getDepsSection name <$> B.hGet h (fromIntegral $ depsLen hdr)
@@ -371,7 +373,9 @@ hReadDeps name h = do
 readDeps :: String -> ByteString -> Deps
 readDeps name bs =
   case getHeader bs of
-    Left err -> error ("readDeps: not a valid GHCJS object: " ++ name ++ "\n   " ++ err)
+    Left err ->
+      -- trace ("hReadDeps: not a valid GHCJS object: " ++ name ++ "\n    " ++ err)
+      Deps (Package "C") "C" mempty mempty (array (0,1) [])
     Right hdr ->
       let depsStart = fromIntegral headerLength + fromIntegral (symbsLen hdr)
       in  getDepsSection name (B.drop depsStart bs)

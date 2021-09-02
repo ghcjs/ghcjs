@@ -51,7 +51,6 @@ withGhcjs' libDir flags ghcActs = runGhc (Just libDir) $ do
     }
   env <- liftIO Ghcjs.newGhcjsEnv
   let dynflags'' = Ghcjs.setGhcjsPlatform mempty env [] libDir $
-                   updateWays $ addWay' (WayCustom "js") $
                    Ghcjs.setGhcjsSuffixes False $
                    gopt_unset dynflags' Opt_SplitObjs
   defaultCleanupHandler dynflags'' $ do

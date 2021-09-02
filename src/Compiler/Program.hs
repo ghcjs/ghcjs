@@ -264,7 +264,6 @@ main' postLoadMode dflags0 args flagWarnings ghcjsSettings native = do
                 then return (Ghcjs.setNativePlatform jsEnv ghcjsSettings baseDir dflags4)
                 else return $
                        Ghcjs.setGhcjsPlatform ghcjsSettings jsEnv js_objs baseDir $
-                       updateWays $ addWay' (WayCustom "js") $
                        Ghcjs.setGhcjsSuffixes {- oneshot -} False dflags4 -- fixme value of oneshot?
 
   let dflags5 = dflags4b { ldInputs = map (FileOption "") objs

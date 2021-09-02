@@ -260,14 +260,7 @@ setGhcjsSuffixes :: Bool     -- oneshot option, -c
                  -> DynFlags
                  -> DynFlags
 setGhcjsSuffixes oneshot df = df
-    { objectSuf     = mkGhcjsSuf (objectSuf df)
-    , dynObjectSuf  = mkGhcjsSuf (dynObjectSuf df)
-    , hiSuf         = mkGhcjsSuf (hiSuf df)
-    , dynHiSuf      = mkGhcjsSuf (dynHiSuf df)
-    , outputFile    = fmap mkGhcjsOutput (outputFile df)
-    , dynOutputFile = fmap mkGhcjsOutput (dynOutputFile df)
-    , outputHi      = fmap mkGhcjsOutput (outputHi df)
-    , ghcLink       = if oneshot then NoLink else ghcLink df
+    { ghcLink       = if oneshot then NoLink else ghcLink df
     }
 
 
@@ -344,7 +337,6 @@ setupSessionForGhcjs ghcjsSettings = do
   jsEnv <- liftIO newGhcjsEnv
   _ <- setSessionDynFlags
        $ setGhcjsPlatform ghcjsSettings jsEnv [] base
-       $ updateWays $ addWay' (WayCustom "js")
        $ setGhcjsSuffixes False dflags
   pure ()
 
