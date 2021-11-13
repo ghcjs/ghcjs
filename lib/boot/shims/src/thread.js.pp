@@ -715,6 +715,10 @@ function h$runThreadSliceCatch(c) {
       h$stack = null;
       h$reportMainLoopException(e, true);
       h$doneMain_e();
+    } else if (e.name === 'ReferenceError') {
+      h$stack = null;
+      h$reportMainLoopException(e, false);
+      h$exitProcess(1);
     } else {
       h$stack = null;
       h$reportMainLoopException(e, false);
