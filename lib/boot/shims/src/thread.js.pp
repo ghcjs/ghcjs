@@ -711,14 +711,14 @@ function h$runThreadSliceCatch(c) {
     h$reportCurrentCcs();
 #endif
     c = null;
-    if(h$stack && h$stack[0] === h$doneMain_e) {
-      h$stack = null;
-      h$reportMainLoopException(e, true);
-      h$doneMain_e();
-    } else if (e.name === 'ReferenceError') {
+    if (e.name === 'ReferenceError') {
       h$stack = null;
       h$reportMainLoopException(e, false);
       h$exitProcess(1);
+    } else if(h$stack && h$stack[0] === h$doneMain_e) {
+      h$stack = null;
+      h$reportMainLoopException(e, true);
+      h$doneMain_e();
     } else {
       h$stack = null;
       h$reportMainLoopException(e, false);
