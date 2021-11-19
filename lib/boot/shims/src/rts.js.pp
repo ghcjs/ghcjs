@@ -12,6 +12,22 @@ function h$rts_eval(action, unbox) {
   );
 }
 
+function h$rts_eval_sync_(closure, unbox) {
+  var res, status = 0;
+  try {
+  h$runSync(MK_AP3( h$ghcjszmprimZCGHCJSziPrimziresolveIO
+           , x => { status = 1; res = unbox(x); }
+           , e => { status = 2; res = new h$HaskellException(e); }
+           , closure), false);
+  } catch(e) { status = 2; res = e; }
+  switch(status) {
+    case 0:  throw new h$HaskellException("internal error"); // thread didn't reach update frame
+    case 1:  return res;
+    default: throw res;
+  }
+}
+
+
 function h$rts_eval_sync(closure, unbox) {
   var res, status = 0;
   try {
