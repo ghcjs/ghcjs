@@ -220,7 +220,7 @@ mkFExportJSBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
     | otherwise     = map (\(nm,_ty,_,_) -> nm) arg_info
 
   fun_proto
-      = text "async" <+>
+      = -- text "async" <+>
         text "function" <+>
         (if isNothing maybe_target
          then (text "h$" <> ftext c_nm <> parens (hsep $ punctuate comma $ "the_stableptr":fun_args))
@@ -265,8 +265,8 @@ mkFExportJSBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
     fun_proto  $$
     vcat
      [ lbrace
-     ,   text "return" <+> text "await" <+>
-         ptext (sLit "h$rts_eval") <> parens (
+     ,   text "return" <+> -- text "await" <+>
+         ptext (sLit "h$rts_eval_sync_") <> parens (
                 (if is_IO_res_ty
                        then expr_to_run
                        else ptext (sLit "h$rts_toIO") <> parens expr_to_run)
