@@ -223,7 +223,7 @@ mkFExportJSBits dflags c_nm maybe_target arg_htys res_hty is_IO_res_ty cc
       = -- text "async" <+>
         text "function" <+>
         (if isNothing maybe_target
-         then (text "h$" <> ftext c_nm <> parens (hsep $ punctuate comma $ "the_stableptr":fun_args))
+         then (text "h$" <> ftext c_nm <> parens (hsep $ punctuate comma $ (text "the_stableptr"):fun_args))
          else (ftext c_nm <> parens (hsep $ punctuate comma $ fun_args)))
         
 
