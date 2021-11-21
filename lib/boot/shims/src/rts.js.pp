@@ -133,6 +133,12 @@ function h$rts_mkPtr(x) {
     buf = h$encodeUtf8(x);
     off = 0;
   } else if(typeof x == 'object' &&
+     typeof x.length == 'number' &&
+     x.length == 2) {
+    // some pair [x,y], most likely some pass through [_d, _o] pair.
+    buf = x[0];
+    off = x[1];
+  } else if(typeof x == 'object' &&
      typeof x.len == 'number' &&
      x.buf instanceof ArrayBuffer) {
     // already a Haskell ByteArray
