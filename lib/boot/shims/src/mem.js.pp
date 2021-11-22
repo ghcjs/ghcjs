@@ -1055,6 +1055,8 @@ function h$arrayBufferId(a) {
 }
 
 function h$comparePointer(a1,o1,a2,o2) {
+  // make sure we can compare stablePtrs against nullPtr.
+  if (a1 === h$stablePtrBuf && a2 === null && o1 === 0 && o2 === 0) { return 0; }
   if (a1 === null) {
     return a2 === null ? 0 : -1;
   } else if (a2 === null) {
