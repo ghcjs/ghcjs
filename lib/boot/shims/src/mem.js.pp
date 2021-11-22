@@ -1054,12 +1054,15 @@ function h$arrayBufferId(a) {
   return a.__ghcjsArrayBufferId;
 }
 
+// make sure we can compare stablePtrs against nullPtr.
+function h$isNullPointer(a,o) {
+  return a === null || (a === h$stablePtrBuf && o === 0);
+}
+
 function h$comparePointer(a1,o1,a2,o2) {
-  // make sure we can compare stablePtrs against nullPtr.
-  if (a1 === h$stablePtrBuf && a2 === null && o1 === 0 && o2 === 0) { return 0; }
-  if (a1 === null) {
-    return a2 === null ? 0 : -1;
-  } else if (a2 === null) {
+  if (h$isNullPointer(a1, o1)) {
+    return h$isNullPointer(a2, o2) ? 0 : -1;
+  } else if (h$isNullPointer(a2, o2)) {
     return 1;
   }
   var i1 = h$arrayBufferId(a1.buf);
