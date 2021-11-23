@@ -556,9 +556,8 @@ genPrim _ _ WriteByteArrayOp_Word64 [] [a,i,e1,e2] =
                   , WriteByteArrayOp_Word8AsWord
  -}
 genPrim _ _ WriteByteArrayOp_Word8AsWord32 [] [a,i,e] =
-  PrimInline $ ifS (i .%. 4 .===. 0)
-                   (a .^ "i3" .! (i.>>.2) |= e)
-                   (appS "h$writeByteArrayWord8AsWord32" [a,i,e])
+  PrimInline $ appS "h$writeByteArrayWord8AsWord32" [a,i,e]
+
 genPrim _ _ CompareByteArraysOp [r] [a1,o1,a2,o2,n] =
   PrimInline $ r |= app "h$compareByteArrays" [a1,o1,a2,o2,n]
 -- fixme we can do faster by copying 32 bit ints or doubles

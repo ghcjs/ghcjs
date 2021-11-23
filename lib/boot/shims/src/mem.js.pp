@@ -995,7 +995,10 @@ function h$uint8ArrayFromUint32(n) {
   return new Uint8Array(buf);
 }
 function h$writeByteArrayWord8AsWord32(a, i, e) {
-  (new Uint8Array(a.buf)).subarray(i,i+4).set(h$uint8ArrayFromUint32(e));
+  if((i & 3) === 0)
+    a.i3[i>>2] = e;
+  else
+    (new Uint8Array(a.buf)).subarray(i,i+4).set(h$uint8ArrayFromUint32(e));
 }
 
 function h$compareByteArrays(a1,o1,a2,o2,n) {
