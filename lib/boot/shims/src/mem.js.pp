@@ -989,6 +989,15 @@ function h$shrinkMutableByteArray(a, n) {
   }
 }
 
+function h$uint8ArrayFromUint32(n) {
+  var buf = new ArrayBuffer(4);
+  new Uint32Array(buf).set([n]);
+  return new Uint8Array(buf);
+}
+function h$writeByteArrayWord8AsWord32(a, i, e) {
+  (new Uint8Array(a.buf)).subarray(i,i+4).set(h$uint8ArrayFromUint32(e));
+}
+
 function h$compareByteArrays(a1,o1,a2,o2,n) {
   for(var i = 0; i < n; i++) {
     var x = a1.u8[i + o1];
