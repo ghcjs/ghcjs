@@ -280,13 +280,13 @@ Library
     Include-Dirs: ghc/compiler ghc/compiler/parser ghc/compiler/utils
 
     if flag(stage1)
-        CPP-options: -DSTAGE1 -DSTAGE=1
+        CPP-options: -DGHC_STAGE1 -DGHC_STAGE=1
     else
         if flag(stage2)
-            CPP-options: -DSTAGE2 -DSTAGE=2
+            CPP-options: -DGHC_STAGE2 -DGHC_STAGE=2
         else
             if flag(stage3)
-                CPP-options: -DSTAGE3 -DSTAGE=3
+                CPP-options: -DGHC_STAGE3 -DGHC_STAGE=3
 
     Install-Includes: ghc/compiler/HsVersions.h
 
