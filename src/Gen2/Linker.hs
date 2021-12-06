@@ -67,7 +67,7 @@ import qualified Distribution.Simple.Utils as Cabal
 import           GHC.Generics
 
 import           System.FilePath
-  (splitPath, (<.>), (</>), dropExtension)
+  (splitPath, (<.>), (</>), dropExtensionm, takeFileName)
 
 import System.IO
 
@@ -660,7 +660,12 @@ loadArchiveDeps' :: [FilePath]
                        , [LinkableUnit]
                        )
 loadArchiveDeps' archives = do
-  archDeps <- forM archives $ \file -> do
+  -- HACK: ignore `libEMCC*` archives. 
+  -- these are emcc compiled archives by (ghcjs) convention, and thus are useless
+  -- for linking in ghcjs.
+  let archives' = [ arch | arch <- archives
+                         , not $ "libEMCC" `isPrefixOf` (takeFileName arch) ]
+  archDeps <- forM archives' $ \file -> do
     Ar.withAllObjects file $ \modulename h _len -> do
         (,ArchiveFile file) <$>
           hReadDeps (file ++ ':':moduleNameString modulename) h
