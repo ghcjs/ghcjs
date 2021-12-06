@@ -43,7 +43,7 @@ import           Data.Int
 import           Data.IntSet              (IntSet)
 import qualified Data.IntSet              as IS
 import           Data.List
-  (partition, nub, foldl', intercalate, group, sort, groupBy)
+  (partition, nub, foldl', intercalate, group, sort, groupBy, isPrefixOf)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe
