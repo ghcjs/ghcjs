@@ -67,7 +67,7 @@ import qualified Distribution.Simple.Utils as Cabal
 import           GHC.Generics
 
 import           System.FilePath
-  (splitPath, (<.>), (</>), dropExtensionm, takeFileName)
+  (splitPath, (<.>), (</>), dropExtension, takeFileName)
 
 import System.IO
 
