@@ -545,8 +545,8 @@ startTHRunner dflags js_env hsc_env runners =
 startTHRunnerProcess :: DynFlags -> GhcjsEnv -> HscEnv -> IO THRunner
 startTHRunnerProcess dflags js_env hsc_env = do
   let thSupport = case objectDir dflags of
-    Just dir -> dir </> "th-support.js"
-    Nothing -> "th-support.js"
+                    Just dir -> dir </> "th-support.js"
+                    Nothing -> "th-support.js"
   compilationProgressMsg dflags $ "Checking for " ++ thSupport
   thSupportFiles <- filterM doesFileExist [ thSupport ]
   lr <- linkTh js_env thSettings thSupportFiles dflags [] (hsc_HPT hsc_env) Nothing
