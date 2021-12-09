@@ -661,7 +661,7 @@ loadArchiveDeps' :: [FilePath]
                        , [LinkableUnit]
                        )
 loadArchiveDeps' archives = do
-  -- HACK: ignore `libEMCC*` archives. 
+  -- HACK: ignore `libEMCC*` archives.
   -- these are emcc compiled archives by (ghcjs) convention, and thus are useless
   -- for linking in ghcjs.
   let archives' = [ arch | arch <- archives
