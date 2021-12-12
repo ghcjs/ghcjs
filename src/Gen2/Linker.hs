@@ -43,7 +43,7 @@ import           Data.Int
 import           Data.IntSet              (IntSet)
 import qualified Data.IntSet              as IS
 import           Data.List
-  (partition, nub, foldl', intercalate, group, sort, groupBy)
+  (partition, nub, foldl', intercalate, group, sort, groupBy, isPrefixOf)
 import           Data.Map.Strict          (Map)
 import qualified Data.Map.Strict          as M
 import           Data.Maybe
@@ -67,7 +67,7 @@ import qualified Distribution.Simple.Utils as Cabal
 import           GHC.Generics
 
 import           System.FilePath
-  (splitPath, (<.>), (</>), dropExtension)
+  (splitPath, (<.>), (</>), dropExtension, takeFileName)
 
 import System.IO
 
@@ -295,7 +295,8 @@ splitPath' = map (filter (`notElem` ("/\\"::String))) . splitPath
 getPackageArchives :: DynFlags -> [([FilePath],[String])] -> IO [FilePath]
 getPackageArchives dflags pkgs =
   filterM doesFileExist [ p </> "lib" ++ l ++ profSuff <.> "js_a"
-                        | (paths, libs) <- pkgs, p <- paths, l <- libs ]
+                        | (paths, libs) <- pkgs, p <- paths, l <- libs
+                        , not $ "EMCC" `isPrefixOf` l]
   where
     profSuff | WayProf `elem` ways dflags = "_p"
              | otherwise                  = ""
@@ -660,7 +661,12 @@ loadArchiveDeps' :: [FilePath]
                        , [LinkableUnit]
                        )
 loadArchiveDeps' archives = do
-  archDeps <- forM archives $ \file -> do
+  -- HACK: ignore `libEMCC*` archives.
+  -- these are emcc compiled archives by (ghcjs) convention, and thus are useless
+  -- for linking in ghcjs.
+  let archives' = [ arch | arch <- archives
+                         , not $ "libEMCC" `isPrefixOf` (takeFileName arch) ]
+  archDeps <- forM archives' $ \file -> do
     Ar.withAllObjects file $ \modulename h _len -> do
         (,ArchiveFile file) <$>
           hReadDeps (file ++ ':':moduleNameString modulename) h

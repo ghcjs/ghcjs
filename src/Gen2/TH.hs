@@ -87,7 +87,8 @@ import qualified "template-haskell"       Language.Haskell.TH.Syntax     as TH
 
 import           System.Process
   (terminateProcess, waitForProcess)
-
+import           System.Directory
+  (doesFileExist)
 import           System.FilePath
 import           System.IO
 import           System.IO.Error
@@ -543,7 +544,12 @@ startTHRunner dflags js_env hsc_env runners =
 
 startTHRunnerProcess :: DynFlags -> GhcjsEnv -> HscEnv -> IO THRunner
 startTHRunnerProcess dflags js_env hsc_env = do
-  lr <- linkTh js_env thSettings [] dflags [] (hsc_HPT hsc_env) Nothing
+  let thSupport = case objectDir dflags of
+                    Just dir -> dir </> "th-support.js"
+                    Nothing -> "th-support.js"
+  compilationProgressMsg dflags $ "Checking for " ++ thSupport
+  thSupportFiles <- filterM doesFileExist [ thSupport ]
+  lr <- linkTh js_env thSettings thSupportFiles dflags [] (hsc_HPT hsc_env) Nothing
   fr <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibRTS lr)
   fa <- BL.fromChunks <$> mapM (Gen2.tryReadShimFile dflags) (Gen2.linkLibA lr)
   aa <- BL.fromChunks <$> mapM (Gen2.readShimsArchive dflags) (Gen2.linkLibAArch lr)
