@@ -1026,7 +1026,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/integer-gmp/jsbits/ghc
 +}
 +
 +function h$ghcjsbn_powModSBigNat(bpos, base, epos, exp, m) {
-+  var newBase = bpos ? base : h$ghcjsbn_sub_bb(m, base);
++  var newBase = bpos ? base : h$ghcjsbn_sub_bb(m, h$ghcjsbn_rem_bb(base,m));
 +  var newExp = epos ? exp : h$ghcjsbn_modular_inverse(exp, m);
 +  return h$ghcjsbn_modPow_bbb(newBase, newExp, m);
 +}

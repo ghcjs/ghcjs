@@ -989,6 +989,18 @@ function h$shrinkMutableByteArray(a, n) {
   }
 }
 
+function h$uint8ArrayFromUint32(n) {
+  var buf = new ArrayBuffer(4);
+  new Uint32Array(buf).set([n]);
+  return new Uint8Array(buf);
+}
+function h$writeByteArrayWord8AsWord32(a, i, e) {
+  if((i & 3) === 0)
+    a.i3[i>>2] = e;
+  else
+    (new Uint8Array(a.buf)).subarray(i,i+4).set(h$uint8ArrayFromUint32(e));
+}
+
 function h$compareByteArrays(a1,o1,a2,o2,n) {
   for(var i = 0; i < n; i++) {
     var x = a1.u8[i + o1];
@@ -1054,10 +1066,15 @@ function h$arrayBufferId(a) {
   return a.__ghcjsArrayBufferId;
 }
 
+// make sure we can compare stablePtrs against nullPtr.
+function h$isNullPointer(a,o) {
+  return a === null || (a === h$stablePtrBuf && o === 0);
+}
+
 function h$comparePointer(a1,o1,a2,o2) {
-  if (a1 === null) {
-    return a2 === null ? 0 : -1;
-  } else if (a2 === null) {
+  if (h$isNullPointer(a1, o1)) {
+    return h$isNullPointer(a2, o2) ? 0 : -1;
+  } else if (h$isNullPointer(a2, o2)) {
     return 1;
   }
   var i1 = h$arrayBufferId(a1.buf);
