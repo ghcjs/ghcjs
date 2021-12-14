@@ -39,6 +39,8 @@ import           Coercion
 import           CoAxiom
 import           Gen2.Utils
 
+import           GHC.Hs.Extension (NoExtField)
+
 -- this is a hack to be able to use pprShow in a Show instance, should be removed
 {-# NOINLINE hackPprDflags #-}
 hackPprDflags :: DynFlags
@@ -102,7 +104,9 @@ deriving instance Show StgBinding
 deriving instance Show StgTopBinding
 deriving instance Show StgRhs
 deriving instance Show StgOp
+deriving instance Show NoExtField
 deriving instance Show StgTickish
+deriving instance Show CoreTickish
 --
 instance Show Coercion where show co = showPpr hackPprDflags co
 deriving instance Show a => Show (Expr a)
