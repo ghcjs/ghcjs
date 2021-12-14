@@ -233,7 +233,7 @@ compileExpr js_env js_settings hsc_env dflags src_span ds_expr
       (spt_entries, th_binds1) <- sptCreateStaticBinds hsc_env th_mod th_binds0
       let (stg_pgm0, cost_centre_info) =
             coreToStg dflags th_mod th_binds1
-      stg_pgm1 <- stg2stg dflags th_mod stg_pgm0
+      stg_pgm1 <- stg2stg hsc_env th_mod stg_pgm0
       return (Gen2.generate js_settings
                             dflags
                             (mod n)
