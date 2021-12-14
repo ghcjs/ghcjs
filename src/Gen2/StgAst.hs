@@ -39,7 +39,7 @@ import           Coercion
 import           CoAxiom
 import           Gen2.Utils
 
-import           GHC.Hs.Extension (NoExtField)
+import           GHC.Hs.Extension (NoExtField(..))
 
 -- this is a hack to be able to use pprShow in a Show instance, should be removed
 {-# NOINLINE hackPprDflags #-}
