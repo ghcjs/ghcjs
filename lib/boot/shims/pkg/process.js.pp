@@ -181,6 +181,16 @@ function h$process_runInteractiveProcess( cmd, args, workingDir, env
             }
         });
 
+        child.on('error', function(e) {
+            TRACE_PROCESS("process errored: " + e.code + " " + e.errno);
+            var codemap = { 'ENOENT': 127 };
+            var code = codemap[e.code];
+            procObj.exit = code;
+            for(var i=0;i<procObj.waiters.length;i++) {
+                procObj.waiters[i](code);
+            }
+        });
+
         // fixme this leaks
         procObj = { pid: h$nProc
                     , fds: [ stdin_fd  === -1 ? h$process_pipeFd(child.stdio[0], true)  : 0
@@ -288,5 +298,3 @@ function h$process_waitForProcess(pid, code_d, code_o, c) {
 #endif
         h$unsupported(-1, c);
 }
-
-
