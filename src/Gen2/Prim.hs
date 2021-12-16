@@ -460,11 +460,17 @@ genPrim _ _ IndexByteArrayOp_Word64 [r1,r2] [a,i] =
    , IndexByteArrayOp_Word8AsInt32
    , IndexByteArrayOp_Word8AsInt64
    , IndexByteArrayOp_Word8AsInt
-   , IndexByteArrayOp_Word8AsWord16
-   , IndexByteArrayOp_Word8AsWord32
-   , IndexByteArrayOp_Word8AsWord64
-   , IndexByteArrayOp_Word8AsWord
  -}
+genPrim _ _ IndexByteArrayOp_Word8AsWord16 [r] [a,i] =
+  PrimInline $ r |= dv_u16 a i
+genPrim _ _ IndexByteArrayOp_Word8AsWord32 [r] [a,i] =
+  PrimInline $ r |= dv_u32 a i
+genPrim _ _ IndexByteArrayOp_Word8AsWord64 [r1,r2] [a,i] =
+  PrimInline $ r1 |= dv_u32 a (i+4) #
+               r2 |= dv_u32 a i
+genPrim _ _ IndexByteArrayOp_Word8AsWord [r] [a,i] =
+  PrimInline $ r |= dv_u32 a i
+
 genPrim _ _ ReadByteArrayOp_Char [r] [a,i] =
   PrimInline $ r |= u8_ a i
 genPrim _ _ ReadByteArrayOp_WideChar [r] [a,i] =
