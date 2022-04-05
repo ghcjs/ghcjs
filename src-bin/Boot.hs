@@ -31,7 +31,8 @@
              NoMonomorphismRestriction,
              FlexibleContexts,
              RankNTypes,
-             TupleSections
+             TupleSections,
+             CPP
   #-}
 module Main (main) where
 
@@ -54,12 +55,17 @@ import           Control.Monad.Reader            (MonadReader, ReaderT(..), ask 
 import           Control.Monad.State
 
 import qualified Data.Aeson                      as Aeson
+#if MIN_VERSION_aeson(2,0,0)
+import qualified Data.Aeson.Key                  as K
+import qualified Data.Aeson.KeyMap               as KM
+#else
+import qualified Data.HashMap.Strict             as KM
+#endif
 import qualified Data.ByteString                 as B
 import qualified Data.ByteString.Lazy            as BL
 import           Data.Data
 import           Data.Data.Lens
 import           Data.Foldable
-import qualified Data.HashMap.Strict             as HM
 import           Data.List                       (intercalate, transpose)
 import           Data.Maybe
 import           Data.Text                       (Text)
@@ -232,13 +238,18 @@ instance Yaml.FromJSON BootPrograms where
     <*> v ..: "cabal"
     <*> v ..: "node"
     where
-      o ..: p = ((\t -> Program p t Nothing Nothing []) <$> o .: p) <|>
-                (withArgs p =<< o .: p)
+      o ..: p = ((\t -> Program (keyToText p) t Nothing Nothing []) <$> o .: p) <|>
+                (withArgs (keyToText p) =<< o .: p)
       withArgs :: Text -> Yaml.Value -> Yaml.Parser Program
-      withArgs p (Yaml.Object o) | [(k,v)] <- HM.toList o =
-        Program p k Nothing Nothing <$> Yaml.parseJSON v
+      withArgs p (Yaml.Object o) | [(k,v)] <- KM.toList o =
+        Program p (keyToText k) Nothing Nothing <$> Yaml.parseJSON v
       withArgs _ _ =
         mempty
+#if MIN_VERSION_aeson(2,0,0)
+      keyToText = K.toText
+#else
+      keyToText = id
+#endif
   parseJSON _ = mempty
 
 instance Yaml.FromJSON BootStages where

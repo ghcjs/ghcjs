@@ -10,7 +10,12 @@ import           Control.Concurrent.MVar
 import           Control.Concurrent
 import           Data.Char (isLower, toLower, isDigit, isSpace)
 import           Data.IORef
-import qualified Data.HashMap.Strict as HM
+#if MIN_VERSION_aeson(2,0,0)
+import qualified Data.Aeson.Key as K
+import qualified Data.Aeson.KeyMap as KM
+#else
+import qualified Data.HashMap.Strict as KM
+#endif
 import           Data.List (partition, isPrefixOf, isInfixOf)
 import           Data.Maybe
 import           Data.Monoid
@@ -316,7 +321,15 @@ data TestSuite =
 instance FromJSON TestSuite where
   parseJSON (Object o) = TestSuite <$> (groups =<< o .: "groups") <*> o .: "requiredPackages"
     where
-      groups (Object o) = sequenceA $ map (\(k,v) -> (,) <$> pure (fromText k) <*> parseJSON v) (HM.toList o)
+      groups (Object o) = sequenceA
+        $ map (\(k,v) -> (,)
+#if MIN_VERSION_aeson(2,0,0)
+              <$> pure (K.toString k)
+#else
+              <$> pure (fromText k)
+#endif
+              <*> parseJSON v)
+            (KM.toList o)
       groups _          = mempty
   parseJSON _          = mempty
 

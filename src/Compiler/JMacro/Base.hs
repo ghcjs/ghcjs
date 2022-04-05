@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, FlexibleContexts, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances, UndecidableInstances, OverloadedStrings, TypeFamilies, RankNTypes, DeriveDataTypeable, FlexibleContexts, ScopedTypeVariables, GADTs, GeneralizedNewtypeDeriving, DeriveGeneric, CPP #-}
 
 -----------------------------------------------------------------------------
 {- |
@@ -40,12 +40,13 @@ module Compiler.JMacro.Base (
   ) where
 import Prelude hiding (tail, init, head, last, minimum, maximum, foldr1, foldl1, (!!), read)
 -- import Control.Applicative hiding (empty)
-import Control.Arrow (second, (***))
+import Control.Arrow ((***))
 import Control.DeepSeq
 import Control.Monad.State.Strict
 import Control.Monad.Identity
 
 import Data.Function
+import Data.Bifunctor (second, bimap) -- one import unused depending on aeson version
 import Data.Bits ((.&.), shiftR)
 import Data.Binary (Binary)
 import Data.Char (toLower, isControl, ord)
@@ -62,7 +63,12 @@ import Numeric(showHex)
 import Safe
 import Data.Aeson
 import qualified Data.Vector as V
-import qualified Data.HashMap.Strict as HM
+#if MIN_VERSION_aeson(2,0,0)
+import qualified Data.Aeson.Key as K
+import qualified Data.Aeson.KeyMap as KM
+#else
+import qualified Data.HashMap.Strict as KM
+#endif
 import Text.PrettyPrint.Leijen.Text hiding ((<$>))
 
 import qualified Text.PrettyPrint.Leijen.Text as PP
@@ -851,7 +857,13 @@ instance ToJExpr Value where
     toJExpr (Number n)       = ValExpr $ JDouble $ realToFrac n
     toJExpr (String s)       = ValExpr $ JStr $ s
     toJExpr (Array vs)       = ValExpr $ JList $ map toJExpr $ V.toList vs
-    toJExpr (Object obj)     = ValExpr $ JHash $ M.fromList $ map (second toJExpr) $ HM.toList obj
+    toJExpr (Object obj)     = ValExpr $ JHash $ M.fromList
+#if MIN_VERSION_aeson(2,0,0)
+                                 $ map (bimap K.toText toJExpr)
+#else
+                                 $ map (second toJExpr)
+#endif
+                                 $ KM.toList obj
 
 
 encodeJson ::  Text -> Text

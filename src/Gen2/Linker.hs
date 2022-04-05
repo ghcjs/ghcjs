@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings,
              TupleSections,
-             DeriveGeneric
+             DeriveGeneric,
+             CPP
 
   #-}
 {- |
@@ -34,11 +35,17 @@ import Prelude
 
 import           Data.Array
 import qualified Data.Aeson               as Aeson
+#if MIN_VERSION_aeson(2,0,0)
+import qualified Data.Aeson.Key           as K
+import qualified Data.Aeson.KeyMap        as KM
+#else
+import qualified Data.HashMap.Strict      as KM
+#endif
+import           Data.Bifunctor           (first)
 import           Data.Binary
 import qualified Data.ByteString          as B
 import qualified Data.ByteString.Lazy     as BL
 import           Data.Function            (on)
-import qualified Data.HashMap.Strict      as HM
 import           Data.Int
 import           Data.IntSet              (IntSet)
 import qualified Data.IntSet              as IS
@@ -520,15 +527,20 @@ noStaticDeps = StaticDeps []
          - JSException
  -}
 instance FromJSON StaticDeps where
-  parseJSON (Object v) = StaticDeps . concat <$> mapM (uncurry parseMod) (HM.toList v)
+  parseJSON (Object v) = StaticDeps . concat <$> mapM (uncurry parseMod . first keyToText) (KM.toList v)
     where
-      parseMod p (Object v) = concat <$> mapM (uncurry (parseSymb p)) (HM.toList v)
+      parseMod p (Object v) = concat <$> mapM (uncurry (parseSymb p) . first keyToText) (KM.toList v)
       parseMod _ _          = mempty
       parseSymb p m (String s) = pure [(p,m,s)]
       parseSymb p m (Array v)  = mapM (parseSingleSymb p m) (V.toList v)
       parseSymb _ _ _          = mempty
       parseSingleSymb p m (String s) = pure (p,m,s)
       parseSingleSymb _ _ _          = mempty
+#if MIN_VERSION_aeson(2,0,0)
+      keyToText = K.toText
+#else
+      keyToText = id
+#endif
   parseJSON _          = mempty
 
 -- | dependencies for the RTS, these need to be always linked
