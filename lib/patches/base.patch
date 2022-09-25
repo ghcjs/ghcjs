@@ -681,7 +681,7 @@ diff -X ../utils/updatePatches.excludes -Nru upstream/pkg/base/System/Posix/Inte
 +s_isfifo cm = c_s_isfifo cm /= 0
 +
 +foreign import javascript unsafe "$r = h$base_sizeof_stat;" sizeof_stat :: Int
-+foreign import javascript unsafe "h$base_st_mtime($1_1,$1_2)" st_mtime :: Ptr CStat -> IO CTime
++foreign import javascript unsafe "$r1 = h$base_st_mtime($1_1,$1_2); $r2 = h$ret1;" st_mtime :: Ptr CStat -> IO CTime
 +foreign import javascript unsafe "$r1 = h$base_st_size($1_1,$1_2); $r2 = h$ret1;" st_size :: Ptr CStat -> IO Int64
 +foreign import javascript unsafe "$r = h$base_st_mode($1_1,$1_2);" st_mode :: Ptr CStat -> IO CMode
 +foreign import javascript unsafe "$r = h$base_st_dev($1_1,$1_2);" st_dev :: Ptr CStat -> IO CDev
