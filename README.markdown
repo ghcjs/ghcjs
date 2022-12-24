@@ -77,7 +77,7 @@ $ cabal v1-install
 or you can use stack:
 
 ```
-$ stack --system-ghc --skip-ghc-check install --local-bin-dir=inplace/bin
+$ stack install
 ```
 
 #### Booting GHCJS
