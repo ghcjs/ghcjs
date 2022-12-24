@@ -35,6 +35,7 @@ GHCJS requires the "upstream" emscripten backend, which is the default now. The 
 $ git clone https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init --recursive
+$ ./utils/makePackages.sh
 ```
 
 
