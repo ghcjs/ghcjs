@@ -35,6 +35,7 @@ GHCJS requires the "upstream" emscripten backend, which is the default now. The 
 $ git clone https://github.com/ghcjs/ghcjs.git
 $ cd ghcjs
 $ git submodule update --init --recursive
+$ ./utils/makePackages.sh
 ```
 
 
@@ -77,7 +78,7 @@ $ cabal v1-install
 or you can use stack:
 
 ```
-$ stack --system-ghc --skip-ghc-check install --local-bin-dir=inplace/bin
+$ stack install
 ```
 
 #### Booting GHCJS

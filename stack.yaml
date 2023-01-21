@@ -1,6 +1,8 @@
-resolver: lts-15.0
+resolver: lts-18.28
 packages:
   - .
+
+allow-newer: true
 
 local-bin-path: inplace/bin
 
