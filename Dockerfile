@@ -1,18 +1,18 @@
-FROM ubuntu:16.04
+FROM ubuntu:22.04
 
 ## ensure locale is set during build
 ENV LANG            C.UTF-8
 
 ## Haskell environment
-RUN echo 'deb http://ppa.launchpad.net/hvr/ghc/ubuntu xenial main' > \
-      /etc/apt/sources.list.d/ghc.list && \
-    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys F6F88286 && \
-    apt-get update && \
+RUN apt-get update && \
+    # ghcup deps
+    apt-get install -y \
+        build-essential curl libffi-dev libffi7 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5 \
+        libnuma-dev && \
+    # ghcjs deps
     apt-get install -y --no-install-recommends \
-      cabal-install-2.2 \
-      ghc-8.4.2 \
-      happy-1.19.5 \
-      alex-3.1.7 \
+      happy \
+      alex \
       zlib1g-dev \
       libtinfo-dev \
       libsqlite3-0 \
@@ -26,11 +26,17 @@ RUN echo 'deb http://ppa.launchpad.net/hvr/ghc/ubuntu xenial main' > \
       g++ \
       python3 \
       git
+RUN curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | \
+    BOOTSTRAP_HASKELL_NONINTERACTIVE=1 \
+    BOOTSTRAP_HASKELL_GHC_VERSION=8.10.7 \
+    sh
+ENV PATH /root/.ghcup/bin:$PATH
 
-ENV PATH /root/.cabal/bin:/root/.local/bin:/opt/cabal/bin:/opt/ghc/8.4.2/bin:/opt/happy/1.19.5/bin:/opt/alex/3.1.7/bin:$PATH
+## llvm
+RUN apt-get update && apt-get install -y llvm
 
 ## node.js
-RUN curl -sL https://deb.nodesource.com/setup_8.x | bash - \
+RUN curl -sL https://deb.nodesource.com/setup_18.x | bash - \
     && apt-get install -y nodejs
 
 
@@ -42,11 +48,9 @@ RUN cabal update
 ADD . ./ghcjs
 
 RUN cd /opt/ghcjs && \
+    git submodule update --init --recursive && \
     ./utils/makePackages.sh && \
-    ./utils/makeSandbox.sh && \
     cabal install
-
-ENV PATH /opt/ghcjs/.cabal-sandbox/bin:$PATH
 
 RUN cd /opt/ghcjs && \
     ghcjs-boot -v2 -s ./lib/boot/
